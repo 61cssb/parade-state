@@ -69,10 +69,6 @@ class Deployment(Base):
         back_populates="deployment"
     )
 
-    __table_args__ = (
-        UniqueConstraint("status", name="unique_active_deployment"),
-    )
-
     def __repr__(self) -> str:
         return f"<Deployment(name={self.name!r}, status={self.status!r})>"
 

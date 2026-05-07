@@ -37,9 +37,9 @@ def event_loop():
     loop.close()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def test_db():
-    """Create a test database engine and initialize it."""
+    """Create a fresh test database engine for each test."""
     # Use in-memory SQLite for tests (with async support)
     database_url = "sqlite+aiosqlite:///:memory:"
 
@@ -73,16 +73,6 @@ async def db_session(test_db) -> AsyncGenerator[AsyncSession, None]:
 @pytest.fixture
 async def sample_access_levels(db_session: AsyncSession):
     """Create sample access levels for testing."""
-    # Check if access levels already exist
-    from sqlalchemy import select
-
-    stmt = select(AccessLevel).where(AccessLevel.name.in_(["unit", "coy", "platoon", "section"]))
-    result = await db_session.execute(stmt)
-    existing_levels = result.scalars().all()
-
-    if existing_levels:
-        return {level.name: level for level in existing_levels}
-
     levels = [
         AccessLevel(name="unit", level_order=1),
         AccessLevel(name="coy", level_order=2),
@@ -100,16 +90,6 @@ async def sample_access_levels(db_session: AsyncSession):
 @pytest.fixture
 async def sample_users(db_session: AsyncSession, sample_access_levels):
     """Create sample users for testing."""
-    # Check if users already exist
-    from sqlalchemy import select
-
-    stmt = select(User).where(User.email.in_(["admin@example.com", "user@example.com"]))
-    result = await db_session.execute(stmt)
-    existing_users = result.scalars().all()
-
-    if existing_users:
-        return {user.email.split("@")[0]: user for user in existing_users}
-
     admin_user = User(
         email="admin@example.com",
         name="Admin User",
@@ -135,16 +115,6 @@ async def sample_users(db_session: AsyncSession, sample_access_levels):
 @pytest.fixture
 async def sample_estab(db_session: AsyncSession, sample_users):
     """Create a sample establishment for testing."""
-    # Check if estab already exists
-    from sqlalchemy import select
-
-    stmt = select(Estab).where(Estab.caa == date(2024, 1, 1))
-    result = await db_session.execute(stmt)
-    existing_estab = result.scalar_one_or_none()
-
-    if existing_estab:
-        return existing_estab
-
     estab = Estab(
         caa=date(2024, 1, 1),
         csv_hash="dummy_hash",
@@ -164,19 +134,6 @@ async def sample_estab(db_session: AsyncSession, sample_users):
 @pytest.fixture
 async def sample_personnel(db_session: AsyncSession, sample_estab, sample_users):
     """Create sample personnel for testing."""
-    # Check if personnel already exist
-    from sqlalchemy import select
-
-    stmt = select(Personnel).where(
-        Personnel.pers_no.in_(["12345", "67890", "11111"]),
-        Personnel.estab_id == str(sample_estab.id),
-    )
-    result = await db_session.execute(stmt)
-    existing_personnel = result.scalars().all()
-
-    if existing_personnel:
-        return list(existing_personnel)
-
     admin_id = str(sample_users["admin"].id)
     estab_id = str(sample_estab.id)
 
@@ -223,16 +180,6 @@ async def sample_personnel(db_session: AsyncSession, sample_estab, sample_users)
 @pytest.fixture
 async def sample_deployment(db_session: AsyncSession, sample_estab, sample_users):
     """Create a sample deployment for testing."""
-    # Check if deployment already exists
-    from sqlalchemy import select
-
-    stmt = select(Deployment).where(Deployment.name == "Test Deployment")
-    result = await db_session.execute(stmt)
-    existing_deployment = result.scalar_one_or_none()
-
-    if existing_deployment:
-        return existing_deployment
-
     admin_id = str(sample_users["admin"].id)
     estab_id = str(sample_estab.id)
 
