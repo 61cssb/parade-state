@@ -1,0 +1,2481 @@
+openapi: 3.1.0
+
+info:
+  title: Parade State Management System API
+  version: 0.1.0
+  description: |
+    API for the Battalion Parade State Management System.
+
+    ## Authentication
+    All endpoints (except `/auth/*`) require a valid session cookie obtained via Google OAuth.
+    Session cookies are `HttpOnly`, `Secure`, `SameSite=Strict`.
+
+    ## Access control
+    Two enforcement dimensions applied on every data endpoint:
+    - **Row visibility**: user sees only personnel rows covered by their subunit scope grants for the requested deployment.
+    - **Column visibility**: response includes only columns whose sensitivity label is met by the user's access level.
+      The `columns` manifest on list endpoints is always pre-scoped — clients render headers from the manifest, never from hardcoded column names.
+
+    Admin and super_admin roles bypass both dimensions and see all rows and columns.
+
+    ## Column manifest pattern (Option C)
+    Endpoints returning personnel data include a `columns` array alongside `rows`.
+    `columns` lists only the fields the requesting user may see, in display order.
+    `rows` objects contain only those keys. Clients must not infer anything from absent keys.
+
+    ## Stale detection (SSE)
+    `GET /events/attendance` is a Server-Sent Events stream. The server emits a
+    `data_changed` event whenever any attendance record within the user's current
+    deployment+session scope is updated by another user. The client shows a Refresh
+    prompt on receipt; it does not apply updates automatically.
+
+servers:
+  - url: /api/v1
+
+# =============================================================================
+# TAGS (endpoint groups)
+# =============================================================================
+
+tags:
+  - name: auth
+    description: Google OAuth flow and session management
+  - name: users
+    description: User account management (admin)
+  - name: access-levels
+    description: Ordered access level vocabulary (admin)
+  - name: subunit-enums
+    description: Valid values for unit/subunit hierarchy levels (admin)
+  - name: csv-upload
+    description: CSV estab upload pipeline — upload, mapping, diff, confirm
+  - name: column-mappings
+    description: Global raw→canonical column mapping table (admin)
+  - name: column-metadata
+    description: Per-CSV-version column registry and sensitivity labels (admin)
+  - name: deployments
+    description: Deployment lifecycle — create, clone, migrate, activate
+  - name: deployment-overrides
+    description: Personnel subunit overrides within a deployment
+  - name: deployment-notes
+    description: Deployment-scoped persistent notes per personnel
+  - name: sessions
+    description: AM/PM attendance session management
+  - name: attendance
+    description: Attendance records — parade state view and inline editing
+  - name: app-settings
+    description: Runtime application settings (admin)
+  - name: audit-log
+    description: Append-only audit trail (admin)
+  - name: events
+    description: Server-Sent Events for stale data detection
+
+# =============================================================================
+# PATHS
+# =============================================================================
+
+paths:
+
+  # ---------------------------------------------------------------------------
+  # AUTH
+  # ---------------------------------------------------------------------------
+
+  /auth/google:
+    get:
+      tags: [auth]
+      summary: Initiate Google OAuth flow
+      description: Redirects to Google's OAuth consent screen. No session required.
+      security: []
+      responses:
+        '302':
+          description: Redirect to Google
+
+  /auth/google/callback:
+    get:
+      tags: [auth]
+      summary: Google OAuth callback
+      description: |
+        Handles the OAuth callback from Google.
+        - If email matches SUPER_ADMIN_EMAIL env var → create/update user as super_admin, activate.
+        - If email matches a `pending` account → activate account, set google_sub.
+        - If email not found → create `unrecognised` record, write audit log event, return 403.
+        Writes `auth.signin_success` or `auth.signin_unrecognised` to audit log.
+      security: []
+      responses:
+        '302':
+          description: Redirect to app on success
+        '403':
+          description: No preregistered account found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/session:
+    get:
+      tags: [auth]
+      summary: Get current session
+      description: Returns the authenticated user's profile and effective permissions.
+      responses:
+        '200':
+          description: Current session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/signout:
+    post:
+      tags: [auth]
+      summary: Sign out
+      description: Destroys the session cookie.
+      responses:
+        '204':
+          description: Signed out
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ---------------------------------------------------------------------------
+  # USERS
+  # ---------------------------------------------------------------------------
+
+  /users:
+    get:
+      tags: [users]
+      summary: List users
+      x-access-control: admin
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, active, suspended, unrecognised]
+      responses:
+        '200':
+          description: Paginated user list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedUsers'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [users]
+      summary: Preregister a user account
+      x-access-control: admin
+      description: |
+        Creates a `pending` account. Admin assigns access level, subunit scope grants,
+        and deployment grants upfront. User activates on first Google sign-in.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /users/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/UserIdParam'
+    get:
+      tags: [users]
+      summary: Get user
+      x-access-control: admin
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [users]
+      summary: Update user (role, status, access level)
+      x-access-control: admin
+      description: |
+        Writable fields: `role`, `status`, `access_level_id`.
+        Suspending a user immediately invalidates their active sessions.
+        Writes `user.access_updated` to audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /users/{userId}/deployment-grants:
+    parameters:
+      - $ref: '#/components/parameters/UserIdParam'
+    get:
+      tags: [users]
+      summary: List deployment grants for user
+      x-access-control: admin
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserDeploymentGrant'
+    put:
+      tags: [users]
+      summary: Replace deployment grants for user
+      x-access-control: admin
+      description: Full replacement. Writes `user.access_updated` to audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deploymentIds]
+              properties:
+                deploymentIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserDeploymentGrant'
+
+  /users/{userId}/subunit-grants:
+    parameters:
+      - $ref: '#/components/parameters/UserIdParam'
+    get:
+      tags: [users]
+      summary: List subunit scope grants for user
+      x-access-control: admin
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserSubunitGrant'
+    put:
+      tags: [users]
+      summary: Replace subunit scope grants for user
+      x-access-control: admin
+      description: Full replacement. Writes `user.access_updated` to audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [grants]
+              properties:
+                grants:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/SubunitGrantInput'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserSubunitGrant'
+
+  # ---------------------------------------------------------------------------
+  # ACCESS LEVELS
+  # ---------------------------------------------------------------------------
+
+  /access-levels:
+    get:
+      tags: [access-levels]
+      summary: List access levels (ordered, ascending by level_order)
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccessLevel'
+    post:
+      tags: [access-levels]
+      summary: Create access level
+      x-access-control: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessLevelInput'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessLevel'
+        '409':
+          description: Label or level_order already in use
+
+  /access-levels/{accessLevelId}:
+    parameters:
+      - name: accessLevelId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags: [access-levels]
+      summary: Update access level label or order
+      x-access-control: admin
+      description: |
+        Relabelling auto-migrates all references (column sensitivity_label,
+        user access_level_id) to the new label string.
+        Writes `access_level.updated` to audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessLevelInput'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessLevel'
+    delete:
+      tags: [access-levels]
+      summary: Deprecate access level
+      x-access-control: admin
+      description: |
+        Soft-delete only. Returns 409 if any active user or non-deprecated column
+        references this level.
+      responses:
+        '204':
+          description: Deprecated
+        '409':
+          description: Level is still in use
+
+  # ---------------------------------------------------------------------------
+  # SUBUNIT ENUMS
+  # ---------------------------------------------------------------------------
+
+  /subunit-enums:
+    get:
+      tags: [subunit-enums]
+      summary: List all subunit enum values grouped by level
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unit:
+                    type: array
+                    items: { type: string }
+                  sub_unit_1:
+                    type: array
+                    items: { type: string }
+                  sub_unit_2:
+                    type: array
+                    items: { type: string }
+                  sub_unit_3:
+                    type: array
+                    items: { type: string }
+
+    post:
+      tags: [subunit-enums]
+      summary: Add enum value
+      x-access-control: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [level, value]
+              properties:
+                level:
+                  type: integer
+                  minimum: 0
+                  maximum: 3
+                value:
+                  type: string
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubunitEnumValue'
+        '409':
+          description: Value already exists at that level
+
+  /subunit-enums/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [subunit-enums]
+      summary: Deprecate enum value
+      x-access-control: admin
+      description: Soft-delete. Returns 409 if value is referenced by any non-archived personnel snapshot.
+      responses:
+        '204':
+          description: Deprecated
+        '409':
+          description: Value still in use
+
+  # ---------------------------------------------------------------------------
+  # CSV UPLOAD PIPELINE
+  # ---------------------------------------------------------------------------
+
+  /csv-uploads:
+    get:
+      tags: [csv-upload]
+      summary: List CSV uploads (estabs)
+      x-access-control: admin
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CsvUploadSummary'
+
+    post:
+      tags: [csv-upload]
+      summary: Upload a new CSV estab file
+      x-access-control: admin
+      description: |
+        Step 1 of 3 in the upload pipeline.
+        Accepts multipart form data. Parses header row, computes content hash,
+        stores raw CSV, attempts auto-matching against global column_mappings table.
+        Returns status `pending_mapping` with the mapping resolution UI payload.
+        Writes `csv.upload_started` to audit log.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, caaDate]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                caaDate:
+                  type: string
+                  format: date
+                  description: Correct-as-at date for this upload
+      responses:
+        '201':
+          description: Upload received; mapping review required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CsvUploadMappingPayload'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: A confirmed CSV already exists with this CAA date
+
+  /csv-uploads/{uploadId}/mapping:
+    parameters:
+      - $ref: '#/components/parameters/UploadIdParam'
+    get:
+      tags: [csv-upload]
+      summary: Get mapping resolution payload for an upload
+      x-access-control: admin
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CsvUploadMappingPayload'
+    post:
+      tags: [csv-upload]
+      summary: Confirm column mappings
+      x-access-control: admin
+      description: |
+        Step 2 of 3. Admin submits resolved mappings for all columns.
+        Required canonical columns must all be mapped.
+        Conflicting mappings (raw name previously mapped to different canonical)
+        must be explicitly confirmed.
+        Updates global column_mappings table.
+        Triggers diff computation against most recent confirmed CSV.
+        Returns status `pending_diff` with diff payload.
+        Writes `csv.mapping_confirmed` to audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmMappingsRequest'
+      responses:
+        '200':
+          description: Mappings confirmed; diff ready for review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CsvDiffPayload'
+        '400':
+          description: Required column(s) still unmapped or conflicts unresolved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MappingValidationError'
+        '409':
+          description: Upload is not in pending_mapping status
+
+  /csv-uploads/{uploadId}/diff:
+    parameters:
+      - $ref: '#/components/parameters/UploadIdParam'
+    get:
+      tags: [csv-upload]
+      summary: Get diff payload for an upload in pending_diff status
+      x-access-control: admin
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CsvDiffPayload'
+
+  /csv-uploads/{uploadId}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/UploadIdParam'
+    post:
+      tags: [csv-upload]
+      summary: Confirm and commit the upload
+      x-access-control: admin
+      description: |
+        Step 3 of 3. Admin confirms the diff.
+        - Populates personnel_snapshots from parsed CSV.
+        - Archives leavers (pers_no in prior CSV but not new).
+        - Creates estab deployment linked to this CSV.
+        - Transfers notes from prior active deployment by pers_no.
+        - Marks prior confirmed CSV as `superseded`.
+        - Sets this upload status to `confirmed`.
+        Writes `csv.diff_confirmed` and `deployment.created` to audit log.
+      responses:
+        '200':
+          description: Upload committed; estab deployment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CsvConfirmResult'
+        '409':
+          description: Upload is not in pending_diff status
+
+  /csv-uploads/{uploadId}:
+    parameters:
+      - $ref: '#/components/parameters/UploadIdParam'
+    get:
+      tags: [csv-upload]
+      summary: Get CSV upload details
+      x-access-control: admin
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CsvUploadDetail'
+
+  # ---------------------------------------------------------------------------
+  # COLUMN MAPPINGS (global table)
+  # ---------------------------------------------------------------------------
+
+  /column-mappings:
+    get:
+      tags: [column-mappings]
+      summary: List all column mappings
+      x-access-control: admin
+      parameters:
+        - name: includeDeprecated
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ColumnMapping'
+
+  /column-mappings/{mappingId}:
+    parameters:
+      - name: mappingId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags: [column-mappings]
+      summary: Update a column mapping
+      x-access-control: admin
+      description: |
+        Admin-editable at any time. Applies to future uploads only; not retroactive.
+        Writes `column_mapping.updated` to audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                canonicalName:
+                  type: string
+                deprecated:
+                  type: boolean
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ColumnMapping'
+
+  # ---------------------------------------------------------------------------
+  # COLUMN METADATA (per CSV version)
+  # ---------------------------------------------------------------------------
+
+  /csv-uploads/{uploadId}/columns:
+    parameters:
+      - $ref: '#/components/parameters/UploadIdParam'
+    get:
+      tags: [column-metadata]
+      summary: List column metadata for a CSV version
+      x-access-control: admin
+      description: Used by the sensitivity label configuration screen.
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ColumnMetadata'
+
+  /csv-uploads/{uploadId}/columns/{columnId}/sensitivity:
+    parameters:
+      - $ref: '#/components/parameters/UploadIdParam'
+      - name: columnId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags: [column-metadata]
+      summary: Update column sensitivity label
+      x-access-control: admin
+      description: |
+        Takes effect immediately for all active sessions.
+        null sensitivityLabel = admin-only.
+        Writes `column_sensitivity.updated` to audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sensitivityLabel:
+                  type: string
+                  nullable: true
+                  description: Access level label, or null for admin-only
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ColumnMetadata'
+
+  # ---------------------------------------------------------------------------
+  # DEPLOYMENTS
+  # ---------------------------------------------------------------------------
+
+  /deployments:
+    get:
+      tags: [deployments]
+      summary: List deployments visible to current user
+      description: |
+        Admins see all deployments.
+        Scoped users see only deployments for which they have a grant.
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, active, inactive, archived]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeploymentSummary'
+
+    post:
+      tags: [deployments]
+      summary: Create deployment
+      x-access-control: admin
+      description: |
+        Creates a `draft` deployment. Validates that valid_from/valid_until does not
+        overlap any existing draft or active deployment (returns 409 if conflict).
+        Writes `deployment.created` to audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDeploymentRequest'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+        '409':
+          description: Date range overlaps an existing draft or active deployment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentOverlapError'
+
+  /deployments/{deploymentId}:
+    parameters:
+      - $ref: '#/components/parameters/DeploymentIdParam'
+    get:
+      tags: [deployments]
+      summary: Get deployment details
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [deployments]
+      summary: Update deployment
+      x-access-control: admin
+      description: |
+        Writable fields: `name`, `valid_from`, `valid_until`, `scheduled_activation`.
+        valid_from/valid_until changes are rejected if they would create an overlap.
+        Writes `deployment.updated` to audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeploymentRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+        '409':
+          description: Date range overlap or deployment not in editable state
+
+  /deployments/{deploymentId}/activate:
+    parameters:
+      - $ref: '#/components/parameters/DeploymentIdParam'
+    post:
+      tags: [deployments]
+      summary: Manually activate a deployment
+      x-access-control: admin
+      description: |
+        Transitions deployment to `active`. Moves current active deployment to `inactive`.
+        Validates no date range overlap with currently active deployment.
+        Writes `deployment.activated` and `deployment.deactivated` to audit log.
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+        '409':
+          description: Overlap conflict or deployment already active/archived
+
+  /deployments/{deploymentId}/clone:
+    parameters:
+      - $ref: '#/components/parameters/DeploymentIdParam'
+    post:
+      tags: [deployments]
+      summary: Clone a deployment (same-estab)
+      x-access-control: admin
+      description: |
+        Creates a new `draft` deployment from the same estab.
+        Copies personnel assignment overrides.
+        Name is prefixed "Copy of …" by default (overridable in request).
+        valid_from/valid_until are unset in the clone (must be provided before activation).
+        transferNotes: if true, copies deployment_notes to the new deployment.
+        Writes `deployment.cloned` to audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloneDeploymentRequest'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+
+  /deployments/{deploymentId}/migrate:
+    parameters:
+      - $ref: '#/components/parameters/DeploymentIdParam'
+    post:
+      tags: [deployments]
+      summary: Begin cross-estab migration
+      x-access-control: admin
+      description: |
+        Step 1 of 2. Computes the diff between the source deployment's estab and
+        the target estab. Returns a resolution payload for admin review.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetCsvUploadId]
+              properties:
+                targetCsvUploadId:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MigrateResolutionPayload'
+        '400':
+          description: Target CSV is not in confirmed status
+
+  /deployments/{deploymentId}/migrate/confirm:
+    parameters:
+      - $ref: '#/components/parameters/DeploymentIdParam'
+    post:
+      tags: [deployments]
+      summary: Confirm cross-estab migration
+      x-access-control: admin
+      description: |
+        Step 2 of 2. Admin submits resolved assignments for joiners and dismissed leavers.
+        Creates a new draft deployment against the target estab.
+        Writes `deployment.migrated` to audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MigrateConfirmRequest'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+        '400':
+          description: Unresolved joiners (missing unit assignments) or undismissed leavers
+
+  # ---------------------------------------------------------------------------
+  # DEPLOYMENT PERSONNEL OVERRIDES
+  # ---------------------------------------------------------------------------
+
+  /deployments/{deploymentId}/overrides:
+    parameters:
+      - $ref: '#/components/parameters/DeploymentIdParam'
+    get:
+      tags: [deployment-overrides]
+      summary: List personnel overrides for a deployment
+      x-access-control: admin
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PersonnelOverride'
+
+    put:
+      tags: [deployment-overrides]
+      summary: Replace all personnel overrides for a deployment
+      x-access-control: admin
+      description: Full replacement. Writes `deployment.override_updated` to audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [overrides]
+              properties:
+                overrides:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/PersonnelOverrideInput'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PersonnelOverride'
+
+  /deployments/{deploymentId}/overrides/{persNo}:
+    parameters:
+      - $ref: '#/components/parameters/DeploymentIdParam'
+      - name: persNo
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      tags: [deployment-overrides]
+      summary: Upsert override for a single person
+      x-access-control: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonnelOverrideInput'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonnelOverride'
+    delete:
+      tags: [deployment-overrides]
+      summary: Remove override (person reverts to estab assignment)
+      x-access-control: admin
+      responses:
+        '204':
+          description: Override removed
+
+  # ---------------------------------------------------------------------------
+  # DEPLOYMENT NOTES
+  # ---------------------------------------------------------------------------
+
+  /deployments/{deploymentId}/notes/{persNo}:
+    parameters:
+      - $ref: '#/components/parameters/DeploymentIdParam'
+      - name: persNo
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [deployment-notes]
+      summary: Get notes for a person in a deployment
+      description: Accessible to any user with row access to this person in this deployment.
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentNote'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    patch:
+      tags: [deployment-notes]
+      summary: Update notes (deployment view context)
+      description: |
+        Writes to canonical deployment_notes only.
+        Does not update any attendance record's notes_snapshot.
+        Accessible to scoped users with write access to this row.
+        Writes `notes.updated` to audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [notesText]
+              properties:
+                notesText:
+                  type: string
+                  maxLength: 2000
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentNote'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ---------------------------------------------------------------------------
+  # SESSIONS
+  # ---------------------------------------------------------------------------
+
+  /deployments/{deploymentId}/sessions:
+    parameters:
+      - $ref: '#/components/parameters/DeploymentIdParam'
+    get:
+      tags: [sessions]
+      summary: List sessions for a deployment
+      description: Scoped users see only sessions for deployments they have access to.
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Session'
+
+    post:
+      tags: [sessions]
+      summary: Create (open) a session
+      x-access-control: admin
+      description: |
+        Creates an AM or PM session for a date. Deployment must be draft or active.
+        On creation, populates attendance_records for all non-archived personnel in this
+        deployment (status=absent, notes_snapshot from current deployment_notes).
+        Returns 409 if a session already exists for this deployment/date/type.
+        Writes `session.created` to audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '409':
+          description: Session already exists for this deployment/date/type
+
+  /sessions/{sessionId}:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdParam'
+    get:
+      tags: [sessions]
+      summary: Get session details
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+    patch:
+      tags: [sessions]
+      summary: Close a session
+      x-access-control: admin
+      description: Sets status to `closed`. Writes `session.closed` to audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [closed]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+
+  # ---------------------------------------------------------------------------
+  # ATTENDANCE (parade state view + editing)
+  # ---------------------------------------------------------------------------
+
+  /sessions/{sessionId}/attendance:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdParam'
+    get:
+      tags: [attendance]
+      summary: Get parade state — column manifest + scoped rows
+      description: |
+        Returns `columns` (user-visible column manifest) and `rows` (one per visible person).
+        Row objects contain only keys present in the columns manifest.
+        Rows are filtered to the user's subunit scope for this deployment.
+        Admins receive all columns and all rows.
+
+        Optional `subunit` filter narrows rows to a specific subunit within scope.
+        Optional `status` filter shows only present/absent.
+
+        This is the primary attendance-taking and parade state view endpoint.
+      parameters:
+        - name: subunit
+          in: query
+          description: Filter by subunit (within user scope)
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [present, absent]
+        - name: sortBy
+          in: query
+          schema:
+            type: string
+            description: Canonical or raw column name from the manifest
+        - name: sortDir
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttendanceView'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /sessions/{sessionId}/attendance/{persNo}:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdParam'
+      - name: persNo
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      tags: [attendance]
+      summary: Update attendance record (inline edit)
+      description: |
+        Writable fields for scoped users: `status`, `remarks`, `notesText`.
+        `notesText` triggers a write-back to deployment_notes and updates
+        notes_snapshot on this record.
+        Unit+subunit snapshot update follows the validity-range rule:
+          - If now() within deployment valid_from/valid_until: snapshots are updated.
+          - If outside validity range: snapshots are NOT updated.
+        Writes `attendance.updated` (and `notes.updated` if notesText changed) to audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttendanceUpdateRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttendanceRecord'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Concurrent write conflict (last-write-wins; this is informational only)
+
+  /sessions/{sessionId}/attendance/bulk:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdParam'
+    patch:
+      tags: [attendance]
+      summary: Bulk update attendance status
+      description: |
+        Convenience endpoint for marking all visible personnel present/absent at once.
+        Applies the same validity-range snapshot rule as single updates.
+        Each row write is independent; partial success is possible.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status, persNos]
+              properties:
+                status:
+                  type: string
+                  enum: [present, absent]
+                persNos:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: integer
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        persNo: { type: string }
+                        reason: { type: string }
+
+  # ---------------------------------------------------------------------------
+  # APP SETTINGS
+  # ---------------------------------------------------------------------------
+
+  /settings:
+    get:
+      tags: [app-settings]
+      summary: Get all app settings
+      x-access-control: admin
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+    patch:
+      tags: [app-settings]
+      summary: Update app settings
+      x-access-control: admin
+      description: Partial update. Writes `app_settings.updated` to audit log per changed key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+
+  # ---------------------------------------------------------------------------
+  # AUDIT LOG
+  # ---------------------------------------------------------------------------
+
+  /audit-log:
+    get:
+      tags: [audit-log]
+      summary: Query audit log
+      x-access-control: admin
+      parameters:
+        - name: entityType
+          in: query
+          schema:
+            type: string
+        - name: entityId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: actorId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAuditLog'
+
+  # ---------------------------------------------------------------------------
+  # EVENTS (SSE — stale data detection)
+  # ---------------------------------------------------------------------------
+
+  /events/attendance:
+    get:
+      tags: [events]
+      summary: SSE stream for attendance stale detection
+      description: |
+        Server-Sent Events stream. The server emits a `data_changed` event when any
+        attendance record within the authenticated user's current deployment+session scope
+        is modified by a different user.
+
+        The client should:
+        1. Open this connection on entering the attendance view, passing deploymentId and sessionId.
+        2. On receiving `data_changed`, show a "Refresh" prompt to the user.
+        3. On user confirming refresh, call GET /sessions/{sessionId}/attendance to reload.
+        4. Close the connection on leaving the attendance view.
+
+        The server does NOT push full record data over this stream — only change signals.
+        Connection is authenticated via session cookie. The server closes the connection
+        if the session expires or the user loses deployment access.
+
+        Event format:
+        ```
+        event: data_changed
+        data: {"deploymentId": "...", "sessionId": "...", "updatedAt": "..."}
+        ```
+
+        Keep-alive ping every 30s:
+        ```
+        event: ping
+        data: {}
+        ```
+      parameters:
+        - name: deploymentId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: sessionId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: SSE stream opened
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+# =============================================================================
+# COMPONENTS
+# =============================================================================
+
+components:
+
+  # ---------------------------------------------------------------------------
+  # Parameters
+  # ---------------------------------------------------------------------------
+
+  parameters:
+    UserIdParam:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    UploadIdParam:
+      name: uploadId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    DeploymentIdParam:
+      name: deploymentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    SessionIdParam:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    PageParam:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+    PageSizeParam:
+      name: pageSize
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+
+  # ---------------------------------------------------------------------------
+  # Responses
+  # ---------------------------------------------------------------------------
+
+  responses:
+    Unauthorized:
+      description: No valid session
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Insufficient access level or deployment grant
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found (or not visible to this user)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  # ---------------------------------------------------------------------------
+  # Schemas
+  # ---------------------------------------------------------------------------
+
+  schemas:
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+    # --- Auth ---
+
+    SessionInfo:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          type: string
+        displayName:
+          type: string
+        role:
+          type: string
+          enum: [super_admin, admin, scoped]
+        accessLevel:
+          $ref: '#/components/schemas/AccessLevel'
+        deploymentGrants:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: IDs of deployments this user can access
+
+    # --- Users ---
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        displayName:
+          type: string
+        role:
+          type: string
+          enum: [super_admin, admin, scoped]
+        status:
+          type: string
+          enum: [pending, active, suspended, unrecognised]
+        accessLevel:
+          $ref: '#/components/schemas/AccessLevel'
+        createdAt:
+          type: string
+          format: date-time
+        activatedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    CreateUserRequest:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [admin, scoped]
+        accessLevelId:
+          type: string
+          format: uuid
+          description: Required if role=scoped
+        deploymentIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        subunitGrants:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubunitGrantInput'
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [admin, scoped]
+        status:
+          type: string
+          enum: [active, suspended]
+        accessLevelId:
+          type: string
+          format: uuid
+          nullable: true
+
+    PaginatedUsers:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    UserDeploymentGrant:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        deploymentId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+
+    UserSubunitGrant:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        deploymentId:
+          type: string
+          format: uuid
+        unit:
+          type: string
+          nullable: true
+        subUnit1:
+          type: string
+          nullable: true
+        subUnit2:
+          type: string
+          nullable: true
+        subUnit3:
+          type: string
+          nullable: true
+
+    SubunitGrantInput:
+      type: object
+      required: [deploymentId]
+      properties:
+        deploymentId:
+          type: string
+          format: uuid
+        unit:
+          type: string
+          nullable: true
+        subUnit1:
+          type: string
+          nullable: true
+        subUnit2:
+          type: string
+          nullable: true
+        subUnit3:
+          type: string
+          nullable: true
+
+    # --- Access levels ---
+
+    AccessLevel:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        label:
+          type: string
+        levelOrder:
+          type: integer
+        deprecated:
+          type: boolean
+
+    AccessLevelInput:
+      type: object
+      required: [label, levelOrder]
+      properties:
+        label:
+          type: string
+        levelOrder:
+          type: integer
+
+    # --- Subunit enums ---
+
+    SubunitEnumValue:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        level:
+          type: integer
+        value:
+          type: string
+        deprecated:
+          type: boolean
+
+    # --- Column mappings ---
+
+    ColumnMapping:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        rawName:
+          type: string
+        canonicalName:
+          type: string
+        status:
+          type: string
+          enum: [auto_detected, admin_confirmed, deprecated]
+        deprecated:
+          type: boolean
+        firstSeenIn:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        confirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+        confirmedBy:
+          type: string
+          format: uuid
+          nullable: true
+
+    # --- CSV uploads ---
+
+    CsvUploadSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        caaDate:
+          type: string
+          format: date
+        originalFilename:
+          type: string
+        status:
+          type: string
+          enum: [pending_mapping, pending_diff, confirmed, superseded]
+        rowCount:
+          type: integer
+          nullable: true
+        uploadedAt:
+          type: string
+          format: date-time
+        uploadedBy:
+          type: string
+          format: uuid
+
+    CsvUploadDetail:
+      allOf:
+        - $ref: '#/components/schemas/CsvUploadSummary'
+        - type: object
+          properties:
+            contentHash:
+              type: string
+            confirmedAt:
+              type: string
+              format: date-time
+              nullable: true
+
+    CsvUploadMappingPayload:
+      type: object
+      description: Returned after upload; drives the mapping confirmation UI
+      properties:
+        uploadId:
+          type: string
+          format: uuid
+        caaDate:
+          type: string
+          format: date
+        columns:
+          type: array
+          items:
+            $ref: '#/components/schemas/ColumnMappingResolutionItem'
+        requiredCanonicalNames:
+          type: array
+          items:
+            type: string
+          description: Canonical names that must all be mapped before confirming
+
+    ColumnMappingResolutionItem:
+      type: object
+      description: One CSV column, its suggested mapping, and whether it needs admin resolution
+      properties:
+        rawName:
+          type: string
+        suggestedCanonicalName:
+          type: string
+          nullable: true
+        existingMapping:
+          type: string
+          nullable: true
+          description: Current global mapping for this rawName (if any)
+        conflict:
+          type: boolean
+          description: True if suggestedCanonicalName differs from existingMapping
+        isRequired:
+          type: boolean
+          description: True if this rawName matches a required canonical column
+        resolutionRequired:
+          type: boolean
+          description: True if admin must explicitly confirm or remap before proceeding
+
+    ConfirmMappingsRequest:
+      type: object
+      required: [mappings]
+      properties:
+        mappings:
+          type: array
+          items:
+            type: object
+            required: [rawName, canonicalName]
+            properties:
+              rawName:
+                type: string
+              canonicalName:
+                type: string
+                nullable: true
+                description: null to leave column unmapped (only permitted for non-required columns)
+
+    MappingValidationError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            unmappedRequired:
+              type: array
+              items:
+                type: string
+              description: Required canonical names still without a mapping
+            unresolvedConflicts:
+              type: array
+              items:
+                type: string
+              description: rawNames with unconfirmed conflicts
+
+    CsvDiffPayload:
+      type: object
+      properties:
+        uploadId:
+          type: string
+          format: uuid
+        summary:
+          type: object
+          properties:
+            joined:
+              type: integer
+            left:
+              type: integer
+            changed:
+              type: integer
+            unchanged:
+              type: integer
+        rows:
+          type: array
+          description: All diff rows in display order (joiners, leavers, changed, unchanged)
+          items:
+            $ref: '#/components/schemas/DiffRow'
+
+    DiffRow:
+      type: object
+      properties:
+        persNo:
+          type: string
+        changeType:
+          type: string
+          enum: [joined, left, changed, unchanged]
+        rank:
+          type: string
+          nullable: true
+        fullName:
+          type: string
+          nullable: true
+        changes:
+          type: array
+          description: Present only when changeType=changed
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              oldValue:
+                type: string
+                nullable: true
+              newValue:
+                type: string
+                nullable: true
+
+    CsvConfirmResult:
+      type: object
+      properties:
+        csvUploadId:
+          type: string
+          format: uuid
+        deploymentId:
+          type: string
+          format: uuid
+          description: ID of the auto-created estab deployment
+        personnelCount:
+          type: integer
+        archivedCount:
+          type: integer
+        notesTransferred:
+          type: integer
+
+    # --- Column metadata ---
+
+    ColumnMetadata:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        csvUploadId:
+          type: string
+          format: uuid
+        rawName:
+          type: string
+        canonicalName:
+          type: string
+          nullable: true
+        isRequired:
+          type: boolean
+        confirmedType:
+          type: string
+          nullable: true
+          enum: [text, integer, date, boolean, numeric]
+        sensitivityLabel:
+          type: string
+          nullable: true
+          description: null = admin-only
+        displayOrder:
+          type: integer
+          nullable: true
+
+    # --- Deployments ---
+
+    DeploymentSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum: [draft, active, inactive, archived]
+        validFrom:
+          type: string
+          format: date-time
+        validUntil:
+          type: string
+          format: date-time
+        scheduledActivation:
+          type: string
+          format: date-time
+          nullable: true
+        csvUploadId:
+          type: string
+          format: uuid
+        caaDate:
+          type: string
+          format: date
+
+    Deployment:
+      allOf:
+        - $ref: '#/components/schemas/DeploymentSummary'
+        - type: object
+          properties:
+            clonedFromId:
+              type: string
+              format: uuid
+              nullable: true
+            cloneType:
+              type: string
+              enum: [same_estab, cross_estab]
+              nullable: true
+            overrideCount:
+              type: integer
+            createdAt:
+              type: string
+              format: date-time
+            createdBy:
+              type: string
+              format: uuid
+
+    CreateDeploymentRequest:
+      type: object
+      required: [name, csvUploadId, validFrom, validUntil]
+      properties:
+        name:
+          type: string
+        csvUploadId:
+          type: string
+          format: uuid
+        validFrom:
+          type: string
+          format: date-time
+        validUntil:
+          type: string
+          format: date-time
+        scheduledActivation:
+          type: string
+          format: date-time
+          nullable: true
+
+    UpdateDeploymentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        validFrom:
+          type: string
+          format: date-time
+        validUntil:
+          type: string
+          format: date-time
+        scheduledActivation:
+          type: string
+          format: date-time
+          nullable: true
+
+    DeploymentOverlapError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            conflictingDeployments:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  name:
+                    type: string
+                  validFrom:
+                    type: string
+                    format: date-time
+                  validUntil:
+                    type: string
+                    format: date-time
+
+    CloneDeploymentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Defaults to "Copy of {source name}" if omitted
+        transferNotes:
+          type: boolean
+          default: false
+          description: Whether to copy deployment_notes to the new deployment
+
+    MigrateResolutionPayload:
+      type: object
+      description: Returned by POST /deployments/{id}/migrate; drives the resolution UI
+      properties:
+        sourceDeploymentId:
+          type: string
+          format: uuid
+        targetCsvUploadId:
+          type: string
+          format: uuid
+        leavers:
+          type: array
+          description: In source estab, not in target. Each must be individually dismissed.
+          items:
+            $ref: '#/components/schemas/MigratePersonnelRow'
+        joiners:
+          type: array
+          description: In target estab, not in source. Each needs unit+subunit assignment.
+          items:
+            $ref: '#/components/schemas/MigratePersonnelRow'
+        continuing:
+          type: array
+          description: In both. Carries over automatically with existing overrides.
+          items:
+            $ref: '#/components/schemas/MigratePersonnelRow'
+
+    MigratePersonnelRow:
+      type: object
+      properties:
+        persNo:
+          type: string
+        rank:
+          type: string
+        fullName:
+          type: string
+        estabUnit:
+          type: string
+          nullable: true
+        estabSubUnit1:
+          type: string
+          nullable: true
+        estabSubUnit2:
+          type: string
+          nullable: true
+        estabSubUnit3:
+          type: string
+          nullable: true
+        currentOverride:
+          $ref: '#/components/schemas/PersonnelOverrideInput'
+          nullable: true
+
+    MigrateConfirmRequest:
+      type: object
+      required: [name, transferNotes, dismissedLeaverPersNos, joinerAssignments]
+      properties:
+        name:
+          type: string
+        validFrom:
+          type: string
+          format: date-time
+          nullable: true
+        validUntil:
+          type: string
+          format: date-time
+          nullable: true
+        transferNotes:
+          type: boolean
+        dismissedLeaverPersNos:
+          type: array
+          description: Must include ALL leavers from the resolution payload to confirm
+          items:
+            type: string
+        joinerAssignments:
+          type: array
+          description: Unit+subunit assignment for each joiner
+          items:
+            $ref: '#/components/schemas/PersonnelOverrideInput'
+
+    # --- Deployment overrides ---
+
+    PersonnelOverride:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        deploymentId:
+          type: string
+          format: uuid
+        persNo:
+          type: string
+        unit:
+          type: string
+        subUnit1:
+          type: string
+          nullable: true
+        subUnit2:
+          type: string
+          nullable: true
+        subUnit3:
+          type: string
+          nullable: true
+
+    PersonnelOverrideInput:
+      type: object
+      required: [persNo, unit]
+      properties:
+        persNo:
+          type: string
+        unit:
+          type: string
+        subUnit1:
+          type: string
+          nullable: true
+        subUnit2:
+          type: string
+          nullable: true
+        subUnit3:
+          type: string
+          nullable: true
+
+    # --- Deployment notes ---
+
+    DeploymentNote:
+      type: object
+      properties:
+        deploymentId:
+          type: string
+          format: uuid
+        persNo:
+          type: string
+        notesText:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+          format: uuid
+          nullable: true
+
+    # --- Sessions ---
+
+    Session:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        deploymentId:
+          type: string
+          format: uuid
+        sessionDate:
+          type: string
+          format: date
+        sessionType:
+          type: string
+          enum: [AM, PM]
+        status:
+          type: string
+          enum: [open, closed]
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+          format: uuid
+
+    CreateSessionRequest:
+      type: object
+      required: [sessionDate, sessionType]
+      properties:
+        sessionDate:
+          type: string
+          format: date
+        sessionType:
+          type: string
+          enum: [AM, PM]
+
+    # --- Attendance ---
+
+    AttendanceView:
+      type: object
+      description: |
+        Column-manifest + rows response. Clients render table headers from `columns`
+        and row cells from `rows[n][column.key]`. Keys not in the manifest are never
+        present in row objects.
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+        deploymentId:
+          type: string
+          format: uuid
+        sessionDate:
+          type: string
+          format: date
+        sessionType:
+          type: string
+          enum: [AM, PM]
+        columns:
+          type: array
+          description: Ordered list of columns visible to this user
+          items:
+            $ref: '#/components/schemas/ColumnManifestEntry'
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttendanceRow'
+        meta:
+          type: object
+          properties:
+            totalRows:
+              type: integer
+            presentCount:
+              type: integer
+            absentCount:
+              type: integer
+
+    ColumnManifestEntry:
+      type: object
+      properties:
+        key:
+          type: string
+          description: The key used in row objects (canonical name or raw name if unmapped)
+        label:
+          type: string
+          description: Display label for column header
+        type:
+          type: string
+          enum: [text, integer, date, boolean, numeric]
+        isAttendanceField:
+          type: boolean
+          description: True for status, remarks, notes — these are inline-editable by scoped users
+        displayOrder:
+          type: integer
+
+    AttendanceRow:
+      type: object
+      description: |
+        Keys are the `key` values from the columns manifest. Always present:
+        persNo, rank, fullName, unit, subUnit1/2/3, status, remarks, notes.
+        All other keys depend on the user's access level.
+      properties:
+        persNo:
+          type: string
+        status:
+          type: string
+          enum: [present, absent]
+        remarks:
+          type: string
+        notes:
+          type: string
+          description: Live canonical notes (not snapshot) for display
+        notesUpdatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        notesUpdatedBy:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+          nullable: true
+      additionalProperties:
+        description: Additional personnel fields visible to this user per column manifest
+
+    AttendanceRecord:
+      type: object
+      description: Single attendance record as returned after a PATCH
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        persNo:
+          type: string
+        status:
+          type: string
+          enum: [present, absent]
+        remarks:
+          type: string
+        notesSnapshot:
+          type: string
+        unitSnapshot:
+          type: string
+          nullable: true
+        subUnit1Snapshot:
+          type: string
+          nullable: true
+        subUnit2Snapshot:
+          type: string
+          nullable: true
+        subUnit3Snapshot:
+          type: string
+          nullable: true
+        snapshotTakenAt:
+          type: string
+          format: date-time
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+          format: uuid
+          nullable: true
+
+    AttendanceUpdateRequest:
+      type: object
+      description: At least one of status, remarks, notesText must be present
+      properties:
+        status:
+          type: string
+          enum: [present, absent]
+        remarks:
+          type: string
+          maxLength: 500
+        notesText:
+          type: string
+          maxLength: 2000
+          description: |
+            If present, triggers write-back to deployment_notes and updates
+            notes_snapshot on this attendance record.
+
+    # --- Audit log ---
+
+    AuditLogEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        actorId:
+          type: string
+          format: uuid
+          nullable: true
+        actorEmail:
+          type: string
+          nullable: true
+        action:
+          type: string
+        entityType:
+          type: string
+        entityId:
+          type: string
+          format: uuid
+          nullable: true
+        payload:
+          type: object
+          additionalProperties: true
+        ipAddress:
+          type: string
+          nullable: true
+        occurredAt:
+          type: string
+          format: date-time
+
+    PaginatedAuditLog:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditLogEntry'
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer

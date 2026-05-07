@@ -1,0 +1,107 @@
+{
+  "_comment": "Static application configuration. Changes require redeployment. Do NOT put secrets here.",
+
+  "requiredColumns": {
+    "_comment": "Canonical column names that must be present (or mapped) before a CSV upload can be confirmed. Keys are canonical names; values describe purpose and type.",
+    "columns": [
+      {
+        "canonicalName": "unit",
+        "description": "Top-level unit identifier",
+        "type": "text",
+        "subunitLevel": 0
+      },
+      {
+        "canonicalName": "sub_unit_1",
+        "description": "Subunit level 1 (e.g. company / branch)",
+        "type": "text",
+        "nullable": true,
+        "subunitLevel": 1
+      },
+      {
+        "canonicalName": "sub_unit_2",
+        "description": "Subunit level 2 (e.g. platoon)",
+        "type": "text",
+        "nullable": true,
+        "subunitLevel": 2
+      },
+      {
+        "canonicalName": "sub_unit_3",
+        "description": "Subunit level 3 (e.g. section)",
+        "type": "text",
+        "nullable": true,
+        "subunitLevel": 3
+      },
+      {
+        "canonicalName": "pers_no",
+        "description": "Unique personnel identifier. Used as the stable key for cross-version matching, notes transfer, and attendance history.",
+        "type": "text",
+        "nullable": false
+      },
+      {
+        "canonicalName": "rank",
+        "description": "Personnel rank for display",
+        "type": "text",
+        "nullable": true
+      },
+      {
+        "canonicalName": "full_name",
+        "description": "Personnel full name for display",
+        "type": "text",
+        "nullable": false
+      }
+    ]
+  },
+
+  "csvImport": {
+    "maxFileSizeBytes": 5242880,
+    "allowedMimeTypes": ["text/csv", "text/plain", "application/vnd.ms-excel"],
+    "encodingFallbacks": ["utf-8", "windows-1252"],
+    "bomHandling": "strip",
+    "unknownEnumValueBehaviour": "warn_require_confirmation"
+  },
+
+  "attendance": {
+    "sessionTypes": ["AM", "PM"],
+    "statuses": ["present", "absent"],
+    "remarksMaxLength": 500,
+    "notesMaxLength": 2000
+  },
+
+  "cache": {
+    "clientCacheTtlSeconds": 86400,
+    "staleIndicatorThresholdSeconds": 300
+  },
+
+  "auditLog": {
+    "retainIndefinitely": true,
+    "actions": {
+      "_comment": "Enumerated action strings written to audit_log.action. Keep in sync with application code.",
+      "list": [
+        "auth.signin_success",
+        "auth.signin_unrecognised",
+        "auth.account_activated",
+        "auth.account_suspended",
+        "csv.upload_started",
+        "csv.mapping_confirmed",
+        "csv.diff_confirmed",
+        "deployment.created",
+        "deployment.activated",
+        "deployment.deactivated",
+        "deployment.cloned",
+        "deployment.migrated",
+        "deployment.override_updated",
+        "session.created",
+        "session.closed",
+        "attendance.updated",
+        "notes.updated",
+        "column_sensitivity.updated",
+        "column_mapping.updated",
+        "access_level.created",
+        "access_level.updated",
+        "user.created",
+        "user.access_updated",
+        "app_settings.updated"
+      ]
+    }
+  }
+}
