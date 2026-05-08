@@ -13,58 +13,65 @@
 **User Management (COMPLETE):**
 - ✅ List users with filtering (status, role, search)
 - ✅ Get user by ID with permission checks
-- ✅ Update user information (admin only)
+- ✅ Update user information (admin only) - FIXED: JSON body handling
 - ✅ Delete user (super admin only)
 - ✅ User role and status management
+- ✅ All tests passing (71/71)
 
 **API Infrastructure (COMPLETE):**
 - ✅ Authentication middleware for protected endpoints
 - ✅ Database session management
 - ✅ Proper error handling and validation
 - ✅ Module-level imports: `from parade_state.utils import utc_dt`
+- ✅ Test fixtures for API testing (async_client, token_headers)
 
 **Development Infrastructure (COMPLETE):**
 - ✅ `CLAUDE.md` - Development patterns and coding standards
 - ✅ `utc_dt` utility module - Centralized datetime handling
 - ✅ Self-documenting modules with comprehensive docstrings
-- ✅ Test coverage: 50 tests passing, 73% coverage
-
-**Git Status:**
-- 📝 3 commits ready to push (authentication system + utility refactoring)
-- 🔄 All changes committed locally
+- ✅ Test coverage: 71 tests passing, comprehensive coverage
 
 ---
 
-## 🎯 Next Phase: Deployment Management & Attendance Tracking
+## 🎯 Next Phase: Attendance Session Management
 
 ### Phase Goals
 
-**Primary Objective:** Build out the core business features for parade state management:
-1. Create and manage deployments (operational windows)
-2. Track attendance for personnel within deployments
-3. Manage personnel records and assignments
-4. Handle deployment activation/scheduling
+**Primary Objective:** Build attendance session management system to track AM/PM attendance windows for deployments.
+
+**What We'll Build:**
+1. Create and manage attendance sessions (AM/PM windows)
+2. Handle session lifecycle (open → closed → finalized)
+3. Implement snapshot functionality for deployment notes
+4. Ensure proper access control and validation
 
 ### Priority Tasks
 
-#### 1. Deployment Management API ⭐️ (START HERE)
-**Endpoints to implement:**
-- `POST /api/v1/deployments` - Create new deployment
-- `GET /api/v1/deployments` - List all deployments
-- `GET /api/v1/deployments/{id}` - Get specific deployment
-- `PATCH /api/v1/deployments/{id}` - Update deployment
-- `DELETE /api/v1/deployments/{id}` - Delete deployment
-- `POST /api/v1/deployments/{id}/activate` - Manually activate deployment
-- `POST /api/v1/deployments/{id}/deactivate` - Manually deactivate deployment
+#### ✅ 1. Deployment Management API (COMPLETE)
+**Endpoints implemented:**
+- ✅ `POST /api/v1/deployments` - Create new deployment
+- ✅ `GET /api/v1/deployments` - List all deployments
+- ✅ `GET /api/v1/deployments/{id}` - Get specific deployment
+- ✅ `PATCH /api/v1/deployments/{id}` - Update deployment
+- ✅ `DELETE /api/v1/deployments/{id}` - Delete deployment
+- ✅ `POST /api/v1/deployments/{id}/activate` - Manually activate deployment
+- ✅ `POST /api/v1/deployments/{id}/deactivate` - Manually deactivate deployment
 
-**Key features:**
-- Deployment status management (draft, active, closed, finalized)
-- Validity range enforcement (valid_from, valid_until)
-- Deployment personnel overrides (personnel assignment changes)
-- Deployment notes (metadata and operational information)
-- Access control for deployment operations
+**Features implemented:**
+- ✅ Deployment status management (draft, active, inactive, closed, finalized)
+- ✅ Validity range enforcement (valid_from, valid_until)
+- ✅ Only one deployment can be active at a time
+- ✅ Deployment personnel overrides (personnel assignment changes)
+- ✅ Deployment notes with version tracking
+- ✅ Access control for deployment operations (admin/super_admin)
+- ✅ Comprehensive test coverage (18 tests, all passing)
 
-#### 2. Attendance Session Management
+**Files created:**
+- ✅ `src/parade_state/api/deployments.py` - Deployment API endpoints
+- ✅ `src/parade_state/models/schemas.py` - Pydantic schemas for all entities
+- ✅ `tests/test_deployments_api.py` - Deployment API tests
+
+#### 2. Attendance Session Management ⭐️ (NEXT UP)
 **Endpoints to implement:**
 - `POST /api/v1/sessions` - Create attendance session (AM/PM window)
 - `GET /api/v1/sessions` - List sessions for deployment
@@ -72,14 +79,23 @@
 - `PATCH /api/v1/sessions/{id}` - Update session (open/close/finalize)
 - `DELETE /api/v1/sessions/{id}` - Delete session
 
-**Key features:**
+**Key features to implement:**
 - Session types: AM (morning) and PM (afternoon)
 - Session status: open, closed, finalized
 - Session creation triggers snapshot of deployment notes
 - Finalized sessions cannot be modified
 - Attendance records can only be created for open sessions
+- Only one session per type (AM/PM) per deployment per day
+- Sessions can only be created for active deployments
 
-#### 3. Attendance Management
+**Business logic:**
+- Session creation must copy deployment notes to snapshot
+- Session status transitions: open → closed → finalized
+- Closed sessions cannot record new attendance
+- Finalized sessions are completely immutable
+- Automatic timestamp tracking (opened_at, closed_at)
+
+#### 3. Attendance Management (FUTURE)
 **Endpoints to implement:**
 - `POST /api/v1/attendance` - Record attendance
 - `GET /api/v1/attendance` - Get attendance for session
@@ -93,7 +109,7 @@
 - Access control (user can only see/edit based on scope)
 - Audit trail for attendance modifications
 
-#### 4. Personnel Management API
+#### 4. Personnel Management API (FUTURE)
 **Endpoints to implement:**
 - `GET /api/v1/personnel` - List personnel with filtering
 - `GET /api/v1/personnel/{id}` - Get specific personnel record
@@ -107,138 +123,142 @@
 
 ### Success Criteria
 
-#### Deployment Management
-- ✅ Admin can create new deployments
-- ✅ Deployments have proper status transitions (draft → active → closed → finalized)
-- ✅ Validity ranges are enforced
-- ✅ Automatic activation based on valid_from works
-- ✅ Admin can add deployment notes
-- ✅ Personnel overrides can be applied
-
-#### Attendance Tracking
-- ✅ Admin can create AM/PM sessions for deployments
-- ✅ Attendance can be recorded for open sessions
-- ✅ Bulk attendance operations work efficiently
-- ✅ Sessions can be closed and finalized
-- ✅ Finalized sessions cannot be modified
-- ✅ Access control respects user scopes
+#### Attendance Session Management
+- [ ] Admin can create AM/PM sessions for active deployments
+- [ ] Session creation snapshots deployment notes
+- [ ] Sessions have proper status transitions (open → closed → finalized)
+- [ ] Closed sessions cannot record new attendance
+- [ ] Finalized sessions cannot be modified
+- [ ] Only one session per type per deployment per day
+- [ ] Access control respects user permissions
+- [ ] Session CRUD operations have proper validation
+- [ ] All new functionality has comprehensive test coverage
 
 #### API Quality
-- ✅ All endpoints have proper authentication/authorization
-- ✅ Request/response models with Pydantic validation
-- ✅ Proper HTTP status codes and error messages
-- ✅ OpenAPI documentation is comprehensive
-- ✅ All new functionality has test coverage
+- [ ] All endpoints have proper authentication/authorization
+- [ ] Request/response models with Pydantic validation
+- [ ] Proper HTTP status codes and error messages
+- [ ] OpenAPI documentation is comprehensive
+- [ ] Test coverage maintained or improved
 
 ### Files to Create
 
 **New API Files:**
-- `src/parade_state/api/deployments.py` - Deployment management endpoints
-- `src/parade_state/api/sessions.py` - Attendance session endpoints
-- `src/parade_state/api/attendance.py` - Attendance record endpoints
-- `src/parade_state/api/personnel.py` - Personnel management endpoints
-- `src/parade_state/models/schemas.py` - Pydantic models for API
+- `src/parade_state/api/sessions.py` - Attendance session endpoints ⭐️ **NEXT**
+- `src/parade_state/api/attendance.py` - Attendance record endpoints (FUTURE)
+- `src/parade_state/api/personnel.py` - Personnel management endpoints (FUTURE)
 
 **Test Files:**
-- `tests/test_deployments_api.py` - Deployment API tests
-- `tests/test_sessions_api.py` - Session API tests
-- `tests/test_attendance_api.py` - Attendance API tests
-- `tests/test_personnel_api.py` - Personnel API tests
+- `tests/test_sessions_api.py` - Session API tests ⭐️ **NEXT**
+- `tests/test_attendance_api.py` - Attendance API tests (FUTURE)
+- `tests/test_personnel_api.py` - Personnel API tests (FUTURE)
 
 **Files to Modify:**
-- `src/parade_state/main.py` - Add new routers
-- `src/parade_state/api/__init__.py` - Export new routers
-- `tests/conftest.py` - Add test fixtures for deployments/sessions
+- `src/parade_state/main.py` - Add sessions router ⭐️ **NEXT**
+- `src/parade_state/api/__init__.py` - Export sessions router ⭐️ **NEXT**
+- `src/parade_state/models/schemas.py` - Add session-specific schemas if needed ⭐️ **NEXT**
 
-### Implementation Order
+### Implementation Strategy
 
-**Recommended sequence:**
+**Next Session Plan:**
 
-1. **Start with deployments** (core business entity)
-   - Create deployment API endpoints
-   - Implement status transitions
-   - Add deployment notes functionality
-   - Test deployment CRUD operations
+1. **Create attendance session endpoints** (`src/parade_state/api/sessions.py`)
+   - Create session (POST /api/v1/sessions)
+   - List sessions (GET /api/v1/sessions)
+   - Get session (GET /api/v1/sessions/{id})
+   - Update session (PATCH /api/v1/sessions/{id})
+   - Delete session (DELETE /api/v1/sessions/{id})
 
-2. **Add attendance sessions** (dependent on deployments)
-   - Create session API endpoints
-   - Implement session open/close/finalize logic
-   - Add session snapshot functionality
-   - Test session lifecycle
+2. **Implement session business logic:**
+   - Validate deployment is active before creating session
+   - Implement uniqueness constraint (deployment + date + session_type)
+   - Add snapshot functionality for deployment notes on session creation
+   - Handle session status transitions (open → closed → finalized)
+   - Prevent modifications to finalized sessions
 
-3. **Add attendance tracking** (dependent on sessions)
-   - Create attendance API endpoints
-   - Implement single and bulk attendance operations
-   - Add access control for attendance operations
-   - Test attendance recording
+3. **Add comprehensive tests:**
+   - Test session creation for active/inactive deployments
+   - Test session uniqueness constraints
+   - Test status transitions and validation
+   - Test snapshot functionality
+   - Test access control (admin/super_admin)
+   - Test session deletion restrictions
 
-4. **Add personnel management** (supporting functionality)
-   - Create personnel API endpoints
-   - Add search and filtering
-   - Integrate with deployment overrides
-   - Test personnel queries
+4. **Integrate with main application:**
+   - Add sessions router to main.py
+   - Update API exports
+   - Verify OpenAPI documentation
 
 ### Technical Considerations
 
-**Access Control Integration:**
-- Deployment operations require admin/super_admin
-- Attendance operations respect user's subunit scope
-- Read operations respect user's access level
+**Business Rules:**
+- Sessions can only be created for active deployments
+- Only one session per type (AM/PM) per deployment per day
+- Session creation must trigger snapshot of deployment notes
+- Finalized sessions are immutable (no status changes, deletions)
+- Attendance records can only be created/modified for open sessions
 
-**Database Transactions:**
-- Session creation should snapshot deployment notes
-- Attendance updates should include audit trail
-- Deployment status changes need proper locking
+**Database Operations:**
+- Session creation should copy deployment notes to attendance records
+- Session status changes need audit trail (opened_at, closed_at, closed_by)
+- Session deletion should only work for non-finalized sessions
+- Need to handle session deployment relationships properly
+
+**Access Control:**
+- Session creation requires admin/super_admin role
+- Session updates require admin/super_admin role
+- Read operations may be accessible to authenticated users
+- Super admins can delete sessions (subject to business rules)
 
 **Performance:**
-- Bulk attendance operations should be efficient
-- Personnel queries should use proper indexing
 - Session listings should be paginated
-
-**Business Logic:**
-- Only one deployment can be active at a time
-- Sessions can only be created for active deployments
-- Finalized sessions are immutable
-- Attendance snapshots preserve deployment state at session creation
+- Efficient queries for session filtering by deployment/date
+- Consider indexing on deployment_id, date, and session_type
 
 ### Dependencies & Prerequisites
 
-**Existing Dependencies (All Set):**
-- FastAPI, SQLAlchemy, Pydantic
-- Database models (Deployment, Session, AttendanceRecord)
-- Authentication/authorization system
-- Utility modules (utc_dt, etc.)
+**Completed Dependencies:**
+- ✅ FastAPI, SQLAlchemy, Pydantic
+- ✅ Database models (Deployment, Session, AttendanceRecord)
+- ✅ Authentication/authorization system
+- ✅ Deployment management API
+- ✅ Utility modules (utc_dt, etc.)
+- ✅ Comprehensive Pydantic schemas (models/schemas.py)
+- ✅ API testing infrastructure (async_client, token_headers)
 
-**New Dependencies May Be Needed:**
+**New Dependencies Needed:**
 - None currently needed
 
-### Fresh Session Starting Point
+### Current Session Status
 
-**Where we left off:**
-- Authentication system complete and tested
-- Database models for deployments/sessions/attendance exist
-- 73% test coverage achieved
-- 50 tests passing consistently
-- 3 commits unpushed (ready when you are)
+**✅ Completed This Session:**
+1. ✅ Deployment Management API - Fully implemented
+2. ✅ Fixed broken user API tests (JSON body handling)
+3. ✅ All 71 tests passing (100% success rate)
+4. ✅ 2 commits ready:
+   - `de5dd10` - feat: Implement complete deployment management API
+   - `e874b7b` - fix: Correct user update API parameter handling
 
-**Clean slate approach:**
-- Can start fresh with deployment management
-- Authentication foundation is solid
-- Database models are already in place
-- Testing infrastructure is ready
+**📊 Current Metrics:**
+- Total Tests: 71
+- Pass Rate: 100%
+- API Endpoints: 11 deployment endpoints
+- Code Quality: Clean, well-tested, documented
 
-**Next session focus:**
-- Build deployment management API
-- Add attendance tracking capabilities
-- Ensure proper access control throughout
-- Maintain test quality and code standards
+**🚀 Next Session Focus:**
+1. Create attendance session management API
+2. Implement session lifecycle and business logic
+3. Add comprehensive test coverage for sessions
+4. Maintain 100% test pass rate
 
 ---
 
 **Previous Phase:** Authentication & User Management ✅ **COMPLETE**
 
-**Current Phase:** Deployment & Core Features 🚀 **READY TO START**
+**Completed:** Deployment Management API ✅ **COMPLETE**
 
-**Estimated Duration:** 2-3 sessions depending on complexity
+**Next Up:** Attendance Session Management 🎯 **READY TO START**
+
+**Estimated Duration:** 1-2 sessions for session management + attendance tracking
 
 **Commit hash:** `d17ec40` - Latest commit: Documentation reorganization
