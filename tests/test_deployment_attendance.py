@@ -10,6 +10,7 @@ from parade_state.models import (
     DeploymentNotes,
     Session,
 )
+from parade_state.utils import utc_dt
 
 
 class TestDeploymentLifecycle:
@@ -25,8 +26,8 @@ class TestDeploymentLifecycle:
             name="Deployment 1",
             estab_id=sample_estab.id,
             status="active",
-            valid_from=datetime.utcnow() - timedelta(days=1),
-            valid_until=datetime.utcnow() + timedelta(days=30),
+            valid_from=utc_dt.utcnow() - timedelta(days=1),
+            valid_until=utc_dt.utcnow() + timedelta(days=30),
             created_by=admin_id,
         )
 
@@ -38,8 +39,8 @@ class TestDeploymentLifecycle:
             name="Deployment 2",
             estab_id=sample_estab.id,
             status="active",  # This should be prevented by application logic
-            valid_from=datetime.utcnow() - timedelta(days=1),
-            valid_until=datetime.utcnow() + timedelta(days=30),
+            valid_from=utc_dt.utcnow() - timedelta(days=1),
+            valid_until=utc_dt.utcnow() + timedelta(days=30),
             created_by=admin_id,
         )
 
@@ -122,7 +123,7 @@ class TestSessionConstraints:
     async def test_unique_session_per_deployment_date_and_type(self, db_session, sample_deployment, sample_users):
         """Test that only one session per type can exist per deployment per date."""
         admin_id = sample_users["admin"].id
-        today = datetime.utcnow().date()
+        today = utc_dt.utcnow().date()
 
         # Create AM session
         session1 = Session(
@@ -179,7 +180,7 @@ class TestAttendanceSnapshotRules:
         # Create session
         session = Session(
             deployment_id=deployment.id,
-            date=datetime.utcnow().date(),
+            date=utc_dt.utcnow().date(),
             session_type="AM",
             created_by=admin_id,
         )
@@ -194,7 +195,7 @@ class TestAttendanceSnapshotRules:
             status="present",
             created_by=admin_id,
             updated_by=admin_id,
-            last_edit_at=datetime.utcnow(),
+            last_edit_at=utc_dt.utcnow(),
             last_edit_by=admin_id,
         )
 
@@ -223,7 +224,7 @@ class TestAttendanceSnapshotRules:
         # Create session
         session = Session(
             deployment_id=deployment.id,
-            date=datetime.utcnow().date(),
+            date=utc_dt.utcnow().date(),
             session_type="AM",
             created_by=admin_id,
         )
@@ -254,9 +255,9 @@ class TestAttendanceSnapshotRules:
         # Update status and remarks (should be allowed)
         attendance.status = "absent"
         attendance.remarks = "Sick leave"
-        attendance.updated_at = datetime.utcnow()
+        attendance.updated_at = utc_dt.utcnow()
         attendance.updated_by = admin_id
-        attendance.last_edit_at = datetime.utcnow()
+        attendance.last_edit_at = utc_dt.utcnow()
         attendance.last_edit_by = admin_id
         attendance.is_retroactive_edit = True
 
@@ -327,7 +328,7 @@ class TestDeploymentNotes:
         # Create session (this would trigger notes snapshot in business logic)
         session = Session(
             deployment_id=deployment.id,
-            date=datetime.utcnow().date(),
+            date=utc_dt.utcnow().date(),
             session_type="AM",
             created_by=admin_id,
         )

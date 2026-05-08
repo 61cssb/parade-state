@@ -9,6 +9,7 @@ from parade_state.models import (
     Estab,
     Personnel,
 )
+from parade_state.utils import utc_dt
 
 
 class TestPersonnelIdentity:
@@ -290,7 +291,7 @@ class TestColumnMapping:
             # Attempt transition
             mapping.status = to_status
             if to_status == "deprecated":
-                mapping.deprecated_at = datetime.utcnow()
+                mapping.deprecated_at = utc_dt.utcnow()
             await db_session.commit()
 
             # Verify transition succeeded

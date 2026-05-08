@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from parade_state.models.attendance import Session
 from parade_state.models.deployment import Deployment
+from parade_state.utils import utc_dt
 
 
 @pytest.mark.asyncio
@@ -56,8 +57,8 @@ async def test_create_session_for_inactive_deployment_forbidden(
         name="Inactive Deployment",
         estab_id=str(sample_estab.id),
         status="draft",  # Not active
-        valid_from=datetime.utcnow() - timedelta(days=1),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow() - timedelta(days=1),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         personnel_count=3,
         created_by=str(sample_users["admin"].id),
     )
@@ -100,7 +101,7 @@ async def test_create_session_duplicate_forbidden(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session1)
@@ -193,7 +194,7 @@ async def test_list_sessions(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     session2 = Session(
@@ -202,7 +203,7 @@ async def test_list_sessions(
         session_type="PM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add_all([session1, session2])
@@ -238,11 +239,11 @@ async def test_list_sessions_with_deployment_filter(
         name="Deployment 2",
         estab_id=str(sample_estab.id),
         status="active",
-        valid_from=datetime.utcnow() - timedelta(days=1),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow() - timedelta(days=1),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         personnel_count=3,
         created_by=str(sample_users["admin"].id),
-        activated_at=datetime.utcnow(),
+        activated_at=utc_dt.utcnow(),
     )
 
     db_session.add(deployment2)
@@ -255,7 +256,7 @@ async def test_list_sessions_with_deployment_filter(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     session2 = Session(
@@ -264,7 +265,7 @@ async def test_list_sessions_with_deployment_filter(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add_all([session1, session2])
@@ -304,7 +305,7 @@ async def test_list_sessions_with_status_filter(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     session2 = Session(
@@ -313,8 +314,8 @@ async def test_list_sessions_with_status_filter(
         session_type="PM",
         status="closed",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
-        closed_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
+        closed_at=utc_dt.utcnow(),
         closed_by="admin-user-id",
     )
 
@@ -354,7 +355,7 @@ async def test_get_session(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -404,7 +405,7 @@ async def test_update_session_status_to_closed(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -442,8 +443,8 @@ async def test_update_session_status_to_finalized(
         session_type="AM",
         status="closed",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
-        closed_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
+        closed_at=utc_dt.utcnow(),
         closed_by="admin-user-id",
     )
 
@@ -480,7 +481,7 @@ async def test_update_session_invalid_status_transition(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -516,8 +517,8 @@ async def test_update_finalized_session_forbidden(
         session_type="AM",
         status="finalized",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
-        closed_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
+        closed_at=utc_dt.utcnow(),
         closed_by="admin-user-id",
     )
 
@@ -553,7 +554,7 @@ async def test_update_session_as_regular_user_forbidden(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -588,7 +589,7 @@ async def test_delete_session_as_super_admin(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -623,8 +624,8 @@ async def test_delete_finalized_session_forbidden(
         session_type="AM",
         status="finalized",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
-        closed_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
+        closed_at=utc_dt.utcnow(),
         closed_by="admin-user-id",
     )
 
@@ -657,7 +658,7 @@ async def test_delete_session_as_admin_forbidden(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -754,7 +755,7 @@ async def test_list_sessions_pagination(
             session_type="AM",
             status="open",
             created_by="admin-user-id",
-            opened_at=datetime.utcnow(),
+            opened_at=utc_dt.utcnow(),
         )
         sessions.append(session)
 
@@ -811,7 +812,7 @@ async def test_session_auto_sets_opened_at(
         "status": "open",
     }
 
-    before_creation = datetime.utcnow()
+    before_creation = utc_dt.utcnow()
 
     response = await async_client.post(
         "/api/v1/sessions/",
@@ -826,9 +827,10 @@ async def test_session_auto_sets_opened_at(
     # Verify opened_at is set and recent
     assert data["opened_at"] is not None
 
-    # Parse the opened_at timestamp
-    opened_at = datetime.fromisoformat(data["opened_at"].replace("Z", "+00:00"))
+    # Parse the opened_at timestamp (naive, as stored in DB)
+    opened_at = datetime.fromisoformat(data["opened_at"])
 
     # Verify it's close to current time (within 1 minute)
-    time_diff = abs((datetime.utcnow() - opened_at).total_seconds())
+    # Use naive UTC time for comparison since opened_at is naive
+    time_diff = abs((utc_dt.ensure_naive(utc_dt.utcnow()) - opened_at).total_seconds())
     assert time_diff < 60  # Less than 1 minute difference

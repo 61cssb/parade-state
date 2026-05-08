@@ -29,6 +29,7 @@ from parade_state.models import (
     User,
     UserSubunitScope,
 )
+from parade_state.utils import utc_dt
 
 
 @pytest.fixture(scope="session")
@@ -124,7 +125,7 @@ async def sample_estab(db_session: AsyncSession, sample_users):
         personnel_count=3,
         uploaded_by=str(sample_users["admin"].id),
         confirmed_by=str(sample_users["admin"].id),
-        confirmed_at=datetime.utcnow(),
+        confirmed_at=utc_dt.utcnow(),
     )
 
     db_session.add(estab)
@@ -189,11 +190,11 @@ async def sample_deployment(db_session: AsyncSession, sample_estab, sample_users
         name="Test Deployment",
         estab_id=estab_id,
         status="active",
-        valid_from=datetime.utcnow() - timedelta(days=1),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow() - timedelta(days=1),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         personnel_count=3,
         created_by=admin_id,
-        activated_at=datetime.utcnow(),
+        activated_at=utc_dt.utcnow(),
     )
 
     db_session.add(deployment)
@@ -263,7 +264,7 @@ async def sample_session(db_session: AsyncSession, sample_deployment: Deployment
         session_type="AM",
         status="open",
         created_by=admin_id,
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -284,8 +285,8 @@ async def sample_sessions(db_session: AsyncSession, sample_deployment: Deploymen
             session_type="AM",
             status="closed",
             created_by=admin_id,
-            opened_at=datetime.utcnow() - timedelta(hours=4),
-            closed_at=datetime.utcnow() - timedelta(hours=2),
+            opened_at=utc_dt.utcnow() - timedelta(hours=4),
+            closed_at=utc_dt.utcnow() - timedelta(hours=2),
             closed_by=admin_id,
         ),
         Session(
@@ -294,7 +295,7 @@ async def sample_sessions(db_session: AsyncSession, sample_deployment: Deploymen
             session_type="PM",
             status="open",
             created_by=admin_id,
-            opened_at=datetime.utcnow(),
+            opened_at=utc_dt.utcnow(),
         ),
         Session(
             deployment_id=str(sample_deployment.id),
@@ -302,8 +303,8 @@ async def sample_sessions(db_session: AsyncSession, sample_deployment: Deploymen
             session_type="AM",
             status="finalized",
             created_by=admin_id,
-            opened_at=datetime.utcnow() - timedelta(days=1, hours=4),
-            closed_at=datetime.utcnow() - timedelta(days=1, hours=2),
+            opened_at=utc_dt.utcnow() - timedelta(days=1, hours=4),
+            closed_at=utc_dt.utcnow() - timedelta(days=1, hours=2),
             closed_by=admin_id,
         ),
     ]

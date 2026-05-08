@@ -16,14 +16,17 @@ async def test_list_personnel_with_deployment_context(
     db_session,
     sample_deployment: Deployment,
     sample_personnel,
+    sample_users,
 ):
     """Test listing personnel with deployment context."""
+    admin_id = str(sample_users["admin"].id)
+
     response = await async_client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
             "deployment_id": str(sample_deployment.id),
-            "user_id": "admin-user-id",
+            "user_id": admin_id,
             "user_role": "admin",
         },
     )
@@ -49,13 +52,14 @@ async def test_list_personnel_without_deployment_context_as_admin(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
     sample_personnel,
+    sample_users,
 ):
     """Test listing personnel without deployment context as admin."""
     response = await async_client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -97,6 +101,7 @@ async def test_list_personnel_without_deployment_context_as_user_forbidden(
 async def test_list_personnel_with_unit_filter(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     db_session,
     sample_deployment: Deployment,
     sample_personnel,
@@ -111,7 +116,7 @@ async def test_list_personnel_with_unit_filter(
         params={
             "deployment_id": str(sample_deployment.id),
             "unit": first_unit,
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -129,6 +134,7 @@ async def test_list_personnel_with_unit_filter(
 async def test_list_personnel_with_sub_unit_filter(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     db_session,
     sample_deployment: Deployment,
     sample_personnel,
@@ -148,7 +154,7 @@ async def test_list_personnel_with_sub_unit_filter(
             params={
                 "deployment_id": str(sample_deployment.id),
                 "sub_unit_1": sub_unit,
-                "user_id": "admin-user-id",
+                "user_id": str(sample_users["admin"].id),
                 "user_role": "admin",
             },
         )
@@ -166,6 +172,7 @@ async def test_list_personnel_with_sub_unit_filter(
 async def test_list_personnel_with_search(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     db_session,
     sample_deployment: Deployment,
     sample_personnel,
@@ -180,7 +187,7 @@ async def test_list_personnel_with_search(
         params={
             "deployment_id": str(sample_deployment.id),
             "search": search_term,
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -203,6 +210,7 @@ async def test_list_personnel_with_search(
 async def test_list_personnel_with_search_by_service_number(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     db_session,
     sample_deployment: Deployment,
     sample_personnel,
@@ -217,7 +225,7 @@ async def test_list_personnel_with_search_by_service_number(
         params={
             "deployment_id": str(sample_deployment.id),
             "search": search_term,
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -263,7 +271,7 @@ async def test_list_personnel_with_overrides(
         headers=admin_token_headers,
         params={
             "deployment_id": str(sample_deployment.id),
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -309,7 +317,7 @@ async def test_list_personnel_with_deployment_notes(
         headers=admin_token_headers,
         params={
             "deployment_id": str(sample_deployment.id),
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -332,6 +340,7 @@ async def test_list_personnel_with_deployment_notes(
 async def test_get_personnel_by_id_with_deployment_context(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     db_session,
     sample_deployment: Deployment,
     sample_personnel,
@@ -342,7 +351,7 @@ async def test_get_personnel_by_id_with_deployment_context(
         headers=admin_token_headers,
         params={
             "deployment_id": str(sample_deployment.id),
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -360,6 +369,7 @@ async def test_get_personnel_by_id_with_deployment_context(
 async def test_get_personnel_by_id_without_deployment_context_as_admin(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     sample_personnel,
 ):
     """Test getting personnel by ID without deployment context as admin."""
@@ -367,7 +377,7 @@ async def test_get_personnel_by_id_without_deployment_context_as_admin(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -439,7 +449,7 @@ async def test_get_personnel_by_id_with_override_and_notes(
         headers=admin_token_headers,
         params={
             "deployment_id": str(sample_deployment.id),
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -455,6 +465,7 @@ async def test_get_personnel_by_id_with_override_and_notes(
 async def test_update_personnel_as_admin(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     db_session,
     sample_deployment: Deployment,
     sample_personnel,
@@ -469,7 +480,7 @@ async def test_update_personnel_as_admin(
         headers=admin_token_headers,
         params={
             "deployment_id": str(sample_deployment.id),
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
         json=update_data,
@@ -510,6 +521,7 @@ async def test_update_personnel_as_user_forbidden(
 async def test_update_personnel_status(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     db_session,
     sample_personnel,
 ):
@@ -522,7 +534,7 @@ async def test_update_personnel_status(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
         json=update_data,
@@ -538,6 +550,7 @@ async def test_update_personnel_status(
 async def test_list_personnel_with_status_filter(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     db_session,
     sample_deployment: Deployment,
     sample_personnel,
@@ -553,7 +566,7 @@ async def test_list_personnel_with_status_filter(
         params={
             "deployment_id": str(sample_deployment.id),
             "status": "archived",
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -572,6 +585,7 @@ async def test_list_personnel_with_status_filter(
 async def test_list_personnel_with_pagination(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     db_session,
     sample_deployment: Deployment,
     sample_personnel,
@@ -585,7 +599,7 @@ async def test_list_personnel_with_pagination(
             "deployment_id": str(sample_deployment.id),
             "limit": 2,
             "offset": 0,
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -603,7 +617,7 @@ async def test_list_personnel_with_pagination(
             "deployment_id": str(sample_deployment.id),
             "limit": 2,
             "offset": 2,
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -618,6 +632,7 @@ async def test_list_personnel_with_pagination(
 async def test_list_personnel_invalid_deployment_id(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
 ):
     """Test listing personnel with invalid deployment ID."""
     response = await async_client.get(
@@ -625,7 +640,7 @@ async def test_list_personnel_invalid_deployment_id(
         headers=admin_token_headers,
         params={
             "deployment_id": "invalid-deployment-id",
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -637,13 +652,14 @@ async def test_list_personnel_invalid_deployment_id(
 async def test_get_personnel_invalid_id(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
 ):
     """Test getting personnel with invalid ID."""
     response = await async_client.get(
         "/api/v1/personnel/invalid-personnel-id",
         headers=admin_token_headers,
         params={
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -655,6 +671,7 @@ async def test_get_personnel_invalid_id(
 async def test_update_personnel_invalid_id(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
 ):
     """Test updating personnel with invalid ID."""
     update_data = {
@@ -665,7 +682,7 @@ async def test_update_personnel_invalid_id(
         "/api/v1/personnel/invalid-personnel-id",
         headers=admin_token_headers,
         params={
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
         json=update_data,
@@ -678,6 +695,7 @@ async def test_update_personnel_invalid_id(
 async def test_list_personnel_from_different_estab_forbidden(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     db_session,
     sample_deployment: Deployment,
     sample_estab,
@@ -703,7 +721,7 @@ async def test_list_personnel_from_different_estab_forbidden(
         headers=admin_token_headers,
         params={
             "deployment_id": str(sample_deployment.id),
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -725,6 +743,7 @@ async def test_list_personnel_from_different_estab_forbidden(
 async def test_get_personnel_from_different_estab_forbidden(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     db_session,
     sample_deployment: Deployment,
     sample_estab,
@@ -750,7 +769,7 @@ async def test_get_personnel_from_different_estab_forbidden(
         headers=admin_token_headers,
         params={
             "deployment_id": str(sample_deployment.id),
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )

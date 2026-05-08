@@ -6,12 +6,14 @@ from httpx import AsyncClient
 
 from parade_state.models.deployment import Deployment
 from parade_state.models.personnel import Personnel
+from parade_state.utils import utc_dt
 
 
 @pytest.mark.asyncio
 async def test_get_personnel_attendance_history_basic(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     sample_deployment: Deployment,
     sample_personnel,
     sample_attendance_records,
@@ -24,7 +26,7 @@ async def test_get_personnel_attendance_history_basic(
         headers=admin_token_headers,
         params={
             "deployment_id": str(sample_deployment.id),
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -79,6 +81,7 @@ async def test_get_personnel_attendance_history_basic(
 async def test_get_personnel_attendance_history_with_date_filter(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     sample_deployment: Deployment,
     sample_personnel,
     sample_attendance_records,
@@ -95,7 +98,7 @@ async def test_get_personnel_attendance_history_with_date_filter(
             "deployment_id": str(sample_deployment.id),
             "date_from": today.isoformat(),
             "date_to": today.isoformat(),
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -113,6 +116,7 @@ async def test_get_personnel_attendance_history_with_date_filter(
 async def test_get_personnel_attendance_history_with_pagination(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     sample_deployment: Deployment,
     sample_personnel,
     sample_attendance_records,
@@ -128,7 +132,7 @@ async def test_get_personnel_attendance_history_with_pagination(
             "deployment_id": str(sample_deployment.id),
             "limit": 1,
             "offset": 0,
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -145,6 +149,7 @@ async def test_get_personnel_attendance_history_with_pagination(
 async def test_get_personnel_attendance_history_ordering(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     sample_deployment: Deployment,
     sample_personnel,
     sample_attendance_records,
@@ -157,7 +162,7 @@ async def test_get_personnel_attendance_history_ordering(
         headers=admin_token_headers,
         params={
             "deployment_id": str(sample_deployment.id),
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -175,6 +180,7 @@ async def test_get_personnel_attendance_history_ordering(
 async def test_get_personnel_attendance_history_invalid_personnel(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     sample_deployment: Deployment,
 ):
     """Test getting attendance history for non-existent personnel."""
@@ -185,7 +191,7 @@ async def test_get_personnel_attendance_history_invalid_personnel(
         headers=admin_token_headers,
         params={
             "deployment_id": str(sample_deployment.id),
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -198,6 +204,7 @@ async def test_get_personnel_attendance_history_invalid_personnel(
 async def test_get_personnel_attendance_history_wrong_estab(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     sample_deployment: Deployment,
     sample_personnel,
     db_session,
@@ -205,7 +212,7 @@ async def test_get_personnel_attendance_history_wrong_estab(
     """Test that personnel from different estab cannot be queried."""
     from parade_state.models import Estab, Deployment as DeploymentModel
 
-    admin_id = "admin-user-id"
+    admin_id = str(sample_users["admin"].id)
     personnel_id = str(sample_personnel[0].id)
 
     # Try to use a deployment ID that doesn't exist
@@ -216,7 +223,7 @@ async def test_get_personnel_attendance_history_wrong_estab(
         headers=admin_token_headers,
         params={
             "deployment_id": fake_deployment_id,
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -230,6 +237,7 @@ async def test_get_personnel_attendance_history_wrong_estab(
 async def test_get_personnel_attendance_history_no_records(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     sample_deployment: Deployment,
     sample_personnel,
 ):
@@ -242,7 +250,7 @@ async def test_get_personnel_attendance_history_no_records(
         headers=admin_token_headers,
         params={
             "deployment_id": str(sample_deployment.id),
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
@@ -265,6 +273,7 @@ async def test_get_personnel_attendance_history_no_records(
 async def test_get_personnel_attendance_history_various_statuses(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     sample_deployment: Deployment,
     sample_personnel,
     sample_attendance_records,
@@ -274,7 +283,7 @@ async def test_get_personnel_attendance_history_various_statuses(
     from parade_state.models import AttendanceRecord, Session
 
     personnel_id = str(sample_personnel[0].id)
-    admin_id = "admin-user-id"
+    admin_id = str(sample_users["admin"].id)
 
     # Create an additional session with "unknown" status
     unknown_session = Session(
@@ -283,7 +292,7 @@ async def test_get_personnel_attendance_history_various_statuses(
         session_type="PM",
         status="open",
         created_by=admin_id,
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
     db_session.add(unknown_session)
     await db_session.commit()
@@ -355,6 +364,7 @@ async def test_get_personnel_attendance_history_access_control(
 async def test_get_personnel_attendance_history_invalid_deployment(
     async_client: AsyncClient,
     admin_token_headers: dict[str, str],
+    sample_users,
     sample_personnel,
 ):
     """Test getting attendance history for non-existent deployment."""
@@ -366,7 +376,7 @@ async def test_get_personnel_attendance_history_invalid_deployment(
         headers=admin_token_headers,
         params={
             "deployment_id": invalid_deployment_id,
-            "user_id": "admin-user-id",
+            "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )

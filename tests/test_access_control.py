@@ -159,9 +159,9 @@ class TestUserAccessControl:
         result = await db_session.execute(stmt)
         access_records = result.scalars().all()
 
-        # Admin might not have explicit grants, but should still have access
-        # (This would be handled in business logic, not constraints)
-        assert len(access_records) == 0  # No explicit grants needed
+        # With new access control system, admins get explicit deployment access
+        # The sample_deployment fixture automatically grants admin access
+        assert len(access_records) >= 1  # Admin has explicit access grant
 
 
 class TestColumnVisibility:

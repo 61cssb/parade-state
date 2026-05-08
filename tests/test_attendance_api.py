@@ -8,6 +8,7 @@ from sqlalchemy import select
 from parade_state.models.attendance import AttendanceRecord, Session
 from parade_state.models.deployment import Deployment, DeploymentNotes, DeploymentPersonnelOverride
 from parade_state.models.personnel import Personnel
+from parade_state.utils import utc_dt
 
 
 @pytest.mark.asyncio
@@ -28,7 +29,7 @@ async def test_create_attendance_record_as_admin(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -76,8 +77,8 @@ async def test_create_attendance_record_for_closed_session_forbidden(
         session_type="AM",
         status="closed",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
-        closed_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
+        closed_at=utc_dt.utcnow(),
         closed_by="admin-user-id",
     )
 
@@ -131,7 +132,7 @@ async def test_create_attendance_record_with_deployment_notes_snapshot(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -186,7 +187,7 @@ async def test_create_attendance_record_with_personnel_override_snapshot(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -219,18 +220,20 @@ async def test_create_attendance_record_retroactive_detection(
     db_session,
     sample_deployment: Deployment,
     sample_personnel,
+    sample_users,
 ):
     """Test retroactive edit detection for past sessions."""
-    # Create a session for yesterday
-    yesterday = date.today() - timedelta(days=1)
+    # Create a session for yesterday (in UTC to ensure it's actually in the past)
+    yesterday = (utc_dt.utcnow() - timedelta(days=1)).date()
+    admin_id = str(sample_users["admin"].id)
 
     session = Session(
         deployment_id=str(sample_deployment.id),
         date=yesterday,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        created_by=admin_id,
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -246,7 +249,7 @@ async def test_create_attendance_record_retroactive_detection(
         "/api/v1/attendance/",
         json=attendance_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 201
@@ -272,7 +275,7 @@ async def test_create_duplicate_attendance_record_forbidden(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -324,7 +327,7 @@ async def test_list_attendance_records(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -383,7 +386,7 @@ async def test_list_attendance_records_with_session_filter(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     session2 = Session(
@@ -392,7 +395,7 @@ async def test_list_attendance_records_with_session_filter(
         session_type="PM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add_all([session1, session2])
@@ -455,7 +458,7 @@ async def test_update_attendance_record(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -509,8 +512,8 @@ async def test_update_attendance_record_for_closed_session_forbidden(
         session_type="AM",
         status="closed",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
-        closed_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
+        closed_at=utc_dt.utcnow(),
         closed_by="admin-user-id",
     )
 
@@ -561,7 +564,7 @@ async def test_delete_attendance_record_as_admin(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -613,7 +616,7 @@ async def test_delete_attendance_record_as_regular_user_forbidden(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -660,7 +663,7 @@ async def test_bulk_create_attendance_records(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -719,7 +722,7 @@ async def test_bulk_create_attendance_records_atomic_rollback(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -785,7 +788,7 @@ async def test_bulk_update_attendance_records(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)
@@ -862,8 +865,8 @@ async def test_bulk_update_attendance_records_for_closed_session_forbidden(
         session_type="AM",
         status="closed",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
-        closed_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
+        closed_at=utc_dt.utcnow(),
         closed_by="admin-user-id",
     )
 
@@ -937,7 +940,7 @@ async def test_list_attendance_records_pagination(
         session_type="AM",
         status="open",
         created_by="admin-user-id",
-        opened_at=datetime.utcnow(),
+        opened_at=utc_dt.utcnow(),
     )
 
     db_session.add(session)

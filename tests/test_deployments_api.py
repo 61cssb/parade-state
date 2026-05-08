@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from parade_state.models.deployment import Deployment
 from parade_state.models.schemas import DeploymentCreate, DeploymentUpdate
+from parade_state.utils import utc_dt
 
 
 @pytest.mark.asyncio
@@ -17,8 +18,8 @@ async def test_create_deployment_as_admin(
     deployment_data = {
         "name": "Test Deployment",
         "estab_id": "test-estab-123",
-        "valid_from": (datetime.utcnow() + timedelta(days=1)).isoformat(),
-        "valid_until": (datetime.utcnow() + timedelta(days=30)).isoformat(),
+        "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
+        "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
         "status": "draft",
         "notes": "Test deployment notes",
     }
@@ -45,8 +46,8 @@ async def test_create_deployment_as_regular_user_forbidden(
     deployment_data = {
         "name": "Test Deployment",
         "estab_id": "test-estab-123",
-        "valid_from": (datetime.utcnow() + timedelta(days=1)).isoformat(),
-        "valid_until": (datetime.utcnow() + timedelta(days=30)).isoformat(),
+        "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
+        "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
     }
 
     response = await async_client.post(
@@ -68,8 +69,8 @@ async def test_create_deployment_invalid_date_range(
     deployment_data = {
         "name": "Test Deployment",
         "estab_id": "test-estab-123",
-        "valid_from": (datetime.utcnow() + timedelta(days=30)).isoformat(),
-        "valid_until": (datetime.utcnow() + timedelta(days=1)).isoformat(),
+        "valid_from": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
+        "valid_until": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
     }
 
     response = await async_client.post(
@@ -93,18 +94,18 @@ async def test_list_deployments(
         name="Deployment 1",
         estab_id="estab-1",
         status="draft",
-        valid_from=datetime.utcnow(),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow(),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
     deployment2 = Deployment(
         name="Deployment 2",
         estab_id="estab-2",
         status="active",
-        valid_from=datetime.utcnow(),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow(),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
-        activated_at=datetime.utcnow(),
+        activated_at=utc_dt.utcnow(),
     )
 
     db_session.add(deployment1)
@@ -134,17 +135,17 @@ async def test_list_deployments_with_status_filter(
         name="Active Deployment",
         estab_id="estab-1",
         status="active",
-        valid_from=datetime.utcnow(),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow(),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
-        activated_at=datetime.utcnow(),
+        activated_at=utc_dt.utcnow(),
     )
     deployment2 = Deployment(
         name="Draft Deployment",
         estab_id="estab-2",
         status="draft",
-        valid_from=datetime.utcnow(),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow(),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -178,8 +179,8 @@ async def test_get_deployment(
         name="Test Deployment",
         estab_id="estab-1",
         status="draft",
-        valid_from=datetime.utcnow(),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow(),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -222,8 +223,8 @@ async def test_update_deployment(
         name="Original Name",
         estab_id="estab-1",
         status="draft",
-        valid_from=datetime.utcnow(),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow(),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -254,8 +255,8 @@ async def test_update_deployment_status_transition(
         name="Test Deployment",
         estab_id="estab-1",
         status="draft",
-        valid_from=datetime.utcnow(),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow(),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -286,8 +287,8 @@ async def test_update_deployment_invalid_status_transition(
         name="Test Deployment",
         estab_id="estab-1",
         status="finalized",
-        valid_from=datetime.utcnow(),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow(),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -316,8 +317,8 @@ async def test_activate_deployment(
         name="Test Deployment",
         estab_id="estab-1",
         status="draft",
-        valid_from=datetime.utcnow(),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow(),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -345,10 +346,10 @@ async def test_activate_deployment_already_active(
         name="Test Deployment",
         estab_id="estab-1",
         status="active",
-        valid_from=datetime.utcnow(),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow(),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
-        activated_at=datetime.utcnow(),
+        activated_at=utc_dt.utcnow(),
     )
 
     db_session.add(deployment)
@@ -373,10 +374,10 @@ async def test_deactivate_deployment(
         name="Test Deployment",
         estab_id="estab-1",
         status="active",
-        valid_from=datetime.utcnow(),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow(),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
-        activated_at=datetime.utcnow(),
+        activated_at=utc_dt.utcnow(),
     )
 
     db_session.add(deployment)
@@ -403,8 +404,8 @@ async def test_delete_deployment_as_super_admin(
         name="Test Deployment",
         estab_id="estab-1",
         status="draft",
-        valid_from=datetime.utcnow(),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow(),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="super-admin-user-id",
     )
 
@@ -435,8 +436,8 @@ async def test_delete_deployment_as_admin_forbidden(
         name="Test Deployment",
         estab_id="estab-1",
         status="draft",
-        valid_from=datetime.utcnow(),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow(),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -462,10 +463,10 @@ async def test_delete_active_deployment_forbidden(
         name="Test Deployment",
         estab_id="estab-1",
         status="active",
-        valid_from=datetime.utcnow(),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow(),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="super-admin-user-id",
-        activated_at=datetime.utcnow(),
+        activated_at=utc_dt.utcnow(),
     )
 
     db_session.add(deployment)
@@ -490,16 +491,16 @@ async def test_search_deployments(
         name="Alpha Deployment",
         estab_id="estab-1",
         status="draft",
-        valid_from=datetime.utcnow(),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow(),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
     deployment2 = Deployment(
         name="Bravo Deployment",
         estab_id="estab-2",
         status="draft",
-        valid_from=datetime.utcnow(),
-        valid_until=datetime.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.utcnow(),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -534,8 +535,8 @@ async def test_list_deployments_pagination(
             name=f"Deployment {i}",
             estab_id=f"estab-{i}",
             status="draft",
-            valid_from=datetime.utcnow(),
-            valid_until=datetime.utcnow() + timedelta(days=30),
+            valid_from=utc_dt.utcnow(),
+            valid_until=utc_dt.utcnow() + timedelta(days=30),
             created_by="admin-user-id",
         )
         db_session.add(deployment)

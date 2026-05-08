@@ -294,15 +294,8 @@ async def test_list_deployment_users(
     admin_id = str(sample_users["admin"].id)
     user_id = str(sample_users["user"].id)
 
-    # First grant admin access to deployment
-    admin_access = DeploymentUserAccess(
-        user_id=admin_id,
-        deployment_id=str(sample_deployment.id),
-        granted_by=admin_id,  # Self-grant
-    )
-    db_session.add(admin_access)
-
     # Grant user access to deployment
+    # Note: Admin access is already granted by sample_deployment fixture
     user_access = DeploymentUserAccess(
         user_id=user_id,
         deployment_id=str(sample_deployment.id),
@@ -343,15 +336,7 @@ async def test_create_user_subunit_scope(
     target_user_id = str(sample_users["user"].id)
     admin_id = str(sample_users["admin"].id)
 
-    # First grant admin access to deployment
-    admin_access = DeploymentUserAccess(
-        user_id=admin_id,
-        deployment_id=str(sample_deployment.id),
-        granted_by=admin_id,
-    )
-    db_session.add(admin_access)
-    await db_session.commit()
-
+    # Note: Admin access already granted by sample_deployment fixture
     response = await async_client.post(
         f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/scopes",
         headers=admin_token_headers,
@@ -391,14 +376,7 @@ async def test_create_duplicate_subunit_scope(
     target_user_id = str(sample_users["user"].id)
     admin_id = str(sample_users["admin"].id)
 
-    # Grant admin access to deployment first
-    admin_access = DeploymentUserAccess(
-        user_id=admin_id,
-        deployment_id=str(sample_deployment.id),
-        granted_by=admin_id,
-    )
-    db_session.add(admin_access)
-
+    # Note: Admin access already granted by sample_deployment fixture
     # Create first scope
     scope = UserSubunitScope(
         user_id=target_user_id,
@@ -440,14 +418,7 @@ async def test_delete_user_subunit_scope(
     target_user_id = str(sample_users["user"].id)
     admin_id = str(sample_users["admin"].id)
 
-    # Grant admin access to deployment first
-    admin_access = DeploymentUserAccess(
-        user_id=admin_id,
-        deployment_id=str(sample_deployment.id),
-        granted_by=admin_id,
-    )
-    db_session.add(admin_access)
-
+    # Note: Admin access already granted by sample_deployment fixture
     # Create scope
     scope = UserSubunitScope(
         user_id=target_user_id,
@@ -485,14 +456,7 @@ async def test_list_user_subunit_scopes(
     target_user_id = str(sample_users["user"].id)
     admin_id = str(sample_users["admin"].id)
 
-    # Grant admin access to deployment first
-    admin_access = DeploymentUserAccess(
-        user_id=admin_id,
-        deployment_id=str(sample_deployment.id),
-        granted_by=admin_id,
-    )
-    db_session.add(admin_access)
-
+    # Note: Admin access already granted by sample_deployment fixture
     # Create scopes
     scope1 = UserSubunitScope(
         user_id=target_user_id,
