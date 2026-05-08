@@ -1,0 +1,587 @@
+# Parade State Management System - Technical Specification
+
+**Version:** 1.0  
+**Date:** 2026-05-08  
+**Status:** Implementation Specification  
+
+---
+
+## Table of Contents
+
+1. [System Overview](#1-system-overview)
+2. [Entity Hierarchy](#2-entity-hierarchy)
+3. [Data Model Specification](#3-data-model-specification)
+4. [Business Rules & Constraints](#4-business-rules--constraints)
+5. [Access Control & Security](#5-access-control--security)
+6. [API & Integration Patterns](#6-api--integration-patterns)
+7. [Technical Decisions](#7-technical-decisions)
+
+---
+
+## 1. System Overview
+
+### 1.1 Problem Statement
+
+The personnel branch currently manages battalion parade state through a manual mapreduce process — aggregating attendance from subunits by hand. This system replaces that process with a structured, access-controlled, deployment-aware web application suitable for field use.
+
+### 1.2 Core Entity Hierarchy
+
+```
+Estab (CAA-pinned, CSV-sourced, immutable)
+ └── Deployment (remaps personnel unit+subunit; has date+time validity range)
+      └── Session (AM or PM, admin-opened, linked to a deployment)
+           └── Attendance Record (per-personnel per-session; notes write-back to deployment)
+```
+
+**Key Concepts:**
+- **Estab**: Base source of truth, uploaded from CSV, pinned by CAA date, immutable after confirmation
+- **Deployment**: Based on specific estab, remaps personnel assignments, valid for date+time range, only one active at a time
+- **Session**: AM/PM attendance window, admin-opened, associated with specific deployment
+- **Attendance Record**: Per-personnel per-session with status, remarks, and snapshots
+
+### 1.3 Scope
+
+**In Scope (v1):**
+- CSV ingestion with CAA versioning, column mapping, diff detection
+- Deployment management: create, clone (same-estab), migrate (cross-estab), scheduled activation
+- Session management: admin-opens, advance creation, notes auto-snapshot on open
+- Attendance taking: AM/PM, present/absent, Notes (deployment-scoped), Remarks (session-scoped)
+- Row access control (access level + subunit scope) and column sensitivity control
+- Parade state table view scoped to user access with inline editing
+- Admin UI (NiceGUI): enums, users, column sensitivity, column mapping, deployment/session management
+- Mobile-friendly static HTML/JS attendance frontend
+- Service worker + IndexedDB read-only cache (24hr TTL, stale indicator)
+- SSE stale-detection signal on attendance view
+
+**Out of Scope (deferred):**
+- Serviceman self-service access
+- View projections / aggregated dashboards / export
+- Automated push notifications or HQ reporting
+- Vue SFC refactor of mobile frontend (revisit after MVP)
+
+---
+
+## 2. Entity Hierarchy
+
+### 2.1 Estab (CSV Ingestion)
+
+**Base personnel roster, sourced from CSV, pinned by CAA (Complement As At) date.**
+
+```
+Estab
+├── id: UUID (PK)
+├── caa: date (Complement As At; must be unique among confirmed estabs)
+├── csv_hash: str (SHA-256 of raw CSV)
+├── status: str ENUM ['draft', 'confirmed', 'archived']
+├── personnel_count: int (snapshot at confirmation)
+├── uploaded_at: datetime
+├── uploaded_by: UUID (FK User)
+├── confirmed_at: datetime (nullable)
+├── confirmed_by: UUID (FK User, nullable)
+├── created_at: datetime
+└── notes: str (nullable; admin notes on this estab)
+```
+
+**Constraints:**
+- UNIQUE(caa) among non-archived estabs
+- Status transition: draft → confirmed → archived (one-way)
+- Raw CSV stored immutably in csv_uploads (append-only; SHA-256 hash recorded)
+- Parsed personnel in personnel_snapshots: required columns as typed fields; all others in extra_fields JSON
+
+### 2.2 Deployment
+
+**Operational deployment based on an estab, with overrides and validity window.**
+
+```
+Deployment
+├── id: UUID (PK)
+├── name: str
+├── estab_id: UUID (FK Estab, on_delete=RESTRICT)
+├── status: str ENUM ['draft', 'active', 'inactive', 'archived', 'closed', 'finalized']
+│   └── draft: not yet active
+│   └── active: currently operational (only one per system, application-enforced)
+│   └── inactive: was active, now past validity window
+│   └── archived: retained for history but no longer operational
+│   └── closed: no further edits permitted
+│   └── finalized: permanent archive; cascades closure to all sessions
+├── valid_from: datetime (when deployment becomes active)
+├── valid_until: datetime (when deployment expires)
+├── scheduled_activation: datetime (nullable; explicit scheduled time)
+├── personnel_count: int (snapshot; non-archived personnel in this deployment)
+├── created_at: datetime
+├── created_by: UUID (FK User)
+├── activated_at: datetime (nullable; when actually transitioned to active)
+├── deactivated_at: datetime (nullable; when transitioned away from active)
+└── notes: str (nullable; admin notes)
+```
+
+**Constraints:**
+- Only one deployment can have status = 'active' (enforced at application layer)
+- Validity range overlaps with existing draft/active deployment → hard reject
+- Closure/finalization cascades to all child sessions
+
+### 2.3 Session
+
+**AM or PM attendance window, explicitly created by admin, linked to deployment.**
+
+```
+Session
+├── id: UUID (PK)
+├── deployment_id: UUID (FK Deployment, on_delete=CASCADE)
+├── date: date
+├── session_type: str ENUM ['AM', 'PM']
+├── status: str ENUM ['open', 'closed', 'finalized']
+│   └── open: attendance can be recorded
+│   └── closed: no further edits (cascade from deployment.closed)
+│   └── finalized: permanent archive (cascade from deployment.finalized)
+├── created_at: datetime
+├── created_by: UUID (FK User)
+├── opened_at: datetime
+├── closed_at: datetime (nullable; when marked closed)
+└── closed_by: UUID (FK User, nullable)
+```
+
+**Constraints:**
+- UNIQUE(deployment_id, date) - prevents duplicate sessions for same day (max one AM+PM per day)
+- No retroactive session creation on inactive/closed deployments
+- Closure/finalization cascades from parent deployment
+
+---
+
+## 3. Data Model Specification
+
+### 3.1 Authentication & Access Control
+
+#### 3.1.1 AccessLevel
+
+**Ordered vocabulary of access scopes (e.g., unit, coy, platoon, section).**
+
+```
+AccessLevel
+├── id: UUID (PK)
+├── name: str (unique, e.g., "platoon")
+├── level_order: int (higher = broader access; used for column visibility)
+├── created_at: datetime
+├── created_by: UUID (FK User; null for system)
+├── updated_at: datetime
+└── updated_by: UUID (FK User; null for system)
+```
+
+**Constraints:**
+- name must be unique
+- level_order must be unique (no duplicate access heights)
+- Relabelling (renaming name) auto-migrates all User/column references
+
+#### 3.1.2 User
+
+**Google-authenticated users with role and access scope.**
+
+```
+User
+├── id: UUID (PK)
+├── email: str (unique)
+├── name: str
+├── status: str ENUM ['pending', 'active', 'suspended', 'unrecognised']
+├── role: str ENUM ['super_admin', 'admin', 'user']
+├── access_level_id: UUID (FK AccessLevel; null for admins)
+├── first_sign_in_at: datetime (nullable)
+├── last_sign_in_at: datetime (nullable)
+├── created_at: datetime
+└── updated_at: datetime
+```
+
+**Constraints:**
+- email is unique
+- Super-admin cannot be revoked via UI; bootstrapped via env var
+- Non-admin users must have access_level_id set
+
+#### 3.1.3 UserSubunitScope
+
+**Links a user to specific subunit(s) within each deployment.**
+
+```
+UserSubunitScope
+├── id: UUID (PK)
+├── user_id: UUID (FK User, on_delete=CASCADE)
+├── deployment_id: UUID (FK Deployment, on_delete=CASCADE)
+├── unit: str (nullable; part of scoped path)
+├── sub_unit_1: str (nullable)
+├── sub_unit_2: str (nullable)
+├── sub_unit_3: str (nullable)
+├── created_at: datetime
+├── created_by: UUID (FK User)
+└── updated_at: datetime
+```
+
+**Constraints:**
+- UNIQUE(user_id, deployment_id, unit, sub_unit_1, sub_unit_2, sub_unit_3)
+- NULL values = "include all at that level and below"
+
+### 3.2 Personnel & CSV Ingestion
+
+#### 3.2.1 Personnel
+
+**Individual personnel record, sourced from CSV estab.**
+
+```
+Personnel
+├── id: UUID (PK) ← Internal system identity (NOT pers_no)
+├── estab_id: UUID (FK Estab, on_delete=CASCADE)
+├── pers_no: str (external reference ID; unique within estab only)
+├── rank: str
+├── full_name: str
+├── unit: str
+├── sub_unit_1: str
+├── sub_unit_2: str
+├── sub_unit_3: str
+├── extra_fields: JSON (other CSV columns not mapped to canonical names; JSONB in PostgreSQL)
+├── status: str ENUM ['active', 'archived']
+├── created_at: datetime
+└── created_by: UUID (FK User; typically system)
+```
+
+**Constraints:**
+- UNIQUE(estab_id, pers_no) within an estab version
+- pers_no is external reference; internal id is the system identity
+- Cross-CSV note linking uses id + estab context, NOT pers_no
+
+### 3.3 Attendance Tracking
+
+#### 3.3.1 AttendanceRecord
+
+**Per-personnel per-session attendance status, remarks, and snapshots.**
+
+```
+AttendanceRecord
+├── id: UUID (PK)
+├── session_id: UUID (FK Session, on_delete=CASCADE)
+├── personnel_id: UUID (FK Personnel, on_delete=CASCADE)
+├── deployment_id: UUID (FK Deployment, on_delete=CASCADE)
+├── status: str ENUM ['present', 'absent', 'excused', 'unknown']
+├── remarks: str (session-scoped; e.g., "on leave", "TDY")
+├── notes_snapshot: str (snapshot of deployment_notes at session open)
+├── unit_snapshot: str (personnel's effective unit at time of write)
+├── sub_unit_1_snapshot: str
+├── sub_unit_2_snapshot: str
+├── sub_unit_3_snapshot: str
+├── created_at: datetime
+├── created_by: UUID (FK User; typically system)
+├── updated_at: datetime (last *any* change to record)
+├── updated_by: UUID (FK User; last editor for any field)
+├── last_edit_at: datetime (last edit to status/remarks/notes_snapshot)
+└── last_edit_by: UUID (FK User; editor of status/remarks/notes_snapshot)
+```
+
+**Constraints:**
+- UNIQUE(session_id, personnel_id)
+- Pre-populated as 'absent' on session creation
+- Snapshot rule applies (see Business Rules)
+
+---
+
+## 4. Business Rules & Constraints
+
+### 4.1 Attendance Snapshot Rule
+
+**Condition 1: Within deployment.valid_from to valid_until**
+- On write, resolve effective unit+subunit: override ?? estab
+- Populate: unit_snapshot, sub_unit_1_snapshot, sub_unit_2_snapshot, sub_unit_3_snapshot
+- Populate: notes_snapshot from current DeploymentNotes
+- Update: last_edit_at, last_edit_by (for display purposes)
+
+**Condition 2: Outside validity range (retroactive edit)**
+- Update: status, remarks, notes_snapshot only
+- DO NOT update: any *_snapshot fields (preserve original snapshot)
+- Update: last_edit_at, last_edit_by (for display purposes)
+
+### 4.2 Deployment Lifecycle
+
+```
+Deployment created (draft)
+  ├─ valid_from, valid_until, optional scheduled_activation set
+  ├─ Admin can edit overrides
+  └─ PersonnelOverrides populated (initially mirrored from Estab)
+
+              At valid_from time (or scheduled_activation, or manual):
+              ↓
+        status → active
+        ├─ Only one deployment active at a time (application-enforced)
+        ├─ Sessions can be created/opened
+        └─ Admin can still edit overrides (live reorg)
+
+              At valid_until time:
+              ↓
+        status → inactive (auto)
+        ├─ No new sessions (existing sessions still open)
+        └─ Admin can manually transition → archived or closed or finalized
+
+        [Manual admin actions at any status:]
+        ├─ archived: retain for history, hide from active lists
+        ├─ closed: no further edits allowed (deployment + all sessions locked)
+        └─ finalized: permanent archive (all sessions finalized; immutable)
+```
+
+### 4.3 Column Mapping Constraint
+
+**Global Constraint:** Each canonical column name maps from at most ONE raw CSV column name
+
+```
+CSV1.raw_columns    ColumnMapping              App.canonical
+─────────────────   ────────────────────────   ──────────────
+"PersonalNumber" ──→ confirmed mapping ────→ pers_no
+"Name" ────────────→ confirmed mapping ────→ full_name
+"Rank" ────────────→ confirmed mapping ────→ rank
+"Unit" ────────────→ confirmed mapping ────→ unit
+(unmapped columns: stored in extra_fields JSON)
+
+CSV2 (later upload)
+"Employee No" ────→ auto-detected mapping ─→ (conflicts with pers_no ← "PersonalNumber")
+                     [admin confirms/rejects]
+
+Result: canonical pers_no can only receive from ONE of "PersonalNumber" OR "Employee No"
+        but different CSVs can have different raw names → same canonical
+```
+
+### 4.4 CSV Upload Pipeline
+
+```
+Upload File
+  ↓
+[CsvUpload.status = 'received']
+  ↓
+Auto-match headers against ColumnMapping
+  ↓
+[User resolves unmapped required columns & conflicts]
+  ↓
+[CsvUpload.status = 'mapping_confirmed']
+  ↓
+Check CAA uniqueness
+  ├─ CAA new → proceed
+  └─ CAA exists (confirmed Estab) → prompt admin for replacement
+      ├─ Admin rejects → stop
+      └─ Admin confirms replacement
+          → Archive prior Estab+related entities
+          → Proceed with new Estab
+  ↓
+Compute diff (current CSV vs prior confirmed CSV)
+  ↓
+[Admin reviews & confirms diff]
+  ↓
+[CsvUpload.status = 'diff_confirmed']
+  ↓
+Populate Estab.status = 'confirmed'
+Populate Personnel records
+Auto-create initial Deployment (status=draft)
+Transfer notes from prior deployment (by Personnel.id match)
+```
+
+### 4.5 Key Constraints Summary
+
+| Table | Unique | Index | Purpose |
+|-------|--------|-------|---------|
+| User | (email) | (email) | Login |
+| User | - | (access_level_id) | Access lookup |
+| AccessLevel | (name), (level_order) | - | Vocab uniqueness |
+| Estab | (caa) among non-archived | (caa) | CAA uniqueness |
+| ColumnMapping | (canonical_name) among non-deprecated | (canonical_name) | Mapping uniqueness |
+| Deployment | Application-level: only one active | (status) | Active deployment enforcement |
+| UserSubunitScope | (user_id, deployment_id, unit, sub_unit_1-3) | (user_id, deployment_id) | Scope lookup |
+| Session | (deployment_id, date) | (deployment_id, date) | Session lookup |
+| AttendanceRecord | (session_id, personnel_id) | (deployment_id, personnel_id) | Attendance lookup |
+
+---
+
+## 5. Access Control & Security
+
+### 5.1 Users and Roles
+
+**Super-Admin:**
+- Bootstrapped via SUPER_ADMIN_EMAIL env var
+- Auto-granted on first Google sign-in
+- Cannot be revoked via UI
+
+**App Admin:**
+- Granted by super-admin
+- Full read/write access to all entities, all columns, all deployments
+- Access to audit log
+- All structural operations are admin-only
+
+**Scoped User:**
+- Google-authenticated
+- Has access level: single admin-assigned label from ordered vocabulary
+- Has subunit scope: one or more (deployment, subunit) pairs
+- Write scope: attendance status, Notes, Remarks — for rows within scope only
+
+### 5.2 Account Lifecycle
+
+1. Admin preregisters account by email with access level, subunit scope, and deployment grants assigned upfront. Account created in pending state.
+2. On first Google sign-in, if email matches a pending account → activated. If no match → held as unrecognised (no access); auth event written to audit log.
+3. Admin may suspend at any time. Suspension immediately invalidates active sessions.
+
+### 5.3 Row Visibility Rules
+
+**User sees personnel row if:**
+- User has DeploymentUserAccess for deployment, AND
+- Personnel's (unit, sub_unit_1, sub_unit_2, sub_unit_3) matches at least one UserSubunitScope for that deployment, AND
+- User.access_level_id.level_order ≥ ColumnMetadata.sensitivity_level_id.level_order (for each visible column)
+
+*(Admins bypass all checks)*
+
+### 5.4 Column Visibility Rules
+
+**Column visible in UI if:**
+- ColumnMetadata.sensitivity_level_id = null → admin-only
+- ColumnMetadata.sensitivity_level_id != null → user.access_level_id.level_order ≥ sensitivity_level_id.level_order
+
+### 5.5 Access Level Vocabulary
+
+Admin-defined ordered string labels (e.g. unit, coy, platoon, section). Linear hierarchy (total ordering; higher level_order integer = broader access). Used for both row visibility and column sensitivity. Relabelling auto-migrates all references.
+
+**Access level stability:** A user's access level is determined at login and remains stable for the duration of the session. Changes to a user's access level require re-login to take effect.
+
+---
+
+## 6. API & Integration Patterns
+
+### 6.1 API Design Principles
+
+**Column manifest pattern:** All data endpoints return columns (user-visible column manifest) + rows (objects containing only manifest keys). Clients render headers from manifest; never hardcode column names.
+
+**SSE stale detection:** GET /api/v1/events/attendance?deploymentId=&sessionId= emits data_changed signal events (no payload data) when any record in the user's scope is modified. Client fetches on user confirmation. 30s keep-alive ping.
+
+**Auth:** session cookie (HttpOnly, Secure, SameSite=Strict). Google OAuth via Authlib.
+
+### 6.2 Required Columns (App Config)
+
+Declared in app.config.json (deployment-time change, not admin UI):
+
+| Canonical name | Purpose |
+|---|---|
+| unit | Top-level unit identifier |
+| sub_unit_1 | Subunit level 1 |
+| sub_unit_2 | Subunit level 2 |
+| sub_unit_3 | Subunit level 3 |
+| pers_no | Unique personnel identifier (cross-version matching key) |
+| rank | Display |
+| full_name | Display |
+
+### 6.3 Deployment Operations
+
+**Clone (Same-Estab):**
+- Admin-only
+- Copies overrides, prefixes name "Copy of …", resets validity range to blank
+- Admin chooses whether to transfer deployment notes
+
+**Migrate (Cross-Estab):**
+- Admin-only
+- Two-step: compute diff between source estab and target estab
+- Present leavers (must be individually dismissed) and joiners (must each receive a unit+subunit assignment)
+- On confirm, create new draft deployment against target estab
+
+---
+
+## 7. Technical Decisions
+
+### 7.1 Database Architecture
+
+**Production:** PostgreSQL with native UUID support and JSONB types  
+**Testing:** SQLite (in-memory) with async support via aiosqlite
+
+**Rationale:**
+- SQLite provides fast, isolated test execution
+- PostgreSQL offers production-grade features (partial indexes, JSONB, native UUIDs)
+- Application code abstracts database differences through SQLAlchemy
+
+### 7.2 UUID Storage Strategy
+
+**Decision:** Store UUIDs as String(36) instead of native UUID types
+
+**Implementation:**
+```python
+# Base class provides String-based UUID storage
+class Base(DeclarativeBase):
+    id: Mapped[uuid.UUID] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        index=True,
+    )
+```
+
+**Rationale:**
+- SQLite doesn't support native UUID types
+- String storage provides cross-database compatibility
+- Application layer still uses Python uuid.UUID type for type safety
+- PostgreSQL can still use UUID functions when needed via migrations
+
+### 7.3 JSON Field Handling
+
+**Personnel.extra_fields:** Use SQLAlchemy JSON type instead of Text
+
+**Implementation:**
+```python
+extra_fields: Mapped[dict] = mapped_column(JSON, default=dict)
+```
+
+**Rationale:**
+- JSON type provides automatic serialization/deserialization
+- Works with both SQLite (JSON as text) and PostgreSQL (JSONB)
+- Allows Python dict manipulation without manual JSON encoding
+
+### 7.4 Constraint Enforcement Strategy
+
+**Decision:** Enforce certain business rules at application level rather than database level
+
+**Active Deployment Constraint:**
+- Original Spec: Only one deployment can have status = 'active' (database constraint)
+- Implementation: Application-level validation only
+
+**Rationale:**
+- SQLite doesn't support partial unique indexes (e.g., WHERE status = 'active')
+- PostgreSQL supports this, but maintaining divergent constraints increases complexity
+- Application layer can provide better error messages and validation logic
+- Allows multiple "draft" or "inactive" deployments without constraint violations
+
+### 7.5 Test Architecture
+
+**Test Isolation Strategy:** Fresh database for each test (function-scoped fixtures)
+
+**Benefits:**
+- Complete isolation: No state leakage between tests
+- Reproducible results: Tests can run in any order
+- Easy debugging: Failures are self-contained
+- Parallel execution ready: Safe to run tests in parallel
+
+**Test Results:**
+- 26/26 tests passing (100% pass rate)
+- 93.77% code coverage (exceeds 80% requirement)
+
+### 7.6 Static Analysis Tooling
+
+**Switch from mypy to ruff:** Use ruff for both linting and type checking
+
+**Rationale:**
+- Performance: ruff is 10-100x faster than mypy
+- Unified tooling: Single tool for linting, formatting, and type checking
+- Active development: ruff has rapid development and Python 3.12+ support
+- Compatibility: Works well with SQLAlchemy async patterns
+
+### 7.7 Tech Stack Summary
+
+| Layer | Choice | Notes |
+|---|---|---|
+| Language | Python 3.12+ | |
+| API framework | FastAPI | Async; OpenAPI generation; SSE via StreamingResponse |
+| Admin UI | NiceGUI | Mounted on FastAPI app at /admin; Quasar components |
+| Mobile UI (MVP) | Static HTML + vanilla JS | Served by FastAPI; no build step |
+| ORM | SQLAlchemy 2.x async | asyncpg driver; shared pool across FastAPI and NiceGUI |
+| Auth | Authlib | Google OAuth 2.0; session middleware |
+| Background jobs | APScheduler AsyncIOScheduler | SQLAlchemy job store (Postgres) for multi-instance safety |
+| Database | PostgreSQL 15+ | Production database |
+| Testing Database | SQLite (in-memory) | Complete test isolation |
+| Package management | uv | Fast resolver; pyproject.toml |
+| Static Analysis | ruff | Linting, formatting, and type checking |
+
+---
+
+*End of Technical Specification v1.0*

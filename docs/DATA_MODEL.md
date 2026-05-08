@@ -253,7 +253,7 @@ Personnel
 ├── sub_unit_1: str
 ├── sub_unit_2: str
 ├── sub_unit_3: str
-├── extra_fields: JSONB (other CSV columns not mapped to canonical names)
+├── extra_fields: JSON (other CSV columns not mapped to canonical names; stored as JSONB in PostgreSQL)
 ├── status: str ENUM ['active', 'archived']
 ├── created_at: datetime
 └── created_by: UUID (FK User; typically system)
@@ -283,7 +283,7 @@ Deployment
 ├── estab_id: UUID (FK Estab, on_delete=RESTRICT)
 ├── status: str ENUM ['draft', 'active', 'inactive', 'archived', 'closed', 'finalized']
 │   └── draft: not yet active
-│   └── active: currently operational (only one per system)
+│   └── active: currently operational (only one per system, enforced at application layer)
 │   └── inactive: was active, now past validity window
 │   └── archived: retained for history but no longer operational
 │   └── closed: no further edits permitted
@@ -300,7 +300,9 @@ Deployment
 ```
 
 **Constraints:**
-- Only one deployment can have `status = 'active'` (enforced by DB partial unique index + app layer)
+- Only one deployment can have `status = 'active'` (enforced at application layer)
+  - PostgreSQL production: Can use partial unique index for additional safety
+  - SQLite testing: Application-level validation only
 - Validity range overlaps with existing draft/active deployment → hard reject
 - Status transitions:
   - draft → active (auto at valid_from or manual + scheduled_activation)
@@ -452,7 +454,7 @@ AuditLog
 ├── entity_type: str (e.g., 'attendance', 'deployment', 'session', 'user', 'csv_upload')
 ├── entity_id: UUID (ID of affected entity; may not exist if soft-deleted)
 ├── action: str ENUM ['create', 'update', 'delete', 'archive', 'close', 'finalize']
-├── changes: JSONB (old/new values for significant fields; detailed pattern TBD)
+├── changes: JSON (old/new values for significant fields; detailed pattern TBD)
 ├── description: str (human-readable summary)
 └── ip_address: str (nullable; client IP)
 ```

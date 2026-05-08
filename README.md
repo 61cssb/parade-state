@@ -19,6 +19,7 @@ This project uses:
 - SQLAlchemy for data persistence
 - NiceGUI for admin interface
 - PostgreSQL for production database
+- SQLite for testing (in-memory)
 
 ### Setup
 
@@ -26,12 +27,34 @@ This project uses:
 # Install dependencies
 uv sync
 
-# Run tests
+# Run tests (with coverage)
 uv run pytest
+
+# Run tests with detailed output
+uv run pytest -v
 
 # Run development server
 uv run uvicorn src.parade_state.main:app --reload
 ```
+
+### Testing
+
+- **Coverage:** 93.77% (target: 80%+)
+- **Test Framework:** pytest with async support
+- **Database:** In-memory SQLite for complete test isolation
+- **Static Analysis:** ruff (replacing mypy for better performance)
+- **Test Isolation:** Fresh database per test ensures reproducible results
+
+### Documentation
+
+**Comprehensive Documentation:**
+- [SPECIFICATION.md](docs/SPECIFICATION.md) - Complete technical specification with data models, business rules, and technical decisions
+- [IMPLEMENTATION.md](docs/IMPLEMENTATION.md) - Technical implementation guide with setup, testing, and deployment details
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - System architecture overview with components and data flow
+
+**Original Documents (referenced in specification):**
+- [PRD v0.4](docs/parade-state-prd-v04.md) - Original Product Requirements Document
+- [Schema Notes](docs/SCHEMA_NOTES.md) - Database design notes and implementation patterns
 
 ## License
 

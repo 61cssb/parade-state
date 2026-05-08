@@ -189,7 +189,7 @@ Result: canonical pers_no can only receive from ONE of "PersonalNumber" OR "Empl
 | AccessLevel | (name), (level_order) | - | Vocab uniqueness |
 | Estab | (caа) among non-archived | (caа) | CAA uniqueness |
 | ColumnMapping | (canonical_name) among non-deprecated | (canonical_name) | Mapping uniqueness |
-| Deployment | (status='active') single row | (status) | Active deployment |
+| Deployment | Application-level: only one active | (status) | Active deployment enforcement |
 | UserSubunitScope | (user_id, deployment_id, unit, sub_unit_1-3) | (user_id, deployment_id) | Scope lookup |
 | DeploymentUserAccess | (user_id, deployment_id) | (deployment_id) | Access lookup |
 | Session | (deployment_id, date) | (deployment_id, date) | Session lookup |
