@@ -1,10 +1,10 @@
 """Attendance management API endpoints."""
 
-from datetime import datetime, date
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, select, or_
+from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,10 +70,8 @@ async def verify_attendance_access(
 async def verify_session_is_open(
     session_id: str,
     db: AsyncSession,
-) -> bool:
-    """Verify that a session is open for attendance recording."""
-    # Session is now imported at the top level
-
+) -> Session:
+    """Verify that a session is open for attendance recording and return it."""
     result = await db.execute(select(Session).where(Session.id == session_id))
     session = result.scalar_one_or_none()
 
@@ -89,15 +87,28 @@ async def verify_session_is_open(
             detail=f"Cannot modify attendance for {session.status} sessions",
         )
 
-    return True
+    return session
 
 
 async def is_retroactive_edit(
-    session_date: date,
+    session_date: datetime | date,
 ) -> bool:
-    """Determine if an edit is retroactive (session date is in the past)."""
-    today = date.today()
-    return session_date < today
+    """Determine if an edit is retroactive (session date is in the past).
+
+    Uses UTC timezone for consistent comparison.
+    Handles both datetime and date objects.
+    """
+    # Get current UTC time
+    now = utc_dt.utcnow()
+    now_naive = utc_dt.ensure_naive(now)
+
+    # Handle both date and datetime objects
+    if isinstance(session_date, datetime):
+        session_date_naive = utc_dt.ensure_naive(session_date)
+        return session_date_naive.date() < now_naive.date()
+    else:
+        # It's already a date object
+        return session_date < now_naive.date()
 
 
 async def get_personnel_snapshot_data(
@@ -167,21 +178,8 @@ async def create_attendance_record(
     Requires the session to be open for attendance recording.
     Automatically snapshots deployment notes and personnel assignments.
     """
-    # Verify session is open
-    await verify_session_is_open(attendance_data.session_id, db)
-
-    # Get session to retrieve deployment_id and date
-    # Session is now imported at the top level
-    session_result = await db.execute(
-        select(Session).where(Session.id == attendance_data.session_id)
-    )
-    session = session_result.scalar_one_or_none()
-
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
+    # Verify session is open and get session object
+    session = await verify_session_is_open(attendance_data.session_id, db)
 
     # Check if attendance record already exists
     existing_result = await db.execute(
@@ -318,21 +316,8 @@ async def update_attendance_record(
     # Get attendance record
     attendance = await verify_attendance_access(attendance_id, user_id, user_role, db)
 
-    # Verify session is open
-    await verify_session_is_open(attendance.session_id, db)
-
-    # Get session to check for retroactive edit
-    # Session is now imported at the top level
-    session_result = await db.execute(
-        select(Session).where(Session.id == attendance.session_id)
-    )
-    session = session_result.scalar_one_or_none()
-
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
+    # Verify session is open and get session object
+    session = await verify_session_is_open(attendance.session_id, db)
 
     # Check if this is a retroactive edit
     is_retroactive = await is_retroactive_edit(session.date)
@@ -382,7 +367,7 @@ async def delete_attendance_record(
     # Get attendance record
     attendance = await verify_attendance_access(attendance_id, user_id, user_role, db)
 
-    # Verify session is open
+    # Verify session is open (discard session object as we don't need it)
     await verify_session_is_open(attendance.session_id, db)
 
     await db.delete(attendance)

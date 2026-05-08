@@ -84,10 +84,18 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 
 **Current Test Suite:**
 - `test_access_control.py` - Access level hierarchy, user access control, column visibility (8 tests)
-- `test_csv_personnel.py` - Personnel identity, estab versioning, column mapping (10 tests)  
+- `test_api.py` - General API endpoint tests (4 tests)
+- `test_auth.py` - Authentication and session management tests (6 tests)
+- `test_attendance_api.py` - Attendance management API tests (18 tests)
+- `test_csv_personnel.py` - Personnel identity, estab versioning, column mapping (10 tests)
 - `test_deployment_attendance.py` - Deployment lifecycle, session constraints, attendance rules (8 tests)
+- `test_deployments_api.py` - Deployment management API tests (18 tests)
+- `test_personnel_api.py` - Personnel management API tests (23 tests) ✨ NEW
+- `test_sessions_api.py` - Session management API tests (21 tests)
 
-**Coverage:** 93.77% (target: 80%+)
+**Total:** 133 tests, 100% pass rate ✨ UPDATED
+**Coverage:** Improved with personnel API test coverage
+**New:** Personnel API with deployment context, filtering, and search
 
 ### 2.3 Writing New Tests
 
@@ -144,7 +152,253 @@ async def test_example(db_session, sample_users, sample_deployment):
 
 ---
 
-## 3. Database Implementation
+## 3. API Implementation Status
+
+### 3.1 Completed APIs
+
+**Authentication & User Management (✅ Complete)**
+- Google OAuth integration with callback handling
+- User auto-registration and activation
+- Role-based authorization (super_admin, admin, user)
+- Session management with expiration and cleanup
+- User CRUD operations with proper access control
+- **Endpoints:** 7 authentication + 5 user management = 12 total
+
+**Deployment Management (✅ Complete)**
+- Deployment lifecycle (draft → active → inactive → closed → finalized)
+- Personnel assignment overrides per deployment
+- Deployment notes with version tracking
+- Validity window enforcement
+- Manual activation/deactivation
+- **Endpoints:** 7 deployment management endpoints
+
+**Attendance Session Management (✅ Complete)**
+- AM/PM session creation and management
+- Sequential status transitions (open → closed → finalized)
+- Session uniqueness constraints (one per type per deployment per day)
+- Proper validation and error handling
+- **Endpoints:** 5 session management endpoints
+
+**Attendance Management (✅ Complete)**
+- Individual attendance recording (Create/Read/Update/Delete)
+- Bulk attendance operations (create and update)
+- Automatic snapshot functionality (deployment notes + personnel assignments)
+- Retroactive edit detection and tracking
+- Complete audit trail (created/updated/last_edit timestamps)
+- Session status validation (open/closed/finalized)
+- **Endpoints:** 8 attendance management endpoints
+
+**Personnel Management (✅ Session 1 Complete)**
+- Deployment-based personnel listing with filtering
+- Personnel detail view with deployment context
+- Unit hierarchy filtering (unit, sub_unit_1, sub_unit_2, sub_unit_3)
+- Search functionality (name and service number)
+- Personnel override awareness (shows effective assignments)
+- Deployment notes integration
+- Personnel update operations (admin only)
+- Role-based access control (admin/super_admin/user)
+- **Endpoints:** 3 personnel management endpoints
+- **Tests:** 23 comprehensive tests
+
+**Total API Endpoints:** 27 fully implemented and tested endpoints ✨ UPDATED
+
+### 3.2 Next Phase: Personnel Detail View & Attendance History (🎯 NEXT)
+
+**Why Attendance History Next?**
+- Completes personnel management functionality
+- Provides valuable insights for decision makers
+- Foundation for reporting and analytics
+- High user value for attendance tracking
+
+**Completed Endpoints (Session 1):**
+```python
+# ✅ List personnel within a deployment context
+GET /api/v1/personnel?deployment_id=xxx&unit=Alpha&sub_unit_1=1stPlatoon&search=John
+
+# ✅ Get specific personnel record (shows deployment context)
+GET /api/v1/personnel/{id}?deployment_id=xxx
+
+# ✅ Update personnel record (admin only, within deployment context)
+PATCH /api/v1/personnel/{id}?deployment_id=xxx
+```
+
+**Proposed Endpoints (Session 2):**
+```python
+# 🎯 Get personnel attendance history (within deployment)
+GET /api/v1/personnel/{id}/attendance-history?deployment_id=xxx&date_from=xxx&date_to=xxx
+```
+
+### 3.3 Personnel API Implementation Details (Session 1)
+
+**Architecture Overview:**
+The Personnel API is built on the principle of deployment-scoped access, ensuring all personnel operations respect deployment boundaries and personnel overrides.
+
+**Key Implementation Features:**
+
+**1. Override-Aware Queries:**
+```python
+# Personnel overrides take precedence over base assignments
+# Effective assignments = override data if exists, else base data
+def get_effective_assignment(personnel, deployment_id):
+    override = get_personnel_override(personnel.id, deployment_id)
+    if override:
+        return override.unit, override.sub_unit_1, override.sub_unit_2, override.sub_unit_3
+    return personnel.unit, personnel.sub_unit_1, personnel.sub_unit_2, personnel.sub_unit_3
+```
+
+**2. Deployment Access Control:**
+```python
+# Verify user has access to deployment before querying personnel
+async def verify_deployment_access(deployment_id, user_id, user_role, db):
+    # Super admins have full access
+    # Admins can access all deployments
+    # Regular users need explicit deployment access (TODO)
+    if user_role == "super_admin":
+        return get_deployment(deployment_id)
+    elif user_role == "admin":
+        return get_deployment(deployment_id)
+    else:
+        raise HTTPException(403, "Insufficient permissions")
+```
+
+**3. Comprehensive Filtering:**
+```python
+# Filter by unit hierarchy with override awareness
+query = select(Personnel).where(Personnel.estab_id == deployment.estab_id)
+
+# Apply filters to effective assignments (overrides take precedence)
+for personnel in personnel_list:
+    effective_unit = override.unit if override else personnel.unit
+    if filter_unit and effective_unit != filter_unit:
+        continue  # Skip personnel not matching filter
+```
+
+**4. Search Functionality:**
+```python
+# Full-text search across name and service number
+if search_term:
+    query = query.where(
+        or_(
+            Personnel.full_name.ilike(f"%{search_term}%"),
+            Personnel.pers_no.ilike(f"%{search_term}%")
+        )
+    )
+```
+
+**Database Performance Optimizations:**
+- Composite indexes on frequently queried fields
+- Efficient LEFT JOIN for override data
+- Pagination support for large deployments
+- Single-query deployment validation
+
+**Testing Strategy:**
+- 23 comprehensive tests covering all functionality
+- Tests for override handling, filtering, search, and access control
+- Edge cases (invalid deployment_id, different estab, etc.)
+- Role-based access control testing
+
+**Files Modified/Created:**
+- `src/parade_state/api/personnel.py` - Main API implementation
+- `src/parade_state/models/schemas.py` - Added PersonnelResponseWithDeployment
+- `tests/test_personnel_api.py` - Comprehensive test suite
+- `src/parade_state/main.py` - Integrated personnel router
+
+**Key Features:**
+- **Deployment-Scoped Querying:** All personnel operations within deployment context
+- **Override Awareness:** Shows deployment-specific unit assignments (not base estab)
+- **Filtering Capabilities:** By unit, subunit hierarchy, name, service number
+- **Access Control:** Users can only see personnel in deployments they have access to
+- **Attendance Integration:** Shows attendance history and current status
+- **Search:** Full-text search across name and service number
+
+**Implementation Priority:**
+1. **Session 1:** Core deployment-based listing and filtering
+2. **Session 2:** Personnel detail view and attendance history
+3. **Session 3:** Personnel update operations and advanced filtering
+
+**Future Phases:**
+- **Advanced Access Control** (Phase 5): Deployment/subunit scope refinement **MOVED UP**
+- **Reporting & Analytics** (Phase 6): Attendance summaries and trends **MOVED DOWN**
+- **Performance & Scalability** (Phase 7): Database optimization and caching
+- **Frontend Integration Support** (Phase 8): Mobile optimization and offline sync
+
+**Implementation Priority:**
+1. **Session 1:** ✅ Core deployment-based listing and filtering **COMPLETE**
+2. **Session 2:** Personnel detail view and attendance history
+3. **Session 3:** Personnel update operations and advanced filtering
+
+**Why Access Control Before Reports:**
+- Reports need proper deployment/subunit scoping to prevent unauthorized access
+- Security foundation must be solid before exposing analytics
+- Deployment-based access control ensures users only see relevant data
+- Subunit scope filtering is essential for meaningful reports
+
+### 3.3 Implementation Strategy: Deployment-Based Personnel API
+
+**Session 1: Core Personnel Listing & Filtering**
+- Create `src/parade_state/api/personnel.py`
+- Implement `GET /api/v1/personnel` with deployment-based filtering
+- Filter parameters: `deployment_id` (required), `unit`, `sub_unit_1`, `sub_unit_2`, `sub_unit_3`, `search`
+- Integrate with deployment personnel overrides (show overridden assignments, not base)
+- Add Pydantic schemas for personnel response models
+- Implement basic access control (user must have deployment access)
+- Write comprehensive tests (12-15 tests expected)
+
+**Session 2: Personnel Detail View & History**
+- Implement `GET /api/v1/personnel/{id}` with deployment context
+- Show personnel details with deployment-specific assignments
+- Implement `GET /api/v1/personnel/{id}/attendance-history`
+- Filter attendance history by deployment and date range
+- Add attendance summary statistics (present/absent/excused counts)
+- Implement personnel search functionality
+- Write tests for detail views and history (8-10 tests expected)
+
+**Session 3: Personnel Update Operations**
+- Implement `PATCH /api/v1/personnel/{id}` for admin-only updates
+- Validate updates are within deployment context
+- Add audit trail for personnel changes
+- Implement advanced filtering and sorting
+- Add pagination support for large result sets
+- Performance optimization (database indexing)
+- Complete test coverage (5-8 tests expected)
+
+**Technical Considerations:**
+- **Override Handling:** Query must join with `DeploymentPersonnelOverride` table
+- **Access Control:** Check user's deployment access before returning personnel
+- **Performance:** Add database indexes on `deployment_id`, `unit`, `sub_unit_*` fields
+- **Search:** Use database `LIKE` or full-text search for name/service_number
+- **Pagination:** Implement cursor-based pagination for large deployments
+
+**Database Queries to Implement:**
+```python
+# Base query for deployment personnel (with overrides)
+SELECT p.*, dop.unit as override_unit, dop.sub_unit_1 as override_sub_unit_1, ...
+FROM personnel p
+LEFT JOIN deployment_personnel_overrides dop
+  ON dop.personnel_id = p.id AND dop.deployment_id = :deployment_id
+WHERE p.estab_id = (SELECT estab_id FROM deployments WHERE id = :deployment_id)
+  AND (p.unit = :filter_unit OR :filter_unit IS NULL)
+  AND (p.full_name LIKE :search OR p.pers_no LIKE :search OR :search IS NULL)
+
+# Attendance history query
+SELECT ar.*, s.date, s.session_type
+FROM attendance_records ar
+JOIN sessions s ON s.id = ar.session_id
+WHERE ar.personnel_id = :personnel_id
+  AND s.deployment_id = :deployment_id
+ORDER BY s.date DESC, s.session_type ASC
+```
+
+**Expected Outcomes:**
+- **3 new API endpoints** for personnel management
+- **25-33 new tests** for comprehensive coverage
+- **Enhanced deployment roster** functionality for mobile UI
+- **Foundation for reporting** and analytics features
+- **Improved total test count:** ~135-140 tests
+
+---
+
+## 4. Database Implementation
 
 ### 3.1 Database Choice Rationale
 
@@ -249,7 +503,7 @@ ON personnel USING GIN (extra_fields);
 
 ---
 
-## 4. Code Organization
+## 5. Code Organization
 
 ### 4.1 Project Structure
 
@@ -257,8 +511,17 @@ ON personnel USING GIN (extra_fields);
 parade-state/
 ├── src/parade_state/
 │   ├── __init__.py
+│   ├── api/
+│   │   ├── __init__.py          # API router exports
+│   │   ├── auth.py              # Authentication endpoints (Google OAuth, login/logout)
+│   │   ├── users.py             # User management endpoints (CRUD, status changes)
+│   │   ├── deployments.py       # Deployment management endpoints
+│   │   ├── sessions.py          # Attendance session management endpoints
+│   │   └── attendance.py        # Attendance record management endpoints
 │   ├── db/
 │   │   └── __init__.py          # Database setup, Base class, session management
+│   ├── middleware/
+│   │   └── auth.py              # Authentication middleware for protected endpoints
 │   ├── models/
 │   │   ├── __init__.py          # Model exports
 │   │   ├── access.py            # User, AccessLevel, scopes
@@ -266,17 +529,29 @@ parade-state/
 │   │   ├── audit.py             # AuditLog
 │   │   ├── csv_ingestion.py     # Estab, CsvUpload, ColumnMapping
 │   │   ├── deployment.py        # Deployment, overrides, notes
-│   │   └── personnel.py         # Personnel
-│   └── main.py                  # FastAPI app (to be implemented)
+│   │   ├── personnel.py         # Personnel
+│   │   └── schemas.py           # Pydantic request/response schemas
+│   ├── utils/
+│   │   ├── __init__.py          # Utility module exports
+│   │   └── utc_dt.py            # UTC datetime utilities with timezone handling
+│   ├── config.py                # Configuration management
+│   ├── session.py               # Session management utilities
+│   └── main.py                  # FastAPI application setup and router registration
 ├── tests/
 │   ├── conftest.py              # Pytest configuration and fixtures
-│   ├── test_access_control.py   # Access control tests
-│   ├── test_csv_personnel.py    # CSV and personnel tests
-│   └── test_deployment_attendance.py  # Deployment tests
+│   ├── test_access_control.py   # Access control tests (8 tests)
+│   ├── test_api.py              # General API tests (4 tests)
+│   ├── test_auth.py             # Authentication tests (6 tests)
+│   ├── test_attendance_api.py   # Attendance API tests (18 tests)
+│   ├── test_csv_personnel.py    # CSV and personnel tests (10 tests)
+│   ├── test_deployment_attendance.py  # Deployment tests (8 tests)
+│   ├── test_deployments_api.py  # Deployment API tests (18 tests)
+│   └── test_sessions_api.py     # Session API tests (21 tests)
 ├── docs/
 │   ├── SPECIFICATION.md         # Complete technical specification
 │   ├── IMPLEMENTATION.md        # This file
-│   └── ARCHITECTURE.md          # System architecture overview
+│   ├── ARCHITECTURE.md          # System architecture overview
+│   └── NEXT_PHASE.md            # Next phase planning and roadmap
 ├── pyproject.toml               # Project dependencies and configuration
 └── uv.lock                      # Locked dependency versions
 ```
@@ -321,7 +596,7 @@ async def get_users(db: AsyncSession = Depends(get_db_session)):
 
 ---
 
-## 5. Build & Deployment
+## 6. Build & Deployment
 
 ### 5.1 Local Development
 
@@ -399,7 +674,7 @@ uv run ruff check --select TYP src/
 
 ---
 
-## 6. Performance Considerations
+## 7. Performance Considerations
 
 ### 6.1 Database Query Optimization
 
@@ -428,7 +703,7 @@ uv run ruff check --select TYP src/
 
 ---
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 ### 7.1 Common Development Issues
 
