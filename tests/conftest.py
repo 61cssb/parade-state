@@ -6,10 +6,12 @@ from datetime import date, datetime, timedelta
 from typing import AsyncGenerator
 
 import pytest
+from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from parade_state.db import Base, get_session_maker, init_database
+from parade_state.main import app
 from parade_state.models import (
     AccessLevel,
     AttendanceRecord,
@@ -198,3 +200,44 @@ async def sample_deployment(db_session: AsyncSession, sample_estab, sample_users
     await db_session.commit()
 
     return deployment
+
+
+@pytest.fixture
+async def async_client(test_db):
+    """Provide an async HTTP client for testing API endpoints."""
+    from parade_state.main import app
+    from parade_state.db import get_db_session
+
+    # Override the database dependency
+    async def override_get_db_session():
+        async with test_db() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client
+
+    # Clean up
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def admin_token_headers(sample_users) -> dict[str, str]:
+    """Provide headers with admin authentication token."""
+    admin_id = str(sample_users["admin"].id)
+    return {"Authorization": f"Bearer {admin_id}"}
+
+
+@pytest.fixture
+def user_token_headers(sample_users) -> dict[str, str]:
+    """Provide headers with regular user authentication token."""
+    user_id = str(sample_users["user"].id)
+    return {"Authorization": f"Bearer {user_id}"}
+
+
+@pytest.fixture
+def super_admin_token_headers() -> dict[str, str]:
+    """Provide headers with super admin authentication token."""
+    super_admin_id = "super-admin-test-id"
+    return {"Authorization": f"Bearer {super_admin_id}"}
