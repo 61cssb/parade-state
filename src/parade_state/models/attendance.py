@@ -46,7 +46,7 @@ class Session(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("deployment_id", "date", name="unique_deployment_date_session"),
+        UniqueConstraint("deployment_id", "date", "session_type", name="unique_deployment_date_session_type"),
     )
 
     def __repr__(self) -> str:

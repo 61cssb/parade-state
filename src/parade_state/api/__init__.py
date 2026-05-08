@@ -1,5 +1,5 @@
 """API router package."""
 
-from parade_state.api import auth, users, deployments
+from parade_state.api import auth, users, deployments, sessions
 
-__all__ = ["auth", "users", "deployments"]
+__all__ = ["auth", "users", "deployments", "sessions"]

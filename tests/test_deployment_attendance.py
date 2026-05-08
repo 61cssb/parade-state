@@ -119,12 +119,12 @@ class TestSessionConstraints:
     """Test session creation and management constraints."""
 
     @pytest.mark.asyncio
-    async def test_unique_session_per_deployment_date(self, db_session, sample_deployment, sample_users):
-        """Test that only one session can exist per deployment per date."""
+    async def test_unique_session_per_deployment_date_and_type(self, db_session, sample_deployment, sample_users):
+        """Test that only one session per type can exist per deployment per date."""
         admin_id = sample_users["admin"].id
         today = datetime.utcnow().date()
 
-        # Create first session
+        # Create AM session
         session1 = Session(
             deployment_id=sample_deployment.id,
             date=today,
@@ -135,15 +135,26 @@ class TestSessionConstraints:
         db_session.add(session1)
         await db_session.commit()
 
-        # Try to create duplicate session for same date
+        # Create PM session (should be allowed - different type)
         session2 = Session(
             deployment_id=sample_deployment.id,
             date=today,
-            session_type="PM",  # Different type, but same date
+            session_type="PM",  # Different type, so should be allowed
             created_by=admin_id,
         )
 
         db_session.add(session2)
+        await db_session.commit()  # Should succeed
+
+        # Try to create duplicate AM session (should fail)
+        session3 = Session(
+            deployment_id=sample_deployment.id,
+            date=today,
+            session_type="AM",  # Same type as session1
+            created_by=admin_id,
+        )
+
+        db_session.add(session3)
         with pytest.raises(Exception):  # Should fail due to unique constraint
             await db_session.commit()
 
