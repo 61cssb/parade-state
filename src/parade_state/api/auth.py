@@ -1,7 +1,5 @@
 """Authentication and user management endpoints."""
 
-import os
-import uuid
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -17,7 +15,7 @@ from parade_state.session import (
     invalidate_session,
 )
 from parade_state.auth import get_oauth
-from parade_state.utils import utc_dt
+from parade_state.utils import env, utc_dt
 
 
 router = APIRouter()
@@ -64,7 +62,7 @@ async def get_current_user(
 @router.get("/login")
 async def login():
     """Initiate Google OAuth login flow."""
-    redirect_uri = os.getenv(
+    redirect_uri = env.get(
         "OAUTH_REDIRECT_URI",
         "http://localhost:8000/api/v1/auth/callback"
     )
@@ -102,7 +100,7 @@ async def auth_callback(
         user = result.scalar_one_or_none()
 
         # Check for super admin bootstrap
-        super_admin_email = os.getenv("SUPER_ADMIN_EMAIL")
+        super_admin_email = env.get("SUPER_ADMIN_EMAIL")
 
         if not user:
             # Auto-register user
@@ -150,7 +148,7 @@ async def auth_callback(
         )
 
         # Redirect to frontend with session token
-        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+        frontend_url = env.get("FRONTEND_URL", "http://localhost:3000")
         redirect_url = f"{frontend_url}/auth/callback?token={user_session.token}"
 
         return RedirectResponse(url=redirect_url)

@@ -1,7 +1,7 @@
 """Attendance management API endpoints."""
 
-from datetime import datetime
-from typing import Literal
+from datetime import date
+from typing import Literal, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, select
@@ -103,7 +103,7 @@ async def is_retroactive_edit(
     now_naive = utc_dt.ensure_naive(now)
 
     # Handle both date and datetime objects
-    if isinstance(session_date, datetime):
+    if hasattr(session_date, 'date'):
         session_date_naive = utc_dt.ensure_naive(session_date)
         return session_date_naive.date() < now_naive.date()
     else:

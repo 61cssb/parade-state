@@ -1,6 +1,5 @@
 """Access control management API endpoints."""
 
-from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status
@@ -17,6 +16,7 @@ from parade_state.models.schemas import (
     UserAccessListParams,
     UserSubunitScopeListParams,
 )
+from parade_state.utils import utc_dt
 
 router = APIRouter()
 
@@ -269,7 +269,7 @@ async def grant_user_deployment_access(
         user_id=user_id,
         deployment_id=deployment_id,
         granted_by=granted_by,
-        granted_at=datetime.utcnow(),
+        granted_at=utc_dt.ensure_naive(utc_dt.utcnow()),
     )
 
     db.add(access)
@@ -329,7 +329,7 @@ async def revoke_user_deployment_access(
         )
 
     # Revoke access
-    access.revoked_at = datetime.utcnow()
+    access.revoked_at = utc_dt.ensure_naive(utc_dt.utcnow())
     await db.commit()
 
     return {"message": "User access revoked successfully"}

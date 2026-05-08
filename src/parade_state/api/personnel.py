@@ -1,6 +1,6 @@
 """Personnel management API endpoints."""
 
-from datetime import date, datetime
+from datetime import date
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status

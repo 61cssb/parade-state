@@ -1,6 +1,5 @@
 """Authentication middleware for protected routes."""
 
-import uuid
 from typing import Optional
 from fastapi import Request, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -10,6 +9,7 @@ from sqlalchemy import select
 from parade_state.db import get_db_session
 from parade_state.models import User
 from parade_state.session import get_valid_session
+from parade_state.utils import uuid_gen
 
 
 security = HTTPBearer()
@@ -31,7 +31,7 @@ async def get_current_user_optional(
         if not session:
             return None
 
-        result = await db.execute(select(User).where(User.id == uuid.UUID(session.user_id)))
+        result = await db.execute(select(User).where(User.id == uuid_gen.to_uuid(session.user_id)))
         user = result.scalar_one_or_none()
 
         if user and user.status == "active":
@@ -56,7 +56,7 @@ async def require_authenticated_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        result = await db.execute(select(User).where(User.id == uuid.UUID(session.user_id)))
+        result = await db.execute(select(User).where(User.id == uuid_gen.to_uuid(session.user_id)))
         user = result.scalar_one_or_none()
 
         if not user:

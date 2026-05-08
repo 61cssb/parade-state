@@ -1,6 +1,5 @@
 """FastAPI application setup and configuration."""
 
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -8,13 +7,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from parade_state.db import init_database
 from parade_state.api import auth, users, deployments, sessions, attendance, personnel, access_control
+from parade_state.utils import env
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle."""
     # Startup
-    database_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    database_url = env.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
     init_database(database_url)
     yield
     # Shutdown

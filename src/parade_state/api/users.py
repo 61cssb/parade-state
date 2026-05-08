@@ -1,6 +1,5 @@
 """User management endpoints."""
 
-import uuid
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
@@ -11,6 +10,7 @@ from sqlalchemy import select, or_, and_
 from parade_state.db import get_db_session
 from parade_state.models import User, AccessLevel
 from parade_state.api.auth import get_current_user
+from parade_state.utils import uuid_gen
 
 
 class UserUpdate(BaseModel):
@@ -127,7 +127,7 @@ async def get_user(
 
     # Validate UUID format but keep as string for database comparison
     try:
-        uuid.UUID(user_id)  # Validate format
+        uuid_gen.validate(user_id)  # Validate format
     except ValueError:
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -168,7 +168,7 @@ async def update_user(
 
     # Validate UUID format but keep as string for database comparison
     try:
-        uuid.UUID(user_id)  # Validate format
+        uuid_gen.validate(user_id)  # Validate format
     except ValueError:
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -213,7 +213,7 @@ async def update_user(
 
     if update_data.access_level_id is not None:
         try:
-            uuid.UUID(update_data.access_level_id)  # Validate format
+            uuid_gen.validate(update_data.access_level_id)  # Validate format
             # Verify access level exists
             access_result = await db.execute(
                 select(AccessLevel).where(AccessLevel.id == update_data.access_level_id)
@@ -264,7 +264,7 @@ async def delete_user(
 
     # Validate UUID format but keep as string for database comparison
     try:
-        uuid.UUID(user_id)  # Validate format
+        uuid_gen.validate(user_id)  # Validate format
     except ValueError:
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,

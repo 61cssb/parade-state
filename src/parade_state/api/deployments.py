@@ -1,8 +1,6 @@
 """Deployment management API endpoints."""
 
-from datetime import datetime
 from typing import Literal
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, or_, and_
@@ -25,7 +23,7 @@ from parade_state.models.schemas import (
     DeploymentPersonnelOverrideCreate,
     DeploymentPersonnelOverrideResponse,
 )
-from parade_state.utils import utc_dt
+from parade_state.utils import utc_dt, uuid_gen
 
 router = APIRouter()
 
