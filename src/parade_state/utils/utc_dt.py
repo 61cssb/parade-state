@@ -1,10 +1,101 @@
-"""Datetime utilities for consistent datetime handling across the application.
+"""UTC Datetime Utilities for Parade State Application.
 
-This module provides centralized datetime handling to ensure:
-- Consistent timezone handling (UTC)
-- Database compatibility
-- Easy maintenance and updates
-- Type safety and predictability
+This module provides centralized UTC datetime handling to ensure consistency
+across the application and eliminate timezone confusion.
+
+**Quick Start:**
+    from parade_state.utils import utc_dt
+
+    # Get current UTC time (always timezone-aware)
+    now = utc_dt.utcnow()
+
+    # Add 7 days while preserving timezone awareness
+    expires = utc_dt.add_timedelta(now, days=7)
+
+    # Store in database (SQLite compatible)
+    db_time = utc_dt.ensure_naive(expires)
+
+    # Check expiration
+    if utc_dt.is_expired(session.expires_at):
+        raise HTTPException(status_code=401, detail="Session expired")
+
+**Why Use This Module:**
+- **Consistent Timezone Handling**: All operations use UTC, eliminating timezone confusion
+- **Database Compatibility**: Proper naive/aware datetime handling for SQLite/PostgreSQL
+- **Maintainability**: Change datetime behavior in one place
+- **Type Safety**: Predictable return types and behavior
+- **No Deprecated Functions**: Uses timezone-aware datetime.now() instead of deprecated utcnow()
+
+**Common Patterns:**
+
+*Getting current time:*
+    now = utc_dt.utcnow()  # Always timezone-aware UTC
+
+*Time arithmetic:*
+    future = utc_dt.add_timedelta(now, days=7, hours=2)
+
+*Database storage:*
+    # Store as naive for SQLite compatibility
+    session.expires_at = utc_dt.ensure_naive(utc_dt.utcnow())
+
+*Business logic:*
+    # Use as timezone-aware for comparisons
+    if utc_dt.ensure_aware(session.expires_at) > utc_dt.utcnow():
+        # Session is still valid
+        pass
+
+*Expiration checking:*
+    if utc_dt.is_expired(deployment.valid_until):
+        # Deployment is expired
+        pass
+
+**Key Functions:**
+
+**Time Retrieval:**
+- utc_dt.utcnow() - Current UTC time (timezone-aware)
+- utc_dt.utc_from_timestamp(timestamp) - Convert timestamp to UTC datetime
+
+**Conversion:**
+- utc_dt.ensure_aware(dt_naive) - Make naive datetime timezone-aware (assumes UTC)
+- utc_dt.ensure_naive(dt_aware) - Convert to naive for database storage
+- utc_dt.to_utc(dt_input) - Convert any datetime to UTC
+
+**Time Calculations:**
+- utc_dt.add_timedelta(base_time, **kwargs) - Add timedelta preserving timezone
+- utc_dt.is_expired(expiry_time) - Check if time has passed
+- utc_dt.is_valid_time_window(start, end) - Check if current time is in range
+
+**Formatting:**
+- utc_dt.format_datetime(dt_input, format_string) - Format datetime as string
+- utc_dt.parse_datetime(datetime_string, format_string) - Parse to timezone-aware datetime
+
+**Constants:**
+- utc_dt.ONE_DAY, utc_dt.ONE_WEEK, utc_dt.ONE_MONTH, utc_dt.ONE_YEAR
+
+**Helpers:**
+- utc_dt.get_age(birth_date) - Calculate age from birth date
+- utc_dt.truncate_to_day(dt_input) - Truncate to start of day
+- utc_dt.get_default_session_expiry() - 7-day session expiry
+- utc_dt.get_default_cache_expiry() - 1-day cache expiry
+
+**Database Compatibility:**
+
+SQLite doesn't handle timezone-aware datetimes well, so we use this pattern:
+1. Store datetimes as naive (no timezone info) in database
+2. Convert to timezone-aware for business logic
+3. Use ensure_naive() before database operations
+4. Use ensure_aware() after database retrieval
+
+**Example:**
+    # Create session with 7-day expiry
+    session = UserSession(
+        expires_at=utc_dt.ensure_naive(utc_dt.add_timedelta(utc_dt.utcnow(), days=7))
+    )
+
+    # Check if session is still valid
+    if utc_dt.ensure_aware(session.expires_at) > utc_dt.utcnow():
+        # Session valid
+        pass
 """
 
 import datetime as dt

@@ -13,6 +13,10 @@
 3. [Data Flow](#3-data-flow)
 4. [Entity Relationships](#4-entity-relationships)
 5. [Technology Stack](#5-technology-stack)
+6. [Deployment Architecture](#6-deployment-architecture)
+7. [Security Architecture](#7-security-architecture)
+8. [Code Standards & Best Practices](#8-code-standards--best-practices)
+9. [Performance & Scalability](#9-performance--scalability)
 
 ---
 
@@ -455,142 +459,36 @@ async def get_visible_columns(user_id: str):
 
 ## 8. Code Standards & Best Practices
 
-### 8.1 Utility Module Usage
+### 8.1 Development Patterns
 
-**Always use utility modules instead of native datatypes:**
+This project follows specific development patterns to ensure consistency and maintainability. For comprehensive development guidance, see **[CLAUDE.md](../CLAUDE.md)**.
 
-The `parade_state.utils` package provides centralized utilities that ensure consistency across the application. **Always prefer utility modules over native Python datatypes.**
+**Key patterns used:**
 
-```python
-# ✅ GOOD - Use utility modules
-from parade_state.utils import utc_dt
+**Utility Module Pattern:**
+- Use centralized utility modules instead of native Python datatypes
+- Example: `from parade_state.utils import utc_dt` for all datetime operations
+- Ensures consistent timezone handling, database compatibility, and easier maintenance
 
-# Get current time
-now = utc_dt.utcnow()  # Always timezone-aware UTC
-expires = utc_dt.add_timedelta(now, days=7)  # Preserves timezone info
+**Async Database Operations:**
+- Always use async database operations with FastAPI
+- Use dependency injection for database sessions
+- Never mix sync and async database operations
 
-# Check expiration
-if utc_dt.is_expired(session.expires_at):
-    raise HTTPException(status_code=401, detail="Session expired")
+**Type Annotations:**
+- Complete type annotations on all functions
+- Enables better IDE support and catches type errors early
+- Required for FastAPI request/response validation
 
-# Database compatibility
-db_time = utc_dt.ensure_naive(utc_dt.utcnow())  # SQLite compatible
-logic_time = utc_dt.ensure_aware(db_time)  # For business logic
+**Explicit Error Handling:**
+- Use specific HTTP status codes and descriptive error messages
+- Clear API contract via OpenAPI documentation
 
-# ❌ BAD - Native datetime usage
-from datetime import datetime, timedelta
-
-now = datetime.utcnow()  # Deprecated and timezone-unaware
-expires = now + timedelta(days=7)  # Loses timezone info
-```
-
-**Why use utility modules:**
-- **Consistent timezone handling** - All UTC, all the time
-- **Database compatibility** - Proper naive/aware datetime handling
-- **Maintainability** - Change behavior in one place
-- **Type safety** - Predictable return types
-- **Less cognitive load** - Don't think about timezones
-
-**Available utility modules:**
-- `utc_dt` - UTC datetime operations (see [UTILS.md](UTILS.md))
-
-For comprehensive utility documentation, see [UTILS.md](UTILS.md).
-
-### 8.2 Async Database Operations
-
-**Always use async database operations:**
-
-```python
-# ✅ GOOD - Async database operations
-@router.get("/api/v1/users/{user_id}")
-async def get_user(user_id: str, db: AsyncSession = Depends(get_db_session)):
-    result = await db.execute(select(User).where(User.id == user_id))
-    return result.scalar_one_or_none()
-
-# ❌ BAD - Sync operations in async context
-@router.get("/api/v1/users/{user_id}")
-def get_user(user_id: str, db: AsyncSession = Depends(get_db_session)):
-    user = db.get(User, user_id)  # Blocks the event loop
-    return user
-```
-
-### 8.3 Type Annotations
-
-**Always use proper type annotations:**
-
-```python
-# ✅ GOOD - Complete type annotations
-from datetime import datetime
-from typing import Optional
-
-async def create_user(
-    email: str,
-    name: str,
-    db: AsyncSession,
-) -> User:
-    user = User(email=email, name=name)
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
-
-# ❌ BAD - Missing type annotations
-async def create_user(email, name, db):
-    user = User(email=email, name=name)
-    db.add(user)
-    await db.commit()
-    return user
-```
-
-### 8.4 Error Handling
-
-**Use proper HTTP status codes and error messages:**
-
-```python
-# ✅ GOOD - Descriptive errors
-from fastapi import HTTPException, status
-
-if not user:
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="User not found",
-        headers={"X-Error": "User lookup failed"},
-    )
-
-# ❌ BAD - Generic errors
-if not user:
-    raise HTTPException(status_code=404, detail="Error")
-```
-
-### 8.5 Database Session Management
-
-**Always use dependency injection for database sessions:**
-
-```python
-# ✅ GOOD - Dependency injection
-@router.post("/api/v1/users")
-async def create_user(
-    user_data: UserCreate,
-    db: AsyncSession = Depends(get_db_session),  # Injected by FastAPI
-):
-    user = User(**user_data.dict())
-    db.add(user)
-    await db.commit()
-    return user
-
-# ❌ BAD - Manual session creation
-@router.post("/api/v1/users")
-async def create_user(user_data: UserCreate):
-    async with get_db_session() as db:  # Bypasses FastAPI's dependency system
-        user = User(**user_data.dict())
-        db.add(user)
-        await db.commit()
-        return user
-```
+For detailed development patterns and examples, refer to **[CLAUDE.md](../CLAUDE.md)**.
 
 ---
 
-## 10. Performance & Scalability
+## 9. Performance & Scalability
 
 ### 8.1 Current Performance Characteristics
 
