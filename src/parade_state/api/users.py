@@ -4,12 +4,21 @@ import uuid
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_
 
 from parade_state.db import get_db_session
 from parade_state.models import User, AccessLevel
 from parade_state.api.auth import get_current_user
+
+
+class UserUpdate(BaseModel):
+    """Schema for user updates."""
+    name: Optional[str] = None
+    status: Optional[str] = None
+    role: Optional[str] = None
+    access_level_id: Optional[str] = None
 
 
 router = APIRouter()
@@ -151,10 +160,7 @@ async def get_user(
 @router.patch("/{user_id}")
 async def update_user(
     user_id: str,
-    name: Optional[str] = None,
-    status: Optional[str] = None,
-    role: Optional[str] = None,
-    access_level_id: Optional[str] = None,
+    update_data: UserUpdate,
     current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
@@ -179,38 +185,38 @@ async def update_user(
         )
 
     # Update fields
-    if name is not None:
-        user.name = name
+    if update_data.name is not None:
+        user.name = update_data.name
 
-    if status is not None:
-        if status not in ["pending", "active", "suspended", "unrecognised"]:
+    if update_data.status is not None:
+        if update_data.status not in ["pending", "active", "suspended", "unrecognised"]:
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Invalid status value",
             )
-        user.status = status
+        user.status = update_data.status
 
-    if role is not None:
-        if role not in ["super_admin", "admin", "user"]:
+    if update_data.role is not None:
+        if update_data.role not in ["super_admin", "admin", "user"]:
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Invalid role value",
             )
 
         # Only super_admin can promote to super_admin
-        if role == "super_admin" and current_user.role != "super_admin":
+        if update_data.role == "super_admin" and current_user.role != "super_admin":
             raise HTTPException(
                 status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="Only super admins can grant super admin role",
             )
-        user.role = role
+        user.role = update_data.role
 
-    if access_level_id is not None:
+    if update_data.access_level_id is not None:
         try:
-            uuid.UUID(access_level_id)  # Validate format
+            uuid.UUID(update_data.access_level_id)  # Validate format
             # Verify access level exists
             access_result = await db.execute(
-                select(AccessLevel).where(AccessLevel.id == access_level_id)
+                select(AccessLevel).where(AccessLevel.id == update_data.access_level_id)
             )
             access_level = access_result.scalar_one_or_none()
 
@@ -220,7 +226,7 @@ async def update_user(
                     detail="Access level not found",
                 )
 
-            user.access_level_id = access_uuid
+            user.access_level_id = update_data.access_level_id
         except ValueError:
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
