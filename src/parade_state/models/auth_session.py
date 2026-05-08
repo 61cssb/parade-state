@@ -1,0 +1,65 @@
+"""Authentication session models for user session management."""
+
+import datetime as dt
+from typing import TYPE_CHECKING
+
+from sqlalchemy import DateTime, ForeignKey, String, Index
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from ..db import Base
+
+if TYPE_CHECKING:
+    from .access import User
+
+
+class UserSession(Base):
+    """User authentication session for managing login state and access control."""
+
+    __tablename__ = "user_sessions"
+
+    token: Mapped[str] = mapped_column(String(255), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(50), nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+    )
+    expires_at: Mapped[dt.datetime] = mapped_column(DateTime, nullable=False)
+    last_accessed_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+    )
+    user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+
+    # Relationships
+    user: Mapped["User"] = relationship(
+        back_populates="sessions", cascade="all, delete"
+    )
+
+    __table_args__ = (
+        Index("ix_user_sessions_user_id", "user_id"),
+        Index("ix_user_sessions_expires_at", "expires_at"),
+    )
+
+    def is_valid(self) -> bool:
+        """Check if session is still valid (not expired)."""
+        now = dt.datetime.now(dt.timezone.utc)
+        # Handle both timezone-aware and naive datetimes
+        if self.expires_at.tzinfo is None:
+            now = dt.datetime.utcnow()
+        else:
+            now = dt.datetime.now(dt.timezone.utc)
+        return now < self.expires_at
+
+    def refresh_last_accessed(self) -> None:
+        """Update the last accessed timestamp."""
+        self.last_accessed_at = dt.datetime.now(dt.timezone.utc)
+
+    def __repr__(self) -> str:
+        return (
+            f"<UserSession(token={self.token[:10]}..., user_id={self.user_id!r}, "
+            f"role={self.role!r}, expires_at={self.expires_at!r})>"
+        )

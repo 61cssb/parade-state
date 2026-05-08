@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from ..db import Base
 
 if TYPE_CHECKING:
+    from .auth_session import UserSession
     from .deployment import Deployment
 
 
@@ -68,6 +69,9 @@ class User(Base):
 
     # Relationships
     access_level: Mapped[AccessLevel | None] = relationship(foreign_keys=[access_level_id])
+    sessions: Mapped[list["UserSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
     subunit_scopes: Mapped[list["UserSubunitScope"]] = relationship(
         back_populates="user", cascade="all, delete-orphan", foreign_keys="UserSubunitScope.user_id"
     )

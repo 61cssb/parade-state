@@ -1,10 +1,15 @@
 """Session management utilities."""
 
 import secrets
-from datetime import datetime, timedelta
+import datetime as dt
+from datetime import timedelta, timezone
 from typing import Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from starlette.requests import Request
+
+from parade_state.models import UserSession
 
 
 def generate_session_token() -> str:
@@ -12,32 +17,103 @@ def generate_session_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def create_session_data(user_id: str, email: str, name: str, role: str) -> dict:
-    """Create session data for storage."""
-    return {
-        "user_id": user_id,
-        "email": email,
-        "name": name,
-        "role": role,
-        "created_at": datetime.utcnow().isoformat(),
-        "expires_at": (datetime.utcnow() + timedelta(days=7)).isoformat(),
-    }
+async def create_user_session(
+    db: AsyncSession,
+    user_id: str,
+    email: str,
+    name: str,
+    role: str,
+    user_agent: Optional[str] = None,
+    ip_address: Optional[str] = None,
+    expires_days: int = 7,
+) -> UserSession:
+    """Create a new user session in the database."""
+    token = generate_session_token()
+    expires_at = dt.datetime.now(timezone.utc) + timedelta(days=expires_days)
+
+    session = UserSession(
+        token=token,
+        user_id=user_id,
+        email=email,
+        name=name,
+        role=role,
+        expires_at=expires_at,
+        user_agent=user_agent,
+        ip_address=ip_address,
+    )
+
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+
+    return session
 
 
-async def get_session_user(request: Request) -> Optional[dict]:
-    """Get current user from session."""
-    # TODO: Implement proper session storage and retrieval
-    # This will integrate with your chosen session backend
-    return None
+async def get_valid_session(
+    db: AsyncSession,
+    token: str,
+    update_last_accessed: bool = True,
+) -> Optional[UserSession]:
+    """Get a valid session by token, optionally updating last accessed time."""
+    result = await db.execute(
+        select(UserSession).where(UserSession.token == token)
+    )
+    session = result.scalar_one_or_none()
+
+    if not session or not session.is_valid():
+        return None
+
+    if update_last_accessed:
+        session.refresh_last_accessed()
+        await db.commit()
+
+    return session
 
 
-async def set_session(request: Request, user_data: dict) -> None:
-    """Set user session."""
-    # TODO: Implement session storage
-    pass
+async def invalidate_session(db: AsyncSession, token: str) -> bool:
+    """Invalidate a session by deleting it."""
+    result = await db.execute(
+        select(UserSession).where(UserSession.token == token)
+    )
+    session = result.scalar_one_or_none()
+
+    if not session:
+        return False
+
+    await db.delete(session)
+    await db.commit()
+    return True
 
 
-async def clear_session(request: Request) -> None:
-    """Clear user session."""
-    # TODO: Implement session clearing
-    pass
+async def invalidate_user_sessions(
+    db: AsyncSession,
+    user_id: str,
+    except_token: Optional[str] = None,
+) -> int:
+    """Invalidate all sessions for a user, optionally keeping one session."""
+    from sqlalchemy import delete
+
+    # Build base delete statement
+    stmt = delete(UserSession).where(UserSession.user_id == user_id)
+
+    if except_token:
+        stmt = stmt.where(UserSession.token != except_token)
+
+    # Execute bulk delete
+    result = await db.execute(stmt)
+    await db.commit()
+
+    return result.rowcount
+
+
+async def cleanup_expired_sessions(db: AsyncSession) -> int:
+    """Clean up expired sessions from the database."""
+    from sqlalchemy import delete
+
+    # Use a simpler datetime comparison that works with both naive and aware datetimes
+    cutoff_time = dt.datetime.now(timezone.utc).replace(tzinfo=None)
+    stmt = delete(UserSession).where(UserSession.expires_at < cutoff_time)
+    result = await db.execute(stmt)
+    await db.commit()
+
+    return result.rowcount
