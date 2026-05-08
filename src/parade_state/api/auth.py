@@ -2,7 +2,6 @@
 
 import os
 import uuid
-from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -18,6 +17,7 @@ from parade_state.session import (
     invalidate_session,
 )
 from parade_state.auth import get_oauth
+from parade_state.utils import utc_dt
 
 
 router = APIRouter()
@@ -42,7 +42,7 @@ async def get_current_user(
         )
 
     # Get user from database
-    result = await db.execute(select(User).where(User.id == uuid.UUID(session.user_id)))
+    result = await db.execute(select(User).where(User.id == session.user_id))
     user = result.scalar_one_or_none()
 
     if not user:
@@ -113,8 +113,8 @@ async def auth_callback(
                 name=name or email.split("@")[0],
                 status="active" if is_super_admin else "pending",
                 role="super_admin" if is_super_admin else "user",
-                first_sign_in_at=datetime.utcnow(),
-                last_sign_in_at=datetime.utcnow(),
+                first_sign_in_at=utc_dt.utcnow(),
+                last_sign_in_at=utc_dt.utcnow(),
             )
 
             db.add(user)
@@ -123,7 +123,7 @@ async def auth_callback(
 
         else:
             # Update last sign in
-            user.last_sign_in_at = datetime.utcnow()
+            user.last_sign_in_at = utc_dt.utcnow()
 
             # Update user info if changed
             if name:
@@ -139,21 +139,21 @@ async def auth_callback(
             )
 
         # Create session
-    user_session = await create_user_session(
-        db,
-        user_id=str(user.id),
-        email=user.email,
-        name=user.name,
-        role=user.role,
-        user_agent=request.headers.get("user-agent"),
-        ip_address=request.client.host if request.client else None,
-    )
+        user_session = await create_user_session(
+            db,
+            user_id=str(user.id),
+            email=user.email,
+            name=user.name,
+            role=user.role,
+            user_agent=request.headers.get("user-agent"),
+            ip_address=request.client.host if request.client else None,
+        )
 
-    # Redirect to frontend with session token
-    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-    redirect_url = f"{frontend_url}/auth/callback?token={user_session.token}"
+        # Redirect to frontend with session token
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+        redirect_url = f"{frontend_url}/auth/callback?token={user_session.token}"
 
-    return RedirectResponse(url=redirect_url)
+        return RedirectResponse(url=redirect_url)
 
     except Exception as e:
         # Log error and return friendly message

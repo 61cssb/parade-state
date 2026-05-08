@@ -1,8 +1,7 @@
 """Tests for authentication system."""
 
 import pytest
-import datetime as dt
-from datetime import timedelta, timezone, datetime
+from datetime import timedelta, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.models import User, UserSession
@@ -13,13 +12,12 @@ from parade_state.session import (
     invalidate_user_sessions,
     cleanup_expired_sessions,
 )
+from parade_state.utils import utc_dt
 
 
-def make_aware(dt_naive: dt.datetime) -> dt.datetime:
+def make_aware(dt_naive: datetime) -> datetime:
     """Make a naive datetime timezone-aware."""
-    if dt_naive.tzinfo is None:
-        return dt_naive.replace(tzinfo=timezone.utc)
-    return dt_naive
+    return utc_dt.ensure_aware(dt_naive)
 
 
 @pytest.mark.asyncio
@@ -49,7 +47,7 @@ async def test_create_user_session(db_session: AsyncSession):
     assert session.user_id == str(user.id)
     assert session.email == user.email
     assert session.is_valid() is True
-    assert session.expires_at > datetime.utcnow()
+    assert session.expires_at > utc_dt.ensure_naive(utc_dt.utcnow())
 
 
 @pytest.mark.asyncio
@@ -108,7 +106,7 @@ async def test_get_invalid_session(db_session: AsyncSession):
     )
 
     # Manually expire the session
-    session.expires_at = datetime.utcnow() - timedelta(days=1)
+    session.expires_at = utc_dt.ensure_naive(utc_dt.add_timedelta(utc_dt.utcnow(), days=-1))
     await db_session.commit()
 
     # Try to get expired session
@@ -231,7 +229,7 @@ async def test_cleanup_expired_sessions(db_session: AsyncSession):
         name=user.name,
         role=user.role,
     )
-    expired_session.expires_at = datetime.utcnow() - timedelta(days=1)
+    expired_session.expires_at = utc_dt.ensure_naive(utc_dt.add_timedelta(utc_dt.utcnow(), days=-1))
     await db_session.commit()
 
     # Cleanup expired sessions
@@ -307,4 +305,6 @@ async def test_session_last_accessed_update(db_session: AsyncSession):
     original_comparable = make_aware(original_last_accessed) if original_last_accessed.tzinfo is None else original_last_accessed
     retrieved_comparable = make_aware(retrieved_session.last_accessed_at) if retrieved_session.last_accessed_at.tzinfo is None else retrieved_session.last_accessed_at
 
-    assert retrieved_comparable > original_comparable
+    # Use a small tolerance for the comparison to avoid flaky tests
+    from datetime import timedelta
+    assert retrieved_comparable >= original_comparable + timedelta(milliseconds=50)

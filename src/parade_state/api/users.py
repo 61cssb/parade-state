@@ -2,7 +2,8 @@
 
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import status as http_status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_
 
@@ -18,7 +19,7 @@ async def require_admin(current_user: User = Depends(get_current_user)):
     """Dependency to require admin or super admin role."""
     if current_user.role not in ["admin", "super_admin"]:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
         )
     return current_user
@@ -111,24 +112,25 @@ async def get_user(
     # Check permission: users can view themselves, admins can view anyone
     if current_user.role not in ["admin", "super_admin"] and str(current_user.id) != user_id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="You can only view your own profile",
         )
 
+    # Validate UUID format but keep as string for database comparison
     try:
-        user_uuid = uuid.UUID(user_id)
+        uuid.UUID(user_id)  # Validate format
     except ValueError:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Invalid user ID format",
         )
 
-    result = await db.execute(select(User).where(User.id == user_uuid))
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
 
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
 
@@ -158,20 +160,21 @@ async def update_user(
 ):
     """Update user information (admin only)."""
 
+    # Validate UUID format but keep as string for database comparison
     try:
-        user_uuid = uuid.UUID(user_id)
+        uuid.UUID(user_id)  # Validate format
     except ValueError:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Invalid user ID format",
         )
 
-    result = await db.execute(select(User).where(User.id == user_uuid))
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
 
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
 
@@ -182,7 +185,7 @@ async def update_user(
     if status is not None:
         if status not in ["pending", "active", "suspended", "unrecognised"]:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Invalid status value",
             )
         user.status = status
@@ -190,37 +193,37 @@ async def update_user(
     if role is not None:
         if role not in ["super_admin", "admin", "user"]:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Invalid role value",
             )
 
         # Only super_admin can promote to super_admin
         if role == "super_admin" and current_user.role != "super_admin":
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="Only super admins can grant super admin role",
             )
         user.role = role
 
     if access_level_id is not None:
         try:
-            access_uuid = uuid.UUID(access_level_id)
+            uuid.UUID(access_level_id)  # Validate format
             # Verify access level exists
             access_result = await db.execute(
-                select(AccessLevel).where(AccessLevel.id == access_uuid)
+                select(AccessLevel).where(AccessLevel.id == access_level_id)
             )
             access_level = access_result.scalar_one_or_none()
 
             if not access_level:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
                     detail="Access level not found",
                 )
 
             user.access_level_id = access_uuid
         except ValueError:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Invalid access level ID format",
             )
 
@@ -249,31 +252,32 @@ async def delete_user(
     # Only super_admin can delete users
     if current_user.role != "super_admin":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Only super admins can delete users",
         )
 
+    # Validate UUID format but keep as string for database comparison
     try:
-        user_uuid = uuid.UUID(user_id)
+        uuid.UUID(user_id)  # Validate format
     except ValueError:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Invalid user ID format",
         )
 
     # Prevent self-deletion
     if str(current_user.id) == user_id:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="You cannot delete your own account",
         )
 
-    result = await db.execute(select(User).where(User.id == user_uuid))
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
 
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
 

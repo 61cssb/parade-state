@@ -1,10 +1,12 @@
 """Authentication session models for user session management."""
 
-import datetime as dt
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, String, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from parade_state.utils import utc_dt
 
 from ..db import Base
 
@@ -24,12 +26,12 @@ class UserSession(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False)
-    created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime, default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()), nullable=False
     )
-    expires_at: Mapped[dt.datetime] = mapped_column(DateTime, nullable=False)
-    last_accessed_at: Mapped[dt.datetime] = mapped_column(
-        DateTime, default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_accessed_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()), nullable=False
     )
     user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
@@ -46,17 +48,11 @@ class UserSession(Base):
 
     def is_valid(self) -> bool:
         """Check if session is still valid (not expired)."""
-        now = dt.datetime.now(dt.timezone.utc)
-        # Handle both timezone-aware and naive datetimes
-        if self.expires_at.tzinfo is None:
-            now = dt.datetime.utcnow()
-        else:
-            now = dt.datetime.now(dt.timezone.utc)
-        return now < self.expires_at
+        return not utc_dt.is_expired(self.expires_at)
 
     def refresh_last_accessed(self) -> None:
         """Update the last accessed timestamp."""
-        self.last_accessed_at = dt.datetime.now(dt.timezone.utc)
+        self.last_accessed_at = utc_dt.ensure_naive(utc_dt.utcnow())
 
     def __repr__(self) -> str:
         return (

@@ -1,15 +1,14 @@
 """Session management utilities."""
 
 import secrets
-import datetime as dt
-from datetime import timedelta, timezone
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from starlette.requests import Request
 
 from parade_state.models import UserSession
+from parade_state.utils import utc_dt
 
 
 def generate_session_token() -> str:
@@ -29,7 +28,7 @@ async def create_user_session(
 ) -> UserSession:
     """Create a new user session in the database."""
     token = generate_session_token()
-    expires_at = dt.datetime.now(timezone.utc) + timedelta(days=expires_days)
+    expires_at = utc_dt.ensure_naive(utc_dt.add_timedelta(utc_dt.utcnow(), days=expires_days))
 
     session = UserSession(
         token=token,
@@ -91,8 +90,6 @@ async def invalidate_user_sessions(
     except_token: Optional[str] = None,
 ) -> int:
     """Invalidate all sessions for a user, optionally keeping one session."""
-    from sqlalchemy import delete
-
     # Build base delete statement
     stmt = delete(UserSession).where(UserSession.user_id == user_id)
 
@@ -108,10 +105,7 @@ async def invalidate_user_sessions(
 
 async def cleanup_expired_sessions(db: AsyncSession) -> int:
     """Clean up expired sessions from the database."""
-    from sqlalchemy import delete
-
-    # Use a simpler datetime comparison that works with both naive and aware datetimes
-    cutoff_time = dt.datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff_time = utc_dt.ensure_naive(utc_dt.utcnow())
     stmt = delete(UserSession).where(UserSession.expires_at < cutoff_time)
     result = await db.execute(stmt)
     await db.commit()

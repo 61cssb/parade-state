@@ -1,6 +1,7 @@
 """Tests for API endpoints."""
 
 import pytest
+import uuid
 from datetime import datetime
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +14,7 @@ from parade_state.session import create_user_session
 @pytest.fixture
 def client(db_session: AsyncSession):
     """Create test client with database session."""
-    def override_get_db():
+    async def override_get_db():
         yield db_session
 
     from parade_state.db import get_db_session
@@ -27,8 +28,10 @@ def client(db_session: AsyncSession):
 
 async def create_test_user_and_session(db_session: AsyncSession, role: str = "user", status: str = "active"):
     """Helper to create a test user and session."""
+    # Generate unique email using UUID to avoid conflicts
+    unique_id = str(uuid.uuid4())[:8]
     user = User(
-        email=f"test_{role}_{status}@example.com",
+        email=f"test_{role}_{status}_{unique_id}@example.com",
         name=f"Test {role} {status}",
         status=status,
         role=role,
