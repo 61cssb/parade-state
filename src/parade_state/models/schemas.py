@@ -1,6 +1,6 @@
 """Pydantic schemas for API request/response validation."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -318,6 +318,7 @@ class PersonnelListParams(BaseModel):
     """Schema for personnel list query parameters."""
 
     estab_id: str | None = None
+    deployment_id: str | None = None
     unit: str | None = None
     sub_unit_1: str | None = None
     sub_unit_2: str | None = None
@@ -326,3 +327,59 @@ class PersonnelListParams(BaseModel):
     search: str | None = None
     limit: int = Field(100, ge=1, le=1000)
     offset: int = Field(0, ge=0)
+
+
+class PersonnelResponseWithDeployment(PersonnelBase):
+    """Schema for personnel response with deployment-specific assignments."""
+
+    id: str
+    estab_id: str
+    status: str
+    created_at: datetime
+    # Deployment-specific fields (included when deployment_id is provided)
+    deployment_id: str | None = None
+    has_override: bool = False
+    deployment_notes: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class PersonnelAttendanceHistoryItem(BaseModel):
+    """Schema for a single attendance record in personnel history."""
+
+    id: str
+    session_id: str
+    session_date: datetime
+    session_type: Literal["AM", "PM"]
+    session_status: Literal["open", "closed", "finalized"]
+    status: Literal["present", "absent", "excused", "unknown"]
+    remarks: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PersonnelAttendanceHistoryStats(BaseModel):
+    """Schema for attendance history statistics."""
+
+    total_sessions: int
+    present_count: int
+    absent_count: int
+    excused_count: int
+    unknown_count: int
+    attendance_rate: float  # Percentage of present + excused vs total
+
+
+class PersonnelAttendanceHistoryResponse(BaseModel):
+    """Schema for personnel attendance history response."""
+
+    personnel_id: str
+    deployment_id: str
+    date_from: date | None
+    date_to: date | None
+    stats: PersonnelAttendanceHistoryStats
+    attendance_records: list[PersonnelAttendanceHistoryItem]
+    total_count: int

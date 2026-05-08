@@ -241,3 +241,117 @@ def super_admin_token_headers() -> dict[str, str]:
     """Provide headers with super admin authentication token."""
     super_admin_id = "super-admin-test-id"
     return {"Authorization": f"Bearer {super_admin_id}"}
+
+
+@pytest.fixture
+async def sample_session(db_session: AsyncSession, sample_deployment: Deployment, sample_users):
+    """Create a sample session for testing."""
+    admin_id = str(sample_users["admin"].id)
+
+    session = Session(
+        deployment_id=str(sample_deployment.id),
+        date=date.today(),
+        session_type="AM",
+        status="open",
+        created_by=admin_id,
+        opened_at=datetime.utcnow(),
+    )
+
+    db_session.add(session)
+    await db_session.commit()
+
+    return session
+
+
+@pytest.fixture
+async def sample_sessions(db_session: AsyncSession, sample_deployment: Deployment, sample_users):
+    """Create multiple sample sessions for testing."""
+    admin_id = str(sample_users["admin"].id)
+
+    sessions = [
+        Session(
+            deployment_id=str(sample_deployment.id),
+            date=date.today(),
+            session_type="AM",
+            status="closed",
+            created_by=admin_id,
+            opened_at=datetime.utcnow() - timedelta(hours=4),
+            closed_at=datetime.utcnow() - timedelta(hours=2),
+            closed_by=admin_id,
+        ),
+        Session(
+            deployment_id=str(sample_deployment.id),
+            date=date.today(),
+            session_type="PM",
+            status="open",
+            created_by=admin_id,
+            opened_at=datetime.utcnow(),
+        ),
+        Session(
+            deployment_id=str(sample_deployment.id),
+            date=date.today() - timedelta(days=1),
+            session_type="AM",
+            status="finalized",
+            created_by=admin_id,
+            opened_at=datetime.utcnow() - timedelta(days=1, hours=4),
+            closed_at=datetime.utcnow() - timedelta(days=1, hours=2),
+            closed_by=admin_id,
+        ),
+    ]
+
+    for session in sessions:
+        db_session.add(session)
+    await db_session.commit()
+
+    return sessions
+
+
+@pytest.fixture
+async def sample_attendance_records(
+    db_session: AsyncSession,
+    sample_sessions,
+    sample_personnel,
+    sample_deployment: Deployment,
+    sample_users,
+):
+    """Create sample attendance records for testing."""
+    admin_id = str(sample_users["admin"].id)
+
+    # Create attendance records for the first personnel
+    attendance_records = [
+        # Today AM - present
+        AttendanceRecord(
+            session_id=str(sample_sessions[0].id),
+            personnel_id=str(sample_personnel[0].id),
+            deployment_id=str(sample_deployment.id),
+            status="present",
+            created_by=admin_id,
+            updated_by=admin_id,
+        ),
+        # Today PM - absent
+        AttendanceRecord(
+            session_id=str(sample_sessions[1].id),
+            personnel_id=str(sample_personnel[0].id),
+            deployment_id=str(sample_deployment.id),
+            status="absent",
+            remarks="Sick leave",
+            created_by=admin_id,
+            updated_by=admin_id,
+        ),
+        # Yesterday AM - excused
+        AttendanceRecord(
+            session_id=str(sample_sessions[2].id),
+            personnel_id=str(sample_personnel[0].id),
+            deployment_id=str(sample_deployment.id),
+            status="excused",
+            remarks="Official duty",
+            created_by=admin_id,
+            updated_by=admin_id,
+        ),
+    ]
+
+    for record in attendance_records:
+        db_session.add(record)
+    await db_session.commit()
+
+    return attendance_records
