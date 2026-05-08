@@ -383,3 +383,69 @@ class PersonnelAttendanceHistoryResponse(BaseModel):
     stats: PersonnelAttendanceHistoryStats
     attendance_records: list[PersonnelAttendanceHistoryItem]
     total_count: int
+
+
+# ============================================================================
+# Access Control Schemas
+# ============================================================================
+
+
+class DeploymentUserAccessCreate(BaseModel):
+    """Schema for creating deployment user access."""
+
+    # Empty for now - access is granted by user/deployment IDs
+    pass
+
+
+class DeploymentUserAccessResponse(BaseModel):
+    """Schema for deployment user access response."""
+
+    id: str
+    user_id: str
+    deployment_id: str
+    granted_by: str
+    granted_at: datetime
+    revoked_at: datetime | None
+
+    class Config:
+        from_attributes = True
+
+
+class UserSubunitScopeCreate(BaseModel):
+    """Schema for creating user subunit scope."""
+
+    unit: str | None = None
+    sub_unit_1: str | None = None
+    sub_unit_2: str | None = None
+    sub_unit_3: str | None = None
+
+
+class UserSubunitScopeResponse(BaseModel):
+    """Schema for user subunit scope response."""
+
+    id: str
+    user_id: str
+    deployment_id: str
+    unit: str | None
+    sub_unit_1: str | None
+    sub_unit_2: str | None
+    sub_unit_3: str | None
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UserAccessListParams(BaseModel):
+    """Schema for user access list query parameters."""
+
+    active_only: bool = True
+
+
+class UserSubunitScopeListParams(BaseModel):
+    """Schema for user subunit scope list query parameters."""
+
+    deployment_id: str | None = None
+    unit: str | None = None

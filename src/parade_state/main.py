@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from parade_state.db import init_database
-from parade_state.api import auth, users, deployments, sessions, attendance, personnel
+from parade_state.api import auth, users, deployments, sessions, attendance, personnel, access_control
 
 
 @asynccontextmanager
@@ -51,3 +51,4 @@ app.include_router(deployments.router, prefix="/api/v1/deployments", tags=["depl
 app.include_router(sessions.router, prefix="/api/v1/sessions", tags=["sessions"])
 app.include_router(attendance.router, prefix="/api/v1/attendance", tags=["attendance"])
 app.include_router(personnel.router, prefix="/api/v1", tags=["personnel"])
+app.include_router(access_control.router, prefix="/api/v1/access-control", tags=["access-control"])

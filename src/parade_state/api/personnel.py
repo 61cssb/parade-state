@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from parade_state.db import get_db_session
-from parade_state.models import User, Personnel, Deployment, DeploymentPersonnelOverride, DeploymentNotes, AttendanceRecord, Session
+from parade_state.models import User, Personnel, Deployment, DeploymentPersonnelOverride, DeploymentNotes, AttendanceRecord, Session, DeploymentUserAccess
 from parade_state.models.schemas import (
     PersonnelResponseWithDeployment,
     PersonnelUpdate,
@@ -35,35 +35,41 @@ async def verify_deployment_access(
 ) -> Deployment:
     """Verify user has access to deployment and return it.
 
-    Super admins and admins have full access to all deployments.
-    Regular users can only access deployments they're assigned to.
+    Super admins have full access to all deployments.
+    Admins need explicit deployment access.
+    Regular users need explicit deployment access.
     """
+    # Get deployment
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+    deployment = result.scalar_one_or_none()
+
+    if not deployment:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Deployment not found",
+        )
+
     # Super admins have full access
     if user_role == "super_admin":
-        result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
-        deployment = result.scalar_one_or_none()
-        if not deployment:
-            raise HTTPException(
-                status_code=http_status.HTTP_404_NOT_FOUND,
-                detail="Deployment not found",
-            )
         return deployment
 
-    # For regular users and admins, check deployment access
-    # TODO: Implement proper access control based on deployment assignments
-    # For now, admins can access all deployments
-    if user_role == "admin":
-        result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
-        deployment = result.scalar_one_or_none()
-        if not deployment:
-            raise HTTPException(
-                status_code=http_status.HTTP_404_NOT_FOUND,
-                detail="Deployment not found",
+    # Check for explicit deployment access
+    access_result = await db.execute(
+        select(DeploymentUserAccess).where(
+            and_(
+                DeploymentUserAccess.user_id == user_id,
+                DeploymentUserAccess.deployment_id == deployment_id,
+                DeploymentUserAccess.revoked_at.is_(None),
             )
+        )
+    )
+    access = access_result.scalar_one_or_none()
+
+    # Both admins and regular users need explicit deployment access
+    if access:
         return deployment
 
-    # Regular users need explicit deployment access
-    # TODO: Check DeploymentUserAccess model
+    # No access found
     raise HTTPException(
         status_code=http_status.HTTP_403_FORBIDDEN,
         detail="Insufficient permissions to access this deployment",

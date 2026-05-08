@@ -199,6 +199,15 @@ async def sample_deployment(db_session: AsyncSession, sample_estab, sample_users
     db_session.add(deployment)
     await db_session.commit()
 
+    # Grant admin access to this deployment for testing
+    admin_access = DeploymentUserAccess(
+        user_id=admin_id,
+        deployment_id=str(deployment.id),
+        granted_by=admin_id,
+    )
+    db_session.add(admin_access)
+    await db_session.commit()
+
     return deployment
 
 
