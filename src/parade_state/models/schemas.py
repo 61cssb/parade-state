@@ -232,10 +232,33 @@ class AttendanceRecordResponse(BaseModel):
         from_attributes = True
 
 
+class AttendanceRecordBulkCreateItem(BaseModel):
+    """Schema for a single attendance record in bulk create operation."""
+
+    session_id: str
+    personnel_id: str
+    status: Literal["present", "absent", "excused", "unknown"] = "absent"
+    remarks: str | None = None
+
+
+class AttendanceRecordBulkCreate(BaseModel):
+    """Schema for bulk creating attendance records."""
+
+    attendance_records: list[AttendanceRecordBulkCreateItem]
+
+
+class AttendanceRecordBulkUpdateItem(BaseModel):
+    """Schema for a single attendance record in bulk update operation."""
+
+    id: str
+    status: Literal["present", "absent", "excused", "unknown"] | None = None
+    remarks: str | None = None
+
+
 class AttendanceRecordBulkUpdate(BaseModel):
     """Schema for bulk updating attendance records."""
 
-    attendance_records: list[AttendanceRecordUpdate]
+    attendance_records: list[AttendanceRecordBulkUpdateItem]
 
 
 class AttendanceListParams(BaseModel):
