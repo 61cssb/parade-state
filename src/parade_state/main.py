@@ -23,8 +23,12 @@ from parade_state.web.auth import router as web_auth_router
 async def lifespan(app: FastAPI):
     """Manage application lifecycle."""
     # Startup
-    database_url = env.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
-    init_database(database_url)
+    # Only initialize if not already initialized (prevents test database from being reset)
+    from parade_state.db import get_session_maker
+
+    if get_session_maker() is None:
+        database_url = env.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+        init_database(database_url)
     yield
     # Shutdown
     pass

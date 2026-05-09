@@ -50,36 +50,67 @@ def event_loop():
 
 
 @pytest.fixture
-async def test_db(tmp_path):
-    """Create a fresh test database engine for each test."""
-    # Use temporary file database instead of :memory: to avoid connection isolation issues
+async def test_engine(tmp_path):
+    """Create test database engine for each test.
+
+    This fixture is function-scoped to ensure complete test isolation.
+    Each test gets its own database file and engine, preventing data
+    leakage between tests.
+    """
+    # Create a unique database file for this test
     db_file = tmp_path / "test.db"
     database_url = f"sqlite+aiosqlite:///{db_file}"
 
-    # Initialize the global database state FIRST (creates the engine)
+    # Initialize the GLOBAL database state
+    # This ensures get_db_session() returns the test database
+    # Critical for authentication tests to work correctly
     init_database(database_url)
 
     # Get the global engine that was just created
     from parade_state.db import _engine
     engine = _engine
 
-    # Create all tables on the global engine
+    # Create all tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # Create session maker using the same engine
-    async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    yield engine
 
-    yield async_session_maker
-
-    # Cleanup
+    # Cleanup: dispose engine after test completes
     await engine.dispose()
 
 
 @pytest.fixture
-async def db_session(test_db) -> AsyncGenerator[AsyncSession, None]:
-    """Provide a database session for each test."""
-    session = test_db()
+def session_maker(test_engine):
+    """Create session maker for each test.
+
+    This fixture is function-scoped to match the test_engine scope,
+    ensuring each test uses its own session maker.
+    """
+    return async_sessionmaker(test_engine, expire_on_commit=False)
+
+
+@pytest.fixture
+def test_db(session_maker):
+    """Compatibility alias for session_maker.
+
+    This fixture maintains backward compatibility with existing test code
+    that uses the `test_db` parameter name. It simply returns the
+    function-scoped session maker.
+
+    TODO: Gradually migrate test code to use `session_maker` directly.
+    """
+    return session_maker
+
+
+@pytest.fixture
+async def db_session(session_maker) -> AsyncGenerator[AsyncSession, None]:
+    """Provide a fresh database session for each test.
+
+    Each test gets its own session that is properly rolled back
+    and closed after the test completes.
+    """
+    session = session_maker()
     try:
         yield session
     finally:
@@ -227,26 +258,30 @@ async def sample_deployment(db_session: AsyncSession, sample_estab, sample_users
 
 
 @pytest.fixture
-def client(test_db):
-    """Provide a test client for API endpoints using FastAPI TestClient."""
+def client(session_maker):
+    """Provide a test client for API endpoints using FastAPI TestClient.
+
+    This fixture creates a TestClient with the test database dependency
+    overridden to use the function-scoped test database. Each test gets
+    its own client with a fresh database.
+    """
     from parade_state.main import app
     from parade_state.db import get_db_session
     from fastapi.testclient import TestClient
 
-    # Override the database dependency to use the same test_db
+    # Override the database dependency to use the test database
     async def override_get_db_session():
-        async with test_db() as session:
+        async with session_maker() as session:
             yield session
 
     app.dependency_overrides[get_db_session] = override_get_db_session
 
-    with TestClient(app) as test_client:
-        yield test_client
-
-    app.dependency_overrides.clear()
-
-    # Clean up
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        # Clean up: remove dependency override
+        app.dependency_overrides.clear()
 
 
 @pytest.fixture

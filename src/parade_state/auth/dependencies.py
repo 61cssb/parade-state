@@ -115,7 +115,7 @@ async def get_current_user_optional(
             return None
 
         result = await db.execute(
-            select(User).where(User.id == ids.to_uuid(session.user_id))
+            select(User).where(User.id == session.user_id)
         )
         user = result.scalar_one_or_none()
 
@@ -171,7 +171,7 @@ async def require_authenticated_user(
             )
 
         result = await db.execute(
-            select(User).where(User.id == ids.to_uuid(session.user_id))
+            select(User).where(User.id == session.user_id)
         )
         user = result.scalar_one_or_none()
 

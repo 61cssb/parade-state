@@ -284,23 +284,23 @@ from parade_state.utils.utc_dt import utcnow, ensure_naive
 
 ## Testing Patterns
 
-### Test Organization
+**🚨 STOP: Read [docs/TESTING.md](docs/TESTING.md) before writing tests!**
 
-- **Unit tests:** `tests/test_{module}.py`
-- **Integration tests:** `tests/test_{feature}.py`
-- **Test fixtures:** `tests/conftest.py`
+Comprehensive testing guidance is available in the testing documentation, including:
 
-### Test Database
+- **Testing Philosophy**: Per-test isolation, realistic testing, fixture-based data
+- **Architecture**: Database isolation strategy, fixture structure, execution flow
+- **Patterns**: HTTP endpoint testing, database testing, authentication testing
+- **Common Pitfalls**: Anti-patterns to avoid when writing tests
+- **Adding New Tests**: Step-by-step guide for creating new tests
+- **Troubleshooting**: Solutions to common test failures
 
-- Use in-memory SQLite for speed
-- Isolate each test with fresh database
-- Clean up after tests automatically
-
-### Async Tests
-
-- Use `@pytest.mark.asyncio` for async test functions
-- Use `AsyncSession` for database operations
-- Use `TestClient` with async dependency overrides
+**Quick Reference**:
+- **Integration tests**: `tests/integration/test_*.py`
+- **Test fixtures**: `tests/conftest.py`
+- **Database**: File-based SQLite (not `:memory:`) for proper isolation
+- **Async tests**: Use `@pytest.mark.asyncio`
+- **HTTP testing**: Use `client` fixture, never create TestClient directly
 
 ## Performance Considerations
 

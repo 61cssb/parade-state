@@ -54,8 +54,10 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-def get_session_maker() -> async_sessionmaker[AsyncSession]:
-    """Get the async session maker for background tasks."""
-    if _async_session_maker is None:
-        raise RuntimeError("Database not initialized. Call init_database() first.")
+def get_session_maker() -> async_sessionmaker[AsyncSession] | None:
+    """Get the async session maker for background tasks.
+
+    Returns None if database has not been initialized yet.
+    This allows the lifespan manager to check if initialization is needed.
+    """
     return _async_session_maker
