@@ -73,6 +73,101 @@ tests/
 
 ---
 
+## Running Tests
+
+### Basic Commands
+
+```bash
+# Run all tests
+uv run pytest
+
+# Run integration tests
+uv run pytest tests/integration/
+
+# Run behavioral tests
+uv run pytest tests/behavioral/
+
+# Run specific test file
+uv run pytest tests/integration/test_personnel_api.py
+
+# Run specific test
+uv run pytest tests/integration/test_personnel_api.py::test_update_personnel_as_admin
+```
+
+### Useful Options
+
+```bash
+# Verbose output (see each test name)
+uv run pytest -v
+
+# Stop on first failure
+uv run pytest -x
+
+# Show detailed output (x = stop on first failure, v = verbose, s = print statements)
+uv run pytest -xvs
+
+# Shorter traceback format
+uv run pytest --tb=short
+
+# Run without coverage (faster)
+uv run pytest --no-cov
+
+# Run tests matching a keyword/pattern
+uv run pytest -k "audit"
+uv run pytest -k "personnel"
+
+# Run last failed tests
+uv run pytest --lf
+
+# Run tests multiple times (check for flakiness)
+uv run pytest --count=3 tests/integration/test_personnel_api.py
+```
+
+### Test Organization
+
+```bash
+# Run all API tests
+uv run pytest tests/integration/*_api.py
+
+# Run specific category
+uv run pytest tests/integration/test_personnel*.py
+
+# Run tests from multiple files
+uv run pytest tests/integration/test_personnel_api.py tests/integration/test_attendance_api.py
+```
+
+### Debugging Failed Tests
+
+```bash
+# Drop into debugger on failure
+uv run pytest --pdb
+
+# Show local variables on failure
+uv run pytest -l
+
+# Run with maximum verbosity
+uv run pytest -vv
+
+# Stop at first failure and drop into debugger
+uv run pytest -x --pdb
+```
+
+### Coverage Reports
+
+```bash
+# Generate coverage report
+uv run pytest --cov=src/parade_state
+
+# Generate HTML coverage report
+uv run pytest --cov=src/parade_state --cov-report=html
+
+# View coverage in browser
+open htmlcov/index.html  # On macOS
+xdg-open htmlcov/index.html  # On Linux
+```
+
+---
+
 ## Database Isolation Strategy
 
 ### Why Per-Test Isolation?
@@ -509,20 +604,20 @@ async def test_feature_y(client, sample_users):
 
 ```bash
 # Run specific test
-python -m pytest tests/integration/test_feature.py::test_feature_y -xvs
+uv run pytest tests/integration/test_feature.py::test_feature_y -xvs
 
 # Run all tests in file
-python -m pytest tests/integration/test_feature.py -xvs
+uv run pytest tests/integration/test_feature.py -xvs
 
 # Run all integration tests
-python -m pytest tests/integration/ -xvs
+uv run pytest tests/integration/ -xvs
 ```
 
 ### Step 5: Verify Isolation
 
 ```bash
 # Run tests multiple times to ensure no interference
-python -m pytest tests/integration/test_feature.py --count=3
+uv run pytest tests/integration/test_feature.py --count=3
 ```
 
 ---

@@ -118,6 +118,27 @@ def apply_personnel_filters(query, params: PersonnelListParams):
             )
         )
 
+    # Apply sorting
+    if params.sort_by:
+        # Map sort_by parameter to actual model fields
+        sort_field_map = {
+            "name": Personnel.full_name,
+            "rank": Personnel.rank,
+            "unit": Personnel.unit,
+            "status": Personnel.status,
+            "created_at": Personnel.created_at,
+            "updated_at": Personnel.updated_at,
+        }
+
+        if params.sort_by in sort_field_map:
+            sort_field = sort_field_map[params.sort_by]
+
+            # Apply sort order
+            if params.sort_order == "desc":
+                query = query.order_by(sort_field.desc())
+            else:
+                query = query.order_by(sort_field.asc())
+
     return query
 
 
@@ -213,6 +234,9 @@ async def get_deployment_personnel_with_overrides(
             sub_unit_3=personnel.sub_unit_3,
             status=personnel.status,
             created_at=personnel.created_at,
+            updated_at=personnel.updated_at,
+            created_by=personnel.created_by,
+            updated_by=personnel.updated_by,
             deployment_id=deployment_id,
             has_override=override is not None,
             deployment_notes=deployment_notes,
@@ -293,6 +317,8 @@ async def list_personnel(
     sub_unit_3: str | None = Query(None, description="Filter by sub-unit 3"),
     status: str | None = Query(None, description="Filter by personnel status"),
     search: str | None = Query(None, description="Search by name or service number"),
+    sort_by: str | None = Query(None, description="Sort field (name, rank, unit, status, created_at, updated_at)"),
+    sort_order: str | None = Query(None, description="Sort order (asc, desc)"),
     limit: int = Query(100, ge=1, le=1000, description="Number of results to return"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
     user_id: str = Query(..., description="User ID for authorization"),
@@ -310,6 +336,11 @@ async def list_personnel(
     When deployment_id is not provided:
     - Returns all personnel (admin/super_admin only)
     - No deployment-specific information included
+
+    Sorting:
+    - Can sort by: name, rank, unit, status, created_at, updated_at
+    - Sort order: asc (ascending) or desc (descending)
+    - Default: No sorting (returns in natural order)
     """
     params = PersonnelListParams(
         deployment_id=deployment_id,
@@ -320,6 +351,8 @@ async def list_personnel(
         sub_unit_3=sub_unit_3,
         status=status,
         search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
         limit=limit,
         offset=offset,
     )
@@ -367,6 +400,9 @@ async def list_personnel(
             sub_unit_3=p.sub_unit_3,
             status=p.status,
             created_at=p.created_at,
+            updated_at=p.updated_at,
+            created_by=p.created_by,
+            updated_by=p.updated_by,
             deployment_id=None,
             has_override=False,
             deployment_notes=None,
@@ -408,6 +444,9 @@ async def get_personnel(
             sub_unit_3=personnel.sub_unit_3,
             status=personnel.status,
             created_at=personnel.created_at,
+            updated_at=personnel.updated_at,
+            created_by=personnel.created_by,
+            updated_by=personnel.updated_by,
             deployment_id=deployment_id,
             has_override=override is not None,
             deployment_notes=notes.notes if notes else None,
@@ -441,6 +480,9 @@ async def get_personnel(
             sub_unit_3=personnel.sub_unit_3,
             status=personnel.status,
             created_at=personnel.created_at,
+            updated_at=personnel.updated_at,
+            created_by=personnel.created_by,
+            updated_by=personnel.updated_by,
             deployment_id=None,
             has_override=False,
             deployment_notes=None,
@@ -481,6 +523,10 @@ async def update_personnel(
             if hasattr(personnel, field):
                 setattr(personnel, field, value)
 
+        # Set audit trail fields
+        personnel.updated_at = utc_dt.utcnow()
+        personnel.updated_by = user_id
+
         await db.commit()
         await db.refresh(personnel)
 
@@ -496,6 +542,9 @@ async def update_personnel(
             sub_unit_3=personnel.sub_unit_3,
             status=personnel.status,
             created_at=personnel.created_at,
+            updated_at=personnel.updated_at,
+            created_by=personnel.created_by,
+            updated_by=personnel.updated_by,
             deployment_id=deployment_id,
             has_override=override is not None,
             deployment_notes=notes.notes if notes else None,
@@ -517,6 +566,10 @@ async def update_personnel(
             if hasattr(personnel, field):
                 setattr(personnel, field, value)
 
+        # Set audit trail fields
+        personnel.updated_at = utc_dt.utcnow()
+        personnel.updated_by = user_id
+
         await db.commit()
         await db.refresh(personnel)
 
@@ -532,6 +585,9 @@ async def update_personnel(
             sub_unit_3=personnel.sub_unit_3,
             status=personnel.status,
             created_at=personnel.created_at,
+            updated_at=personnel.updated_at,
+            created_by=personnel.created_by,
+            updated_by=personnel.updated_by,
             deployment_id=None,
             has_override=False,
             deployment_notes=None,

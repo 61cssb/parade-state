@@ -1,31 +1,33 @@
 # Parade State Development Guide
 
-**Purpose:** Primary reference for development patterns, conventions, and best practices when working on the Parade State application.
+**Purpose:** Primary reference for development patterns and conventions when working on the Parade State application.
 
 **What's Here:**
-- Development patterns (utility modules, async operations, etc.)
-- Code conventions and standards
-- Testing patterns
-- Performance and security guidelines
+- Critical development patterns (what you need every session)
+- Essential coding standards
+- Quick testing reference
 
 **What's Not Here:**
-- System architecture and design decisions → See [ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- Detailed code style and formatting rules → See [CODE_STYLE.md](docs/CODE_STYLE.md)
+- System architecture and design decisions → See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Detailed code style and formatting rules → See [docs/CODE_STYLE.md](docs/CODE_STYLE.md)
+- Performance optimization guidelines → See [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
+- Security patterns and best practices → See [docs/SECURITY.md](docs/SECURITY.md)
 - Specific utility module APIs → See module docstrings (e.g., `from parade_state.utils import utc_dt; help(utc_dt)`)
 - API documentation → See FastAPI auto-generated docs at `/docs`
 
 **How to Use This Guide:**
-1. **Read [CODE_STYLE.md](docs/CODE_STYLE.md) first** - Understand code style and import conventions
-2. Read through the patterns to understand the project's conventions
-3. Follow the examples when implementing new features
-4. Update this guide when introducing new patterns
-5. Refer to specific sections when you need guidance on particular operations
+1. **Read [docs/CODE_STYLE.md](docs/CODE_STYLE.md) first** - Understand code style and import conventions
+2. Follow these patterns for every feature you implement
+3. Refer to detailed docs for task-specific guidance
+4. Update this guide when introducing critical new patterns
+
+---
 
 ## Development Patterns
 
 ### 0. Code Style First (⚠️ CRITICAL)
 
-**🚨 STOP: Read [CODE_STYLE.md](docs/CODE_STYLE.md) before writing code!**
+**🚨 STOP: Read [docs/CODE_STYLE.md](docs/CODE_STYLE.md) before writing code!**
 
 The most important pattern in this project is **utility module encapsulation**. This is strictly enforced:
 
@@ -55,56 +57,9 @@ def schedule_session(date: utc_dt.date) -> utc_dt.datetime:
 - Automated checks may flag violations
 - You'll be asked to refactor the code
 
-### 1. Utility Module Pattern
-
-**Pattern:** Use centralized utility modules instead of native Python datatypes for common operations.
-
-**Rationale:**
-- Ensures consistency across the codebase
-- Centralizes business logic (easier maintenance)
-- Provides type-safe operations
-- Eliminates common sources of bugs (timezone confusion, etc.)
-
-**Example - Datetime Operations:**
-
-❌ **Don't use native datetime directly:**
-```python
-from datetime import datetime, timedelta
-
-now = datetime.utcnow()  # Deprecated and timezone-naive
-expires = now + timedelta(days=7)  # Loses timezone information
-if expires < datetime.utcnow():  # Fragile comparison
-    pass
-```
-
-✅ **Do use utility modules:**
-```python
-from parade_state.utils import utc_dt
-
-now = utc_dt.utcnow()  # Always UTC, always timezone-aware
-expires = utc_dt.add_timedelta(now, days=7)  # Preserves timezone info
-if utc_dt.is_expired(expires):  # Clear intent, handles edge cases
-    pass
-```
-
-**Available Utility Modules:**
-- `parade_state.utils.utc_dt` - UTC datetime operations (see module docstring for API reference)
-
-**When to Create New Utility Modules:**
-- You find yourself writing the same logic in multiple places
-- The operation involves tricky edge cases (timezones, validation, etc.)
-- You want to ensure consistent behavior across the codebase
-- The operation would benefit from centralized testing
-
-### 2. Async Database Operations
+### 1. Async Database Operations
 
 **Pattern:** Always use async database operations with FastAPI.
-
-**Rationale:**
-- Non-blocking I/O operations
-- Better concurrent request handling
-- Works seamlessly with FastAPI's async model
-- Efficient database connection usage
 
 ❌ **Don't use sync database operations:**
 ```python
@@ -122,15 +77,9 @@ async def get_user(user_id: str, db: AsyncSession = Depends(get_db_session)):
     return result.scalar_one_or_none()
 ```
 
-### 3. Dependency Injection for Database Sessions
+### 2. Dependency Injection for Database Sessions
 
 **Pattern:** Always use FastAPI's dependency injection for database sessions.
-
-**Rationale:**
-- Automatic session cleanup
-- Consistent with FastAPI patterns
-- Easier testing (can override dependencies)
-- Proper transaction management
 
 ❌ **Don't create sessions manually:**
 ```python
@@ -154,15 +103,9 @@ async def create_user(
     return user
 ```
 
-### 4. Type Annotations
+### 3. Type Annotations
 
 **Pattern:** Always provide complete type annotations.
-
-**Rationale:**
-- Better IDE support and autocomplete
-- Catches type errors early
-- Self-documenting code
-- Required for FastAPI request/response validation
 
 ❌ **Don't omit type annotations:**
 ```python
@@ -187,14 +130,9 @@ async def create_user(
     return user
 ```
 
-### 5. Explicit Error Handling
+### 4. Explicit Error Handling
 
 **Pattern:** Use specific HTTP status codes and descriptive error messages.
-
-**Rationale:**
-- Better API consumer experience
-- Easier debugging
-- Clear API contract via OpenAPI docs
 
 ❌ **Don't use generic errors:**
 ```python
@@ -211,14 +149,9 @@ if not user:
     )
 ```
 
-### 6. String UUID Storage
+### 5. String UUID Storage
 
 **Pattern:** Store UUIDs as strings in the database, use UUID objects for validation.
-
-**Rationale:**
-- SQLite compatibility (no native UUID type)
-- Cross-database compatibility
-- Easy string comparisons in queries
 
 ❌ **Don't use UUID objects for database queries:**
 ```python
@@ -237,102 +170,62 @@ except ValueError:
 result = await db.execute(select(User).where(User.id == user_id))
 ```
 
-## Code Conventions
-
-### Import Organization
-
-**Group imports in this order:**
-1. Standard library imports
-2. Third-party imports
-3. Local application imports (from parade_state.*)
-
-**Module-level imports preferred:**
-```python
-# ✅ Good - Module-level imports
-from parade_state.utils import utc_dt
-from parade_state.db import get_db_session
-
-# Use explicit module calls
-now = utc_dt.utcnow()
-db = get_db_session()
-
-# ❌ Avoid - Function-level imports (unless there's a naming conflict)
-from parade_state.utils.utc_dt import utcnow, ensure_naive
-```
-
-### Naming Conventions
-
-- **Modules:** `lowercase_with_underscores`
-- **Classes:** `PascalCase`
-- **Functions:** `lowercase_with_underscores`
-- **Constants:** `UPPER_CASE_WITH_UNDERSCORES`
-- **Private functions:** `_leading_underscore`
-
-### Database Models
-
-- **Table names:** `snake_case` (plural for tables)
-- **Column names:** `snake_case`
-- **Relationships:** Use `relationship()` with clear `back_populates`
-- **Indexes:** Add indexes for frequently queried columns
-
-### API Endpoints
-
-- **Routes:** Use `/api/v1/{resource}` pattern
-- **HTTP methods:** Use appropriate methods (GET for retrieval, POST for creation, etc.)
-- **Status codes:** Use correct HTTP status codes
-- **Responses:** Use Pydantic models for request/response validation
+---
 
 ## Testing Patterns
 
 **🚨 STOP: Read [docs/TESTING.md](docs/TESTING.md) before writing tests!**
 
-Comprehensive testing guidance is available in the testing documentation, including:
+### Running Tests
 
-- **Testing Philosophy**: Per-test isolation, realistic testing, fixture-based data
-- **Architecture**: Database isolation strategy, fixture structure, execution flow
-- **Patterns**: HTTP endpoint testing, database testing, authentication testing
-- **Common Pitfalls**: Anti-patterns to avoid when writing tests
-- **Adding New Tests**: Step-by-step guide for creating new tests
-- **Troubleshooting**: Solutions to common test failures
+**Essential Commands:**
+```bash
+# Run all tests
+uv run pytest
 
-**Quick Reference**:
-- **Integration tests**: `tests/integration/test_*.py`
-- **Test fixtures**: `tests/conftest.py`
-- **Database**: File-based SQLite (not `:memory:`) for proper isolation
-- **Async tests**: Use `@pytest.mark.asyncio`
-- **HTTP testing**: Use `client` fixture, never create TestClient directly
+# Run specific test file
+uv run pytest tests/integration/test_personnel_api.py
 
-## Performance Considerations
+# Run specific test
+uv run pytest tests/integration/test_personnel_api.py::test_update_personnel_as_admin
 
-### Database Queries
+# Run with verbose output
+uv run pytest -v
 
-- Use `select()` instead of `all()` for large datasets
-- Use `join()` strategically to avoid N+1 queries
-- Add indexes for frequently queried columns
-- Use bulk operations for multiple inserts/updates
+# Stop on first failure
+uv run pytest -x
 
-### Memory Management
+# Run without coverage (faster)
+uv run pytest --no-cov
 
-- Use generators instead of lists for large datasets
-- Close database sessions properly
-- Use connection pooling (configured in SQLAlchemy setup)
+# Run tests matching pattern
+uv run pytest -k "personnel"
+```
 
-## Security Patterns
+**For more testing options and detailed guidance, see [docs/TESTING.md](docs/TESTING.md)**
 
-### Input Validation
+### Quick Testing Reference
 
-- Always validate user input (use Pydantic models)
-- Sanitize data before database operations
-- Validate UUIDs and other ID formats
+- **Integration tests:** `tests/integration/test_*.py`
+- **Test fixtures:** `tests/conftest.py`
+- **Database:** File-based SQLite (not `:memory:`) for proper isolation
+- **Async tests:** Use `@pytest.mark.asyncio`
+- **HTTP testing:** Use `client` fixture, never create TestClient directly
 
-### Access Control
+---
 
-- Use dependency injection for authentication/authorization
-- Check permissions at endpoint level
-- Implement row-level security where appropriate
+## Additional Guidelines
+
+For detailed guidance on specific topics, refer to these documents:
+
+- **[docs/CODE_STYLE.md](docs/CODE_STYLE.md)** - Complete code style and formatting reference
+- **[docs/TESTING.md](docs/TESTING.md)** - Comprehensive testing guide
+- **[docs/PERFORMANCE.md](docs/PERFORMANCE.md)** - Performance optimization guidelines
+- **[docs/SECURITY.md](docs/SECURITY.md)** - Security patterns and best practices
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - System architecture and design decisions
 
 ---
 
 **Contributing:** When adding new development patterns, update this document to share knowledge with the team.
 
-**See Also:** [ARCHITECTURE.md](docs/ARCHITECTURE.md) for system architecture and design decisions.
+**See Also:** [docs/TESTING.md](docs/TESTING.md) for testing patterns and [docs/CODE_STYLE.md](docs/CODE_STYLE.md) for code style conventions.

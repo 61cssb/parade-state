@@ -21,9 +21,9 @@ class Personnel(Base):
         String(36), ForeignKey("estabs.id", ondelete="CASCADE"), index=True
     )
     pers_no: Mapped[str] = mapped_column(String(255), index=True)
-    rank: Mapped[str] = mapped_column(String(50))
-    full_name: Mapped[str] = mapped_column(String(255))
-    unit: Mapped[str] = mapped_column(String(255))
+    rank: Mapped[str] = mapped_column(String(50), index=True)
+    full_name: Mapped[str] = mapped_column(String(255), index=True)
+    unit: Mapped[str] = mapped_column(String(255), index=True)
     sub_unit_1: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sub_unit_2: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sub_unit_3: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -31,9 +31,12 @@ class Personnel(Base):
     status: Mapped[str] = mapped_column(
         Enum("active", "archived", name="personnel_status"),
         default="active",
+        index=True,
     )
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
+    updated_at: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
+    updated_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
 
     # Relationships
     estab: Mapped["Estab"] = relationship(back_populates="personnel")

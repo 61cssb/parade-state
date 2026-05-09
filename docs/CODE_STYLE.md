@@ -347,6 +347,99 @@ async def get_user(user_id: str):
     return user  # Unclear what this returns
 ```
 
+### **Response Models**
+
+Use Pydantic models for responses:
+
+```python
+# ✅ CORRECT - Explicit response models
+@router.get("/users/{user_id}", response_model=UserResponse)
+async def get_user(user_id: str):
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "name": user.name,
+    }
+
+# ❌ VIOLATION - Untyped responses
+@router.get("/users/{user_id}")
+async def get_user(user_id: str):
+    return user  # Unclear what this returns
+```
+
+### **HTTP Methods and Status Codes**
+
+Use appropriate HTTP methods and status codes:
+
+| Operation | HTTP Method | Success Status | Error Statuses |
+|-----------|-------------|----------------|----------------|
+| List | GET | 200 OK | 400, 401, 403, 404 |
+| Get by ID | GET | 200 OK | 400, 401, 403, 404 |
+| Create | POST | 201 Created | 400, 401, 403 |
+| Update | PATCH | 200 OK | 400, 401, 403, 404 |
+| Delete | DELETE | 204 No Content | 400, 401, 403, 404 |
+
+---
+
+## Database Models
+
+### **Naming Conventions**
+
+**Table Names:**
+- Use `snake_case` (plural for tables)
+- Example: `personnel`, `deployment_user_accesses`
+
+**Column Names:**
+- Use `snake_case`
+- Example: `created_at`, `deployment_id`, `full_name`
+
+**Relationships:**
+- Use `relationship()` with clear `back_populates`
+- Example:
+```python
+class Personnel(Base):
+    """Individual personnel record."""
+    __tablename__ = "personnel"
+
+    # Relationships
+    deployment_overrides: Mapped[list["DeploymentPersonnelOverride"]] = relationship(
+        back_populates="personnel",
+        cascade="all, delete-orphan",
+    )
+```
+
+**Indexes:**
+- Add indexes for frequently queried columns
+- Example:
+```python
+class Personnel(Base):
+    pers_no: Mapped[str] = mapped_column(String(255), index=True)
+    rank: Mapped[str] = mapped_column(String(50), index=True)
+    status: Mapped[str] = mapped_column(
+        Enum("active", "archived", name="personnel_status"),
+        index=True,
+    )
+```
+
+### **Foreign Key Conventions**
+
+Store UUIDs as strings for database compatibility:
+
+```python
+# ✅ CORRECT - String UUIDs
+class Deployment(Base):
+    __tablename__ = "deployments"
+
+    estab_id: Mapped[str] = mapped_column(
+        String(36),  # String UUID for SQLite compatibility
+        ForeignKey("estabs.id", ondelete="CASCADE"),
+    )
+
+# ❌ AVOID - Native UUID type (not SQLite compatible)
+class Deployment(Base):
+    estab_id: Mapped[UUID] = mapped_column(UUID)  # Not portable
+```
+
 ---
 
 ## Enforcing Style Guidelines

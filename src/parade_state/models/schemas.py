@@ -296,7 +296,9 @@ class PersonnelResponse(PersonnelBase):
     estab_id: str
     status: str
     created_at: datetime
-    updated_at: datetime
+    updated_at: datetime | None
+    created_by: str
+    updated_by: str | None
 
     class Config:
         from_attributes = True
@@ -305,13 +307,17 @@ class PersonnelResponse(PersonnelBase):
 class PersonnelUpdate(BaseModel):
     """Schema for updating personnel."""
 
-    rank: str | None = Field(None, min_length=1)
-    name: str | None = Field(None, min_length=1)
-    unit: str | None = Field(None, min_length=1)
-    sub_unit_1: str | None = None
-    sub_unit_2: str | None = None
-    sub_unit_3: str | None = None
-    status: str | None = None
+    rank: str | None = Field(None, min_length=1, max_length=50, description="Personnel rank")
+    name: str | None = Field(None, min_length=1, max_length=255, description="Full name")
+    unit: str | None = Field(None, min_length=1, max_length=255, description="Unit assignment")
+    sub_unit_1: str | None = Field(None, max_length=255, description="Sub-unit level 1")
+    sub_unit_2: str | None = Field(None, max_length=255, description="Sub-unit level 2")
+    sub_unit_3: str | None = Field(None, max_length=255, description="Sub-unit level 3")
+    status: str | None = Field(
+        None,
+        pattern="^(active|archived)$",
+        description="Personnel status (active or archived)",
+    )
 
 
 class PersonnelListParams(BaseModel):
@@ -325,6 +331,14 @@ class PersonnelListParams(BaseModel):
     sub_unit_3: str | None = None
     status: str | None = None
     search: str | None = None
+    sort_by: str | None = Field(
+        None,
+        description="Sort field (name, rank, unit, status, created_at, updated_at)",
+    )
+    sort_order: str | None = Field(
+        None,
+        description="Sort order (asc, desc)",
+    )
     limit: int = Field(100, ge=1, le=1000)
     offset: int = Field(0, ge=0)
 
@@ -336,6 +350,9 @@ class PersonnelResponseWithDeployment(PersonnelBase):
     estab_id: str
     status: str
     created_at: datetime
+    updated_at: datetime | None
+    created_by: str
+    updated_by: str | None
     # Deployment-specific fields (included when deployment_id is provided)
     deployment_id: str | None = None
     has_override: bool = False
