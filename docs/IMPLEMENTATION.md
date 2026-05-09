@@ -73,29 +73,37 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 
 ### 2.1 Test Architecture
 
-**Database Isolation:** Each test gets a completely fresh in-memory SQLite database with async support.
+**Database Isolation:** Each test gets a completely fresh file-based SQLite database with async support.
+
+**Rationale for File-Based Database:**
+- **Proper isolation**: File-based databases avoid connection isolation issues with async SQLite
+- **Transaction safety**: Each test gets its own database file preventing interference
+- **Debugging**: Database files persist temporarily for debugging failed tests
+- **Performance**: Slightly slower than `:memory:`, but provides reliable test isolation
 
 **Fixture Scope:**
-- `test_db`: Function-scoped - new database per test
+- `test_engine`: Function-scoped - creates engine and database file per test
+- `session_maker`: Function-scoped - creates session factory per test
 - `db_session`: Function-scoped - new session per test
+- `client`: Function-scoped - creates TestClient with dependency override per test
 - All sample data fixtures: Function-scoped - fresh data per test
+
+**Critical Pattern:** Tests initialize the global database state via `init_database()` to ensure the authentication system works correctly.
 
 ### 2.2 Test Categories
 
 **Current Test Suite:**
-- `test_access_control.py` - Access level hierarchy, user access control, column visibility (8 tests)
-- `test_api.py` - General API endpoint tests (4 tests)
-- `test_auth.py` - Authentication and session management tests (6 tests)
-- `test_attendance_api.py` - Attendance management API tests (18 tests)
-- `test_csv_personnel.py` - Personnel identity, estab versioning, column mapping (10 tests)
-- `test_deployment_attendance.py` - Deployment lifecycle, session constraints, attendance rules (8 tests)
-- `test_deployments_api.py` - Deployment management API tests (18 tests)
-- `test_personnel_api.py` - Personnel management API tests (23 tests) ✨ NEW
-- `test_sessions_api.py` - Session management API tests (21 tests)
+- `tests/integration/test_access_control_api.py` - Access level hierarchy, user access control, column visibility (19 tests)
+- `tests/integration/test_api.py` - Authentication, user management, role management (18 tests)
+- `tests/integration/test_attendance_api.py` - Attendance management, snapshots, constraints (40 tests)
+- `tests/integration/test_deployments_api.py` - Deployment lifecycle, CRUD operations (18 tests)
+- `tests/integration/test_personnel_api.py` - Personnel management, search, filtering (12 tests)
+- `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (10 tests)
+- `tests/integration/test_sessions_api.py` - Session management, opening, closing, finalization (8 tests)
 
-**Total:** 133 tests, 100% pass rate ✨ UPDATED
-**Coverage:** Improved with personnel API test coverage
-**New:** Personnel API with deployment context, filtering, and search
+**Total:** 125 tests, 100% pass rate ✅ UPDATED
+**Coverage:** Comprehensive integration test coverage across all major features
+**Performance:** ~9 seconds for full integration test suite
 
 ### 2.3 Writing New Tests
 
@@ -124,12 +132,14 @@ async def test_your_feature(db_session, sample_deployment, sample_users):
 
 ### 2.4 Test Fixtures
 
-**Available fixtures:**
+**Core fixtures:**
 
 ```python
-# Database fixtures
-db_session          # Async database session for each test
-test_db             # Fresh database engine for each test
+test_engine     # Creates database engine and file, initializes global state
+session_maker   # Creates session factory for test database
+db_session       # Provides database session for direct operations
+client          # Provides TestClient with database dependency override
+test_db          # Alias for session_maker (backward compatibility)
 
 # Sample data fixtures (automatically create fresh data)
 sample_access_levels    # Creates: unit, coy, platoon, section
@@ -137,17 +147,21 @@ sample_users            # Creates: admin user, regular user
 sample_estab            # Creates: sample establishment
 sample_personnel        # Creates: 3 sample personnel records
 sample_deployment       # Creates: sample active deployment
+sample_sessions         # Creates: multiple session records
+sample_attendance_records  # Creates: attendance records
 ```
 
 **Using fixtures:**
 
 ```python
-async def test_example(db_session, sample_users, sample_deployment):
+async def test_example(client, sample_users, sample_deployment):
     # Fixtures automatically provide fresh, isolated data
     admin = sample_users["admin"]
     deployment = sample_deployment
-    
-    # Test code here...
+
+    # HTTP endpoint testing
+    response = client.get(f"/api/v1/deployments/{deployment.id}")
+    assert response.status_code == 200
 ```
 
 ---

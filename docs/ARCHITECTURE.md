@@ -825,11 +825,56 @@ async def get_visible_personnel(user_id: str, deployment_id: str):
 # User sees columns where access_level >= column_sensitivity
 async def get_visible_columns(user_id: str):
     user_access_level = await get_user_access_level(user_id)
-    
+
     # Get columns where sensitivity_level <= user_access_level
     columns = await query_columns_by_sensitivity(user_access_level)
     return columns
 ```
+
+### 7.3 Session Management Implementation
+
+**Session Storage Pattern:**
+```python
+class UserSession(Base):
+    """User authentication session for managing login state and access control."""
+    __tablename__ = "user_sessions"
+
+    token: Mapped[str] = mapped_column(String(255), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
+    # ... other fields
+```
+
+**Critical Pattern - UUID String Storage:**
+- **Database Storage**: UUIDs stored as **strings** (`Mapped[str]`) for SQLite compatibility
+- **Database Queries**: Use **string comparison** (not UUID objects)
+- **Validation**: Convert to UUID objects only for format validation
+
+```python
+# ✅ CORRECT: String comparison for database queries
+result = await db.execute(
+    select(User).where(User.id == session.user_id)  # Both strings
+)
+
+# ❌ WRONG: UUID object comparison fails
+result = await db.execute(
+    select(User).where(User.id == ids.to_uuid(session.user_id))  # UUID vs string
+)
+```
+
+**Authentication Flow:**
+1. User logs in via Google OAuth → creates `User` record
+2. System creates `UserSession` with secure token → stores in database
+3. Client receives token → includes in Authorization header
+4. HTTP request triggers `require_authenticated_user()` dependency
+5. Dependency validates token via `get_valid_session()` → retrieves UserSession
+6. Dependency looks up User by string ID → returns authenticated user
+7. Request proceeds with user context
+
+**Security Features:**
+- **Token Generation**: `secrets.token_urlsafe(32)` for 256-bit security
+- **Expiration**: 7-day default expiration
+- **Tracking**: Stores IP, user agent, last accessed time
+- **Validation**: Every request validates session in database
 
 ---
 
