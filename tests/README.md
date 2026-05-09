@@ -173,20 +173,20 @@ class TestFunctionName:
 """Tests for [feature] API endpoints."""
 
 import pytest
-from httpx import AsyncClient
+from fastapi.testclient import TestClient
 
 @pytest.mark.asyncio
 async def test_create_resource_as_admin(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
-    db_session,
+    test_db,
 ):
     """Test resource creation by admin."""
     # Arrange
     resource_data = {"name": "Test Resource"}
 
     # Act
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/resources/",
         json=resource_data,
         headers=admin_token_headers,
@@ -231,13 +231,67 @@ class TestDomainBehavior:
 
 ### Available Fixtures (in `conftest.py`)
 
-- `async_client` - HTTP client for API testing
-- `db_session` - Database session for database operations
-- `admin_token_headers` - Authentication headers for admin user
-- `sample_deployment` - Sample deployment entity
-- `sample_personnel` - Sample personnel entities
-- `sample_users` - Sample user entities
-- `sample_estab` - Sample establishment entity
+- **`client`** - FastAPI TestClient for API testing (synchronous interface)
+- **`test_db`** - Database engine and session factory with tables created
+- **`db_session`** - Database session for database operations
+- **`admin_token_headers`** - Authentication headers for admin user
+- **`sample_deployment`** - Sample deployment entity
+- **`sample_personnel`** - Sample personnel entities
+- **`sample_users`** - Sample user entities
+- **`sample_estab`** - Sample establishment entity
+
+### Testing Approach
+
+**FastAPI TestClient (Recommended):**
+- **Synchronous interface** - No need for `await` keywords
+- **Built into FastAPI** - No extra dependencies required
+- **Handles async internally** - TestClient manages async/await for you
+- **Better performance** - Less overhead than httpx.AsyncClient
+- **Designed for FastAPI** - Perfect match for our framework
+
+```python
+# ✅ CORRECT - Use TestClient synchronously
+def test_endpoint(client: TestClient):
+    response = client.get("/api/v1/users")  # No await
+    assert response.status_code == 200
+```
+
+**When to consider httpx.AsyncClient:**
+- Testing concurrent/parallel requests
+- Load testing with high concurrency
+- WebSocket testing
+- External async API integration testing
+
+**Note:** httpx was intentionally removed as a direct dependency to reduce complexity. If you need httpx for advanced testing scenarios, this should be a deliberate decision discussed with the team.
+
+## 🎯 Dependency Decisions
+
+### Why We Use FastAPI TestClient Over httpx
+
+**Decision:** Use FastAPI's built-in TestClient instead of httpx.AsyncClient for testing.
+
+**Rationale:**
+
+1. **Simplicity:** TestClient provides a synchronous interface - no need for `await` keywords in test calls
+2. **Performance:** Less overhead than httpx.AsyncClient for our use case
+3. **Framework Match:** TestClient is designed specifically for FastAPI applications
+4. **Fewer Dependencies:** Reduces our direct dependency count
+5. **Maintainability:** Less complex test code is easier to maintain
+
+**When we moved from httpx to TestClient:**
+- All integration tests now use `client: TestClient` instead of `async_client: AsyncClient`
+- Removed `await` keywords from HTTP calls: `client.get()` instead of `await async_client.get()`
+- Updated all test fixtures to use synchronous interface
+- Removed httpx from project dependencies in `pyproject.toml`
+
+**Future considerations:**
+If httpx.AsyncClient is needed in the future, it should be for specific, intentional reasons:
+- Concurrent request testing (parallel API calls)
+- Load testing with high concurrency
+- Advanced WebSocket testing
+- External async API integration testing
+
+This should be a deliberate architectural decision, not incidental complexity.
 
 ### Creating Custom Fixtures
 
@@ -245,13 +299,14 @@ class TestDomainBehavior:
 # In conftest.py or your test file
 
 @pytest.fixture
-async def custom_resource(db_session):
+async def custom_resource(test_db):
     """Create a custom resource for testing."""
-    resource = Resource(name="Test")
-    db_session.add(resource)
-    await db_session.commit()
-    await db_session.refresh(resource)
-    return resource
+    async with test_db() as db_session:
+        resource = Resource(name="Test")
+        db_session.add(resource)
+        await db_session.commit()
+        await db_session.refresh(resource)
+        return resource
 ```
 
 ## 📏 Test Conventions
@@ -435,10 +490,17 @@ When contributing new tests:
 |------|---------|
 | Run all tests | `pytest` |
 | Run only unit tests | `pytest tests/unit/` |
+| Run only integration tests | `pytest tests/integration/` |
 | Run with coverage | `pytest --cov` |
 | Run failed tests | `pytest --lf` |
 | Run with verbose output | `pytest -v` |
 | Debug with pdb | `pytest --pdb` |
 | Run specific test | `pytest tests/path/to/test.py::test_function` |
+
+## 🔗 Related Documentation
+
+- [CLAUDE.md](../CLAUDE.md) - Development patterns and conventions
+- [ARCHITECTURE.md](../docs/ARCHITECTURE.md) - System architecture and design
+- [CODE_STYLE.md](../docs/CODE_STYLE.md) - Code style and formatting rules
 
 For questions or help with testing, please refer to the project documentation or ask the team.

@@ -17,7 +17,8 @@
 7. [Deployment Architecture](#7-deployment-architecture)
 8. [Security Architecture](#8-security-architecture)
 9. [Code Standards & Best Practices](#9-code-standards--best-practices)
-10. [Performance & Scalability](#10-performance--scalability)
+10. [Testing Strategy](#10-testing-strategy)
+11. [Performance & Scalability](#11-performance--scalability)
 
 ---
 
@@ -863,9 +864,133 @@ For detailed development patterns and examples, refer to **[CLAUDE.md](../CLAUDE
 
 ---
 
-## 10. Performance & Scalability
+## 10. Testing Strategy
 
-### 10.1 Current Performance Characteristics
+### 10.1 Testing Philosophy
+
+The project follows a **testing pyramid** approach with clear separation of concerns:
+
+```
+                 /\
+                /  \
+               / E2E\           (Future: End-to-end UI tests)
+              /------\
+             /        \
+            / Integration \    (API endpoints, database)
+           /--------------\
+          /                  \
+         /     Unit Tests      \  (Functions, models, logic)
+        /----------------------\
+```
+
+**Testing priorities:**
+1. **Unit tests** - Fast, isolated tests of business logic
+2. **Integration tests** - API endpoint testing with real database
+3. **Behavioral tests** - Domain logic and system behavior validation
+
+### 10.2 FastAPI Testing Approach
+
+**Decision:** Use FastAPI's built-in **TestClient** instead of httpx.AsyncClient
+
+**Rationale:**
+
+| Aspect | FastAPI TestClient | httpx.AsyncClient |
+|--------|-------------------|-------------------|
+| **Interface** | Synchronous | Async (requires await) |
+| **Dependencies** | Built into FastAPI | Additional dependency |
+| **Performance** | Lower overhead | Higher overhead |
+| **Framework Match** | Designed for FastAPI | Generic HTTP client |
+| **Complexity** | Simpler test code | More complex test code |
+
+**Implementation:**
+```python
+# ✅ CORRECT - Use TestClient synchronously
+from fastapi.testclient import TestClient
+
+def test_endpoint(client: TestClient):
+    response = client.get("/api/v1/users")  # No await
+    assert response.status_code == 200
+
+# ❌ WRONG - Don't use httpx for basic testing
+import httpx
+
+async def test_endpoint():
+    async with httpx.AsyncClient(app=app) as client:
+        response = await client.get("/api/v1/users")  # Unnecessary complexity
+```
+
+**Benefits:**
+1. **Simplicity** - No async/await complexity in test code
+2. **Performance** - Lower overhead for our use case
+3. **Maintainability** - Less complex, easier to understand
+4. **Dependencies** - Fewer direct dependencies to manage
+
+### 10.3 Test Organization
+
+**Unit Tests (`tests/unit/`)**
+- **Purpose:** Test isolated functions and modules
+- **Characteristics:** Fast, no database/network, use mocks
+- **Example:** Testing `utc_dt.now()` with various inputs
+
+**Integration Tests (`tests/integration/`)**
+- **Purpose:** Test API endpoints with database
+- **Characteristics:** Real database (SQLite in-memory), HTTP requests
+- **Example:** Testing `POST /api/v1/attendance` with authentication
+
+**Behavioral Tests (`tests/behavioral/`)**
+- **Purpose:** Test domain logic and business rules
+- **Characteristics:** Database models, constraints, system behavior
+- **Example:** Testing access control hierarchy enforcement
+
+### 10.4 Dependency Decisions
+
+**httpx Removal (2026-05-09):**
+
+**Decision:** Removed httpx as a direct dependency from `pyproject.toml`
+
+**Reasons:**
+1. **Overengineering:** httpx.AsyncClient provided unnecessary complexity for our testing needs
+2. **Framework-native:** FastAPI TestClient is designed specifically for FastAPI applications
+3. **Dependency surface:** Reducing direct dependencies improves maintainability
+4. **Performance:** TestClient has lower overhead for our use case
+
+**Impact:**
+- All integration tests converted from `async_client: AsyncClient` to `client: TestClient`
+- Removed `await` keywords from HTTP test calls
+- Updated test fixtures to use synchronous interface
+- All 100+ integration tests passing with new approach
+
+**Future considerations:**
+If httpx.AsyncClient is added back in the future, it should be for specific, intentional reasons:
+- **Concurrent request testing** - Testing parallel API calls
+- **Load testing** - High concurrency performance testing
+- **WebSocket testing** - Advanced WebSocket testing capabilities
+- **External async API integration** - When the app needs to make async HTTP calls
+
+This should be a deliberate architectural decision, not incidental complexity.
+
+### 10.5 Test Coverage Requirements
+
+**Minimum Coverage: 80%**
+
+The project requires 80% code coverage across all modules.
+
+**Coverage targets by component:**
+- **Utils modules:** 90%+ (isolated, easy to test)
+- **API endpoints:** 85%+ (critical paths)
+- **Models:** 80%+ (business logic)
+- **Middleware:** 75%+ (harder to test)
+
+**Verification:**
+```bash
+pytest --cov=src/parade_state --cov-report=term-missing
+```
+
+---
+
+## 11. Performance & Scalability
+
+### 11.1 Current Performance Characteristics
 
 **Test results:**
 - 26 tests execute in ~2 seconds
@@ -877,7 +1002,7 @@ For detailed development patterns and examples, refer to **[CLAUDE.md](../CLAUDE
 - Mobile UI load time: < 2s on 4G
 - Attendance write: < 500ms round-trip
 
-### 10.2 Scalability Considerations
+### 11.2 Scalability Considerations
 
 **Current single-instance limits:**
 - Max concurrent users: ~200 (based on typical FastAPI performance)
