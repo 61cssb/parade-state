@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from parade_state.api.auth import get_current_user
+from parade_state.auth.dependencies import require_authenticated_user, require_admin_user
 from parade_state.db import get_db_session
 from parade_state.models import AccessLevel, User
 from parade_state.utils import ids
@@ -24,14 +24,9 @@ class UserUpdate(BaseModel):
 router = APIRouter()
 
 
-async def require_admin(current_user: User = Depends(get_current_user)):
-    """Dependency to require admin or super admin role."""
-    if current_user.role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="Admin access required",
-        )
-    return current_user
+# Aliases for backward compatibility within this module
+get_current_user = require_authenticated_user
+require_admin = require_admin_user
 
 
 @router.get("/")

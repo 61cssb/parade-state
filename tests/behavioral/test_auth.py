@@ -5,7 +5,7 @@ from datetime import timedelta, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.models import User, UserSession
-from parade_state.session import (
+from parade_state.auth.session import (
     create_user_session,
     get_valid_session,
     invalidate_session,

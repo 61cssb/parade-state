@@ -16,12 +16,11 @@ The application follows a strict 5-layer architecture with clear dependency boun
 
 ### Layer 3: Business Logic
 - **parade_state.config** - Application configuration
-- **parade_state.auth** - OAuth client configuration
-- **parade_state.session** - User session management
 
-### Layer 4: API Layer
-- **parade_state.middleware** - Authentication middleware
-- **parade_state.api** - REST API route handlers
+### Layer 4: Routes & Authentication
+- **parade_state.auth** - Authentication utilities (dependencies, session, oauth)
+- **parade_state.web** - User-facing web routes (OAuth flows, redirects)
+- **parade_state.api** - REST API route handlers (JSON responses)
 
 ### Layer 5: Application
 - **parade_state.main** - FastAPI application orchestration
@@ -29,7 +28,7 @@ The application follows a strict 5-layer architecture with clear dependency boun
 ## Dependency Flow
 
 ```
-Foundation → Data Models → Business Logic → API Layer → Application
+Foundation → Data Models → Business Logic → Auth → Web/API → Application
 ```
 
 **Key Rules:**
@@ -37,15 +36,17 @@ Foundation → Data Models → Business Logic → API Layer → Application
 - No circular dependencies at runtime
 - Models use TYPE_CHECKING for forward references
 - API endpoints use dependency injection for runtime dependencies
+- Web routes and API both use shared auth utilities
 
 ## Initialization Order
 
 1. Load utilities (parade_state.utils)
 2. Initialize database (parade_state.db.init_database)
 3. Import models (parade_state.models)
-4. Load business logic (parade_state.config, auth, session)
-5. Initialize API layer (parade_state.middleware, api)
-6. Create FastAPI app (parade_state.main.app)
+4. Load business logic (parade_state.config)
+5. Load authentication utilities (parade_state.auth)
+6. Initialize web routes (parade_state.web) and API routes (parade_state.api)
+7. Create FastAPI app (parade_state.main.app)
 
 ## Module Dependencies
 

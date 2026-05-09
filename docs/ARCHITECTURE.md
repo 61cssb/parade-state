@@ -138,10 +138,21 @@ The `parade_state` application follows a strict layered architecture with clear 
                               │ depends on
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    LAYER 4: API Layer                       │
-│                    parade_state.api/*                        │
-│                    parade_state.middleware/*                 │
-│                    (Route handlers & middleware)             │
+│                    LAYER 4: Routes                          │
+│                                                              │
+│  ┌────────────────────┐    ┌────────────────────┐          │
+│  │ parade_state.web   │    │ parade_state.api   │          │
+│  │ (OAuth flows)      │    │ (REST API)         │          │
+│  │ /auth/login        │    │ /api/v1/*          │          │
+│  │ /auth/callback     │    │ (JSON responses)   │          │
+│  └────────────────────┘    └────────────────────┘          │
+│           │                           │                     │
+│           └───────────┬───────────────┘                     │
+│                       ▼                                     │
+│         ┌───────────────────────────┐                      │
+│         │ parade_state.auth         │                      │
+│         │ (dependencies, session)   │                      │
+│         └───────────────────────────┘                      │
 └─────────────────────────────────────────────────────────────┘
                               │
                               │ depends on
@@ -149,8 +160,6 @@ The `parade_state` application follows a strict layered architecture with clear 
 ┌─────────────────────────────────────────────────────────────┐
 │                   LAYER 3: Business Logic                   │
 │                   parade_state.config                        │
-│                   parade_state.auth                          │
-│                   parade_state.session                       │
 │                   (Configuration & domain logic)             │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -213,31 +222,30 @@ The `parade_state` application follows a strict layered architecture with clear 
 **`parade_state.config`**
 - **Purpose:** Application configuration management
 - **Dependencies:** `parade_state.utils.env`
-- **Initialization:** Fourth (parallel with auth)
+- **Initialization:** Fourth
+
+#### **Layer 4: Routes & Authentication**
 
 **`parade_state.auth`**
-- **Purpose:** OAuth client configuration
-- **Dependencies:** `parade_state.utils.env`
-- **Initialization:** Fourth (parallel with config)
+- **Modules:** `dependencies.py`, `session.py`, `oauth.py`
+- **Purpose:** Authentication and authorization utilities
+- **Dependencies:** `parade_state.models`, `parade_state.db`, `parade_state.utils`
+- **Initialization:** Fifth
+- **Note:** Reusable authentication logic for both API and web routes
 
-**`parade_state.session`**
-- **Purpose:** User session management
-- **Dependencies:** `parade_state.models`, `parade_state.utils.utc_dt`
-- **Initialization:** Fifth (after models)
-
-#### **Layer 4: API Layer**
-
-**`parade_state.middleware`**
+**`parade_state.web`**
 - **Modules:** `auth.py`
-- **Purpose:** Authentication middleware for protected routes
-- **Dependencies:** `parade_state.models`, `parade_state.db`, `parade_state.session`, `parade_state.utils.ids`
+- **Purpose:** User-facing web routes (OAuth flows, redirects)
+- **Dependencies:** `parade_state.auth`, `parade_state.models`, `parade_state.db`
 - **Initialization:** Sixth
+- **Note:** Returns HTML/redirects, not JSON
 
 **`parade_state.api`**
 - **Modules:** `auth.py`, `users.py`, `deployments.py`, `sessions.py`, `attendance.py`, `personnel.py`, `access_control.py`
-- **Purpose:** REST API route handlers
+- **Purpose:** REST API route handlers (JSON responses)
 - **Dependencies:** All previous layers
 - **Initialization:** Seventh
+- **Note:** Pure JSON API, documented in OpenAPI
 
 #### **Layer 5: Application**
 
@@ -354,7 +362,105 @@ Application → API → Business Logic → Models → Foundation
 - No runtime model operations in middleware
 - All database operations via dependency injection
 
-### 3.6 Dependency Rules
+### 3.6 Web Routes vs REST API
+
+The application separates user-facing web routes from REST API endpoints for clear architectural boundaries.
+
+#### **Web Routes (`parade_state.web`)**
+
+**Purpose:** Handle browser-based authentication flows and user interactions
+
+**Characteristics:**
+- Return HTTP redirects, not JSON
+- Handle OAuth flows (Google OAuth)
+- Intended for frontend navigation
+- Not documented in OpenAPI/Swagger
+
+**URL Structure:**
+```
+/auth/login     → Redirect to Google OAuth
+/auth/callback  → OAuth callback, redirect to frontend with token
+```
+
+**Example:**
+```python
+@router.get("/login")
+async def login(request: Request):
+    """Initiate Google OAuth login flow (user-facing)."""
+    return await google.authorize_redirect(request, redirect_uri)
+```
+
+#### **REST API (`parade_state.api`)**
+
+**Purpose:** Provide JSON API for frontend clients, mobile apps, and integrations
+
+**Characteristics:**
+- Return JSON responses only
+- Require Bearer token authentication
+- Documented in OpenAPI/Swagger (`/docs`)
+- Intended for programmatic access
+
+**URL Structure:**
+```
+/api/v1/auth/me     → Get current user info
+/api/v1/auth/logout → Logout user
+/api/v1/users/      → List users
+/api/v1/deployments/ → Manage deployments
+```
+
+**Example:**
+```python
+@router.get("/me")
+async def get_current_user_info(
+    current_user: User = Depends(require_authenticated_user),
+) -> dict:
+    """Get current user information (REST API)."""
+    return {
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "name": current_user.name,
+        "role": current_user.role,
+    }
+```
+
+#### **Authentication Logic (`parade_state.auth`)**
+
+**Purpose:** Reusable authentication utilities for both web and API
+
+**Modules:**
+- `dependencies.py` - FastAPI dependencies for authentication
+- `session.py` - Session management utilities
+- `oauth.py` - OAuth client configuration
+
+**Benefits of Separation:**
+
+1. **Clear API Contract:** REST API clients only see JSON endpoints
+2. **Frontend Independence:** Can change OAuth flow without affecting API
+3. **Testing:** Test API endpoints independently of OAuth
+4. **Documentation:** OpenAPI docs only show relevant endpoints
+5. **Deployment:** Can deploy web routes and API separately if needed
+
+#### **Authentication Flow**
+
+```
+1. User clicks "Sign in with Google"
+   ↓
+2. Frontend redirects to /auth/login (web route)
+   ↓
+3. Google OAuth flow completes
+   ↓
+4. Google redirects to /auth/callback (web route)
+   ↓
+5. Server creates session and redirects to frontend with token
+   ↓
+6. Frontend stores token for API calls
+   ↓
+7. Frontend calls /api/v1/auth/me with Bearer token (API route)
+   ↓
+8. Server returns JSON user data
+```
+
+### 3.7 Dependency Rules
 
 **When adding new modules:**
 

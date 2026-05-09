@@ -16,6 +16,7 @@ from parade_state.api import (
 )
 from parade_state.db import init_database
 from parade_state.utils import env
+from parade_state.web.auth import router as web_auth_router
 
 
 @asynccontextmanager
@@ -53,7 +54,11 @@ async def health_check():
 
 
 # Include routers
-app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
+# User-facing web routes (OAuth flows, redirects)
+app.include_router(web_auth_router, prefix="/auth", tags=["web-auth"])
+
+# REST API endpoints (JSON responses)
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["api-auth"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 app.include_router(
     deployments.router, prefix="/api/v1/deployments", tags=["deployments"]

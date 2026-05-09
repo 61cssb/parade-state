@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.main import app
 from parade_state.models import User
-from parade_state.session import create_user_session
+from parade_state.auth.session import create_user_session
 
 
 @pytest.fixture

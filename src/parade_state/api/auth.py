@@ -1,161 +1,189 @@
-"""Authentication and user management endpoints."""
+"""REST API authentication endpoints (JSON responses only).
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+This module contains REST API endpoints for authentication operations that
+return JSON responses, not HTML redirects.
+
+## Routes
+
+### GET /api/v1/auth/me
+Get current authenticated user information.
+
+### POST /api/v1/auth/logout
+Logout current user by invalidating session token.
+
+## Architecture
+
+These routes return JSON responses, not HTTP redirects. They are part of the
+REST API, not the user-facing web interface.
+
+**Key differences from web routes:**
+- Returns JSON responses instead of redirects
+- Requires Bearer token authentication
+- Documented in OpenAPI/Swagger
+- Intended for API clients (frontend JavaScript, mobile apps, etc.)
+
+## Authentication Flow
+
+### Login (via web routes)
+1. Frontend: `window.location.href = '/auth/login'`
+2. User completes OAuth flow
+3. Frontend receives token: `?token=xxx`
+4. Frontend stores token for API calls
+
+### API Usage
+```javascript
+// Get current user
+fetch('/api/v1/auth/me', {
+    headers: {
+        'Authorization': `Bearer ${token}`
+    }
+})
+.then(res => res.json())
+.then(data => {
+    console.log('User:', data.email, data.name)
+})
+
+// Logout
+fetch('/api/v1/auth/logout', {
+    method: 'POST',
+    headers: {
+        'Authorization': `Bearer ${token}`
+    }
+})
+.then(res => res.json())
+.then(data => {
+    console.log('Logged out:', data.message)
+})
+```
+
+## Dependencies
+
+This module depends on:
+- `parade_state.auth.dependencies` - Authentication dependencies
+- `parade_state.auth.session` - Session management
+- `parade_state.models` - User model
+- `parade_state.db` - Database sessions
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.responses import RedirectResponse
 
-from parade_state.auth import get_oauth
+from parade_state.auth.dependencies import require_authenticated_user
+from parade_state.auth.session import invalidate_session
 from parade_state.db import get_db_session
 from parade_state.models import User
-from parade_state.session import (
-    create_user_session,
-    get_valid_session,
-    invalidate_session,
-)
-from parade_state.utils import env, utc_dt
 
 router = APIRouter()
 security = HTTPBearer()
-oauth = get_oauth()
+
+# Alias for backward compatibility
+get_current_user = require_authenticated_user
 
 
-async def get_current_user(
-    request: Request,
+@router.get("/me")
+async def get_current_user_info(
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Get current user information.
+
+    Returns profile information for the currently authenticated user.
+    Requires valid Bearer token in Authorization header.
+
+    Args:
+        current_user: Authenticated user (injected by dependency)
+
+    Returns:
+        Dictionary containing user profile data:
+        - id: User ID (string UUID)
+        - email: User email address
+        - name: User display name
+        - role: User role (super_admin, admin, user)
+        - status: Account status (active, pending, suspended, unrecognised)
+        - access_level_id: Access level assignment (if any)
+
+    Raises:
+        HTTPException 401: If token invalid or user not found
+        HTTPException 403: If user account is not active
+
+    Example:
+        ```bash
+        curl -H "Authorization: Bearer abc123..." \\
+             http://localhost:8000/api/v1/auth/me
+        ```
+
+    Response:
+        ```json
+        {
+            "id": "123e4567-e89b-12d3-a456-426614174000",
+            "email": "user@example.com",
+            "name": "John Doe",
+            "role": "admin",
+            "status": "active",
+            "access_level_id": "456e7890-e12b-34d5-b678-901234567890"
+        }
+        ```
+    """
+    return {
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "name": current_user.name,
+        "role": current_user.role,
+        "status": current_user.status,
+        "access_level_id": str(current_user.access_level_id)
+        if current_user.access_level_id
+        else None,
+    }
+
+
+@router.post("/logout")
+async def logout(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_db_session),
-) -> User:
-    """Get current authenticated user from session token."""
+):
+    """Logout current user by invalidating session token.
+
+    Invalidates the session token, requiring the user to re-authenticate
+    for subsequent API calls.
+
+    Args:
+        credentials: HTTP Bearer credentials (auto-extracted by FastAPI)
+
+    Returns:
+        Dictionary confirming logout success
+
+    Raises:
+        HTTPException 401: If token invalid (session already expired)
+
+    Example:
+        ```bash
+        curl -X POST \\
+             -H "Authorization: Bearer abc123..." \\
+             http://localhost:8000/api/v1/auth/logout
+        ```
+
+    Response:
+        ```json
+        {
+            "message": "Logged out successfully"
+        }
+        ```
+
+    Note:
+        The client should also discard the stored token after successful logout.
+        Invalidating the server-side session prevents token reuse, but client-side
+        cleanup is recommended for best practices.
+    """
     token = credentials.credentials
 
-    # Get valid session from database
-    session = await get_valid_session(db, token)
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired session token",
-        )
+    async for db in get_db_session():
+        success = await invalidate_session(db, token)
+        if success:
+            return {"message": "Logged out successfully"}
 
-    # Get user from database
-    result = await db.execute(select(User).where(User.id == session.user_id))
-    user = result.scalar_one_or_none()
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-        )
-
-    # Check if user is active
-    if user.status != "active":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"User account is {user.status}",
-        )
-
-    return user
-
-
-@router.get("/login")
-async def login(request: Request):
-    """Initiate Google OAuth login flow."""
-    redirect_uri = env.get(
-        "OAUTH_REDIRECT_URI", "http://localhost:8000/api/v1/auth/callback"
+    # If we get here, session wasn't found
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired session token",
     )
-
-    google = oauth.create_client("google")
-    return await google.authorize_redirect(request, redirect_uri)
-
-
-@router.get("/callback")
-async def auth_callback(
-    request: Request,
-    db: AsyncSession = Depends(get_db_session),
-):
-    """Handle Google OAuth callback and create user session."""
-    try:
-        google = oauth.create_client("google")
-        token = await google.authorize_access_token(request)
-        user_info = token.get("userinfo")
-
-        if not user_info:
-            user_info = await google.parse_id_token(request, token)
-
-        email = user_info.get("email")
-        name = user_info.get("name")
-
-        if not email:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email not provided by Google OAuth",
-            )
-
-        # Check if user exists
-        result = await db.execute(select(User).where(User.email == email))
-        user = result.scalar_one_or_none()
-
-        # Check for super admin bootstrap
-        super_admin_email = env.get("SUPER_ADMIN_EMAIL")
-
-        if not user:
-            # Auto-register user
-            is_super_admin = super_admin_email == email
-
-            user = User(
-                email=email,
-                name=name or email.split("@")[0],
-                status="active" if is_super_admin else "pending",
-                role="super_admin" if is_super_admin else "user",
-                first_sign_in_at=utc_dt.utcnow(),
-                last_sign_in_at=utc_dt.utcnow(),
-            )
-
-            db.add(user)
-            await db.commit()
-            await db.refresh(user)
-
-        else:
-            # Update last sign in
-            user.last_sign_in_at = utc_dt.utcnow()
-
-            # Update user info if changed
-            if name:
-                user.name = name
-
-            await db.commit()
-
-        # Check user status
-        if user.status == "suspended":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Account suspended",
-            )
-
-        # Create session
-        user_session = await create_user_session(
-            db,
-            user_id=str(user.id),
-            email=user.email,
-            name=user.name,
-            role=user.role,
-            user_agent=request.headers.get("user-agent"),
-            ip_address=request.client.host if request.client else None,
-        )
-
-        # Redirect to frontend with session token
-        frontend_url = env.get("FRONTEND_URL", "http://localhost:3000")
-        redirect_url = f"{frontend_url}/auth/callback?token={user_session.token}"
-
-        return RedirectResponse(url=redirect_url)
-
-    except Exception as e:
-        # Log error and return friendly message
-        print(f"OAuth callback error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Authentication failed",
-        )
 
 
 @router.get("/me")
