@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Enum, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db import Base
@@ -68,15 +68,21 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     # Relationships
-    access_level: Mapped[AccessLevel | None] = relationship(foreign_keys=[access_level_id])
+    access_level: Mapped[AccessLevel | None] = relationship(
+        foreign_keys=[access_level_id]
+    )
     sessions: Mapped[list["UserSession"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
     subunit_scopes: Mapped[list["UserSubunitScope"]] = relationship(
-        back_populates="user", cascade="all, delete-orphan", foreign_keys="UserSubunitScope.user_id"
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="UserSubunitScope.user_id",
     )
     deployment_accesses: Mapped[list["DeploymentUserAccess"]] = relationship(
-        back_populates="user", cascade="all, delete-orphan", foreign_keys="DeploymentUserAccess.user_id"
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="DeploymentUserAccess.user_id",
     )
 
     def __repr__(self) -> str:
@@ -99,13 +105,13 @@ class UserSubunitScope(Base):
     sub_unit_2: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sub_unit_3: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    created_by: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id")
-    )
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     # Relationships
-    user: Mapped[User] = relationship(back_populates="subunit_scopes", foreign_keys=[user_id])
+    user: Mapped[User] = relationship(
+        back_populates="subunit_scopes", foreign_keys=[user_id]
+    )
     deployment: Mapped["Deployment"] = relationship(back_populates="user_scopes")
 
     __table_args__ = (
@@ -139,18 +145,20 @@ class DeploymentUserAccess(Base):
     deployment_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("deployments.id", ondelete="CASCADE"), index=True
     )
-    granted_by: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id")
-    )
+    granted_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     granted_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
     # Relationships
-    user: Mapped[User] = relationship(back_populates="deployment_accesses", foreign_keys=[user_id])
+    user: Mapped[User] = relationship(
+        back_populates="deployment_accesses", foreign_keys=[user_id]
+    )
     deployment: Mapped["Deployment"] = relationship(back_populates="user_accesses")
 
     __table_args__ = (
-        UniqueConstraint("user_id", "deployment_id", name="unique_user_deployment_access"),
+        UniqueConstraint(
+            "user_id", "deployment_id", name="unique_user_deployment_access"
+        ),
     )
 
     def __repr__(self) -> str:

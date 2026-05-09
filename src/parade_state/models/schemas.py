@@ -2,10 +2,8 @@
 
 from datetime import date, datetime
 from typing import Literal
-from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
-
+from pydantic import BaseModel, Field
 
 # ============================================================================
 # Deployment Schemas
@@ -33,7 +31,9 @@ class DeploymentUpdate(BaseModel):
     """Schema for updating a deployment."""
 
     name: str | None = Field(None, min_length=1, max_length=255)
-    status: Literal["draft", "active", "inactive", "archived", "closed", "finalized"] | None = None
+    status: (
+        Literal["draft", "active", "inactive", "archived", "closed", "finalized"] | None
+    ) = None
     valid_from: datetime | None = None
     valid_until: datetime | None = None
     scheduled_activation: datetime | None = None

@@ -1,7 +1,6 @@
 """Configuration management utilities."""
 
 from functools import lru_cache
-from typing import List
 
 from parade_state.utils import env
 
@@ -27,13 +26,15 @@ class Settings:
     SUPER_ADMIN_EMAIL: str = env.get("SUPER_ADMIN_EMAIL", "")
 
     # CORS
-    ALLOWED_ORIGINS: List[str] = env.get_list("ALLOWED_ORIGINS", separator=",", default=["*"])
+    ALLOWED_ORIGINS: list[str] = env.get_list(
+        "ALLOWED_ORIGINS", separator=",", default=["*"]
+    )
 
     # Application URLs
     APP_BASE_URL: str = env.get("APP_BASE_URL", "http://localhost:8000")
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()

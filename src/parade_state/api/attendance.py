@@ -1,8 +1,5 @@
 """Attendance management API endpoints."""
 
-from datetime import date
-from typing import Literal, Union
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
@@ -10,15 +7,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
 from parade_state.models.attendance import AttendanceRecord, Session
-from parade_state.models.deployment import Deployment, DeploymentNotes, DeploymentPersonnelOverride
+from parade_state.models.deployment import (
+    DeploymentNotes,
+    DeploymentPersonnelOverride,
+)
 from parade_state.models.personnel import Personnel
 from parade_state.models.schemas import (
-    AttendanceRecordCreate,
-    AttendanceRecordUpdate,
-    AttendanceRecordResponse,
     AttendanceRecordBulkCreate,
     AttendanceRecordBulkUpdate,
-    AttendanceListParams,
+    AttendanceRecordCreate,
+    AttendanceRecordResponse,
+    AttendanceRecordUpdate,
 )
 from parade_state.utils import utc_dt
 
@@ -39,7 +38,9 @@ async def verify_attendance_access(
     """Verify user has access to attendance record and return it."""
     # Super admins have full access
     if user_role == "super_admin":
-        result = await db.execute(select(AttendanceRecord).where(AttendanceRecord.id == attendance_id))
+        result = await db.execute(
+            select(AttendanceRecord).where(AttendanceRecord.id == attendance_id)
+        )
         attendance = result.scalar_one_or_none()
         if not attendance:
             raise HTTPException(
@@ -52,7 +53,9 @@ async def verify_attendance_access(
     # TODO: Implement proper access control based on deployment/subunit scope
     # For now, admins can access all attendance records
     if user_role in ["admin", "user"]:
-        result = await db.execute(select(AttendanceRecord).where(AttendanceRecord.id == attendance_id))
+        result = await db.execute(
+            select(AttendanceRecord).where(AttendanceRecord.id == attendance_id)
+        )
         attendance = result.scalar_one_or_none()
         if not attendance:
             raise HTTPException(
@@ -91,7 +94,7 @@ async def verify_session_is_open(
 
 
 async def is_retroactive_edit(
-    session_date: datetime | date,
+    session_date: utc_dt.datetime | utc_dt.date,
 ) -> bool:
     """Determine if an edit is retroactive (session date is in the past).
 
@@ -103,7 +106,7 @@ async def is_retroactive_edit(
     now_naive = utc_dt.ensure_naive(now)
 
     # Handle both date and datetime objects
-    if hasattr(session_date, 'date'):
+    if hasattr(session_date, "date"):
         session_date_naive = utc_dt.ensure_naive(session_date)
         return session_date_naive.date() < now_naive.date()
     else:
@@ -130,14 +133,26 @@ async def get_personnel_snapshot_data(
 
     if override:
         # Use override data
-        return override.unit, override.sub_unit_1, override.sub_unit_2, override.sub_unit_3
+        return (
+            override.unit,
+            override.sub_unit_1,
+            override.sub_unit_2,
+            override.sub_unit_3,
+        )
 
     # Fall back to base personnel data
-    personnel_result = await db.execute(select(Personnel).where(Personnel.id == personnel_id))
+    personnel_result = await db.execute(
+        select(Personnel).where(Personnel.id == personnel_id)
+    )
     personnel = personnel_result.scalar_one_or_none()
 
     if personnel:
-        return personnel.unit, personnel.sub_unit_1, personnel.sub_unit_2, personnel.sub_unit_3
+        return (
+            personnel.unit,
+            personnel.sub_unit_1,
+            personnel.sub_unit_2,
+            personnel.sub_unit_3,
+        )
 
     return None, None, None, None
 
@@ -166,7 +181,9 @@ async def get_deployment_notes_snapshot(
 # ============================================================================
 
 
-@router.post("/", response_model=AttendanceRecordResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/", response_model=AttendanceRecordResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_attendance_record(
     attendance_data: AttendanceRecordCreate,
     user_id: str = Query(..., description="User ID creating the attendance record"),
@@ -210,7 +227,6 @@ async def create_attendance_record(
     is_retroactive = await is_retroactive_edit(session.date)
 
     # Create attendance record
-    now = utc_dt.utcnow()
     attendance = AttendanceRecord(
         session_id=attendance_data.session_id,
         personnel_id=attendance_data.personnel_id,
@@ -231,7 +247,7 @@ async def create_attendance_record(
         db.add(attendance)
         await db.commit()
         await db.refresh(attendance)
-    except IntegrityError as e:
+    except IntegrityError:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -381,7 +397,11 @@ async def delete_attendance_record(
 # ============================================================================
 
 
-@router.post("/bulk/create", response_model=list[AttendanceRecordResponse], status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/bulk/create",
+    response_model=list[AttendanceRecordResponse],
+    status_code=status.HTTP_201_CREATED,
+)
 async def bulk_create_attendance(
     bulk_data: AttendanceRecordBulkCreate,
     user_id: str = Query(..., description="User ID creating the attendance records"),
@@ -405,7 +425,9 @@ async def bulk_create_attendance(
 
     try:
         # Get all unique session IDs to verify they're open
-        session_ids = list(set([item.session_id for item in bulk_data.attendance_records]))
+        session_ids = list(
+            set([item.session_id for item in bulk_data.attendance_records])
+        )
 
         # Verify all sessions are open
         # Session is now imported at the top level
@@ -447,7 +469,12 @@ async def bulk_create_attendance(
                 continue
 
             # Get snapshot data
-            unit, sub_unit_1, sub_unit_2, sub_unit_3 = await get_personnel_snapshot_data(
+            (
+                unit,
+                sub_unit_1,
+                sub_unit_2,
+                sub_unit_3,
+            ) = await get_personnel_snapshot_data(
                 attendance_item.personnel_id, session.deployment_id, db
             )
             notes_snapshot = await get_deployment_notes_snapshot(

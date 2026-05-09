@@ -3,7 +3,16 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, Enum, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Date,
+    Enum,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db import Base
@@ -25,9 +34,7 @@ class Estab(Base):
     )
     personnel_count: Mapped[int] = mapped_column(Integer, default=0)
     uploaded_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    uploaded_by: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id")
-    )
+    uploaded_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     confirmed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     confirmed_by: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True
@@ -65,9 +72,7 @@ class CsvUpload(Base):
     sha256_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     line_count: Mapped[int] = mapped_column(Integer)
     uploaded_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    uploaded_by: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id")
-    )
+    uploaded_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     mapping_confirmed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     diff_confirmed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
@@ -156,7 +161,9 @@ class ColumnMetadata(Base):
 
     # Relationships
     estab: Mapped[Estab] = relationship(back_populates="column_metadata")
-    sensitivity_level: Mapped["AccessLevel"] = relationship(back_populates="column_metadata")
+    sensitivity_level: Mapped["AccessLevel"] = relationship(
+        back_populates="column_metadata"
+    )
 
     __table_args__ = (
         UniqueConstraint("estab_id", "original_name", name="unique_estab_column"),

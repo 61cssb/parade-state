@@ -10,16 +10,50 @@
 
 **What's Not Here:**
 - System architecture and design decisions → See [ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Detailed code style and formatting rules → See [CODE_STYLE.md](docs/CODE_STYLE.md)
 - Specific utility module APIs → See module docstrings (e.g., `from parade_state.utils import utc_dt; help(utc_dt)`)
 - API documentation → See FastAPI auto-generated docs at `/docs`
 
 **How to Use This Guide:**
-1. Read through the patterns to understand the project's conventions
-2. Follow the examples when implementing new features
-3. Update this guide when introducing new patterns
-4. Refer to specific sections when you need guidance on particular operations
+1. **Read [CODE_STYLE.md](docs/CODE_STYLE.md) first** - Understand code style and import conventions
+2. Read through the patterns to understand the project's conventions
+3. Follow the examples when implementing new features
+4. Update this guide when introducing new patterns
+5. Refer to specific sections when you need guidance on particular operations
 
 ## Development Patterns
+
+### 0. Code Style First (⚠️ CRITICAL)
+
+**🚨 STOP: Read [CODE_STYLE.md](docs/CODE_STYLE.md) before writing code!**
+
+The most important pattern in this project is **utility module encapsulation**. This is strictly enforced:
+
+```python
+# ❌ NEVER DO THIS - Direct built-in imports
+import datetime
+import os
+import uuid
+from datetime import datetime, date
+
+# ✅ ALWAYS DO THIS - Use utility modules
+from parade_state.utils import utc_dt, env, ids
+
+# For type annotations
+def schedule_session(date: utc_dt.date) -> utc_dt.datetime:
+    return utc_dt.utcnow()
+```
+
+**Why so strict?**
+- One datetime bug (timezone confusion) caused a production incident
+- Utility modules prevent entire classes of bugs
+- Centralized logic = easier maintenance and testing
+- Consistent behavior across the entire codebase
+
+**Consequences of violations:**
+- Code review will reject direct built-in imports
+- Automated checks may flag violations
+- You'll be asked to refactor the code
 
 ### 1. Utility Module Pattern
 

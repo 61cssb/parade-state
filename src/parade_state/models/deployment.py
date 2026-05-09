@@ -41,9 +41,7 @@ class Deployment(Base):
     scheduled_activation: Mapped[datetime | None] = mapped_column(nullable=True)
     personnel_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    created_by: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id")
-    )
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     activated_at: Mapped[datetime | None] = mapped_column(nullable=True)
     deactivated_at: Mapped[datetime | None] = mapped_column(nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -89,9 +87,7 @@ class DeploymentPersonnelOverride(Base):
     sub_unit_2: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sub_unit_3: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    created_by: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id")
-    )
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     # Relationships
@@ -126,13 +122,9 @@ class DeploymentNotes(Base):
     )
     notes: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    created_by: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id")
-    )
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    updated_by: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id")
-    )
+    updated_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     notes_version: Mapped[int] = mapped_column(Integer, default=1)
 
     # Relationships

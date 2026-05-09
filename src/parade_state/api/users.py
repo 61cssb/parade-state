@@ -1,25 +1,24 @@
 """User management endpoints."""
 
-from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 from pydantic import BaseModel
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_
 
-from parade_state.db import get_db_session
-from parade_state.models import User, AccessLevel
 from parade_state.api.auth import get_current_user
+from parade_state.db import get_db_session
+from parade_state.models import AccessLevel, User
 from parade_state.utils import ids
 
 
 class UserUpdate(BaseModel):
     """Schema for user updates."""
 
-    name: Optional[str] = None
-    status: Optional[str] = None
-    role: Optional[str] = None
-    access_level_id: Optional[str] = None
+    name: str | None = None
+    status: str | None = None
+    role: str | None = None
+    access_level_id: str | None = None
 
 
 router = APIRouter()
@@ -39,9 +38,9 @@ async def require_admin(current_user: User = Depends(get_current_user)):
 async def list_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    search: Optional[str] = None,
-    status_filter: Optional[str] = None,
-    role_filter: Optional[str] = None,
+    search: str | None = None,
+    status_filter: str | None = None,
+    role_filter: str | None = None,
     current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):

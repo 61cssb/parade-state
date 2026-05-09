@@ -99,12 +99,18 @@ SQLite doesn't handle timezone-aware datetimes well, so we use this pattern:
 """
 
 import datetime as dt
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Union
+from datetime import date, datetime, timedelta
 
+# Re-export commonly used types for type annotations
+__all__ = [
+    "date",
+    "datetime",
+    "timedelta",
+    "UTC",
+]
 
 # Constants for datetime handling
-UTC = timezone.utc
+UTC = dt.UTC
 
 
 def utcnow() -> datetime:
@@ -131,7 +137,7 @@ def utc_from_timestamp(timestamp: float) -> datetime:
     return datetime.fromtimestamp(timestamp, UTC)
 
 
-def ensure_aware(dt_naive: Union[datetime, dt.datetime]) -> datetime:
+def ensure_aware(dt_naive: datetime | dt.datetime) -> datetime:
     """Ensure a datetime is timezone-aware by adding UTC if naive.
 
     Args:
@@ -145,7 +151,7 @@ def ensure_aware(dt_naive: Union[datetime, dt.datetime]) -> datetime:
     return dt_naive
 
 
-def ensure_naive(dt_aware: Union[datetime, dt.datetime]) -> datetime:
+def ensure_naive(dt_aware: datetime | dt.datetime) -> datetime:
     """Convert timezone-aware datetime to naive datetime (remove timezone info).
 
     Useful for database operations that expect naive datetimes.
@@ -161,7 +167,7 @@ def ensure_naive(dt_aware: Union[datetime, dt.datetime]) -> datetime:
     return dt_aware
 
 
-def to_utc(dt_input: Union[datetime, dt.datetime]) -> datetime:
+def to_utc(dt_input: datetime | dt.datetime) -> datetime:
     """Convert any datetime to UTC timezone.
 
     Args:
@@ -177,7 +183,7 @@ def to_utc(dt_input: Union[datetime, dt.datetime]) -> datetime:
     return dt_input.astimezone(UTC)
 
 
-def is_expired(expiry_time: Union[datetime, dt.datetime]) -> bool:
+def is_expired(expiry_time: datetime | dt.datetime) -> bool:
     """Check if an expiry time has passed.
 
     Args:
@@ -198,8 +204,7 @@ def is_expired(expiry_time: Union[datetime, dt.datetime]) -> bool:
 
 
 def is_valid_time_window(
-    start_time: Union[datetime, dt.datetime],
-    end_time: Union[datetime, dt.datetime]
+    start_time: datetime | dt.datetime, end_time: datetime | dt.datetime
 ) -> bool:
     """Check if current time is within a time window.
 
@@ -218,18 +223,10 @@ def is_valid_time_window(
     else:
         now_for_start = ensure_aware(now)
 
-    if end_time.tzinfo is None:
-        now_for_end = ensure_naive(now)
-    else:
-        now_for_end = ensure_aware(now)
-
     return start_time <= now_for_start <= end_time
 
 
-def add_timedelta(
-    base_time: Union[datetime, dt.datetime],
-    **timedelta_kwargs
-) -> datetime:
+def add_timedelta(base_time: datetime | dt.datetime, **timedelta_kwargs) -> datetime:
     """Add timedelta to a datetime while preserving timezone awareness.
 
     Args:
@@ -249,8 +246,7 @@ def add_timedelta(
 
 
 def format_datetime(
-    dt_input: Union[datetime, dt.datetime],
-    format_string: str = "%Y-%m-%d %H:%M:%S %Z"
+    dt_input: datetime | dt.datetime, format_string: str = "%Y-%m-%d %H:%M:%S %Z"
 ) -> str:
     """Format datetime as string.
 
@@ -266,10 +262,7 @@ def format_datetime(
     return dt_input.strftime(format_string)
 
 
-def parse_datetime(
-    datetime_string: str,
-    format_string: Optional[str] = None
-) -> datetime:
+def parse_datetime(datetime_string: str, format_string: str | None = None) -> datetime:
     """Parse datetime string into timezone-aware datetime.
 
     Args:
@@ -287,7 +280,7 @@ def parse_datetime(
     return ensure_aware(dt_parsed)
 
 
-def get_age(birth_date: Union[datetime, dt.datetime]) -> int:
+def get_age(birth_date: datetime | dt.datetime) -> int:
     """Calculate age from birth date.
 
     Args:
@@ -299,13 +292,13 @@ def get_age(birth_date: Union[datetime, dt.datetime]) -> int:
     today = utcnow()
     birth = ensure_aware(birth_date) if birth_date.tzinfo else birth_date
 
-    age = today.year - birth.year - (
-        (today.month, today.day) < (birth.month, birth.day)
+    age = (
+        today.year - birth.year - ((today.month, today.day) < (birth.month, birth.day))
     )
     return age
 
 
-def truncate_to_day(dt_input: Union[datetime, dt.datetime]) -> datetime:
+def truncate_to_day(dt_input: datetime | dt.datetime) -> datetime:
     """Truncate datetime to start of day (00:00:00).
 
     Args:

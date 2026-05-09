@@ -1,9 +1,7 @@
 """Authentication middleware for protected routes."""
 
-from typing import Optional
-from fastapi import Request, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 
 from parade_state.db import get_db_session
@@ -11,13 +9,12 @@ from parade_state.models import User
 from parade_state.session import get_valid_session
 from parade_state.utils import ids
 
-
 security = HTTPBearer()
 
 
 async def get_current_user_optional(
     request: Request,
-) -> Optional[User]:
+) -> User | None:
     """Get current user from session without requiring authentication."""
     auth_header = request.headers.get("Authorization")
 

@@ -1,7 +1,6 @@
 """Google OAuth authentication utilities."""
 
 from functools import lru_cache
-from typing import Optional
 
 from authlib.integrations.starlette_client import OAuth
 

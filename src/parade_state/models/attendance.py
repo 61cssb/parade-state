@@ -30,9 +30,7 @@ class Session(Base):
         default="open",
     )
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    created_by: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id")
-    )
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     opened_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     closed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     closed_by: Mapped[str | None] = mapped_column(
@@ -46,7 +44,12 @@ class Session(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("deployment_id", "date", "session_type", name="unique_deployment_date_session_type"),
+        UniqueConstraint(
+            "deployment_id",
+            "date",
+            "session_type",
+            name="unique_deployment_date_session_type",
+        ),
     )
 
     def __repr__(self) -> str:
@@ -87,13 +90,9 @@ class AttendanceRecord(Base):
     sub_unit_2_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sub_unit_3_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    created_by: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id")
-    )
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    updated_by: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id")
-    )
+    updated_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     last_edit_at: Mapped[datetime | None] = mapped_column(nullable=True)
     last_edit_by: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True

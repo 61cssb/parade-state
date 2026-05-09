@@ -1,7 +1,5 @@
 """Attendance session management API endpoints."""
 
-from typing import Literal
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
@@ -9,10 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
 from parade_state.models.attendance import Session
-from parade_state.models.deployment import Deployment, DeploymentNotes
+from parade_state.models.deployment import Deployment
 from parade_state.models.schemas import (
     SessionCreate,
-    SessionListParams,
     SessionResponse,
     SessionUpdate,
 )
@@ -80,7 +77,7 @@ async def validate_session_status_transition(
 
 async def check_session_uniqueness(
     deployment_id: str,
-    date: datetime,
+    date: utc_dt.datetime,
     session_type: str,
     db: AsyncSession,
     exclude_session_id: str | None = None,
@@ -190,8 +187,8 @@ async def create_session(
 async def list_sessions(
     deployment_id: str | None = None,
     status: str | None = None,
-    date_from: datetime | None = None,
-    date_to: datetime | None = None,
+    date_from: utc_dt.datetime | None = None,
+    date_to: utc_dt.datetime | None = None,
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     user_id: str = Query(..., description="User ID making the request"),

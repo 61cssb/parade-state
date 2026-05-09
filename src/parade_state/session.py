@@ -1,11 +1,9 @@
 """Session management utilities."""
 
 import secrets
-from typing import Optional
 
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
-from starlette.requests import Request
 
 from parade_state.models import UserSession
 from parade_state.utils import utc_dt
@@ -22,13 +20,15 @@ async def create_user_session(
     email: str,
     name: str,
     role: str,
-    user_agent: Optional[str] = None,
-    ip_address: Optional[str] = None,
+    user_agent: str | None = None,
+    ip_address: str | None = None,
     expires_days: int = 7,
 ) -> UserSession:
     """Create a new user session in the database."""
     token = generate_session_token()
-    expires_at = utc_dt.ensure_naive(utc_dt.add_timedelta(utc_dt.utcnow(), days=expires_days))
+    expires_at = utc_dt.ensure_naive(
+        utc_dt.add_timedelta(utc_dt.utcnow(), days=expires_days)
+    )
 
     session = UserSession(
         token=token,
@@ -52,11 +52,9 @@ async def get_valid_session(
     db: AsyncSession,
     token: str,
     update_last_accessed: bool = True,
-) -> Optional[UserSession]:
+) -> UserSession | None:
     """Get a valid session by token, optionally updating last accessed time."""
-    result = await db.execute(
-        select(UserSession).where(UserSession.token == token)
-    )
+    result = await db.execute(select(UserSession).where(UserSession.token == token))
     session = result.scalar_one_or_none()
 
     if not session or not session.is_valid():
@@ -71,9 +69,7 @@ async def get_valid_session(
 
 async def invalidate_session(db: AsyncSession, token: str) -> bool:
     """Invalidate a session by deleting it."""
-    result = await db.execute(
-        select(UserSession).where(UserSession.token == token)
-    )
+    result = await db.execute(select(UserSession).where(UserSession.token == token))
     session = result.scalar_one_or_none()
 
     if not session:
@@ -87,7 +83,7 @@ async def invalidate_session(db: AsyncSession, token: str) -> bool:
 async def invalidate_user_sessions(
     db: AsyncSession,
     user_id: str,
-    except_token: Optional[str] = None,
+    except_token: str | None = None,
 ) -> int:
     """Invalidate all sessions for a user, optionally keeping one session."""
     # Build base delete statement

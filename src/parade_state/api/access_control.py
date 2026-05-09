@@ -1,20 +1,16 @@
 """Access control management API endpoints."""
 
-from typing import Literal
-
-from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status
-from sqlalchemy import and_, func, or_, select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import status as http_status
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
-from parade_state.models import User, Deployment, DeploymentUserAccess, UserSubunitScope
+from parade_state.models import Deployment, DeploymentUserAccess, User, UserSubunitScope
 from parade_state.models.schemas import (
-    DeploymentUserAccessCreate,
     DeploymentUserAccessResponse,
     UserSubunitScopeCreate,
     UserSubunitScopeResponse,
-    UserAccessListParams,
-    UserSubunitScopeListParams,
 )
 from parade_state.utils import utc_dt
 
@@ -174,7 +170,12 @@ async def check_subunit_access(
     # Check if any scope matches the requested unit hierarchy
     for scope in scopes:
         # If scope has no restrictions, grant access
-        if not scope.unit and not scope.sub_unit_1 and not scope.sub_unit_2 and not scope.sub_unit_3:
+        if (
+            not scope.unit
+            and not scope.sub_unit_1
+            and not scope.sub_unit_2
+            and not scope.sub_unit_3
+        ):
             return True
 
         # Check unit match
@@ -205,7 +206,10 @@ async def check_subunit_access(
 # ============================================================================
 
 
-@router.post("/deployments/{deployment_id}/users/{user_id}/access", response_model=DeploymentUserAccessResponse)
+@router.post(
+    "/deployments/{deployment_id}/users/{user_id}/access",
+    response_model=DeploymentUserAccessResponse,
+)
 async def grant_user_deployment_access(
     deployment_id: str,
     user_id: str,
@@ -335,12 +339,16 @@ async def revoke_user_deployment_access(
     return {"message": "User access revoked successfully"}
 
 
-@router.get("/users/{user_id}/deployments", response_model=list[DeploymentUserAccessResponse])
+@router.get(
+    "/users/{user_id}/deployments", response_model=list[DeploymentUserAccessResponse]
+)
 async def list_user_deployment_accesses(
     user_id: str,
     active_only: bool = Query(True, description="Show only active accesses"),
     requesting_user_id: str = Query(..., description="User ID making the request"),
-    requesting_user_role: str = Query(..., description="Role of user making the request"),
+    requesting_user_role: str = Query(
+        ..., description="Role of user making the request"
+    ),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List all deployment accesses for a user.
@@ -349,7 +357,10 @@ async def list_user_deployment_accesses(
     Admins and super admins can see all users' deployment accesses.
     """
     # Check permissions
-    if requesting_user_id != user_id and requesting_user_role not in ["admin", "super_admin"]:
+    if requesting_user_id != user_id and requesting_user_role not in [
+        "admin",
+        "super_admin",
+    ]:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
             detail="You can only view your own deployment accesses",
@@ -366,9 +377,7 @@ async def list_user_deployment_accesses(
         )
 
     # Get deployment accesses
-    query = select(DeploymentUserAccess).where(
-        DeploymentUserAccess.user_id == user_id
-    )
+    query = select(DeploymentUserAccess).where(DeploymentUserAccess.user_id == user_id)
 
     if active_only:
         query = query.where(DeploymentUserAccess.revoked_at.is_(None))
@@ -379,12 +388,17 @@ async def list_user_deployment_accesses(
     return accesses
 
 
-@router.get("/deployments/{deployment_id}/users", response_model=list[DeploymentUserAccessResponse])
+@router.get(
+    "/deployments/{deployment_id}/users",
+    response_model=list[DeploymentUserAccessResponse],
+)
 async def list_deployment_users(
     deployment_id: str,
     active_only: bool = Query(True, description="Show only active accesses"),
     requesting_user_id: str = Query(..., description="User ID making the request"),
-    requesting_user_role: str = Query(..., description="Role of user making the request"),
+    requesting_user_role: str = Query(
+        ..., description="Role of user making the request"
+    ),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List all users with access to a deployment.
@@ -421,7 +435,10 @@ async def list_deployment_users(
 # ============================================================================
 
 
-@router.post("/deployments/{deployment_id}/users/{user_id}/scopes", response_model=UserSubunitScopeResponse)
+@router.post(
+    "/deployments/{deployment_id}/users/{user_id}/scopes",
+    response_model=UserSubunitScopeResponse,
+)
 async def create_user_subunit_scope(
     deployment_id: str,
     user_id: str,
@@ -557,12 +574,17 @@ async def delete_user_subunit_scope(
     return {"message": "Subunit scope deleted successfully"}
 
 
-@router.get("/deployments/{deployment_id}/users/{user_id}/scopes", response_model=list[UserSubunitScopeResponse])
+@router.get(
+    "/deployments/{deployment_id}/users/{user_id}/scopes",
+    response_model=list[UserSubunitScopeResponse],
+)
 async def list_user_subunit_scopes(
     deployment_id: str,
     user_id: str,
     requesting_user_id: str = Query(..., description="User ID making the request"),
-    requesting_user_role: str = Query(..., description="Role of user making the request"),
+    requesting_user_role: str = Query(
+        ..., description="Role of user making the request"
+    ),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List all subunit scopes for a user within a deployment.
@@ -571,7 +593,10 @@ async def list_user_subunit_scopes(
     Admins and super admins can see all users' scopes.
     """
     # Check permissions
-    if requesting_user_id != user_id and requesting_user_role not in ["admin", "super_admin"]:
+    if requesting_user_id != user_id and requesting_user_role not in [
+        "admin",
+        "super_admin",
+    ]:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
             detail="You can only view your own subunit scopes",

@@ -1,12 +1,12 @@
 """Authentication and user management endpoints."""
 
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import RedirectResponse
 
+from parade_state.auth import get_oauth
 from parade_state.db import get_db_session
 from parade_state.models import User
 from parade_state.session import (
@@ -14,9 +14,7 @@ from parade_state.session import (
     get_valid_session,
     invalidate_session,
 )
-from parade_state.auth import get_oauth
 from parade_state.utils import env, utc_dt
-
 
 router = APIRouter()
 security = HTTPBearer()
@@ -60,11 +58,10 @@ async def get_current_user(
 
 
 @router.get("/login")
-async def login():
+async def login(request: Request):
     """Initiate Google OAuth login flow."""
     redirect_uri = env.get(
-        "OAUTH_REDIRECT_URI",
-        "http://localhost:8000/api/v1/auth/callback"
+        "OAUTH_REDIRECT_URI", "http://localhost:8000/api/v1/auth/callback"
     )
 
     google = oauth.create_client("google")
@@ -87,7 +84,6 @@ async def auth_callback(
 
         email = user_info.get("email")
         name = user_info.get("name")
-        google_id = user_info.get("sub")
 
         if not email:
             raise HTTPException(
@@ -173,7 +169,9 @@ async def get_current_user_info(
         "name": current_user.name,
         "role": current_user.role,
         "status": current_user.status,
-        "access_level_id": str(current_user.access_level_id) if current_user.access_level_id else None,
+        "access_level_id": str(current_user.access_level_id)
+        if current_user.access_level_id
+        else None,
     }
 
 

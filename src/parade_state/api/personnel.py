@@ -1,22 +1,28 @@
 """Personnel management API endpoints."""
 
-from datetime import date
-from typing import Literal
-
-from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import status as http_status
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from parade_state.db import get_db_session
-from parade_state.models import User, Personnel, Deployment, DeploymentPersonnelOverride, DeploymentNotes, AttendanceRecord, Session, DeploymentUserAccess
+from parade_state.utils import utc_dt
+from parade_state.models import (
+    AttendanceRecord,
+    Deployment,
+    DeploymentNotes,
+    DeploymentPersonnelOverride,
+    DeploymentUserAccess,
+    Personnel,
+    Session,
+)
 from parade_state.models.schemas import (
+    PersonnelAttendanceHistoryItem,
+    PersonnelAttendanceHistoryResponse,
+    PersonnelAttendanceHistoryStats,
+    PersonnelListParams,
     PersonnelResponseWithDeployment,
     PersonnelUpdate,
-    PersonnelListParams,
-    PersonnelAttendanceHistoryResponse,
-    PersonnelAttendanceHistoryItem,
-    PersonnelAttendanceHistoryStats,
 )
 
 router = APIRouter()
@@ -320,7 +326,11 @@ async def list_personnel(
 
     # Deployment-scoped query
     if params.deployment_id:
-        personnel_list, total_count, deployment = await get_deployment_personnel_with_overrides(
+        (
+            personnel_list,
+            total_count,
+            deployment,
+        ) = await get_deployment_personnel_with_overrides(
             params.deployment_id, params, user_id, user_role, db
         )
         return personnel_list
@@ -335,11 +345,6 @@ async def list_personnel(
     # Build query without deployment context
     query = select(Personnel)
     query = apply_personnel_filters(query, params)
-
-    # Get total count
-    count_query = select(func.count()).select_from(query.subquery())
-    total_count_result = await db.execute(count_query)
-    total_count = total_count_result.scalar() or 0
 
     # Apply pagination
     query = query.offset(params.offset).limit(params.limit)
@@ -442,7 +447,9 @@ async def get_personnel(
         )
 
 
-@router.patch("/personnel/{personnel_id}", response_model=PersonnelResponseWithDeployment)
+@router.patch(
+    "/personnel/{personnel_id}", response_model=PersonnelResponseWithDeployment
+)
 async def update_personnel(
     personnel_id: str,
     personnel_update: PersonnelUpdate,
@@ -538,8 +545,12 @@ async def update_personnel(
 async def get_personnel_attendance_history(
     personnel_id: str,
     deployment_id: str = Query(..., description="Deployment ID for context"),
-    date_from: date | None = Query(None, description="Filter attendance from this date"),
-    date_to: date | None = Query(None, description="Filter attendance until this date"),
+    date_from: utc_dt.date | None = Query(
+        None, description="Filter attendance from this date"
+    ),
+    date_to: utc_dt.date | None = Query(
+        None, description="Filter attendance until this date"
+    ),
     limit: int = Query(100, ge=1, le=1000, description="Number of results to return"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
     user_id: str = Query(..., description="User ID for authorization"),

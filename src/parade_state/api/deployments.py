@@ -1,9 +1,7 @@
 """Deployment management API endpoints."""
 
-from typing import Literal
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, or_, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
@@ -14,16 +12,15 @@ from parade_state.models.deployment import (
 )
 from parade_state.models.schemas import (
     DeploymentCreate,
-    DeploymentListParams,
-    DeploymentResponse,
-    DeploymentUpdate,
     DeploymentNotesCreate,
-    DeploymentNotesUpdate,
     DeploymentNotesResponse,
+    DeploymentNotesUpdate,
     DeploymentPersonnelOverrideCreate,
     DeploymentPersonnelOverrideResponse,
+    DeploymentResponse,
+    DeploymentUpdate,
 )
-from parade_state.utils import utc_dt, ids
+from parade_state.utils import utc_dt
 
 router = APIRouter()
 

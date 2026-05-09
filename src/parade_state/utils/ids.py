@@ -69,7 +69,6 @@ All conversion functions raise ValueError with descriptive messages:
 """
 
 import uuid as uuid_module
-from typing import Union, Optional
 
 
 def uuid4() -> uuid_module.UUID:
@@ -154,7 +153,7 @@ def validate(value: str) -> None:
         raise ValueError(f"Invalid UUID format: '{value}'") from e
 
 
-def to_uuid(value: Union[str, uuid_module.UUID]) -> uuid_module.UUID:
+def to_uuid(value: str | uuid_module.UUID) -> uuid_module.UUID:
     """Convert string to UUID object with validation.
 
     Args:
@@ -188,7 +187,7 @@ def to_uuid(value: Union[str, uuid_module.UUID]) -> uuid_module.UUID:
         raise ValueError(f"Invalid UUID format: '{value}'") from e
 
 
-def to_string(value: Union[str, uuid_module.UUID]) -> str:
+def to_string(value: str | uuid_module.UUID) -> str:
     """Convert UUID to string format.
 
     Args:
@@ -231,8 +230,8 @@ def db_default() -> str:
 
 
 def or_default(
-    value: Optional[Union[str, uuid_module.UUID]], default: Optional[str] = None
-) -> Optional[str]:
+    value: str | uuid_module.UUID | None, default: str | None = None
+) -> str | None:
     """Return UUID string or default value if None/invalid.
 
     Args:

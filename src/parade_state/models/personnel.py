@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, ForeignKey, Integer, String, Text, JSON
+from sqlalchemy import JSON, Enum, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db import Base
@@ -33,9 +33,7 @@ class Personnel(Base):
         default="active",
     )
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    created_by: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id")
-    )
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
 
     # Relationships
     estab: Mapped["Estab"] = relationship(back_populates="personnel")

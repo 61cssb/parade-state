@@ -56,11 +56,10 @@ across the application and provide better testability.
 """
 
 import os
-from typing import Any, List, Optional, Union
 from urllib.parse import urlparse
 
 
-def get(key: str, default: Optional[str] = None) -> Optional[str]:
+def get(key: str, default: str | None = None) -> str | None:
     """Get environment variable value with optional default.
 
     Args:
@@ -128,9 +127,9 @@ def get_bool(key: str, default: bool = False) -> bool:
 
     # Convert to lowercase and check for truthy values
     value_lower = value.lower()
-    if value_lower in ('true', '1', 'yes', 'on'):
+    if value_lower in ("true", "1", "yes", "on"):
         return True
-    elif value_lower in ('false', '0', 'no', 'off'):
+    elif value_lower in ("false", "0", "no", "off"):
         return False
     else:
         # If value is not recognized, return default
@@ -189,7 +188,9 @@ def get_float(key: str, default: float = 0.0) -> float:
         return default
 
 
-def get_list(key: str, separator: str = ",", default: Optional[List[str]] = None) -> List[str]:
+def get_list(
+    key: str, separator: str = ",", default: list[str] | None = None
+) -> list[str]:
     """Get environment variable as list of strings.
 
     Args:
@@ -219,7 +220,7 @@ def get_list(key: str, separator: str = ",", default: Optional[List[str]] = None
     return [item for item in items if item]
 
 
-def get_url(key: str, default: Optional[str] = None) -> Optional[str]:
+def get_url(key: str, default: str | None = None) -> str | None:
     """Get environment variable as URL with basic validation.
 
     Args:
@@ -252,7 +253,7 @@ def get_url(key: str, default: Optional[str] = None) -> Optional[str]:
         raise ValueError(f"Invalid URL for environment variable '{key}': {e}")
 
 
-def get_email(key: str, default: Optional[str] = None) -> Optional[str]:
+def get_email(key: str, default: str | None = None) -> str | None:
     """Get environment variable as email address with basic validation.
 
     Args:
@@ -276,8 +277,10 @@ def get_email(key: str, default: Optional[str] = None) -> Optional[str]:
         return None
 
     # Basic email validation
-    if '@' not in value or '.' not in value.split('@')[-1]:
-        raise ValueError(f"Invalid email format for environment variable '{key}': {value}")
+    if "@" not in value or "." not in value.split("@")[-1]:
+        raise ValueError(
+            f"Invalid email format for environment variable '{key}': {value}"
+        )
 
     return value
 
