@@ -10,13 +10,14 @@
 
 1. [System Overview](#1-system-overview)
 2. [Component Architecture](#2-component-architecture)
-3. [Data Flow](#3-data-flow)
-4. [Entity Relationships](#4-entity-relationships)
-5. [Technology Stack](#5-technology-stack)
-6. [Deployment Architecture](#6-deployment-architecture)
-7. [Security Architecture](#7-security-architecture)
-8. [Code Standards & Best Practices](#8-code-standards--best-practices)
-9. [Performance & Scalability](#9-performance--scalability)
+3. [Module Architecture](#3-module-architecture)
+4. [Data Flow](#4-data-flow)
+5. [Entity Relationships](#5-entity-relationships)
+6. [Technology Stack](#6-technology-stack)
+7. [Deployment Architecture](#7-deployment-architecture)
+8. [Security Architecture](#8-security-architecture)
+9. [Code Standards & Best Practices](#9-code-standards--best-practices)
+10. [Performance & Scalability](#10-performance--scalability)
 
 ---
 
@@ -121,6 +122,274 @@ uvicorn (single process)
 
 ---
 
+## 3. Module Architecture
+
+### 3.1 Module Dependency Tree
+
+The `parade_state` application follows a strict layered architecture with clear dependency boundaries. Modules are organized into 5 layers, where each layer only depends on lower layers.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    LAYER 5: Application                      │
+│                    parade_state.main                        │
+│                    (FastAPI app orchestration)              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              │ depends on
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    LAYER 4: API Layer                       │
+│                    parade_state.api/*                        │
+│                    parade_state.middleware/*                 │
+│                    (Route handlers & middleware)             │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              │ depends on
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   LAYER 3: Business Logic                   │
+│                   parade_state.config                        │
+│                   parade_state.auth                          │
+│                   parade_state.session                       │
+│                   (Configuration & domain logic)             │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              │ depends on
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    LAYER 2: Data Models                     │
+│                    parade_state.models/*                     │
+│                    (Database models & schemas)               │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              │ depends on
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   LAYER 1: Foundation                        │
+│                   parade_state.utils/*                       │
+│                   parade_state.db                            │
+│                   (Core utilities & database)                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 3.2 Layer Breakdown
+
+#### **Layer 1: Foundation (No internal dependencies)**
+
+**`parade_state.utils`**
+- **Modules:** `env.py`, `ids.py`, `utc_dt.py`
+- **Purpose:** Core utility functions with no internal dependencies
+- **Dependencies:** Standard library only
+- **Initialization:** First
+- **Key responsibilities:**
+  - Environment variable access (`env`)
+  - UUID generation and validation (`ids`)
+  - UTC datetime operations (`utc_dt`)
+
+**`parade_state.db`**
+- **Purpose:** Database connection and session management
+- **Dependencies:** `parade_state.utils.ids`
+- **Initialization:** Second
+- **Key responsibilities:**
+  - SQLAlchemy engine and session factory
+  - Base model class with default UUID generation
+  - Database initialization lifecycle
+
+#### **Layer 2: Data Models**
+
+**`parade_state.models`**
+- **Modules:** `access.py`, `attendance.py`, `audit.py`, `auth_session.py`, `csv_ingestion.py`, `deployment.py`, `personnel.py`, `schemas.py`
+- **Purpose:** Database models and Pydantic schemas
+- **Dependencies:** `parade_state.db` (for `Base` class)
+- **Initialization:** Third
+- **Key responsibilities:**
+  - SQLAlchemy ORM models
+  - Database schema definition
+  - Request/response validation schemas
+- **Note:** Uses `TYPE_CHECKING` to avoid circular dependencies
+
+#### **Layer 3: Business Logic**
+
+**`parade_state.config`**
+- **Purpose:** Application configuration management
+- **Dependencies:** `parade_state.utils.env`
+- **Initialization:** Fourth (parallel with auth)
+
+**`parade_state.auth`**
+- **Purpose:** OAuth client configuration
+- **Dependencies:** `parade_state.utils.env`
+- **Initialization:** Fourth (parallel with config)
+
+**`parade_state.session`**
+- **Purpose:** User session management
+- **Dependencies:** `parade_state.models`, `parade_state.utils.utc_dt`
+- **Initialization:** Fifth (after models)
+
+#### **Layer 4: API Layer**
+
+**`parade_state.middleware`**
+- **Modules:** `auth.py`
+- **Purpose:** Authentication middleware for protected routes
+- **Dependencies:** `parade_state.models`, `parade_state.db`, `parade_state.session`, `parade_state.utils.ids`
+- **Initialization:** Sixth
+
+**`parade_state.api`**
+- **Modules:** `auth.py`, `users.py`, `deployments.py`, `sessions.py`, `attendance.py`, `personnel.py`, `access_control.py`
+- **Purpose:** REST API route handlers
+- **Dependencies:** All previous layers
+- **Initialization:** Seventh
+
+#### **Layer 5: Application**
+
+**`parade_state.main`**
+- **Purpose:** FastAPI application setup and lifecycle management
+- **Dependencies:** All API modules, `parade_state.db`, `parade_state.utils`
+- **Initialization:** Last (orchestrates all modules)
+
+### 3.3 Initialization Order
+
+**Recommended startup sequence:**
+
+1. **Foundation** → Load utilities and database configuration
+2. **Database** → Initialize database engine and session factory
+3. **Models** → Import and register ORM models
+4. **Business Logic** → Load configuration, auth, and session management
+5. **API Layer** → Initialize middleware and route handlers
+6. **Application** → Create FastAPI app and mount routes
+
+**Current implementation** ([`main.py:22-29`](../src/parade_state/main.py#L22-L29)):
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    database_url = env.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    init_database(database_url)  # Step 2
+    yield
+    # Shutdown
+```
+
+### 3.4 Circular Dependency Management
+
+**✅ No Runtime Circular Dependencies**
+
+The codebase successfully avoids circular dependencies through three key patterns:
+
+#### **1. TYPE_CHECKING Pattern**
+
+Models use forward references to break import cycles:
+
+```python
+# models/access.py
+from typing import TYPE_CHECKING
+from ..db import Base
+
+if TYPE_CHECKING:
+    from .auth_session import UserSession
+    from .deployment import Deployment
+```
+
+**Why this works:**
+- `TYPE_CHECKING` is `False` at runtime, preventing circular imports
+- Type checkers and IDEs still see the full type information
+- Relationships work via string references (e.g., `"Deployment"`)
+
+#### **2. Dependency Injection**
+
+FastAPI's dependency injection breaks circular dependency chains:
+
+```python
+# API endpoints receive dependencies via FastAPI DI
+async def endpoint(
+    db: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user)
+):
+    # No direct imports needed at module level
+```
+
+**Benefits:**
+- Modules don't need to import each other directly
+- Dependencies are resolved at runtime, not import time
+- Easier testing with mock dependencies
+
+#### **3. Clear Layer Boundaries**
+
+Each layer only depends on lower layers:
+
+```
+Application → API → Business Logic → Models → Foundation
+```
+
+**This prevents:**
+- Upward dependencies (lower layers importing higher layers)
+- Peer dependencies (modules at same level importing each other)
+- Cross-cutting concerns (modules importing across layers)
+
+### 3.5 Dependency Risks & Mitigations
+
+#### **Model Relationships (Low Risk ✅)**
+
+**Risk:** Models reference each other via relationships
+**Example:** `User` → `UserSession` → `User` (via `back_populates`)
+
+**Mitigation:**
+- Use `TYPE_CHECKING` for type hints
+- Use string references for relationships
+- No runtime imports between models
+
+#### **API ↔ Session ↔ Models (Low Risk ✅)**
+
+**Risk:** API modules import session, which imports models
+
+**Mitigation:**
+- Clear one-way dependency flow
+- Session module doesn't import API modules
+- Models don't import API modules
+
+#### **Middleware ↔ Models (Low Risk ✅)**
+
+**Risk:** Middleware imports models for type annotations
+
+**Mitigation:**
+- Middleware only uses models for type hints
+- No runtime model operations in middleware
+- All database operations via dependency injection
+
+### 3.6 Dependency Rules
+
+**When adding new modules:**
+
+1. **Check layer placement** - Which layer does your module belong to?
+2. **Verify dependencies** - Only import from lower layers
+3. **Use TYPE_CHECKING** - For forward references in models
+4. **Prefer dependency injection** - For runtime dependencies
+5. **Test imports** - Ensure no circular import errors
+
+**Example - Adding a new utility:**
+```python
+# ✅ CORRECT - New utility in foundation layer
+# parade_state/utils/validation.py
+from parade_state.utils import ids  # Same layer, OK
+
+# ❌ WRONG - Importing from higher layer
+from parade_state.models import User  # Violates layer boundaries
+```
+
+**Example - Adding a new API endpoint:**
+```python
+# ✅ CORRECT - Using dependency injection
+@router.get("/endpoint")
+async def endpoint(
+    db: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user)
+):
+    # Use injected dependencies
+
+# ❌ WRONG - Direct imports at module level
+from parade_state.api.some_module import function  # Circular risk
+```
+
+---
+
 ## 3. Data Flow
 
 ### 3.1 Authentication Flow
@@ -194,7 +463,7 @@ uvicorn (single process)
 
 ---
 
-## 4. Entity Relationships
+## 5. Entity Relationships
 
 ### 4.1 Core Entity Hierarchy
 
@@ -257,7 +526,7 @@ Deployment
 
 ---
 
-## 5. Technology Stack
+## 6. Technology Stack
 
 ### 5.1 Technology Choices
 
@@ -325,7 +594,7 @@ class User(Base):
 
 ---
 
-## 6. Deployment Architecture
+## 7. Deployment Architecture
 
 ### 6.1 Single Instance Deployment (MVP)
 
@@ -392,7 +661,7 @@ class User(Base):
 
 ---
 
-## 7. Security Architecture
+## 8. Security Architecture
 
 ### 7.1 Authentication & Authorization
 
@@ -457,7 +726,7 @@ async def get_visible_columns(user_id: str):
 
 ---
 
-## 8. Code Standards & Best Practices
+## 9. Code Standards & Best Practices
 
 ### 8.1 Development Patterns
 
@@ -488,9 +757,9 @@ For detailed development patterns and examples, refer to **[CLAUDE.md](../CLAUDE
 
 ---
 
-## 9. Performance & Scalability
+## 10. Performance & Scalability
 
-### 8.1 Current Performance Characteristics
+### 10.1 Current Performance Characteristics
 
 **Test results:**
 - 26 tests execute in ~2 seconds
@@ -502,7 +771,7 @@ For detailed development patterns and examples, refer to **[CLAUDE.md](../CLAUDE
 - Mobile UI load time: < 2s on 4G
 - Attendance write: < 500ms round-trip
 
-### 8.2 Scalability Considerations
+### 10.2 Scalability Considerations
 
 **Current single-instance limits:**
 - Max concurrent users: ~200 (based on typical FastAPI performance)
