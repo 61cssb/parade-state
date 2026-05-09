@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from parade_state.models.deployment import Deployment, DeploymentNotes, DeploymentPersonnelOverride
 from parade_state.models.personnel import Personnel
+from tests.test_utils import assert_pagination_works, assert_404_response, assert_permission_denied
 
 
 @pytest.mark.asyncio
@@ -84,17 +85,17 @@ async def test_list_personnel_without_deployment_context_as_user_forbidden(
     user_token_headers: dict[str, str],
 ):
     """Test that regular users cannot list personnel without deployment context."""
-    response = client.get(
+    assert_permission_denied(
+        client,
+        "get",
         "/api/v1/personnel",
-        headers=user_token_headers,
+        user_token_headers,
+        expected_detail="Only admins can list personnel without deployment context",
         params={
             "user_id": "user-id",
             "user_role": "user",
         },
     )
-
-    assert response.status_code == 403
-    assert "Only admins can list personnel without deployment context" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -391,24 +392,23 @@ async def test_get_personnel_by_id_without_deployment_context_as_admin(
     assert data["deployment_notes"] is None
 
 
-@pytest.mark.asyncio
 async def test_get_personnel_by_id_without_deployment_context_as_user_forbidden(
     client: TestClient,
     user_token_headers: dict[str, str],
     sample_personnel,
 ):
     """Test that regular users cannot get personnel without deployment context."""
-    response = client.get(
+    assert_permission_denied(
+        client,
+        "get",
         f"/api/v1/personnel/{sample_personnel[0].id}",
-        headers=user_token_headers,
+        user_token_headers,
+        expected_detail="Only admins can view personnel without deployment context",
         params={
             "user_id": "user-id",
             "user_role": "user",
         },
     )
-
-    assert response.status_code == 403
-    assert "Only admins can view personnel without deployment context" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -492,7 +492,6 @@ async def test_update_personnel_as_admin(
     assert data["rank"] == "Updated Rank"
 
 
-@pytest.mark.asyncio
 async def test_update_personnel_as_user_forbidden(
     client: TestClient,
     user_token_headers: dict[str, str],
@@ -503,18 +502,18 @@ async def test_update_personnel_as_user_forbidden(
         "rank": "Updated Rank",
     }
 
-    response = client.patch(
+    assert_permission_denied(
+        client,
+        "patch",
         f"/api/v1/personnel/{sample_personnel[0].id}",
-        headers=user_token_headers,
+        user_token_headers,
+        expected_detail="Only admins can update personnel records",
         params={
             "user_id": "user-id",
             "user_role": "user",
         },
-        json=update_data,
+        json_data=update_data,
     )
-
-    assert response.status_code == 403
-    assert "Only admins can update personnel records" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -581,63 +580,36 @@ async def test_list_personnel_with_status_filter(
         assert personnel["status"] == "archived"
 
 
-@pytest.mark.asyncio
 async def test_list_personnel_with_pagination(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
-    db_session,
     sample_deployment: Deployment,
-    sample_personnel,
 ):
     """Test listing personnel with pagination."""
-    # Request first page
-    response = client.get(
+    assert_pagination_works(
+        client,
         "/api/v1/personnel",
-        headers=admin_token_headers,
+        admin_token_headers,
         params={
             "deployment_id": str(sample_deployment.id),
-            "limit": 2,
-            "offset": 0,
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
 
-    assert response.status_code == 200
-    data = response.json()
-    assert isinstance(data, list)
-    assert len(data) <= 2
 
-    # Request second page
-    response = client.get(
-        "/api/v1/personnel",
-        headers=admin_token_headers,
-        params={
-            "deployment_id": str(sample_deployment.id),
-            "limit": 2,
-            "offset": 2,
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert isinstance(data, list)
-    assert len(data) <= 2
-
-
-@pytest.mark.asyncio
 async def test_list_personnel_invalid_deployment_id(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
 ):
     """Test listing personnel with invalid deployment ID."""
-    response = client.get(
+    assert_404_response(
+        client,
+        "get",
         "/api/v1/personnel",
-        headers=admin_token_headers,
+        admin_token_headers,
         params={
             "deployment_id": "invalid-deployment-id",
             "user_id": str(sample_users["admin"].id),
@@ -645,29 +617,25 @@ async def test_list_personnel_invalid_deployment_id(
         },
     )
 
-    assert response.status_code == 404
 
-
-@pytest.mark.asyncio
 async def test_get_personnel_invalid_id(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
 ):
     """Test getting personnel with invalid ID."""
-    response = client.get(
+    assert_404_response(
+        client,
+        "get",
         "/api/v1/personnel/invalid-personnel-id",
-        headers=admin_token_headers,
+        admin_token_headers,
         params={
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
 
-    assert response.status_code == 404
 
-
-@pytest.mark.asyncio
 async def test_update_personnel_invalid_id(
     client: TestClient,
     admin_token_headers: dict[str, str],

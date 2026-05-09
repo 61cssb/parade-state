@@ -9,6 +9,7 @@ from parade_state.models.attendance import AttendanceRecord, Session
 from parade_state.models.deployment import Deployment, DeploymentNotes, DeploymentPersonnelOverride
 from parade_state.models.personnel import Personnel
 from parade_state.utils import utc_dt
+from tests.test_utils import assert_pagination_works, assert_404_response, assert_permission_denied
 
 
 @pytest.mark.asyncio
@@ -912,14 +913,13 @@ async def test_get_attendance_record_not_found(
     admin_token_headers: dict[str, str],
 ):
     """Test getting a non-existent attendance record."""
-    response = client.get(
+    assert_404_response(
+        client,
+        "get",
         "/api/v1/attendance/non-existent-id",
-        headers=admin_token_headers,
+        admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
-
-    assert response.status_code == 404
-    assert "not found" in response.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
@@ -962,34 +962,12 @@ async def test_list_attendance_records_pagination(
     db_session.add_all(attendance_records)
     await db_session.commit()
 
-    # Get first page
-    response = client.get(
+    assert_pagination_works(
+        client,
         "/api/v1/attendance/",
-        headers=admin_token_headers,
+        admin_token_headers,
         params={
             "user_id": "admin-user-id",
             "user_role": "admin",
-            "limit": 2,
-            "offset": 0,
         },
     )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data) == 2
-
-    # Get second page
-    response = client.get(
-        "/api/v1/attendance/",
-        headers=admin_token_headers,
-        params={
-            "user_id": "admin-user-id",
-            "user_role": "admin",
-            "limit": 2,
-            "offset": 2,
-        },
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data) == 1  # Only 1 remaining

@@ -10,6 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import sessionmaker
 
 from parade_state.db import Base, get_session_maker, init_database
+
+# Ensure all models are imported so they're registered with Base
+import parade_state.models.access  # noqa: F401
+import parade_state.models.attendance  # noqa: F401
+import parade_state.models.audit  # noqa: F401
+import parade_state.models.auth_session  # noqa: F401
+import parade_state.models.csv_ingestion  # noqa: F401
+import parade_state.models.deployment  # noqa: F401
+import parade_state.models.personnel  # noqa: F401
 from parade_state.main import app
 from parade_state.models import (
     AccessLevel,
@@ -26,6 +35,7 @@ from parade_state.models import (
     Personnel,
     Session,
     User,
+    UserSession,
     UserSubunitScope,
 )
 from parade_state.utils import utc_dt
@@ -40,20 +50,25 @@ def event_loop():
 
 
 @pytest.fixture
-async def test_db():
+async def test_db(tmp_path):
     """Create a fresh test database engine for each test."""
-    # Use in-memory SQLite for tests (with async support)
-    database_url = "sqlite+aiosqlite:///:memory:"
+    # Use temporary file database instead of :memory: to avoid connection isolation issues
+    db_file = tmp_path / "test.db"
+    database_url = f"sqlite+aiosqlite:///{db_file}"
 
-    engine = create_async_engine(database_url, echo=False)
-    async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
-
-    # Initialize the global database state
+    # Initialize the global database state FIRST (creates the engine)
     init_database(database_url)
 
-    # Create all tables
+    # Get the global engine that was just created
+    from parade_state.db import _engine
+    engine = _engine
+
+    # Create all tables on the global engine
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Create session maker using the same engine
+    async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
     yield async_session_maker
 
@@ -218,7 +233,7 @@ def client(test_db):
     from parade_state.db import get_db_session
     from fastapi.testclient import TestClient
 
-    # Override the database dependency
+    # Override the database dependency to use the same test_db
     async def override_get_db_session():
         async with test_db() as session:
             yield session
@@ -227,6 +242,8 @@ def client(test_db):
 
     with TestClient(app) as test_client:
         yield test_client
+
+    app.dependency_overrides.clear()
 
     # Clean up
     app.dependency_overrides.clear()

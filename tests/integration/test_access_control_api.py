@@ -5,6 +5,7 @@ from datetime import datetime
 from fastapi.testclient import TestClient
 
 from parade_state.models import User, Deployment, DeploymentUserAccess, UserSubunitScope
+from tests.test_utils import assert_permission_denied
 
 
 @pytest.mark.asyncio
@@ -74,17 +75,17 @@ async def test_grant_user_deployment_access_as_user_forbidden(
     """Test that regular users cannot grant deployment access."""
     target_user_id = str(sample_users["user"].id)
 
-    response = client.post(
+    assert_permission_denied(
+        client,
+        "post",
         f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/access",
-        headers=user_token_headers,
+        user_token_headers,
+        expected_detail="Only admins can grant deployment access",
         params={
             "granted_by": str(sample_users["user"].id),
             "user_role": "user",
         },
     )
-
-    assert response.status_code == 403
-    assert "Only admins can grant deployment access" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -269,17 +270,17 @@ async def test_list_other_user_accesses_as_user_forbidden(
     admin_user_id = str(sample_users["admin"].id)
     regular_user_id = str(sample_users["user"].id)
 
-    response = client.get(
+    assert_permission_denied(
+        client,
+        "get",
         f"/api/v1/access-control/users/{admin_user_id}/deployments",
-        headers=user_token_headers,
+        user_token_headers,
+        expected_detail="can only view your own",
         params={
             "requesting_user_id": regular_user_id,
             "requesting_user_role": "user",
         },
     )
-
-    assert response.status_code == 403
-    assert "can only view your own" in response.json()["detail"]
 
 
 @pytest.mark.asyncio

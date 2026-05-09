@@ -8,6 +8,7 @@ from sqlalchemy import select
 from parade_state.models.attendance import Session
 from parade_state.models.deployment import Deployment
 from parade_state.utils import utc_dt
+from tests.test_utils import assert_pagination_works, assert_404_response, assert_permission_denied
 
 
 @pytest.mark.asyncio
@@ -125,11 +126,9 @@ async def test_create_session_duplicate_forbidden(
     assert "already exists" in response.json()["detail"]
 
 
-@pytest.mark.asyncio
 async def test_create_session_as_regular_user_forbidden(
     client: TestClient,
     user_token_headers: dict[str, str],
-    db_session,
     sample_deployment: Deployment,
 ):
     """Test that regular users cannot create sessions."""
@@ -141,18 +140,17 @@ async def test_create_session_as_regular_user_forbidden(
         "session_type": "PM",
     }
 
-    response = client.post(
+    assert_permission_denied(
+        client,
+        "post",
         "/api/v1/sessions/",
-        json=session_data,
-        headers=user_token_headers,
+        user_token_headers,
+        expected_detail="Only admins and super admins",
         params={"user_id": "regular-user-id", "user_role": "user"},
+        json_data=session_data,
     )
 
-    assert response.status_code == 403
-    assert "Only admins and super admins" in response.json()["detail"]
 
-
-@pytest.mark.asyncio
 async def test_create_session_deployment_not_found(
     client: TestClient,
     admin_token_headers: dict[str, str],
@@ -373,20 +371,18 @@ async def test_get_session(
     assert data["session_type"] == "AM"
 
 
-@pytest.mark.asyncio
 async def test_get_session_not_found(
     client: TestClient,
     admin_token_headers: dict[str, str],
 ):
     """Test getting a non-existent session."""
-    response = client.get(
+    assert_404_response(
+        client,
+        "get",
         "/api/v1/sessions/non-existent-id",
-        headers=admin_token_headers,
+        admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
-
-    assert response.status_code == 404
-    assert "not found" in response.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
@@ -538,7 +534,6 @@ async def test_update_finalized_session_forbidden(
     assert "Cannot modify finalized sessions" in response.json()["detail"]
 
 
-@pytest.mark.asyncio
 async def test_update_session_as_regular_user_forbidden(
     client: TestClient,
     user_token_headers: dict[str, str],
@@ -562,15 +557,15 @@ async def test_update_session_as_regular_user_forbidden(
 
     update_data = {"status": "closed"}
 
-    response = client.patch(
+    assert_permission_denied(
+        client,
+        "patch",
         f"/api/v1/sessions/{session.id}",
-        json=update_data,
-        headers=user_token_headers,
+        user_token_headers,
+        expected_detail="Only admins and super admins",
         params={"user_id": "regular-user-id", "user_role": "user"},
+        json_data=update_data,
     )
-
-    assert response.status_code == 403
-    assert "Only admins and super admins" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -642,7 +637,6 @@ async def test_delete_finalized_session_forbidden(
     assert "Cannot delete finalized sessions" in response.json()["detail"]
 
 
-@pytest.mark.asyncio
 async def test_delete_session_as_admin_forbidden(
     client: TestClient,
     admin_token_headers: dict[str, str],
@@ -664,14 +658,14 @@ async def test_delete_session_as_admin_forbidden(
     db_session.add(session)
     await db_session.commit()
 
-    response = client.delete(
+    assert_permission_denied(
+        client,
+        "delete",
         f"/api/v1/sessions/{session.id}",
-        headers=admin_token_headers,
+        admin_token_headers,
+        expected_detail="Only super admins",
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
-
-    assert response.status_code == 403
-    assert "Only super admins" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -736,7 +730,6 @@ async def test_create_both_am_and_pm_sessions_for_same_day(
     assert any(s["session_type"] == "PM" for s in data)
 
 
-@pytest.mark.asyncio
 async def test_list_sessions_pagination(
     client: TestClient,
     admin_token_headers: dict[str, str],
@@ -762,37 +755,15 @@ async def test_list_sessions_pagination(
     db_session.add_all(sessions)
     await db_session.commit()
 
-    # Get first page
-    response = client.get(
+    assert_pagination_works(
+        client,
         "/api/v1/sessions/",
-        headers=admin_token_headers,
+        admin_token_headers,
         params={
             "user_id": "admin-user-id",
             "user_role": "admin",
-            "limit": 2,
-            "offset": 0,
         },
     )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data) == 2
-
-    # Get second page
-    response = client.get(
-        "/api/v1/sessions/",
-        headers=admin_token_headers,
-        params={
-            "user_id": "admin-user-id",
-            "user_role": "admin",
-            "limit": 2,
-            "offset": 2,
-        },
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data) == 2
 
 
 @pytest.mark.asyncio
