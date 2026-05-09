@@ -12,10 +12,11 @@ from parade_state.auth.session import create_user_session
 
 
 @pytest.fixture
-def client(db_session: AsyncSession):
+def client(test_db):
     """Create test client with database session."""
     async def override_get_db():
-        yield db_session
+        async with test_db() as session:
+            yield session
 
     from parade_state.db import get_db_session
     app.dependency_overrides[get_db_session] = override_get_db
@@ -26,7 +27,7 @@ def client(db_session: AsyncSession):
     app.dependency_overrides.clear()
 
 
-async def create_test_user_and_session(db_session: AsyncSession, role: str = "user", status: str = "active"):
+async def create_test_user_and_session(test_db, role: str = "user", status: str = "active"):
     """Helper to create a test user and session."""
     # Generate unique email using UUID to avoid conflicts
     unique_id = str(uuid.uuid4())[:8]
@@ -36,40 +37,41 @@ async def create_test_user_and_session(db_session: AsyncSession, role: str = "us
         status=status,
         role=role,
     )
-    db_session.add(user)
-    await db_session.commit()
-    await db_session.refresh(user)
 
-    session = await create_user_session(
-        db_session,
-        user_id=str(user.id),
-        email=user.email,
-        name=user.name,
-        role=user.role,
-    )
+    async with test_db() as db_session:
+        db_session.add(user)
+        await db_session.commit()
+        await db_session.refresh(user)
+
+        session = await create_user_session(
+            db_session,
+            user_id=str(user.id),
+            email=user.email,
+            name=user.name,
+            role=user.role,
+        )
+        await db_session.commit()
 
     return user, session
 
 
-@pytest.mark.asyncio
-async def test_health_check(client: TestClient):
+def test_health_check(client: TestClient):
     """Test health check endpoint."""
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
 
 
-@pytest.mark.asyncio
-async def test_get_current_user_info_unauthorized(client: TestClient):
+def test_get_current_user_info_unauthorized(client: TestClient):
     """Test that unauthorized requests to /me fail."""
     response = client.get("/api/v1/auth/me")
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_get_current_user_info_authorized(client: TestClient, db_session: AsyncSession):
+async def test_get_current_user_info_authorized(client: TestClient, test_db):
     """Test getting current user info with valid token."""
-    user, session = await create_test_user_and_session(db_session)
+    user, session = await create_test_user_and_session(test_db)
 
     headers = {"Authorization": f"Bearer {session.token}"}
     response = client.get("/api/v1/auth/me", headers=headers)
@@ -82,9 +84,9 @@ async def test_get_current_user_info_authorized(client: TestClient, db_session: 
 
 
 @pytest.mark.asyncio
-async def test_logout_with_valid_token(client: TestClient, db_session: AsyncSession):
+async def test_logout_with_valid_token(client: TestClient, test_db):
     """Test logout with valid token."""
-    user, session = await create_test_user_and_session(db_session)
+    user, session = await create_test_user_and_session(test_db)
 
     headers = {"Authorization": f"Bearer {session.token}"}
     response = client.post("/api/v1/auth/logout", headers=headers)
@@ -94,7 +96,7 @@ async def test_logout_with_valid_token(client: TestClient, db_session: AsyncSess
 
 
 @pytest.mark.asyncio
-async def test_list_users_as_admin(client: TestClient, db_session: AsyncSession):
+async def test_list_users_as_admin(client: TestClient, test_db):
     """Test listing users as admin."""
     admin_user, admin_session = await create_test_user_and_session(db_session, role="admin")
 
@@ -113,7 +115,7 @@ async def test_list_users_as_admin(client: TestClient, db_session: AsyncSession)
 
 
 @pytest.mark.asyncio
-async def test_list_users_as_regular_user(client: TestClient, db_session: AsyncSession):
+async def test_list_users_as_regular_user(client: TestClient, test_db):
     """Test that regular users cannot list users."""
     user, session = await create_test_user_and_session(db_session, role="user")
 
@@ -124,7 +126,7 @@ async def test_list_users_as_regular_user(client: TestClient, db_session: AsyncS
 
 
 @pytest.mark.asyncio
-async def test_get_user_as_admin(client: TestClient, db_session: AsyncSession):
+async def test_get_user_as_admin(client: TestClient, test_db):
     """Test getting a specific user as admin."""
     admin_user, admin_session = await create_test_user_and_session(db_session, role="admin")
     user, _ = await create_test_user_and_session(db_session, role="user")
@@ -139,7 +141,7 @@ async def test_get_user_as_admin(client: TestClient, db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_get_user_self(client: TestClient, db_session: AsyncSession):
+async def test_get_user_self(client: TestClient, test_db):
     """Test that users can view their own profile."""
     user, session = await create_test_user_and_session(db_session, role="user")
 
@@ -152,7 +154,7 @@ async def test_get_user_self(client: TestClient, db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_get_other_user_as_regular_user(client: TestClient, db_session: AsyncSession):
+async def test_get_other_user_as_regular_user(client: TestClient, test_db):
     """Test that regular users cannot view other users."""
     user1, session1 = await create_test_user_and_session(db_session, role="user")
     user2, _ = await create_test_user_and_session(db_session, role="user")
@@ -164,7 +166,7 @@ async def test_get_other_user_as_regular_user(client: TestClient, db_session: As
 
 
 @pytest.mark.asyncio
-async def test_update_user_as_admin(client: TestClient, db_session: AsyncSession):
+async def test_update_user_as_admin(client: TestClient, test_db):
     """Test updating user as admin."""
     admin_user, admin_session = await create_test_user_and_session(db_session, role="admin")
     user, _ = await create_test_user_and_session(db_session, role="user")
@@ -182,7 +184,7 @@ async def test_update_user_as_admin(client: TestClient, db_session: AsyncSession
 
 
 @pytest.mark.asyncio
-async def test_update_user_role_as_super_admin(client: TestClient, db_session: AsyncSession):
+async def test_update_user_role_as_super_admin(client: TestClient, test_db):
     """Test promoting user to admin as super admin."""
     super_admin, super_admin_session = await create_test_user_and_session(db_session, role="super_admin")
     user, _ = await create_test_user_and_session(db_session, role="user")
@@ -200,7 +202,7 @@ async def test_update_user_role_as_super_admin(client: TestClient, db_session: A
 
 
 @pytest.mark.asyncio
-async def test_update_user_role_as_regular_admin(client: TestClient, db_session: AsyncSession):
+async def test_update_user_role_as_regular_admin(client: TestClient, test_db):
     """Test that regular admins cannot grant super admin role."""
     admin, admin_session = await create_test_user_and_session(db_session, role="admin")
     user, _ = await create_test_user_and_session(db_session, role="user")
@@ -216,7 +218,7 @@ async def test_update_user_role_as_regular_admin(client: TestClient, db_session:
 
 
 @pytest.mark.asyncio
-async def test_delete_user_as_super_admin(client: TestClient, db_session: AsyncSession):
+async def test_delete_user_as_super_admin(client: TestClient, test_db):
     """Test deleting user as super admin."""
     super_admin, super_admin_session = await create_test_user_and_session(db_session, role="super_admin")
     user, _ = await create_test_user_and_session(db_session, role="user")
@@ -229,7 +231,7 @@ async def test_delete_user_as_super_admin(client: TestClient, db_session: AsyncS
 
 
 @pytest.mark.asyncio
-async def test_delete_user_as_regular_admin(client: TestClient, db_session: AsyncSession):
+async def test_delete_user_as_regular_admin(client: TestClient, test_db):
     """Test that regular admins cannot delete users."""
     admin, admin_session = await create_test_user_and_session(db_session, role="admin")
     user, _ = await create_test_user_and_session(db_session, role="user")
@@ -241,7 +243,7 @@ async def test_delete_user_as_regular_admin(client: TestClient, db_session: Asyn
 
 
 @pytest.mark.asyncio
-async def test_self_deletion_prevention(client: TestClient, db_session: AsyncSession):
+async def test_self_deletion_prevention(client: TestClient, test_db):
     """Test that users cannot delete themselves."""
     super_admin, super_admin_session = await create_test_user_and_session(db_session, role="super_admin")
 
@@ -252,7 +254,7 @@ async def test_self_deletion_prevention(client: TestClient, db_session: AsyncSes
 
 
 @pytest.mark.asyncio
-async def test_user_filtering(client: TestClient, db_session: AsyncSession):
+async def test_user_filtering(client: TestClient, test_db):
     """Test filtering users by status and role."""
     admin, admin_session = await create_test_user_and_session(db_session, role="admin")
 
@@ -277,7 +279,7 @@ async def test_user_filtering(client: TestClient, db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_user_search(client: TestClient, db_session: AsyncSession):
+async def test_user_search(client: TestClient, test_db):
     """Test searching users by name or email."""
     admin, admin_session = await create_test_user_and_session(db_session, role="admin")
 
@@ -300,7 +302,7 @@ async def test_user_search(client: TestClient, db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_pagination(client: TestClient, db_session: AsyncSession):
+async def test_pagination(client: TestClient, test_db):
     """Test user list pagination."""
     admin, admin_session = await create_test_user_and_session(db_session, role="admin")
 
