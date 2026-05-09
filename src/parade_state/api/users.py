@@ -10,11 +10,12 @@ from sqlalchemy import select, or_, and_
 from parade_state.db import get_db_session
 from parade_state.models import User, AccessLevel
 from parade_state.api.auth import get_current_user
-from parade_state.utils import uuid_gen
+from parade_state.utils import ids
 
 
 class UserUpdate(BaseModel):
     """Schema for user updates."""
+
     name: Optional[str] = None
     status: Optional[str] = None
     role: Optional[str] = None
@@ -98,9 +99,13 @@ async def list_users(
                 "name": user.name,
                 "role": user.role,
                 "status": user.status,
-                "access_level_id": str(user.access_level_id) if user.access_level_id else None,
+                "access_level_id": str(user.access_level_id)
+                if user.access_level_id
+                else None,
                 "created_at": user.created_at.isoformat(),
-                "last_sign_in_at": user.last_sign_in_at.isoformat() if user.last_sign_in_at else None,
+                "last_sign_in_at": user.last_sign_in_at.isoformat()
+                if user.last_sign_in_at
+                else None,
             }
             for user in users
         ],
@@ -119,7 +124,10 @@ async def get_user(
     """Get a specific user by ID."""
 
     # Check permission: users can view themselves, admins can view anyone
-    if current_user.role not in ["admin", "super_admin"] and str(current_user.id) != user_id:
+    if (
+        current_user.role not in ["admin", "super_admin"]
+        and str(current_user.id) != user_id
+    ):
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
             detail="You can only view your own profile",
@@ -127,7 +135,7 @@ async def get_user(
 
     # Validate UUID format but keep as string for database comparison
     try:
-        uuid_gen.validate(user_id)  # Validate format
+        ids.validate(user_id)  # Validate format
     except ValueError:
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -152,8 +160,12 @@ async def get_user(
         "access_level_id": str(user.access_level_id) if user.access_level_id else None,
         "created_at": user.created_at.isoformat(),
         "updated_at": user.updated_at.isoformat(),
-        "first_sign_in_at": user.first_sign_in_at.isoformat() if user.first_sign_in_at else None,
-        "last_sign_in_at": user.last_sign_in_at.isoformat() if user.last_sign_in_at else None,
+        "first_sign_in_at": user.first_sign_in_at.isoformat()
+        if user.first_sign_in_at
+        else None,
+        "last_sign_in_at": user.last_sign_in_at.isoformat()
+        if user.last_sign_in_at
+        else None,
     }
 
 
@@ -168,7 +180,7 @@ async def update_user(
 
     # Validate UUID format but keep as string for database comparison
     try:
-        uuid_gen.validate(user_id)  # Validate format
+        ids.validate(user_id)  # Validate format
     except ValueError:
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -213,7 +225,7 @@ async def update_user(
 
     if update_data.access_level_id is not None:
         try:
-            uuid_gen.validate(update_data.access_level_id)  # Validate format
+            ids.validate(update_data.access_level_id)  # Validate format
             # Verify access level exists
             access_result = await db.execute(
                 select(AccessLevel).where(AccessLevel.id == update_data.access_level_id)
@@ -264,7 +276,7 @@ async def delete_user(
 
     # Validate UUID format but keep as string for database comparison
     try:
-        uuid_gen.validate(user_id)  # Validate format
+        ids.validate(user_id)  # Validate format
     except ValueError:
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,

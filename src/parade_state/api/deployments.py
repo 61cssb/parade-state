@@ -23,7 +23,7 @@ from parade_state.models.schemas import (
     DeploymentPersonnelOverrideCreate,
     DeploymentPersonnelOverrideResponse,
 )
-from parade_state.utils import utc_dt, uuid_gen
+from parade_state.utils import utc_dt, ids
 
 router = APIRouter()
 
@@ -42,7 +42,9 @@ async def verify_deployment_access(
     """Verify user has access to deployment and return it."""
     # Super admins have full access
     if user_role == "super_admin":
-        result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+        result = await db.execute(
+            select(Deployment).where(Deployment.id == deployment_id)
+        )
         deployment = result.scalar_one_or_none()
         if not deployment:
             raise HTTPException(
@@ -55,7 +57,9 @@ async def verify_deployment_access(
     # TODO: Implement proper access control based on user scopes
     # For now, admins can access all deployments
     if user_role in ["admin", "user"]:
-        result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+        result = await db.execute(
+            select(Deployment).where(Deployment.id == deployment_id)
+        )
         deployment = result.scalar_one_or_none()
         if not deployment:
             raise HTTPException(
@@ -92,7 +96,9 @@ async def validate_deployment_status_transition(
 # ============================================================================
 
 
-@router.post("/", response_model=DeploymentResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/", response_model=DeploymentResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_deployment(
     deployment_data: DeploymentCreate,
     user_id: str = Query(..., description="User ID creating the deployment"),
@@ -602,7 +608,9 @@ async def list_deployment_notes(
     await verify_deployment_access(deployment_id, user_id, user_role, db)
 
     # Build query
-    query = select(DeploymentNotes).where(DeploymentNotes.deployment_id == deployment_id)
+    query = select(DeploymentNotes).where(
+        DeploymentNotes.deployment_id == deployment_id
+    )
 
     if personnel_id:
         query = query.where(DeploymentNotes.personnel_id == personnel_id)
@@ -613,7 +621,9 @@ async def list_deployment_notes(
     return notes_list
 
 
-@router.patch("/{deployment_id}/notes/{personnel_id}", response_model=DeploymentNotesResponse)
+@router.patch(
+    "/{deployment_id}/notes/{personnel_id}", response_model=DeploymentNotesResponse
+)
 async def update_deployment_notes(
     deployment_id: str,
     personnel_id: str,

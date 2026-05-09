@@ -9,7 +9,7 @@ from sqlalchemy import select
 from parade_state.db import get_db_session
 from parade_state.models import User
 from parade_state.session import get_valid_session
-from parade_state.utils import uuid_gen
+from parade_state.utils import ids
 
 
 security = HTTPBearer()
@@ -31,7 +31,9 @@ async def get_current_user_optional(
         if not session:
             return None
 
-        result = await db.execute(select(User).where(User.id == uuid_gen.to_uuid(session.user_id)))
+        result = await db.execute(
+            select(User).where(User.id == ids.to_uuid(session.user_id))
+        )
         user = result.scalar_one_or_none()
 
         if user and user.status == "active":
@@ -56,7 +58,9 @@ async def require_authenticated_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        result = await db.execute(select(User).where(User.id == uuid_gen.to_uuid(session.user_id)))
+        result = await db.execute(
+            select(User).where(User.id == ids.to_uuid(session.user_id))
+        )
         user = result.scalar_one_or_none()
 
         if not user:
@@ -114,6 +118,7 @@ async def require_super_admin_user(
 
 def check_access_level(required_access_level_order: int):
     """Dependency factory to check user access level."""
+
     async def check_access(
         request: Request,
         credentials: HTTPAuthorizationCredentials = Depends(security),
