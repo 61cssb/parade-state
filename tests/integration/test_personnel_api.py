@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import date, datetime, timedelta
-from httpx import AsyncClient
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from parade_state.models.deployment import Deployment, DeploymentNotes, DeploymentPersonnelOverride
@@ -11,7 +11,7 @@ from parade_state.models.personnel import Personnel
 
 @pytest.mark.asyncio
 async def test_list_personnel_with_deployment_context(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -21,7 +21,7 @@ async def test_list_personnel_with_deployment_context(
     """Test listing personnel with deployment context."""
     admin_id = str(sample_users["admin"].id)
 
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
@@ -49,13 +49,13 @@ async def test_list_personnel_with_deployment_context(
 
 @pytest.mark.asyncio
 async def test_list_personnel_without_deployment_context_as_admin(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_personnel,
     sample_users,
 ):
     """Test listing personnel without deployment context as admin."""
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
@@ -80,11 +80,11 @@ async def test_list_personnel_without_deployment_context_as_admin(
 
 @pytest.mark.asyncio
 async def test_list_personnel_without_deployment_context_as_user_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     user_token_headers: dict[str, str],
 ):
     """Test that regular users cannot list personnel without deployment context."""
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel",
         headers=user_token_headers,
         params={
@@ -99,7 +99,7 @@ async def test_list_personnel_without_deployment_context_as_user_forbidden(
 
 @pytest.mark.asyncio
 async def test_list_personnel_with_unit_filter(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
@@ -110,7 +110,7 @@ async def test_list_personnel_with_unit_filter(
     # Get the unit of first personnel
     first_unit = sample_personnel[0].unit
 
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
@@ -132,7 +132,7 @@ async def test_list_personnel_with_unit_filter(
 
 @pytest.mark.asyncio
 async def test_list_personnel_with_sub_unit_filter(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
@@ -148,7 +148,7 @@ async def test_list_personnel_with_sub_unit_filter(
             break
 
     if sub_unit:
-        response = await async_client.get(
+        response = client.get(
             "/api/v1/personnel",
             headers=admin_token_headers,
             params={
@@ -170,7 +170,7 @@ async def test_list_personnel_with_sub_unit_filter(
 
 @pytest.mark.asyncio
 async def test_list_personnel_with_search(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
@@ -181,7 +181,7 @@ async def test_list_personnel_with_search(
     # Search for first personnel's name
     search_term = sample_personnel[0].full_name[:5]  # Use first 5 characters
 
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
@@ -208,7 +208,7 @@ async def test_list_personnel_with_search(
 
 @pytest.mark.asyncio
 async def test_list_personnel_with_search_by_service_number(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
@@ -219,7 +219,7 @@ async def test_list_personnel_with_search_by_service_number(
     # Search for first personnel's service number
     search_term = sample_personnel[0].pers_no[:5]  # Use first 5 characters
 
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
@@ -246,7 +246,7 @@ async def test_list_personnel_with_search_by_service_number(
 
 @pytest.mark.asyncio
 async def test_list_personnel_with_overrides(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -266,7 +266,7 @@ async def test_list_personnel_with_overrides(
     db_session.add(override)
     await db_session.commit()
 
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
@@ -292,7 +292,7 @@ async def test_list_personnel_with_overrides(
 
 @pytest.mark.asyncio
 async def test_list_personnel_with_deployment_notes(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -312,7 +312,7 @@ async def test_list_personnel_with_deployment_notes(
     db_session.add(notes)
     await db_session.commit()
 
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
@@ -338,7 +338,7 @@ async def test_list_personnel_with_deployment_notes(
 
 @pytest.mark.asyncio
 async def test_get_personnel_by_id_with_deployment_context(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
@@ -346,7 +346,7 @@ async def test_get_personnel_by_id_with_deployment_context(
     sample_personnel,
 ):
     """Test getting personnel by ID with deployment context."""
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
@@ -367,13 +367,13 @@ async def test_get_personnel_by_id_with_deployment_context(
 
 @pytest.mark.asyncio
 async def test_get_personnel_by_id_without_deployment_context_as_admin(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     sample_personnel,
 ):
     """Test getting personnel by ID without deployment context as admin."""
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
@@ -393,12 +393,12 @@ async def test_get_personnel_by_id_without_deployment_context_as_admin(
 
 @pytest.mark.asyncio
 async def test_get_personnel_by_id_without_deployment_context_as_user_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     user_token_headers: dict[str, str],
     sample_personnel,
 ):
     """Test that regular users cannot get personnel without deployment context."""
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=user_token_headers,
         params={
@@ -413,7 +413,7 @@ async def test_get_personnel_by_id_without_deployment_context_as_user_forbidden(
 
 @pytest.mark.asyncio
 async def test_get_personnel_by_id_with_override_and_notes(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -444,7 +444,7 @@ async def test_get_personnel_by_id_with_override_and_notes(
     db_session.add(notes)
     await db_session.commit()
 
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
@@ -463,7 +463,7 @@ async def test_get_personnel_by_id_with_override_and_notes(
 
 @pytest.mark.asyncio
 async def test_update_personnel_as_admin(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
@@ -475,7 +475,7 @@ async def test_update_personnel_as_admin(
         "rank": "Updated Rank",
     }
 
-    response = await async_client.patch(
+    response = client.patch(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
@@ -494,7 +494,7 @@ async def test_update_personnel_as_admin(
 
 @pytest.mark.asyncio
 async def test_update_personnel_as_user_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     user_token_headers: dict[str, str],
     sample_personnel,
 ):
@@ -503,7 +503,7 @@ async def test_update_personnel_as_user_forbidden(
         "rank": "Updated Rank",
     }
 
-    response = await async_client.patch(
+    response = client.patch(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=user_token_headers,
         params={
@@ -519,7 +519,7 @@ async def test_update_personnel_as_user_forbidden(
 
 @pytest.mark.asyncio
 async def test_update_personnel_status(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
@@ -530,7 +530,7 @@ async def test_update_personnel_status(
         "status": "archived",
     }
 
-    response = await async_client.patch(
+    response = client.patch(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
@@ -548,7 +548,7 @@ async def test_update_personnel_status(
 
 @pytest.mark.asyncio
 async def test_list_personnel_with_status_filter(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
@@ -560,7 +560,7 @@ async def test_list_personnel_with_status_filter(
     sample_personnel[0].status = "archived"
     await db_session.commit()
 
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
@@ -583,7 +583,7 @@ async def test_list_personnel_with_status_filter(
 
 @pytest.mark.asyncio
 async def test_list_personnel_with_pagination(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
@@ -592,7 +592,7 @@ async def test_list_personnel_with_pagination(
 ):
     """Test listing personnel with pagination."""
     # Request first page
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
@@ -610,7 +610,7 @@ async def test_list_personnel_with_pagination(
     assert len(data) <= 2
 
     # Request second page
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
@@ -630,12 +630,12 @@ async def test_list_personnel_with_pagination(
 
 @pytest.mark.asyncio
 async def test_list_personnel_invalid_deployment_id(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
 ):
     """Test listing personnel with invalid deployment ID."""
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
@@ -650,12 +650,12 @@ async def test_list_personnel_invalid_deployment_id(
 
 @pytest.mark.asyncio
 async def test_get_personnel_invalid_id(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
 ):
     """Test getting personnel with invalid ID."""
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel/invalid-personnel-id",
         headers=admin_token_headers,
         params={
@@ -669,7 +669,7 @@ async def test_get_personnel_invalid_id(
 
 @pytest.mark.asyncio
 async def test_update_personnel_invalid_id(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
 ):
@@ -678,7 +678,7 @@ async def test_update_personnel_invalid_id(
         "rank": "Updated Rank",
     }
 
-    response = await async_client.patch(
+    response = client.patch(
         "/api/v1/personnel/invalid-personnel-id",
         headers=admin_token_headers,
         params={
@@ -693,7 +693,7 @@ async def test_update_personnel_invalid_id(
 
 @pytest.mark.asyncio
 async def test_list_personnel_from_different_estab_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
@@ -716,7 +716,7 @@ async def test_list_personnel_from_different_estab_forbidden(
     db_session.add(other_personnel)
     await db_session.commit()
 
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
@@ -741,7 +741,7 @@ async def test_list_personnel_from_different_estab_forbidden(
 
 @pytest.mark.asyncio
 async def test_get_personnel_from_different_estab_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
@@ -764,7 +764,7 @@ async def test_get_personnel_from_different_estab_forbidden(
     db_session.add(other_personnel)
     await db_session.commit()
 
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/personnel/{other_personnel.id}",
         headers=admin_token_headers,
         params={

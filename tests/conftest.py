@@ -6,7 +6,6 @@ from datetime import date, datetime, timedelta
 from typing import AsyncGenerator
 
 import pytest
-from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -213,10 +212,11 @@ async def sample_deployment(db_session: AsyncSession, sample_estab, sample_users
 
 
 @pytest.fixture
-async def async_client(test_db):
-    """Provide an async HTTP client for testing API endpoints."""
+def client(test_db):
+    """Provide a test client for API endpoints using FastAPI TestClient."""
     from parade_state.main import app
     from parade_state.db import get_db_session
+    from fastapi.testclient import TestClient
 
     # Override the database dependency
     async def override_get_db_session():
@@ -225,8 +225,8 @@ async def async_client(test_db):
 
     app.dependency_overrides[get_db_session] = override_get_db_session
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        yield client
+    with TestClient(app) as test_client:
+        yield test_client
 
     # Clean up
     app.dependency_overrides.clear()

@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import date, datetime, timedelta
-from httpx import AsyncClient
+from fastapi.testclient import TestClient
 
 from parade_state.models.deployment import Deployment
 from parade_state.models.personnel import Personnel
@@ -11,7 +11,7 @@ from parade_state.utils import utc_dt
 
 @pytest.mark.asyncio
 async def test_get_personnel_attendance_history_basic(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     sample_deployment: Deployment,
@@ -21,7 +21,7 @@ async def test_get_personnel_attendance_history_basic(
     """Test getting personnel attendance history."""
     personnel_id = str(sample_personnel[0].id)
 
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/personnel/{personnel_id}/attendance-history",
         headers=admin_token_headers,
         params={
@@ -79,7 +79,7 @@ async def test_get_personnel_attendance_history_basic(
 
 @pytest.mark.asyncio
 async def test_get_personnel_attendance_history_with_date_filter(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     sample_deployment: Deployment,
@@ -91,7 +91,7 @@ async def test_get_personnel_attendance_history_with_date_filter(
 
     # Get attendance from today only
     today = date.today()
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/personnel/{personnel_id}/attendance-history",
         headers=admin_token_headers,
         params={
@@ -114,7 +114,7 @@ async def test_get_personnel_attendance_history_with_date_filter(
 
 @pytest.mark.asyncio
 async def test_get_personnel_attendance_history_with_pagination(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     sample_deployment: Deployment,
@@ -125,7 +125,7 @@ async def test_get_personnel_attendance_history_with_pagination(
     personnel_id = str(sample_personnel[0].id)
 
     # Get first page with limit 1
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/personnel/{personnel_id}/attendance-history",
         headers=admin_token_headers,
         params={
@@ -147,7 +147,7 @@ async def test_get_personnel_attendance_history_with_pagination(
 
 @pytest.mark.asyncio
 async def test_get_personnel_attendance_history_ordering(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     sample_deployment: Deployment,
@@ -157,7 +157,7 @@ async def test_get_personnel_attendance_history_ordering(
     """Test that attendance history is ordered by date descending (most recent first)."""
     personnel_id = str(sample_personnel[0].id)
 
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/personnel/{personnel_id}/attendance-history",
         headers=admin_token_headers,
         params={
@@ -178,7 +178,7 @@ async def test_get_personnel_attendance_history_ordering(
 
 @pytest.mark.asyncio
 async def test_get_personnel_attendance_history_invalid_personnel(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     sample_deployment: Deployment,
@@ -186,7 +186,7 @@ async def test_get_personnel_attendance_history_invalid_personnel(
     """Test getting attendance history for non-existent personnel."""
     invalid_personnel_id = "00000000-0000-0000-0000-000000000000"
 
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/personnel/{invalid_personnel_id}/attendance-history",
         headers=admin_token_headers,
         params={
@@ -202,7 +202,7 @@ async def test_get_personnel_attendance_history_invalid_personnel(
 
 @pytest.mark.asyncio
 async def test_get_personnel_attendance_history_wrong_estab(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     sample_deployment: Deployment,
@@ -218,7 +218,7 @@ async def test_get_personnel_attendance_history_wrong_estab(
     # Try to use a deployment ID that doesn't exist
     fake_deployment_id = "00000000-0000-0000-0000-999999999999"
 
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/personnel/{personnel_id}/attendance-history",
         headers=admin_token_headers,
         params={
@@ -235,7 +235,7 @@ async def test_get_personnel_attendance_history_wrong_estab(
 
 @pytest.mark.asyncio
 async def test_get_personnel_attendance_history_no_records(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     sample_deployment: Deployment,
@@ -245,7 +245,7 @@ async def test_get_personnel_attendance_history_no_records(
     # Use second personnel who has no attendance records
     personnel_id = str(sample_personnel[1].id)
 
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/personnel/{personnel_id}/attendance-history",
         headers=admin_token_headers,
         params={
@@ -271,7 +271,7 @@ async def test_get_personnel_attendance_history_no_records(
 
 @pytest.mark.asyncio
 async def test_get_personnel_attendance_history_various_statuses(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     sample_deployment: Deployment,
@@ -310,7 +310,7 @@ async def test_get_personnel_attendance_history_various_statuses(
     await db_session.commit()
 
     # Get attendance history
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/personnel/{personnel_id}/attendance-history",
         headers=admin_token_headers,
         params={
@@ -336,7 +336,7 @@ async def test_get_personnel_attendance_history_various_statuses(
 
 @pytest.mark.asyncio
 async def test_get_personnel_attendance_history_access_control(
-    async_client: AsyncClient,
+    client: TestClient,
     user_token_headers: dict[str, str],
     sample_deployment: Deployment,
     sample_personnel,
@@ -345,7 +345,7 @@ async def test_get_personnel_attendance_history_access_control(
     """Test that regular users cannot access attendance history (without deployment access)."""
     personnel_id = str(sample_personnel[0].id)
 
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/personnel/{personnel_id}/attendance-history",
         headers=user_token_headers,
         params={
@@ -362,7 +362,7 @@ async def test_get_personnel_attendance_history_access_control(
 
 @pytest.mark.asyncio
 async def test_get_personnel_attendance_history_invalid_deployment(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     sample_personnel,
@@ -371,7 +371,7 @@ async def test_get_personnel_attendance_history_invalid_deployment(
     personnel_id = str(sample_personnel[0].id)
     invalid_deployment_id = "00000000-0000-0000-0000-000000000000"
 
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/personnel/{personnel_id}/attendance-history",
         headers=admin_token_headers,
         params={

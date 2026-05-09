@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, timedelta
-from httpx import AsyncClient
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from parade_state.models.deployment import Deployment
@@ -12,7 +12,7 @@ from parade_state.utils import utc_dt
 
 @pytest.mark.asyncio
 async def test_create_deployment_as_admin(
-    async_client: AsyncClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
     """Test deployment creation by admin."""
     deployment_data = {
@@ -24,7 +24,7 @@ async def test_create_deployment_as_admin(
         "notes": "Test deployment notes",
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/deployments/",
         json=deployment_data,
         headers=admin_token_headers,
@@ -40,7 +40,7 @@ async def test_create_deployment_as_admin(
 
 @pytest.mark.asyncio
 async def test_create_deployment_as_regular_user_forbidden(
-    async_client: AsyncClient, user_token_headers: dict[str, str], db_session
+    client: TestClient, user_token_headers: dict[str, str], db_session
 ):
     """Test that regular users cannot create deployments."""
     deployment_data = {
@@ -50,7 +50,7 @@ async def test_create_deployment_as_regular_user_forbidden(
         "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/deployments/",
         json=deployment_data,
         headers=user_token_headers,
@@ -63,7 +63,7 @@ async def test_create_deployment_as_regular_user_forbidden(
 
 @pytest.mark.asyncio
 async def test_create_deployment_invalid_date_range(
-    async_client: AsyncClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
     """Test deployment creation with invalid date range."""
     deployment_data = {
@@ -73,7 +73,7 @@ async def test_create_deployment_invalid_date_range(
         "valid_until": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/deployments/",
         json=deployment_data,
         headers=admin_token_headers,
@@ -86,7 +86,7 @@ async def test_create_deployment_invalid_date_range(
 
 @pytest.mark.asyncio
 async def test_list_deployments(
-    async_client: AsyncClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
     """Test listing deployments."""
     # Create some test deployments
@@ -112,7 +112,7 @@ async def test_list_deployments(
     db_session.add(deployment2)
     await db_session.commit()
 
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/deployments/",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -127,7 +127,7 @@ async def test_list_deployments(
 
 @pytest.mark.asyncio
 async def test_list_deployments_with_status_filter(
-    async_client: AsyncClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
     """Test listing deployments with status filter."""
     # Create test deployments with different statuses
@@ -153,7 +153,7 @@ async def test_list_deployments_with_status_filter(
     db_session.add(deployment2)
     await db_session.commit()
 
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/deployments/",
         headers=admin_token_headers,
         params={
@@ -172,7 +172,7 @@ async def test_list_deployments_with_status_filter(
 
 @pytest.mark.asyncio
 async def test_get_deployment(
-    async_client: AsyncClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
     """Test getting a specific deployment."""
     deployment = Deployment(
@@ -187,7 +187,7 @@ async def test_get_deployment(
     db_session.add(deployment)
     await db_session.commit()
 
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/deployments/{deployment.id}",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -201,10 +201,10 @@ async def test_get_deployment(
 
 @pytest.mark.asyncio
 async def test_get_deployment_not_found(
-    async_client: AsyncClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
     """Test getting a non-existent deployment."""
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/deployments/non-existent-id",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -216,7 +216,7 @@ async def test_get_deployment_not_found(
 
 @pytest.mark.asyncio
 async def test_update_deployment(
-    async_client: AsyncClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
     """Test updating a deployment."""
     deployment = Deployment(
@@ -233,7 +233,7 @@ async def test_update_deployment(
 
     update_data = {"name": "Updated Name", "notes": "Updated notes"}
 
-    response = await async_client.patch(
+    response = client.patch(
         f"/api/v1/deployments/{deployment.id}",
         json=update_data,
         headers=admin_token_headers,
@@ -248,7 +248,7 @@ async def test_update_deployment(
 
 @pytest.mark.asyncio
 async def test_update_deployment_status_transition(
-    async_client: AsyncClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
     """Test updating deployment status."""
     deployment = Deployment(
@@ -265,7 +265,7 @@ async def test_update_deployment_status_transition(
 
     update_data = {"status": "active"}
 
-    response = await async_client.patch(
+    response = client.patch(
         f"/api/v1/deployments/{deployment.id}",
         json=update_data,
         headers=admin_token_headers,
@@ -280,7 +280,7 @@ async def test_update_deployment_status_transition(
 
 @pytest.mark.asyncio
 async def test_update_deployment_invalid_status_transition(
-    async_client: AsyncClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
     """Test updating deployment status with invalid transition."""
     deployment = Deployment(
@@ -297,7 +297,7 @@ async def test_update_deployment_invalid_status_transition(
 
     update_data = {"status": "active"}
 
-    response = await async_client.patch(
+    response = client.patch(
         f"/api/v1/deployments/{deployment.id}",
         json=update_data,
         headers=admin_token_headers,
@@ -310,7 +310,7 @@ async def test_update_deployment_invalid_status_transition(
 
 @pytest.mark.asyncio
 async def test_activate_deployment(
-    async_client: AsyncClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
     """Test activating a deployment."""
     deployment = Deployment(
@@ -325,7 +325,7 @@ async def test_activate_deployment(
     db_session.add(deployment)
     await db_session.commit()
 
-    response = await async_client.post(
+    response = client.post(
         f"/api/v1/deployments/{deployment.id}/activate",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -339,7 +339,7 @@ async def test_activate_deployment(
 
 @pytest.mark.asyncio
 async def test_activate_deployment_already_active(
-    async_client: AsyncClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
     """Test activating an already active deployment."""
     deployment = Deployment(
@@ -355,7 +355,7 @@ async def test_activate_deployment_already_active(
     db_session.add(deployment)
     await db_session.commit()
 
-    response = await async_client.post(
+    response = client.post(
         f"/api/v1/deployments/{deployment.id}/activate",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -367,7 +367,7 @@ async def test_activate_deployment_already_active(
 
 @pytest.mark.asyncio
 async def test_deactivate_deployment(
-    async_client: AsyncClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
     """Test deactivating a deployment."""
     deployment = Deployment(
@@ -383,7 +383,7 @@ async def test_deactivate_deployment(
     db_session.add(deployment)
     await db_session.commit()
 
-    response = await async_client.post(
+    response = client.post(
         f"/api/v1/deployments/{deployment.id}/deactivate",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -397,7 +397,7 @@ async def test_deactivate_deployment(
 
 @pytest.mark.asyncio
 async def test_delete_deployment_as_super_admin(
-    async_client: AsyncClient, super_admin_token_headers: dict[str, str], db_session
+    client: TestClient, super_admin_token_headers: dict[str, str], db_session
 ):
     """Test deployment deletion by super admin."""
     deployment = Deployment(
@@ -412,7 +412,7 @@ async def test_delete_deployment_as_super_admin(
     db_session.add(deployment)
     await db_session.commit()
 
-    response = await async_client.delete(
+    response = client.delete(
         f"/api/v1/deployments/{deployment.id}",
         headers=super_admin_token_headers,
         params={"user_id": "super-admin-user-id", "user_role": "super_admin"},
@@ -429,7 +429,7 @@ async def test_delete_deployment_as_super_admin(
 
 @pytest.mark.asyncio
 async def test_delete_deployment_as_admin_forbidden(
-    async_client: AsyncClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
     """Test that regular admins cannot delete deployments."""
     deployment = Deployment(
@@ -444,7 +444,7 @@ async def test_delete_deployment_as_admin_forbidden(
     db_session.add(deployment)
     await db_session.commit()
 
-    response = await async_client.delete(
+    response = client.delete(
         f"/api/v1/deployments/{deployment.id}",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -456,7 +456,7 @@ async def test_delete_deployment_as_admin_forbidden(
 
 @pytest.mark.asyncio
 async def test_delete_active_deployment_forbidden(
-    async_client: AsyncClient, super_admin_token_headers: dict[str, str], db_session
+    client: TestClient, super_admin_token_headers: dict[str, str], db_session
 ):
     """Test that active deployments cannot be deleted."""
     deployment = Deployment(
@@ -472,7 +472,7 @@ async def test_delete_active_deployment_forbidden(
     db_session.add(deployment)
     await db_session.commit()
 
-    response = await async_client.delete(
+    response = client.delete(
         f"/api/v1/deployments/{deployment.id}",
         headers=super_admin_token_headers,
         params={"user_id": "super-admin-user-id", "user_role": "super_admin"},
@@ -484,7 +484,7 @@ async def test_delete_active_deployment_forbidden(
 
 @pytest.mark.asyncio
 async def test_search_deployments(
-    async_client: AsyncClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
     """Test searching deployments by name."""
     deployment1 = Deployment(
@@ -508,7 +508,7 @@ async def test_search_deployments(
     db_session.add(deployment2)
     await db_session.commit()
 
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/deployments/",
         headers=admin_token_headers,
         params={
@@ -526,7 +526,7 @@ async def test_search_deployments(
 
 @pytest.mark.asyncio
 async def test_list_deployments_pagination(
-    async_client: AsyncClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
     """Test deployment list pagination."""
     # Create multiple deployments
@@ -544,7 +544,7 @@ async def test_list_deployments_pagination(
     await db_session.commit()
 
     # Get first page
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/deployments/",
         headers=admin_token_headers,
         params={
@@ -560,7 +560,7 @@ async def test_list_deployments_pagination(
     assert len(data) == 2
 
     # Get second page
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/deployments/",
         headers=admin_token_headers,
         params={

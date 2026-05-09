@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, timedelta, date
-from httpx import AsyncClient
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from parade_state.models.attendance import Session
@@ -12,7 +12,7 @@ from parade_state.utils import utc_dt
 
 @pytest.mark.asyncio
 async def test_create_session_as_admin(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -27,7 +27,7 @@ async def test_create_session_as_admin(
         "status": "open",
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/sessions/",
         json=session_data,
         headers=admin_token_headers,
@@ -45,7 +45,7 @@ async def test_create_session_as_admin(
 
 @pytest.mark.asyncio
 async def test_create_session_for_inactive_deployment_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_estab,
@@ -73,7 +73,7 @@ async def test_create_session_for_inactive_deployment_forbidden(
         "session_type": "AM",
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/sessions/",
         json=session_data,
         headers=admin_token_headers,
@@ -86,7 +86,7 @@ async def test_create_session_for_inactive_deployment_forbidden(
 
 @pytest.mark.asyncio
 async def test_create_session_duplicate_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -114,7 +114,7 @@ async def test_create_session_duplicate_forbidden(
         "session_type": "AM",
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/sessions/",
         json=session_data,
         headers=admin_token_headers,
@@ -127,7 +127,7 @@ async def test_create_session_duplicate_forbidden(
 
 @pytest.mark.asyncio
 async def test_create_session_as_regular_user_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     user_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -141,7 +141,7 @@ async def test_create_session_as_regular_user_forbidden(
         "session_type": "PM",
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/sessions/",
         json=session_data,
         headers=user_token_headers,
@@ -154,7 +154,7 @@ async def test_create_session_as_regular_user_forbidden(
 
 @pytest.mark.asyncio
 async def test_create_session_deployment_not_found(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
 ):
     """Test session creation with non-existent deployment."""
@@ -166,7 +166,7 @@ async def test_create_session_deployment_not_found(
         "session_type": "AM",
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/sessions/",
         json=session_data,
         headers=admin_token_headers,
@@ -179,7 +179,7 @@ async def test_create_session_deployment_not_found(
 
 @pytest.mark.asyncio
 async def test_list_sessions(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -209,7 +209,7 @@ async def test_list_sessions(
     db_session.add_all([session1, session2])
     await db_session.commit()
 
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/sessions/",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -224,7 +224,7 @@ async def test_list_sessions(
 
 @pytest.mark.asyncio
 async def test_list_sessions_with_deployment_filter(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -272,7 +272,7 @@ async def test_list_sessions_with_deployment_filter(
     await db_session.commit()
 
     # Filter by first deployment
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/sessions/",
         headers=admin_token_headers,
         params={
@@ -290,7 +290,7 @@ async def test_list_sessions_with_deployment_filter(
 
 @pytest.mark.asyncio
 async def test_list_sessions_with_status_filter(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -323,7 +323,7 @@ async def test_list_sessions_with_status_filter(
     await db_session.commit()
 
     # Filter by open status
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/sessions/",
         headers=admin_token_headers,
         params={
@@ -341,7 +341,7 @@ async def test_list_sessions_with_status_filter(
 
 @pytest.mark.asyncio
 async def test_get_session(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -361,7 +361,7 @@ async def test_get_session(
     db_session.add(session)
     await db_session.commit()
 
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/sessions/{session.id}",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -375,11 +375,11 @@ async def test_get_session(
 
 @pytest.mark.asyncio
 async def test_get_session_not_found(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
 ):
     """Test getting a non-existent session."""
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/sessions/non-existent-id",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -391,7 +391,7 @@ async def test_get_session_not_found(
 
 @pytest.mark.asyncio
 async def test_update_session_status_to_closed(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -413,7 +413,7 @@ async def test_update_session_status_to_closed(
 
     update_data = {"status": "closed"}
 
-    response = await async_client.patch(
+    response = client.patch(
         f"/api/v1/sessions/{session.id}",
         json=update_data,
         headers=admin_token_headers,
@@ -429,7 +429,7 @@ async def test_update_session_status_to_closed(
 
 @pytest.mark.asyncio
 async def test_update_session_status_to_finalized(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -453,7 +453,7 @@ async def test_update_session_status_to_finalized(
 
     update_data = {"status": "finalized"}
 
-    response = await async_client.patch(
+    response = client.patch(
         f"/api/v1/sessions/{session.id}",
         json=update_data,
         headers=admin_token_headers,
@@ -467,7 +467,7 @@ async def test_update_session_status_to_finalized(
 
 @pytest.mark.asyncio
 async def test_update_session_invalid_status_transition(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -490,7 +490,7 @@ async def test_update_session_invalid_status_transition(
     # Try to skip from open to finalized
     update_data = {"status": "finalized"}
 
-    response = await async_client.patch(
+    response = client.patch(
         f"/api/v1/sessions/{session.id}",
         json=update_data,
         headers=admin_token_headers,
@@ -503,7 +503,7 @@ async def test_update_session_invalid_status_transition(
 
 @pytest.mark.asyncio
 async def test_update_finalized_session_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -527,7 +527,7 @@ async def test_update_finalized_session_forbidden(
 
     update_data = {"status": "closed"}
 
-    response = await async_client.patch(
+    response = client.patch(
         f"/api/v1/sessions/{session.id}",
         json=update_data,
         headers=admin_token_headers,
@@ -540,7 +540,7 @@ async def test_update_finalized_session_forbidden(
 
 @pytest.mark.asyncio
 async def test_update_session_as_regular_user_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     user_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -562,7 +562,7 @@ async def test_update_session_as_regular_user_forbidden(
 
     update_data = {"status": "closed"}
 
-    response = await async_client.patch(
+    response = client.patch(
         f"/api/v1/sessions/{session.id}",
         json=update_data,
         headers=user_token_headers,
@@ -575,7 +575,7 @@ async def test_update_session_as_regular_user_forbidden(
 
 @pytest.mark.asyncio
 async def test_delete_session_as_super_admin(
-    async_client: AsyncClient,
+    client: TestClient,
     super_admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -595,7 +595,7 @@ async def test_delete_session_as_super_admin(
     db_session.add(session)
     await db_session.commit()
 
-    response = await async_client.delete(
+    response = client.delete(
         f"/api/v1/sessions/{session.id}",
         headers=super_admin_token_headers,
         params={"user_id": "super-admin-id", "user_role": "super_admin"},
@@ -610,7 +610,7 @@ async def test_delete_session_as_super_admin(
 
 @pytest.mark.asyncio
 async def test_delete_finalized_session_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     super_admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -632,7 +632,7 @@ async def test_delete_finalized_session_forbidden(
     db_session.add(session)
     await db_session.commit()
 
-    response = await async_client.delete(
+    response = client.delete(
         f"/api/v1/sessions/{session.id}",
         headers=super_admin_token_headers,
         params={"user_id": "super-admin-id", "user_role": "super_admin"},
@@ -644,7 +644,7 @@ async def test_delete_finalized_session_forbidden(
 
 @pytest.mark.asyncio
 async def test_delete_session_as_admin_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -664,7 +664,7 @@ async def test_delete_session_as_admin_forbidden(
     db_session.add(session)
     await db_session.commit()
 
-    response = await async_client.delete(
+    response = client.delete(
         f"/api/v1/sessions/{session.id}",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -676,7 +676,7 @@ async def test_delete_session_as_admin_forbidden(
 
 @pytest.mark.asyncio
 async def test_create_both_am_and_pm_sessions_for_same_day(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -692,7 +692,7 @@ async def test_create_both_am_and_pm_sessions_for_same_day(
         "status": "open",
     }
 
-    am_response = await async_client.post(
+    am_response = client.post(
         "/api/v1/sessions/",
         json=am_session_data,
         headers=admin_token_headers,
@@ -709,7 +709,7 @@ async def test_create_both_am_and_pm_sessions_for_same_day(
         "status": "open",
     }
 
-    pm_response = await async_client.post(
+    pm_response = client.post(
         "/api/v1/sessions/",
         json=pm_session_data,
         headers=admin_token_headers,
@@ -719,7 +719,7 @@ async def test_create_both_am_and_pm_sessions_for_same_day(
     assert pm_response.status_code == 201
 
     # Verify both sessions exist
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/sessions/",
         headers=admin_token_headers,
         params={
@@ -738,7 +738,7 @@ async def test_create_both_am_and_pm_sessions_for_same_day(
 
 @pytest.mark.asyncio
 async def test_list_sessions_pagination(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -763,7 +763,7 @@ async def test_list_sessions_pagination(
     await db_session.commit()
 
     # Get first page
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/sessions/",
         headers=admin_token_headers,
         params={
@@ -779,7 +779,7 @@ async def test_list_sessions_pagination(
     assert len(data) == 2
 
     # Get second page
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/sessions/",
         headers=admin_token_headers,
         params={
@@ -797,7 +797,7 @@ async def test_list_sessions_pagination(
 
 @pytest.mark.asyncio
 async def test_session_auto_sets_opened_at(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -814,7 +814,7 @@ async def test_session_auto_sets_opened_at(
 
     before_creation = utc_dt.utcnow()
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/sessions/",
         json=session_data,
         headers=admin_token_headers,

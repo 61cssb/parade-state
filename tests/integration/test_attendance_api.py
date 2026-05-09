@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import date, datetime, timedelta
-from httpx import AsyncClient
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from parade_state.models.attendance import AttendanceRecord, Session
@@ -13,7 +13,7 @@ from parade_state.utils import utc_dt
 
 @pytest.mark.asyncio
 async def test_create_attendance_record_as_admin(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -42,7 +42,7 @@ async def test_create_attendance_record_as_admin(
         "remarks": "On time",
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/attendance/",
         json=attendance_data,
         headers=admin_token_headers,
@@ -61,7 +61,7 @@ async def test_create_attendance_record_as_admin(
 
 @pytest.mark.asyncio
 async def test_create_attendance_record_for_closed_session_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -91,7 +91,7 @@ async def test_create_attendance_record_for_closed_session_forbidden(
         "status": "present",
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/attendance/",
         json=attendance_data,
         headers=admin_token_headers,
@@ -104,7 +104,7 @@ async def test_create_attendance_record_for_closed_session_forbidden(
 
 @pytest.mark.asyncio
 async def test_create_attendance_record_with_deployment_notes_snapshot(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -144,7 +144,7 @@ async def test_create_attendance_record_with_deployment_notes_snapshot(
         "status": "excused",
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/attendance/",
         json=attendance_data,
         headers=admin_token_headers,
@@ -158,7 +158,7 @@ async def test_create_attendance_record_with_deployment_notes_snapshot(
 
 @pytest.mark.asyncio
 async def test_create_attendance_record_with_personnel_override_snapshot(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -199,7 +199,7 @@ async def test_create_attendance_record_with_personnel_override_snapshot(
         "status": "present",
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/attendance/",
         json=attendance_data,
         headers=admin_token_headers,
@@ -215,7 +215,7 @@ async def test_create_attendance_record_with_personnel_override_snapshot(
 
 @pytest.mark.asyncio
 async def test_create_attendance_record_retroactive_detection(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -245,7 +245,7 @@ async def test_create_attendance_record_retroactive_detection(
         "status": "present",
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/attendance/",
         json=attendance_data,
         headers=admin_token_headers,
@@ -259,7 +259,7 @@ async def test_create_attendance_record_retroactive_detection(
 
 @pytest.mark.asyncio
 async def test_create_duplicate_attendance_record_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -288,7 +288,7 @@ async def test_create_duplicate_attendance_record_forbidden(
         "status": "present",
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/attendance/",
         json=attendance_data,
         headers=admin_token_headers,
@@ -298,7 +298,7 @@ async def test_create_duplicate_attendance_record_forbidden(
     assert response.status_code == 201
 
     # Try to create duplicate
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/attendance/",
         json=attendance_data,
         headers=admin_token_headers,
@@ -311,7 +311,7 @@ async def test_create_duplicate_attendance_record_forbidden(
 
 @pytest.mark.asyncio
 async def test_list_attendance_records(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -355,7 +355,7 @@ async def test_list_attendance_records(
     db_session.add_all([attendance1, attendance2])
     await db_session.commit()
 
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/attendance/",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -370,7 +370,7 @@ async def test_list_attendance_records(
 
 @pytest.mark.asyncio
 async def test_list_attendance_records_with_session_filter(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -424,7 +424,7 @@ async def test_list_attendance_records_with_session_filter(
     await db_session.commit()
 
     # Filter by first session
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/attendance/",
         headers=admin_token_headers,
         params={
@@ -442,7 +442,7 @@ async def test_list_attendance_records_with_session_filter(
 
 @pytest.mark.asyncio
 async def test_update_attendance_record(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -479,7 +479,7 @@ async def test_update_attendance_record(
 
     update_data = {"status": "present", "remarks": "Arrived late"}
 
-    response = await async_client.patch(
+    response = client.patch(
         f"/api/v1/attendance/{attendance.id}",
         json=update_data,
         headers=admin_token_headers,
@@ -496,7 +496,7 @@ async def test_update_attendance_record(
 
 @pytest.mark.asyncio
 async def test_update_attendance_record_for_closed_session_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -535,7 +535,7 @@ async def test_update_attendance_record_for_closed_session_forbidden(
 
     update_data = {"status": "present"}
 
-    response = await async_client.patch(
+    response = client.patch(
         f"/api/v1/attendance/{attendance.id}",
         json=update_data,
         headers=admin_token_headers,
@@ -548,7 +548,7 @@ async def test_update_attendance_record_for_closed_session_forbidden(
 
 @pytest.mark.asyncio
 async def test_delete_attendance_record_as_admin(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -583,7 +583,7 @@ async def test_delete_attendance_record_as_admin(
     db_session.add(attendance)
     await db_session.commit()
 
-    response = await async_client.delete(
+    response = client.delete(
         f"/api/v1/attendance/{attendance.id}",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -600,7 +600,7 @@ async def test_delete_attendance_record_as_admin(
 
 @pytest.mark.asyncio
 async def test_delete_attendance_record_as_regular_user_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     user_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -635,7 +635,7 @@ async def test_delete_attendance_record_as_regular_user_forbidden(
     db_session.add(attendance)
     await db_session.commit()
 
-    response = await async_client.delete(
+    response = client.delete(
         f"/api/v1/attendance/{attendance.id}",
         headers=user_token_headers,
         params={"user_id": "regular-user-id", "user_role": "user"},
@@ -647,7 +647,7 @@ async def test_delete_attendance_record_as_regular_user_forbidden(
 
 @pytest.mark.asyncio
 async def test_bulk_create_attendance_records(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -691,7 +691,7 @@ async def test_bulk_create_attendance_records(
         ]
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/attendance/bulk/create",
         json=bulk_data,
         headers=admin_token_headers,
@@ -706,7 +706,7 @@ async def test_bulk_create_attendance_records(
 
 @pytest.mark.asyncio
 async def test_bulk_create_attendance_records_atomic_rollback(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -756,7 +756,7 @@ async def test_bulk_create_attendance_records_atomic_rollback(
         ]
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/attendance/bulk/create",
         json=bulk_data,
         headers=admin_token_headers,
@@ -772,7 +772,7 @@ async def test_bulk_create_attendance_records_atomic_rollback(
 
 @pytest.mark.asyncio
 async def test_bulk_update_attendance_records(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -831,7 +831,7 @@ async def test_bulk_update_attendance_records(
         ]
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/attendance/bulk/update",
         json=bulk_data,
         headers=admin_token_headers,
@@ -849,7 +849,7 @@ async def test_bulk_update_attendance_records(
 
 @pytest.mark.asyncio
 async def test_bulk_update_attendance_records_for_closed_session_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -895,7 +895,7 @@ async def test_bulk_update_attendance_records_for_closed_session_forbidden(
         ]
     }
 
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/attendance/bulk/update",
         json=bulk_data,
         headers=admin_token_headers,
@@ -908,11 +908,11 @@ async def test_bulk_update_attendance_records_for_closed_session_forbidden(
 
 @pytest.mark.asyncio
 async def test_get_attendance_record_not_found(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
 ):
     """Test getting a non-existent attendance record."""
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/attendance/non-existent-id",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -924,7 +924,7 @@ async def test_get_attendance_record_not_found(
 
 @pytest.mark.asyncio
 async def test_list_attendance_records_pagination(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
     sample_deployment: Deployment,
@@ -963,7 +963,7 @@ async def test_list_attendance_records_pagination(
     await db_session.commit()
 
     # Get first page
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/attendance/",
         headers=admin_token_headers,
         params={
@@ -979,7 +979,7 @@ async def test_list_attendance_records_pagination(
     assert len(data) == 2
 
     # Get second page
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/attendance/",
         headers=admin_token_headers,
         params={

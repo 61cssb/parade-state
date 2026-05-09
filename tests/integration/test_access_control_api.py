@@ -2,14 +2,14 @@
 
 import pytest
 from datetime import datetime
-from httpx import AsyncClient
+from fastapi.testclient import TestClient
 
 from parade_state.models import User, Deployment, DeploymentUserAccess, UserSubunitScope
 
 
 @pytest.mark.asyncio
 async def test_grant_user_deployment_access_as_admin(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_deployment: Deployment,
     sample_users,
@@ -17,7 +17,7 @@ async def test_grant_user_deployment_access_as_admin(
     """Test that admins can grant deployment access to users."""
     target_user_id = str(sample_users["user"].id)
 
-    response = await async_client.post(
+    response = client.post(
         f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/access",
         headers=admin_token_headers,
         params={
@@ -40,7 +40,7 @@ async def test_grant_user_deployment_access_as_admin(
 
 @pytest.mark.asyncio
 async def test_grant_user_deployment_access_as_super_admin(
-    async_client: AsyncClient,
+    client: TestClient,
     super_admin_token_headers: dict[str, str],
     sample_deployment: Deployment,
     sample_users,
@@ -48,7 +48,7 @@ async def test_grant_user_deployment_access_as_super_admin(
     """Test that super admins can grant deployment access."""
     target_user_id = str(sample_users["user"].id)
 
-    response = await async_client.post(
+    response = client.post(
         f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/access",
         headers=super_admin_token_headers,
         params={
@@ -66,7 +66,7 @@ async def test_grant_user_deployment_access_as_super_admin(
 
 @pytest.mark.asyncio
 async def test_grant_user_deployment_access_as_user_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     user_token_headers: dict[str, str],
     sample_deployment: Deployment,
     sample_users,
@@ -74,7 +74,7 @@ async def test_grant_user_deployment_access_as_user_forbidden(
     """Test that regular users cannot grant deployment access."""
     target_user_id = str(sample_users["user"].id)
 
-    response = await async_client.post(
+    response = client.post(
         f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/access",
         headers=user_token_headers,
         params={
@@ -89,7 +89,7 @@ async def test_grant_user_deployment_access_as_user_forbidden(
 
 @pytest.mark.asyncio
 async def test_grant_duplicate_deployment_access(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_deployment: Deployment,
     sample_users,
@@ -109,7 +109,7 @@ async def test_grant_duplicate_deployment_access(
     await db_session.commit()
 
     # Try to create duplicate access grant
-    response = await async_client.post(
+    response = client.post(
         f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/access",
         headers=admin_token_headers,
         params={
@@ -124,7 +124,7 @@ async def test_grant_duplicate_deployment_access(
 
 @pytest.mark.asyncio
 async def test_revoke_user_deployment_access(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_deployment: Deployment,
     sample_users,
@@ -144,7 +144,7 @@ async def test_revoke_user_deployment_access(
     await db_session.commit()
 
     # Revoke access
-    response = await async_client.delete(
+    response = client.delete(
         f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/access",
         headers=admin_token_headers,
         params={
@@ -159,7 +159,7 @@ async def test_revoke_user_deployment_access(
 
 @pytest.mark.asyncio
 async def test_revoke_nonexistent_access(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_deployment: Deployment,
     sample_users,
@@ -167,7 +167,7 @@ async def test_revoke_nonexistent_access(
     """Test revoking non-existent access."""
     target_user_id = str(sample_users["user"].id)
 
-    response = await async_client.delete(
+    response = client.delete(
         f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/access",
         headers=admin_token_headers,
         params={
@@ -182,7 +182,7 @@ async def test_revoke_nonexistent_access(
 
 @pytest.mark.asyncio
 async def test_list_user_deployment_accesses_own(
-    async_client: AsyncClient,
+    client: TestClient,
     user_token_headers: dict[str, str],
     sample_deployment: Deployment,
     sample_users,
@@ -202,7 +202,7 @@ async def test_list_user_deployment_accesses_own(
     await db_session.commit()
 
     # List own accesses
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/access-control/users/{target_user_id}/deployments",
         headers=user_token_headers,
         params={
@@ -224,7 +224,7 @@ async def test_list_user_deployment_accesses_own(
 
 @pytest.mark.asyncio
 async def test_list_other_user_accesses_as_admin(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_deployment: Deployment,
     sample_users,
@@ -244,7 +244,7 @@ async def test_list_other_user_accesses_as_admin(
     await db_session.commit()
 
     # List user's accesses as admin
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/access-control/users/{target_user_id}/deployments",
         headers=admin_token_headers,
         params={
@@ -260,7 +260,7 @@ async def test_list_other_user_accesses_as_admin(
 
 @pytest.mark.asyncio
 async def test_list_other_user_accesses_as_user_forbidden(
-    async_client: AsyncClient,
+    client: TestClient,
     user_token_headers: dict[str, str],
     sample_deployment: Deployment,
     sample_users,
@@ -269,7 +269,7 @@ async def test_list_other_user_accesses_as_user_forbidden(
     admin_user_id = str(sample_users["admin"].id)
     regular_user_id = str(sample_users["user"].id)
 
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/access-control/users/{admin_user_id}/deployments",
         headers=user_token_headers,
         params={
@@ -284,7 +284,7 @@ async def test_list_other_user_accesses_as_user_forbidden(
 
 @pytest.mark.asyncio
 async def test_list_deployment_users(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_deployment: Deployment,
     sample_users,
@@ -305,7 +305,7 @@ async def test_list_deployment_users(
     await db_session.commit()
 
     # List deployment users
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/access-control/deployments/{sample_deployment.id}/users",
         headers=admin_token_headers,
         params={
@@ -326,7 +326,7 @@ async def test_list_deployment_users(
 
 @pytest.mark.asyncio
 async def test_create_user_subunit_scope(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_deployment: Deployment,
     sample_users,
@@ -337,7 +337,7 @@ async def test_create_user_subunit_scope(
     admin_id = str(sample_users["admin"].id)
 
     # Note: Admin access already granted by sample_deployment fixture
-    response = await async_client.post(
+    response = client.post(
         f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/scopes",
         headers=admin_token_headers,
         params={
@@ -366,7 +366,7 @@ async def test_create_user_subunit_scope(
 
 @pytest.mark.asyncio
 async def test_create_duplicate_subunit_scope(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_deployment: Deployment,
     sample_users,
@@ -389,7 +389,7 @@ async def test_create_duplicate_subunit_scope(
     await db_session.commit()
 
     # Try to create duplicate scope
-    response = await async_client.post(
+    response = client.post(
         f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/scopes",
         headers=admin_token_headers,
         params={
@@ -408,7 +408,7 @@ async def test_create_duplicate_subunit_scope(
 
 @pytest.mark.asyncio
 async def test_delete_user_subunit_scope(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_deployment: Deployment,
     sample_users,
@@ -431,7 +431,7 @@ async def test_delete_user_subunit_scope(
     scope_id = str(scope.id)
 
     # Delete scope
-    response = await async_client.delete(
+    response = client.delete(
         f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/scopes/{scope_id}",
         headers=admin_token_headers,
         params={
@@ -446,7 +446,7 @@ async def test_delete_user_subunit_scope(
 
 @pytest.mark.asyncio
 async def test_list_user_subunit_scopes(
-    async_client: AsyncClient,
+    client: TestClient,
     admin_token_headers: dict[str, str],
     sample_deployment: Deployment,
     sample_users,
@@ -476,7 +476,7 @@ async def test_list_user_subunit_scopes(
     await db_session.commit()
 
     # List scopes
-    response = await async_client.get(
+    response = client.get(
         f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/scopes",
         headers=admin_token_headers,
         params={
@@ -497,7 +497,7 @@ async def test_list_user_subunit_scopes(
 
 @pytest.mark.asyncio
 async def test_access_control_enforcement_deployment_access(
-    async_client: AsyncClient,
+    client: TestClient,
     user_token_headers: dict[str, str],
     admin_token_headers: dict[str, str],
     sample_deployment: Deployment,
@@ -509,7 +509,7 @@ async def test_access_control_enforcement_deployment_access(
     admin_id = str(sample_users["admin"].id)
 
     # Try to access deployment personnel without access grant
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel",
         headers=user_token_headers,
         params={
@@ -525,7 +525,7 @@ async def test_access_control_enforcement_deployment_access(
 
 @pytest.mark.asyncio
 async def test_access_control_with_deployment_access_grant(
-    async_client: AsyncClient,
+    client: TestClient,
     user_token_headers: dict[str, str],
     admin_token_headers: dict[str, str],
     sample_deployment: Deployment,
@@ -547,7 +547,7 @@ async def test_access_control_with_deployment_access_grant(
     await db_session.commit()
 
     # Try to access deployment personnel with access grant
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel",
         headers=user_token_headers,
         params={
@@ -563,12 +563,12 @@ async def test_access_control_with_deployment_access_grant(
 
 @pytest.mark.asyncio
 async def test_super_admin_full_access(
-    async_client: AsyncClient,
+    client: TestClient,
     super_admin_token_headers: dict[str, str],
     sample_deployment: Deployment,
 ):
     """Test that super admins have full access without explicit grants."""
-    response = await async_client.get(
+    response = client.get(
         "/api/v1/personnel",
         headers=super_admin_token_headers,
         params={
