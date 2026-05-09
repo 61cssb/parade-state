@@ -533,7 +533,9 @@ parade-state/
 │   │   └── schemas.py           # Pydantic request/response schemas
 │   ├── utils/
 │   │   ├── __init__.py          # Utility module exports
-│   │   └── utc_dt.py            # UTC datetime utilities with timezone handling
+│   │   ├── utc_dt.py            # UTC datetime utilities with timezone handling
+│   │   ├── env.py               # Environment variable utilities and configuration
+│   │   └── ids.py               # ID generation utilities (UUID, validation, conversion)
 │   ├── config.py                # Configuration management
 │   ├── session.py               # Session management utilities
 │   └── main.py                  # FastAPI application setup and router registration
@@ -549,6 +551,7 @@ parade-state/
 │   └── test_sessions_api.py     # Session API tests (21 tests)
 ├── docs/
 │   ├── SPECIFICATION.md         # Complete technical specification
+│   ├── CODE_STYLE.md            # Code style guide and conventions
 │   ├── IMPLEMENTATION.md        # This file
 │   ├── ARCHITECTURE.md          # System architecture overview
 │   └── NEXT_PHASE.md            # Next phase planning and roadmap
@@ -649,6 +652,14 @@ uvicorn src.parade_state.main:app --host 0.0.0.0 --port $PORT
 
 ### 5.3 Static Analysis
 
+**🚨 Code Style Requirements:**
+- **Read [CODE_STYLE.md](CODE_STYLE.md) before writing code**
+- Utility module encapsulation is **strictly enforced**
+- No direct built-in module imports (datetime, os, uuid, etc.)
+- All datetime operations via `utils.utc_dt`
+- All environment variables via `utils.env`
+- All ID generation via `utils.ids`
+
 **Run before commits:**
 
 ```bash
@@ -662,6 +673,23 @@ uv run ruff format src/ tests/
 uv run ruff check --select TYP src/
 ```
 
+**Common Violations to Avoid:**
+
+```python
+# ❌ VIOLATIONS - Direct built-in imports
+import datetime
+import os
+import uuid
+from datetime import datetime, date
+
+# ✅ CORRECT - Use utility modules
+from parade_state.utils import utc_dt, env, ids
+
+# For type annotations
+def schedule_session(date: utc_dt.date) -> utc_dt.datetime:
+    return utc_dt.utcnow()
+```
+
 **CI/CD Integration:**
 
 ```yaml
@@ -670,6 +698,39 @@ uv run ruff check --select TYP src/
   run: |
     uv run ruff check src/ tests/
     uv run ruff format --check src/ tests/
+```
+
+### 5.4 Dependency Management
+
+**Current Status:**
+- **15 core dependencies** - all actively used, no bloat
+- **Modern versions**: FastAPI 0.136+, Pydantic 2.13+, SQLAlchemy 2.0+
+- **No security vulnerabilities** detected in current versions
+- **Appropriate version constraints** (>=) allows security updates
+
+**Dependency Categories:**
+- **Core Framework**: FastAPI, Uvicorn, Pydantic, SQLAlchemy
+- **Database**: asyncpg (PostgreSQL), aiosqlite (testing), Alembic (migrations)
+- **Authentication**: authlib, python-multipart
+- **UI/Scheduling**: nicegui, apscheduler
+- **Testing**: pytest, pytest-asyncio, pytest-cov, faker
+
+**Future Maintenance:**
+1. **Security Automation**: Consider adding `pip-audit` to CI/CD for automated vulnerability scanning
+2. **Version Management**: Current '>=' constraints are good for development; consider pinning major versions for production stability
+3. **Regular Audits**: Quarterly dependency review recommended
+4. **Update Policy**: Keep dependencies current, test upgrades before deployment
+
+**Dependency Health Check:**
+```bash
+# Check for security vulnerabilities (future)
+pip-audit
+
+# Check for outdated packages
+pip list --outdated
+
+# Update dependencies safely
+uv sync --upgrade
 ```
 
 ---
