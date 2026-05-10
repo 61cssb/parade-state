@@ -16,6 +16,7 @@ async def test_create_session_as_admin(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
 ):
     """Test session creation by admin for active deployment."""
@@ -32,7 +33,7 @@ async def test_create_session_as_admin(
         "/api/v1/sessions/",
         json=session_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 201
@@ -48,6 +49,7 @@ async def test_create_session_as_admin(
 async def test_create_session_for_inactive_deployment_forbidden(
     client: TestClient,
     admin_token_headers: dict[str, str],
+    admin_id: str,
     db_session,
     sample_estab,
     sample_users,
@@ -67,6 +69,16 @@ async def test_create_session_for_inactive_deployment_forbidden(
     db_session.add(deployment)
     await db_session.commit()
 
+    # Grant admin access to this deployment for testing
+    from parade_state.models import DeploymentUserAccess
+    admin_access = DeploymentUserAccess(
+        user_id=admin_id,
+        deployment_id=str(deployment.id),
+        granted_by=admin_id,
+    )
+    db_session.add(admin_access)
+    await db_session.commit()
+
     session_date = date.today()
     session_data = {
         "deployment_id": str(deployment.id),
@@ -78,7 +90,7 @@ async def test_create_session_for_inactive_deployment_forbidden(
         "/api/v1/sessions/",
         json=session_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 400
@@ -90,6 +102,7 @@ async def test_create_session_duplicate_forbidden(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
 ):
     """Test that duplicate sessions (same deployment, date, type) are forbidden."""
@@ -101,7 +114,7 @@ async def test_create_session_duplicate_forbidden(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -119,7 +132,7 @@ async def test_create_session_duplicate_forbidden(
         "/api/v1/sessions/",
         json=session_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 400
@@ -153,7 +166,8 @@ async def test_create_session_as_regular_user_forbidden(
 
 async def test_create_session_deployment_not_found(
     client: TestClient,
-    admin_token_headers: dict[str, str],
+    admin_token_headers,
+    admin_id: str,
 ):
     """Test session creation with non-existent deployment."""
     session_date = date.today()
@@ -168,7 +182,7 @@ async def test_create_session_deployment_not_found(
         "/api/v1/sessions/",
         json=session_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 404
@@ -180,6 +194,7 @@ async def test_list_sessions(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
 ):
     """Test listing sessions."""
@@ -191,7 +206,7 @@ async def test_list_sessions(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -200,7 +215,7 @@ async def test_list_sessions(
         date=session_date,
         session_type="PM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -210,7 +225,7 @@ async def test_list_sessions(
     response = client.get(
         "/api/v1/sessions/",
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 200
@@ -225,6 +240,7 @@ async def test_list_sessions_with_deployment_filter(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_estab,
     sample_users,
@@ -253,7 +269,7 @@ async def test_list_sessions_with_deployment_filter(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -262,7 +278,7 @@ async def test_list_sessions_with_deployment_filter(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -274,7 +290,7 @@ async def test_list_sessions_with_deployment_filter(
         "/api/v1/sessions/",
         headers=admin_token_headers,
         params={
-            "user_id": "admin-user-id",
+            "user_id": admin_id,
             "user_role": "admin",
             "deployment_id": str(sample_deployment.id),
         },
@@ -291,6 +307,7 @@ async def test_list_sessions_with_status_filter(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
 ):
     """Test listing sessions filtered by status."""
@@ -302,7 +319,7 @@ async def test_list_sessions_with_status_filter(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -311,10 +328,10 @@ async def test_list_sessions_with_status_filter(
         date=session_date,
         session_type="PM",
         status="closed",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
         closed_at=utc_dt.utcnow(),
-        closed_by="admin-user-id",
+        closed_by=admin_id,
     )
 
     db_session.add_all([session1, session2])
@@ -325,7 +342,7 @@ async def test_list_sessions_with_status_filter(
         "/api/v1/sessions/",
         headers=admin_token_headers,
         params={
-            "user_id": "admin-user-id",
+            "user_id": admin_id,
             "user_role": "admin",
             "status": "open",
         },
@@ -342,6 +359,7 @@ async def test_get_session(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
 ):
     """Test getting a specific session."""
@@ -352,7 +370,7 @@ async def test_get_session(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -362,7 +380,7 @@ async def test_get_session(
     response = client.get(
         f"/api/v1/sessions/{session.id}",
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 200
@@ -373,7 +391,8 @@ async def test_get_session(
 
 async def test_get_session_not_found(
     client: TestClient,
-    admin_token_headers: dict[str, str],
+    admin_token_headers,
+    admin_id: str,
 ):
     """Test getting a non-existent session."""
     assert_404_response(
@@ -381,7 +400,7 @@ async def test_get_session_not_found(
         "get",
         "/api/v1/sessions/non-existent-id",
         admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
 
@@ -390,6 +409,7 @@ async def test_update_session_status_to_closed(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
 ):
     """Test updating session status from open to closed."""
@@ -400,7 +420,7 @@ async def test_update_session_status_to_closed(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -413,14 +433,14 @@ async def test_update_session_status_to_closed(
         f"/api/v1/sessions/{session.id}",
         json=update_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "closed"
     assert data["closed_at"] is not None
-    assert data["closed_by"] == "admin-user-id"
+    assert data["closed_by"] == admin_id
 
 
 @pytest.mark.asyncio
@@ -428,6 +448,7 @@ async def test_update_session_status_to_finalized(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
 ):
     """Test updating session status from closed to finalized."""
@@ -438,10 +459,10 @@ async def test_update_session_status_to_finalized(
         date=session_date,
         session_type="AM",
         status="closed",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
         closed_at=utc_dt.utcnow(),
-        closed_by="admin-user-id",
+        closed_by=admin_id,
     )
 
     db_session.add(session)
@@ -453,7 +474,7 @@ async def test_update_session_status_to_finalized(
         f"/api/v1/sessions/{session.id}",
         json=update_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 200
@@ -466,6 +487,7 @@ async def test_update_session_invalid_status_transition(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
 ):
     """Test invalid status transition (open to finalized without closing)."""
@@ -476,7 +498,7 @@ async def test_update_session_invalid_status_transition(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -490,7 +512,7 @@ async def test_update_session_invalid_status_transition(
         f"/api/v1/sessions/{session.id}",
         json=update_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 400
@@ -502,6 +524,7 @@ async def test_update_finalized_session_forbidden(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
 ):
     """Test that finalized sessions cannot be modified."""
@@ -512,10 +535,10 @@ async def test_update_finalized_session_forbidden(
         date=session_date,
         session_type="AM",
         status="finalized",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
         closed_at=utc_dt.utcnow(),
-        closed_by="admin-user-id",
+        closed_by=admin_id,
     )
 
     db_session.add(session)
@@ -527,7 +550,7 @@ async def test_update_finalized_session_forbidden(
         f"/api/v1/sessions/{session.id}",
         json=update_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 400
@@ -538,6 +561,7 @@ async def test_update_session_as_regular_user_forbidden(
     client: TestClient,
     user_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
 ):
     """Test that regular users cannot update sessions."""
@@ -548,7 +572,7 @@ async def test_update_session_as_regular_user_forbidden(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -573,6 +597,7 @@ async def test_delete_session_as_super_admin(
     client: TestClient,
     super_admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
 ):
     """Test session deletion by super admin."""
@@ -583,7 +608,7 @@ async def test_delete_session_as_super_admin(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -608,6 +633,7 @@ async def test_delete_finalized_session_forbidden(
     client: TestClient,
     super_admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
 ):
     """Test that finalized sessions cannot be deleted."""
@@ -618,10 +644,10 @@ async def test_delete_finalized_session_forbidden(
         date=session_date,
         session_type="AM",
         status="finalized",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
         closed_at=utc_dt.utcnow(),
-        closed_by="admin-user-id",
+        closed_by=admin_id,
     )
 
     db_session.add(session)
@@ -641,6 +667,7 @@ async def test_delete_session_as_admin_forbidden(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
 ):
     """Test that regular admins cannot delete sessions (only super admins)."""
@@ -651,7 +678,7 @@ async def test_delete_session_as_admin_forbidden(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -664,7 +691,7 @@ async def test_delete_session_as_admin_forbidden(
         f"/api/v1/sessions/{session.id}",
         admin_token_headers,
         expected_detail="Only super admins",
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
 
@@ -673,6 +700,7 @@ async def test_create_both_am_and_pm_sessions_for_same_day(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
 ):
     """Test that both AM and PM sessions can be created for the same day."""
@@ -690,7 +718,7 @@ async def test_create_both_am_and_pm_sessions_for_same_day(
         "/api/v1/sessions/",
         json=am_session_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert am_response.status_code == 201
@@ -707,7 +735,7 @@ async def test_create_both_am_and_pm_sessions_for_same_day(
         "/api/v1/sessions/",
         json=pm_session_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert pm_response.status_code == 201
@@ -717,7 +745,7 @@ async def test_create_both_am_and_pm_sessions_for_same_day(
         "/api/v1/sessions/",
         headers=admin_token_headers,
         params={
-            "user_id": "admin-user-id",
+            "user_id": admin_id,
             "user_role": "admin",
             "deployment_id": str(sample_deployment.id),
         },
@@ -734,6 +762,7 @@ async def test_list_sessions_pagination(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
 ):
     """Test session list pagination."""
@@ -747,7 +776,7 @@ async def test_list_sessions_pagination(
             date=base_date - timedelta(days=i),  # Different dates
             session_type="AM",
             status="open",
-            created_by="admin-user-id",
+            created_by=admin_id,
             opened_at=utc_dt.utcnow(),
         )
         sessions.append(session)
@@ -760,7 +789,7 @@ async def test_list_sessions_pagination(
         "/api/v1/sessions/",
         admin_token_headers,
         params={
-            "user_id": "admin-user-id",
+            "user_id": admin_id,
             "user_role": "admin",
         },
     )
@@ -771,6 +800,7 @@ async def test_session_auto_sets_opened_at(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
 ):
     """Test that session creation automatically sets opened_at timestamp."""
@@ -789,7 +819,7 @@ async def test_session_auto_sets_opened_at(
         "/api/v1/sessions/",
         json=session_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 201
