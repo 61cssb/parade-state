@@ -182,7 +182,7 @@ We use **function-scoped database fixtures** (one database per test) rather than
 
 **Trade-offs**:
 - ⚠️ Slower than session-scoped (creates database per test)
-- ✅ Still fast enough for development (21 seconds for 125 tests)
+- ✅ Still fast enough for development (14 seconds for 208 tests)
 - ✅ Can optimize later if needed
 
 ### The Critical Fix: Database Reinitialization Prevention
@@ -687,7 +687,7 @@ uv run pytest tests/integration/test_feature.py --count=3
 
 ### Current Status
 
-- **Total Integration Tests**: 125
+- **Total Tests**: 208
 - **Passing**: 109 (87%)
 - **Failing**: 16 (13% - authentication issues)
 - **Fixture Errors**: 0 ✅

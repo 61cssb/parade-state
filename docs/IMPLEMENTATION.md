@@ -101,7 +101,7 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 - `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (10 tests)
 - `tests/integration/test_sessions_api.py` - Session management, opening, closing, finalization (8 tests)
 
-**Total:** 125 tests, 100% pass rate ✅ UPDATED
+**Total:** 208 tests, 100% pass rate ✅ UPDATED
 **Coverage:** Comprehensive integration test coverage across all major features
 **Performance:** ~9 seconds for full integration test suite
 

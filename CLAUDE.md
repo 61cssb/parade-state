@@ -6,6 +6,7 @@
 - Critical development patterns (what you need every session)
 - Essential coding standards
 - Quick testing reference
+- **📚 Documentation navigation index** (find what you need fast)
 
 **What's Not Here:**
 - System architecture and design decisions → See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
@@ -20,6 +21,52 @@
 2. Follow these patterns for every feature you implement
 3. Refer to detailed docs for task-specific guidance
 4. Update this guide when introducing critical new patterns
+
+---
+
+## 📚 Documentation Navigation Index
+
+**New to the project? Start here:** → [README.md](README.md)
+
+### 🔥 Essential Development Guides (Read These First)
+
+- **[CLAUDE.md](CLAUDE.md)** (this file) - Critical development patterns for every session
+- **[docs/CODE_STYLE.md](docs/CODE_STYLE.md)** - Utility module patterns and import conventions (⚠️ STRICTLY ENFORCED)
+- **[docs/TESTING.md](docs/TESTING.md)** - Testing strategies, fixtures, and patterns
+
+### 🏗️ Architecture & Design
+
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - System architecture, components, and data flow
+- **[docs/SPECIFICATION.md](docs/SPECIFICATION.md)** - Complete technical specification (data models, business rules)
+- **[docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)** - Implementation status and technical setup guide
+
+### 🔒 Security & Access Control
+
+- **[docs/SECURITY.md](docs/SECURITY.md)** - Security patterns and best practices
+- **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** - Production deployment (Railway, Docker, troubleshooting)
+
+### 📋 Planning & Status
+
+- **[docs/NEXT_PHASE.md](docs/NEXT_PHASE.md)** - Roadmap, current status, and implementation history
+- **[tests/README.md](tests/README.md)** - Testing organization and quick reference
+
+### 📖 Historical Documents
+
+- **[docs/parade-state-prd-v04.md](docs/parade-state-prd-v04.md)** - Original Product Requirements Document
+- **[docs/SCHEMA_NOTES.md](docs/SCHEMA_NOTES.md)** - Database design notes and implementation patterns
+
+### 🔧 Project Configuration
+
+- **[pyproject.toml](pyproject.toml)** - Project dependencies and build configuration
+
+### 🌐 Runtime Documentation
+
+- **`/docs`** (when app is running) - FastAPI auto-generated interactive API documentation
+- **`/redoc`** (when app is running) - Alternative API documentation (ReDoc)
+
+**💡 Tip:** Most documents link to related documentation. Follow the "See Also" sections for deeper dives into specific topics.
+
+---
 
 ---
 
