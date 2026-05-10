@@ -154,14 +154,18 @@ async def verify_deployment_access(
     user_role: str,
     db: AsyncSession,
 ) -> Deployment:
-    """Verify user has access to deployment."""
+    """Verify user has access to deployment and return it."""
 
-    # Super admins have full access
+    # Super admins have full access to all deployments
     if user_role == "super_admin":
-        return await get_deployment(deployment_id, db)
+        result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+        deployment = result.scalar_one_or_none()
+        if not deployment:
+            raise HTTPException(status_code=404, detail="Deployment not found")
+        return deployment
 
     # Check for explicit deployment access
-    access = await db.execute(
+    access_result = await db.execute(
         select(DeploymentUserAccess).where(
             and_(
                 DeploymentUserAccess.user_id == user_id,
@@ -170,12 +174,133 @@ async def verify_deployment_access(
             )
         )
     )
+    access = access_result.scalar_one_or_none()
 
-    if not access.scalar_one_or_none():
-        raise HTTPException(
-            status_code=403,
-            detail="Insufficient permissions for this deployment"
-        )
+    # Both admins and regular users need explicit deployment access
+    if access:
+        result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+        return result.scalar_one_or_none()
+
+    # No access found
+    raise HTTPException(
+        status_code=403,
+        detail="Insufficient permissions to access this deployment"
+    )
+```
+
+### Multi-Tenant Security Patterns
+
+**Data Isolation Strategy:**
+
+1. **Automatic Filtering:** All data queries automatically filter by deployment access
+2. **Explicit Grants:** Users must be explicitly granted access to deployments
+3. **Scope Enforcement:** Subunit-level filtering within deployments
+4. **Audit Trail:** All access grants and revocations are logged
+
+**Implementation Across APIs:**
+
+✅ **Personnel API:**
+```python
+# Filter personnel by deployment access
+async def list_personnel(deployment_id: str, user_id: str, user_role: str):
+    # Verify deployment access first
+    deployment = await verify_deployment_access(deployment_id, user_id, user_role, db)
+    
+    # Return personnel only from accessible deployment
+    return await get_personnel_for_deployment(deployment.id)
+```
+
+✅ **Sessions API:**
+```python
+# Create sessions only for accessible deployments
+async def create_session(session_data: SessionCreate, user_id: str, user_role: str):
+    # Verify deployment access
+    deployment = await verify_deployment_access(
+        session_data.deployment_id, user_id, user_role, db
+    )
+    
+    # Create session with access verified
+    return await create_session_for_deployment(session_data, deployment)
+```
+
+✅ **Attendance API:**
+```python
+# Record attendance only for accessible deployments
+async def create_attendance(attendance_data: AttendanceCreate, user_id: str, user_role: str):
+    # Verify session and deployment access
+    session = await verify_session_and_deployment_access(
+        attendance_data.session_id, user_id, user_role, db
+    )
+    
+    # Record attendance with access verified
+    return await record_attendance(attendance_data, session)
+```
+
+### Subunit Scope Filtering
+
+**Hierarchical access control within deployments:**
+
+```python
+async def check_subunit_access(
+    user_id: str,
+    deployment_id: str,
+    unit: str | None = None,
+    sub_unit_1: str | None = None,
+    sub_unit_2: str | None = None,
+    sub_unit_3: str | None = None,
+    db: AsyncSession,
+) -> bool:
+    """Check if user has access to specific subunit within deployment."""
+
+    # Get user's subunit scopes for this deployment
+    scopes = await get_user_subunit_scopes(user_id, deployment_id, db)
+
+    # If no scopes defined, user has deployment-wide access
+    if not scopes:
+        return True
+
+    # Check if any scope matches the requested unit hierarchy
+    for scope in scopes:
+        # If scope has no restrictions, grant access
+        if not any([scope.unit, scope.sub_unit_1, scope.sub_unit_2, scope.sub_unit_3]):
+            return True
+
+        # Check hierarchical unit matching
+        if scope.unit and unit != scope.unit:
+            continue
+        if scope.sub_unit_1 and sub_unit_1 != scope.sub_unit_1:
+            continue
+        if scope.sub_unit_2 and sub_unit_2 != scope.sub_unit_2:
+            continue
+        if scope.sub_unit_3 and sub_unit_3 != scope.sub_unit_3:
+            continue
+
+        # All checks passed
+        return True
+
+    # No matching scope found
+    return False
+```
+
+### Access Control Best Practices
+
+**✅ DO:**
+- Verify deployment access at the beginning of each endpoint
+- Filter all data queries by deployment scope
+- Use dependency injection for authentication
+- Implement audit trails for access changes
+- Test access control with multiple user roles
+- Use HTTP 403 Forbidden for access denied
+- Include user context in audit logs
+
+**❌ DON'T:**
+- Skip access checks for "read-only" operations
+- Assume super admins don't need validation
+- Filter data after retrieval (filter at query level)
+- Use hardcoded user IDs in production
+- Ignore subunit scope restrictions
+- Return 404 for access denied (use 403)
+- Forget to log access control decisions
 
     return await get_deployment(deployment_id, db)
 ```

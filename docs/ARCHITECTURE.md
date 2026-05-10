@@ -831,7 +831,82 @@ async def get_visible_columns(user_id: str):
     return columns
 ```
 
-### 7.3 Session Management Implementation
+### 7.3 Multi-Tenant Deployment Access Control (Phase 5)
+
+**Overview:** Enterprise-grade deployment isolation ensuring users can only access data from deployments they're explicitly authorized to access.
+
+**Architecture:**
+```
+┌─────────────────────────────────────────────────────────┐
+│           Multi-Tenant Access Control                    │
+│                                                           │
+│  User Request → verify_deployment_access()               │
+│       ↓                                                  │
+│  Check DeploymentUserAccess table                        │
+│       ↓                                                  │
+│  Filter data by deployment_id                            │
+│       ↓                                                  │
+│  Return authorized data only                             │
+│                                                           │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Implementation Pattern:**
+```python
+async def verify_deployment_access(
+    deployment_id: str,
+    user_id: str,
+    user_role: str,
+    db: AsyncSession,
+) -> Deployment:
+    """Verify user has access to deployment and return it."""
+    
+    # Super admins have full access
+    if user_role == "super_admin":
+        return deployment
+    
+    # Check for explicit deployment access
+    access = await db.execute(
+        select(DeploymentUserAccess).where(
+            and_(
+                DeploymentUserAccess.user_id == user_id,
+                DeploymentUserAccess.deployment_id == deployment_id,
+                DeploymentUserAccess.revoked_at.is_(None),
+            )
+        )
+    )
+    
+    if not access:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    return deployment
+```
+
+**Access Control Enforcement Points:**
+- ✅ **Personnel API** - Deployment-based listing and filtering
+- ✅ **Sessions API** - Session creation and listing restricted by deployment
+- ✅ **Attendance API** - Attendance operations respect deployment boundaries
+- ✅ **Deployments API** - Deployment management with access checks
+
+**Data Isolation:**
+- Users only see personnel from their authorized deployments
+- Sessions filtered by deployment access
+- Attendance records scoped to accessible deployments
+- Automatic filtering in all list operations
+
+**Access Management:**
+- `POST /api/v1/access-control/deployments/{id}/users/{user_id}/access` - Grant access
+- `DELETE /api/v1/access-control/deployments/{id}/users/{user_id}/access` - Revoke access
+- `GET /api/v1/access-control/deployments/{id}/users` - List deployment users
+- `GET /api/v1/access-control/users/{user_id}/deployments` - List user deployments
+
+**Security Guarantees:**
+- No cross-deployment data leakage
+- Explicit access grants required
+- Audit trail for all access changes
+- Role-based + scope-based authorization
+
+### 7.4 Session Management Implementation
 
 **Session Storage Pattern:**
 ```python
