@@ -6,14 +6,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
-from parade_state.models.attendance import Session
-from parade_state.models.deployment import Deployment
+from parade_state.models import Deployment, DeploymentUserAccess, Session
 from parade_state.models.schemas import (
     SessionCreate,
     SessionResponse,
     SessionUpdate,
 )
 from parade_state.utils import utc_dt
+from parade_state.api.access_control import get_user_accessible_deployments
 
 router = APIRouter()
 
@@ -23,6 +23,55 @@ router = APIRouter()
 # ============================================================================
 
 
+async def verify_deployment_access(
+    deployment_id: str,
+    user_id: str,
+    user_role: str,
+    db: AsyncSession,
+) -> Deployment:
+    """Verify user has access to deployment and return it.
+
+    Super admins have full access to all deployments.
+    Admins need explicit deployment access.
+    Regular users need explicit deployment access.
+    """
+    # Get deployment
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+    deployment = result.scalar_one_or_none()
+
+    if not deployment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Deployment not found",
+        )
+
+    # Super admins have full access
+    if user_role == "super_admin":
+        return deployment
+
+    # Check for explicit deployment access
+    access_result = await db.execute(
+        select(DeploymentUserAccess).where(
+            and_(
+                DeploymentUserAccess.user_id == user_id,
+                DeploymentUserAccess.deployment_id == deployment_id,
+                DeploymentUserAccess.revoked_at.is_(None),
+            )
+        )
+    )
+    access = access_result.scalar_one_or_none()
+
+    # Both admins and regular users need explicit deployment access
+    if access:
+        return deployment
+
+    # No access found
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Insufficient permissions to access this deployment",
+    )
+
+
 async def verify_session_access(
     session_id: str,
     user_id: str,
@@ -30,34 +79,20 @@ async def verify_session_access(
     db: AsyncSession,
 ) -> Session:
     """Verify user has access to session and return it."""
-    # Super admins have full access
-    if user_role == "super_admin":
-        result = await db.execute(select(Session).where(Session.id == session_id))
-        session = result.scalar_one_or_none()
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found",
-            )
-        return session
+    # Get session
+    result = await db.execute(select(Session).where(Session.id == session_id))
+    session = result.scalar_one_or_none()
 
-    # For regular users and admins, check session access
-    # TODO: Implement proper access control based on deployment access
-    # For now, admins can access all sessions
-    if user_role in ["admin", "user"]:
-        result = await db.execute(select(Session).where(Session.id == session_id))
-        session = result.scalar_one_or_none()
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found",
-            )
-        return session
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
 
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Insufficient permissions to access this session",
-    )
+    # Verify deployment access
+    await verify_deployment_access(session.deployment_id, user_id, user_role, db)
+
+    return session
 
 
 async def validate_session_status_transition(
@@ -125,17 +160,10 @@ async def create_session(
             detail="Only admins and super admins can create sessions",
         )
 
-    # Verify deployment exists and is active
-    deployment_result = await db.execute(
-        select(Deployment).where(Deployment.id == session_data.deployment_id)
+    # Verify deployment exists, user has access, and deployment is active
+    deployment = await verify_deployment_access(
+        session_data.deployment_id, user_id, user_role, db
     )
-    deployment = deployment_result.scalar_one_or_none()
-
-    if not deployment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Deployment not found",
-        )
 
     if deployment.status != "active":
         raise HTTPException(
@@ -199,11 +227,27 @@ async def list_sessions(
 
     All authenticated users can list sessions.
     Filters may be applied based on user role.
+    Non-super-admins can only see sessions from deployments they have access to.
     """
     query = select(Session)
 
+    # For non-super-admins, filter by deployments they have access to
+    if user_role != "super_admin":
+        # Get user's accessible deployments
+        accessible_deployments = await get_user_accessible_deployments(
+            user_id, user_role, db
+        )
+        accessible_deployment_ids = [d.id for d in accessible_deployments]
+
+        if not accessible_deployment_ids:
+            return []  # No access to any deployments
+
+        query = query.where(Session.deployment_id.in_(accessible_deployment_ids))
+
     # Apply filters
     if deployment_id:
+        # Verify deployment access if specific deployment is requested
+        await verify_deployment_access(deployment_id, user_id, user_role, db)
         query = query.where(Session.deployment_id == deployment_id)
 
     if status:

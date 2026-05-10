@@ -16,6 +16,7 @@ from tests.test_utils import assert_pagination_works, assert_404_response, asser
 async def test_create_attendance_record_as_admin(
     client: TestClient,
     admin_token_headers: dict[str, str],
+    admin_id: str,
     db_session,
     sample_deployment: Deployment,
     sample_personnel,
@@ -29,7 +30,7 @@ async def test_create_attendance_record_as_admin(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -47,7 +48,7 @@ async def test_create_attendance_record_as_admin(
         "/api/v1/attendance/",
         json=attendance_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 201
@@ -65,6 +66,7 @@ async def test_create_attendance_record_for_closed_session_forbidden(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_personnel,
 ):
@@ -77,10 +79,10 @@ async def test_create_attendance_record_for_closed_session_forbidden(
         date=session_date,
         session_type="AM",
         status="closed",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
         closed_at=utc_dt.utcnow(),
-        closed_by="admin-user-id",
+        closed_by=admin_id,
     )
 
     db_session.add(session)
@@ -96,7 +98,7 @@ async def test_create_attendance_record_for_closed_session_forbidden(
         "/api/v1/attendance/",
         json=attendance_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 400
@@ -108,6 +110,7 @@ async def test_create_attendance_record_with_deployment_notes_snapshot(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_personnel,
     sample_users,
@@ -132,7 +135,7 @@ async def test_create_attendance_record_with_deployment_notes_snapshot(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -149,7 +152,7 @@ async def test_create_attendance_record_with_deployment_notes_snapshot(
         "/api/v1/attendance/",
         json=attendance_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 201
@@ -162,6 +165,7 @@ async def test_create_attendance_record_with_personnel_override_snapshot(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_personnel,
     sample_users,
@@ -187,7 +191,7 @@ async def test_create_attendance_record_with_personnel_override_snapshot(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -204,7 +208,7 @@ async def test_create_attendance_record_with_personnel_override_snapshot(
         "/api/v1/attendance/",
         json=attendance_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 201
@@ -219,6 +223,7 @@ async def test_create_attendance_record_retroactive_detection(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_personnel,
     sample_users,
@@ -263,6 +268,7 @@ async def test_create_duplicate_attendance_record_forbidden(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_personnel,
 ):
@@ -275,7 +281,7 @@ async def test_create_duplicate_attendance_record_forbidden(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -293,7 +299,7 @@ async def test_create_duplicate_attendance_record_forbidden(
         "/api/v1/attendance/",
         json=attendance_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 201
@@ -303,7 +309,7 @@ async def test_create_duplicate_attendance_record_forbidden(
         "/api/v1/attendance/",
         json=attendance_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 400
@@ -315,6 +321,7 @@ async def test_list_attendance_records(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_personnel,
 ):
@@ -327,7 +334,7 @@ async def test_list_attendance_records(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -340,8 +347,8 @@ async def test_list_attendance_records(
         personnel_id=str(sample_personnel[0].id),
         deployment_id=str(sample_deployment.id),
         status="present",
-        created_by="admin-user-id",
-        updated_by="admin-user-id",
+        created_by=admin_id,
+        updated_by=admin_id,
     )
 
     attendance2 = AttendanceRecord(
@@ -349,8 +356,8 @@ async def test_list_attendance_records(
         personnel_id=str(sample_personnel[1].id),
         deployment_id=str(sample_deployment.id),
         status="absent",
-        created_by="admin-user-id",
-        updated_by="admin-user-id",
+        created_by=admin_id,
+        updated_by=admin_id,
     )
 
     db_session.add_all([attendance1, attendance2])
@@ -359,7 +366,7 @@ async def test_list_attendance_records(
     response = client.get(
         "/api/v1/attendance/",
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 200
@@ -374,6 +381,7 @@ async def test_list_attendance_records_with_session_filter(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_personnel,
 ):
@@ -386,7 +394,7 @@ async def test_list_attendance_records_with_session_filter(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -395,7 +403,7 @@ async def test_list_attendance_records_with_session_filter(
         date=session_date,
         session_type="PM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -408,8 +416,8 @@ async def test_list_attendance_records_with_session_filter(
         personnel_id=str(sample_personnel[0].id),
         deployment_id=str(sample_deployment.id),
         status="present",
-        created_by="admin-user-id",
-        updated_by="admin-user-id",
+        created_by=admin_id,
+        updated_by=admin_id,
     )
 
     attendance2 = AttendanceRecord(
@@ -417,8 +425,8 @@ async def test_list_attendance_records_with_session_filter(
         personnel_id=str(sample_personnel[0].id),
         deployment_id=str(sample_deployment.id),
         status="absent",
-        created_by="admin-user-id",
-        updated_by="admin-user-id",
+        created_by=admin_id,
+        updated_by=admin_id,
     )
 
     db_session.add_all([attendance1, attendance2])
@@ -429,7 +437,7 @@ async def test_list_attendance_records_with_session_filter(
         "/api/v1/attendance/",
         headers=admin_token_headers,
         params={
-            "user_id": "admin-user-id",
+            "user_id": admin_id,
             "user_role": "admin",
             "session_id": str(session1.id),
         },
@@ -446,6 +454,7 @@ async def test_update_attendance_record(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_personnel,
 ):
@@ -458,7 +467,7 @@ async def test_update_attendance_record(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -471,8 +480,8 @@ async def test_update_attendance_record(
         personnel_id=str(sample_personnel[0].id),
         deployment_id=str(sample_deployment.id),
         status="absent",
-        created_by="admin-user-id",
-        updated_by="admin-user-id",
+        created_by=admin_id,
+        updated_by=admin_id,
     )
 
     db_session.add(attendance)
@@ -484,7 +493,7 @@ async def test_update_attendance_record(
         f"/api/v1/attendance/{attendance.id}",
         json=update_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 200
@@ -492,7 +501,7 @@ async def test_update_attendance_record(
     assert data["status"] == "present"
     assert data["remarks"] == "Arrived late"
     assert data["last_edit_at"] is not None
-    assert data["last_edit_by"] == "admin-user-id"
+    assert data["last_edit_by"] == admin_id
 
 
 @pytest.mark.asyncio
@@ -500,6 +509,7 @@ async def test_update_attendance_record_for_closed_session_forbidden(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_personnel,
 ):
@@ -512,10 +522,10 @@ async def test_update_attendance_record_for_closed_session_forbidden(
         date=session_date,
         session_type="AM",
         status="closed",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
         closed_at=utc_dt.utcnow(),
-        closed_by="admin-user-id",
+        closed_by=admin_id,
     )
 
     db_session.add(session)
@@ -527,8 +537,8 @@ async def test_update_attendance_record_for_closed_session_forbidden(
         personnel_id=str(sample_personnel[0].id),
         deployment_id=str(sample_deployment.id),
         status="absent",
-        created_by="admin-user-id",
-        updated_by="admin-user-id",
+        created_by=admin_id,
+        updated_by=admin_id,
     )
 
     db_session.add(attendance)
@@ -540,7 +550,7 @@ async def test_update_attendance_record_for_closed_session_forbidden(
         f"/api/v1/attendance/{attendance.id}",
         json=update_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 400
@@ -552,6 +562,7 @@ async def test_delete_attendance_record_as_admin(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_personnel,
 ):
@@ -564,7 +575,7 @@ async def test_delete_attendance_record_as_admin(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -577,8 +588,8 @@ async def test_delete_attendance_record_as_admin(
         personnel_id=str(sample_personnel[0].id),
         deployment_id=str(sample_deployment.id),
         status="absent",
-        created_by="admin-user-id",
-        updated_by="admin-user-id",
+        created_by=admin_id,
+        updated_by=admin_id,
     )
 
     db_session.add(attendance)
@@ -587,7 +598,7 @@ async def test_delete_attendance_record_as_admin(
     response = client.delete(
         f"/api/v1/attendance/{attendance.id}",
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 204
@@ -604,6 +615,7 @@ async def test_delete_attendance_record_as_regular_user_forbidden(
     client: TestClient,
     user_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_personnel,
 ):
@@ -616,7 +628,7 @@ async def test_delete_attendance_record_as_regular_user_forbidden(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -629,8 +641,8 @@ async def test_delete_attendance_record_as_regular_user_forbidden(
         personnel_id=str(sample_personnel[0].id),
         deployment_id=str(sample_deployment.id),
         status="absent",
-        created_by="admin-user-id",
-        updated_by="admin-user-id",
+        created_by=admin_id,
+        updated_by=admin_id,
     )
 
     db_session.add(attendance)
@@ -651,6 +663,7 @@ async def test_bulk_create_attendance_records(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_personnel,
 ):
@@ -663,7 +676,7 @@ async def test_bulk_create_attendance_records(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -696,7 +709,7 @@ async def test_bulk_create_attendance_records(
         "/api/v1/attendance/bulk/create",
         json=bulk_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 201
@@ -710,6 +723,7 @@ async def test_bulk_create_attendance_records_atomic_rollback(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_personnel,
 ):
@@ -722,7 +736,7 @@ async def test_bulk_create_attendance_records_atomic_rollback(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -735,8 +749,8 @@ async def test_bulk_create_attendance_records_atomic_rollback(
         personnel_id=str(sample_personnel[0].id),
         deployment_id=str(sample_deployment.id),
         status="present",
-        created_by="admin-user-id",
-        updated_by="admin-user-id",
+        created_by=admin_id,
+        updated_by=admin_id,
     )
 
     db_session.add(existing_attendance)
@@ -761,7 +775,7 @@ async def test_bulk_create_attendance_records_atomic_rollback(
         "/api/v1/attendance/bulk/create",
         json=bulk_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     # Should succeed but skip duplicate
@@ -776,6 +790,7 @@ async def test_bulk_update_attendance_records(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_personnel,
 ):
@@ -788,7 +803,7 @@ async def test_bulk_update_attendance_records(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -801,8 +816,8 @@ async def test_bulk_update_attendance_records(
         personnel_id=str(sample_personnel[0].id),
         deployment_id=str(sample_deployment.id),
         status="absent",
-        created_by="admin-user-id",
-        updated_by="admin-user-id",
+        created_by=admin_id,
+        updated_by=admin_id,
     )
 
     attendance2 = AttendanceRecord(
@@ -810,8 +825,8 @@ async def test_bulk_update_attendance_records(
         personnel_id=str(sample_personnel[1].id),
         deployment_id=str(sample_deployment.id),
         status="absent",
-        created_by="admin-user-id",
-        updated_by="admin-user-id",
+        created_by=admin_id,
+        updated_by=admin_id,
     )
 
     db_session.add_all([attendance1, attendance2])
@@ -836,7 +851,7 @@ async def test_bulk_update_attendance_records(
         "/api/v1/attendance/bulk/update",
         json=bulk_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     if response.status_code != 200:
@@ -853,6 +868,7 @@ async def test_bulk_update_attendance_records_for_closed_session_forbidden(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_personnel,
 ):
@@ -865,10 +881,10 @@ async def test_bulk_update_attendance_records_for_closed_session_forbidden(
         date=session_date,
         session_type="AM",
         status="closed",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
         closed_at=utc_dt.utcnow(),
-        closed_by="admin-user-id",
+        closed_by=admin_id,
     )
 
     db_session.add(session)
@@ -880,8 +896,8 @@ async def test_bulk_update_attendance_records_for_closed_session_forbidden(
         personnel_id=str(sample_personnel[0].id),
         deployment_id=str(sample_deployment.id),
         status="absent",
-        created_by="admin-user-id",
-        updated_by="admin-user-id",
+        created_by=admin_id,
+        updated_by=admin_id,
     )
 
     db_session.add(attendance)
@@ -900,7 +916,7 @@ async def test_bulk_update_attendance_records_for_closed_session_forbidden(
         "/api/v1/attendance/bulk/update",
         json=bulk_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
     assert response.status_code == 400
@@ -910,7 +926,8 @@ async def test_bulk_update_attendance_records_for_closed_session_forbidden(
 @pytest.mark.asyncio
 async def test_get_attendance_record_not_found(
     client: TestClient,
-    admin_token_headers: dict[str, str],
+    admin_token_headers,
+    admin_id: str,
 ):
     """Test getting a non-existent attendance record."""
     assert_404_response(
@@ -918,7 +935,7 @@ async def test_get_attendance_record_not_found(
         "get",
         "/api/v1/attendance/non-existent-id",
         admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "admin"},
     )
 
 
@@ -927,6 +944,7 @@ async def test_list_attendance_records_pagination(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
+    admin_id: str,
     sample_deployment: Deployment,
     sample_personnel,
 ):
@@ -939,7 +957,7 @@ async def test_list_attendance_records_pagination(
         date=session_date,
         session_type="AM",
         status="open",
-        created_by="admin-user-id",
+        created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
 
@@ -954,8 +972,8 @@ async def test_list_attendance_records_pagination(
             personnel_id=str(personnel.id),
             deployment_id=str(sample_deployment.id),
             status="present" if i % 2 == 0 else "absent",
-            created_by="admin-user-id",
-            updated_by="admin-user-id",
+            created_by=admin_id,
+            updated_by=admin_id,
         )
         attendance_records.append(attendance)
 
@@ -967,7 +985,7 @@ async def test_list_attendance_records_pagination(
         "/api/v1/attendance/",
         admin_token_headers,
         params={
-            "user_id": "admin-user-id",
+            "user_id": admin_id,
             "user_role": "admin",
         },
     )

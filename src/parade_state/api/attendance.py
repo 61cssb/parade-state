@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
+from parade_state.models import Deployment, DeploymentUserAccess
 from parade_state.models.attendance import AttendanceRecord, Session
 from parade_state.models.deployment import (
     DeploymentNotes,
@@ -20,6 +21,7 @@ from parade_state.models.schemas import (
     AttendanceRecordUpdate,
 )
 from parade_state.utils import utc_dt
+from parade_state.api.access_control import get_user_accessible_deployments
 
 router = APIRouter()
 
@@ -29,6 +31,78 @@ router = APIRouter()
 # ============================================================================
 
 
+async def verify_deployment_access(
+    deployment_id: str,
+    user_id: str,
+    user_role: str,
+    db: AsyncSession,
+) -> Deployment:
+    """Verify user has access to deployment and return it.
+
+    Super admins have full access to all deployments.
+    Admins need explicit deployment access.
+    Regular users need explicit deployment access.
+    """
+    # Get deployment
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+    deployment = result.scalar_one_or_none()
+
+    if not deployment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Deployment not found",
+        )
+
+    # Super admins have full access
+    if user_role == "super_admin":
+        return deployment
+
+    # Check for explicit deployment access
+    access_result = await db.execute(
+        select(DeploymentUserAccess).where(
+            and_(
+                DeploymentUserAccess.user_id == user_id,
+                DeploymentUserAccess.deployment_id == deployment_id,
+                DeploymentUserAccess.revoked_at.is_(None),
+            )
+        )
+    )
+    access = access_result.scalar_one_or_none()
+
+    # Both admins and regular users need explicit deployment access
+    if access:
+        return deployment
+
+    # No access found
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Insufficient permissions to access this deployment",
+    )
+
+
+async def verify_session_and_deployment_access(
+    session_id: str,
+    user_id: str,
+    user_role: str,
+    db: AsyncSession,
+) -> Session:
+    """Verify user has access to session and its deployment, then return session."""
+    # Get session
+    result = await db.execute(select(Session).where(Session.id == session_id))
+    session = result.scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+
+    # Verify deployment access
+    await verify_deployment_access(session.deployment_id, user_id, user_role, db)
+
+    return session
+
+
 async def verify_attendance_access(
     attendance_id: str,
     user_id: str,
@@ -36,38 +110,24 @@ async def verify_attendance_access(
     db: AsyncSession,
 ) -> AttendanceRecord:
     """Verify user has access to attendance record and return it."""
-    # Super admins have full access
-    if user_role == "super_admin":
-        result = await db.execute(
-            select(AttendanceRecord).where(AttendanceRecord.id == attendance_id)
-        )
-        attendance = result.scalar_one_or_none()
-        if not attendance:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Attendance record not found",
-            )
-        return attendance
-
-    # For regular users and admins, check attendance access based on scope
-    # TODO: Implement proper access control based on deployment/subunit scope
-    # For now, admins can access all attendance records
-    if user_role in ["admin", "user"]:
-        result = await db.execute(
-            select(AttendanceRecord).where(AttendanceRecord.id == attendance_id)
-        )
-        attendance = result.scalar_one_or_none()
-        if not attendance:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Attendance record not found",
-            )
-        return attendance
-
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Insufficient permissions to access this attendance record",
+    # Get attendance record
+    result = await db.execute(
+        select(AttendanceRecord).where(AttendanceRecord.id == attendance_id)
     )
+    attendance = result.scalar_one_or_none()
+
+    if not attendance:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Attendance record not found",
+        )
+
+    # Verify session and deployment access
+    await verify_session_and_deployment_access(
+        attendance.session_id, user_id, user_role, db
+    )
+
+    return attendance
 
 
 async def verify_session_is_open(
@@ -195,8 +255,9 @@ async def create_attendance_record(
     Requires the session to be open for attendance recording.
     Automatically snapshots deployment notes and personnel assignments.
     """
-    # Verify session is open and get session object
+    # Verify session is open and user has deployment access
     session = await verify_session_is_open(attendance_data.session_id, db)
+    await verify_deployment_access(session.deployment_id, user_id, user_role, db)
 
     # Check if attendance record already exists
     existing_result = await db.execute(
@@ -273,14 +334,30 @@ async def list_attendance_records(
 
     All authenticated users can list attendance records.
     Filters may be applied based on user role and scope.
+    Non-super-admins can only see attendance from deployments they have access to.
     """
     query = select(AttendanceRecord)
+
+    # For non-super-admins, filter by deployments they have access to
+    if user_role != "super_admin":
+        # Get user's accessible deployments
+        accessible_deployments = await get_user_accessible_deployments(
+            user_id, user_role, db
+        )
+        accessible_deployment_ids = [d.id for d in accessible_deployments]
+
+        if not accessible_deployment_ids:
+            return []  # No access to any deployments
+
+        query = query.where(AttendanceRecord.deployment_id.in_(accessible_deployment_ids))
 
     # Apply filters
     if session_id:
         query = query.where(AttendanceRecord.session_id == session_id)
 
     if deployment_id:
+        # Verify deployment access if specific deployment is requested
+        await verify_deployment_access(deployment_id, user_id, user_role, db)
         query = query.where(AttendanceRecord.deployment_id == deployment_id)
 
     if personnel_id:
@@ -429,7 +506,7 @@ async def bulk_create_attendance(
             set([item.session_id for item in bulk_data.attendance_records])
         )
 
-        # Verify all sessions are open
+        # Verify all sessions are open and user has deployment access
         # Session is now imported at the top level
         session_results = await db.execute(
             select(Session).where(Session.id.in_(session_ids))
@@ -448,6 +525,11 @@ async def bulk_create_attendance(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Session {session_id} is not open",
                 )
+
+            # Verify deployment access for each session
+            await verify_deployment_access(
+                sessions[session_id].deployment_id, user_id, user_role, db
+            )
 
         # Process each attendance record creation
         for attendance_item in bulk_data.attendance_records:
@@ -556,6 +638,13 @@ async def bulk_update_attendance(
         )
 
         records_data = {r[0].id: (r[0], r[1]) for r in results.all()}
+
+        # Verify deployment access for all unique deployments in the request
+        unique_deployment_ids = set(
+            [session.deployment_id for attendance, session in records_data.values()]
+        )
+        for deployment_id in unique_deployment_ids:
+            await verify_deployment_access(deployment_id, user_id, user_role, db)
 
         # Process each update
         for update_item in bulk_data.attendance_records:

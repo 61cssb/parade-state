@@ -292,6 +292,12 @@ def admin_token_headers(sample_users) -> dict[str, str]:
 
 
 @pytest.fixture
+def admin_id(sample_users) -> str:
+    """Provide the admin user ID for test parameters."""
+    return str(sample_users["admin"].id)
+
+
+@pytest.fixture
 def user_token_headers(sample_users) -> dict[str, str]:
     """Provide headers with regular user authentication token."""
     user_id = str(sample_users["user"].id)
