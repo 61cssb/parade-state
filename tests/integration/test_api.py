@@ -302,7 +302,7 @@ async def test_pagination(client: TestClient, test_db):
     admin, admin_session = await create_test_user_and_session(test_db, role="admin")
 
     # Create multiple users
-    for i in range(5):
+    for _ in range(5):
         await create_test_user_and_session(test_db, role="user", status="active")
 
     headers = {"Authorization": f"Bearer {admin_session.token}"}

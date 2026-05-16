@@ -214,7 +214,6 @@ async def test_get_personnel_attendance_history_wrong_estab(
     from parade_state.models import Deployment as DeploymentModel
     from parade_state.models import Estab
 
-    admin_id = str(sample_users["admin"].id)
     personnel_id = str(sample_personnel[0].id)
 
     # Try to use a deployment ID that doesn't exist

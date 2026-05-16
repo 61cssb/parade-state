@@ -508,7 +508,6 @@ async def test_access_control_enforcement_deployment_access(
 ):
     """Test that users without deployment access are blocked."""
     user_id = str(sample_users["user"].id)
-    admin_id = str(sample_users["admin"].id)
 
     # Try to access deployment personnel without access grant
     response = client.get(
