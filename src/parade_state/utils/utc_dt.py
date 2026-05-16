@@ -280,16 +280,17 @@ def parse_datetime(datetime_string: str, format_string: str | None = None) -> da
     return ensure_aware(dt_parsed)
 
 
-def get_age(birth_date: datetime | dt.datetime) -> int:
+def get_age(birth_date: datetime | dt.datetime, today: datetime | dt.datetime | None = None) -> int:
     """Calculate age from birth date.
 
     Args:
         birth_date: Birth date
+        today: Current date (for testing, defaults to utcnow())
 
     Returns:
         Age in years
     """
-    today = utcnow()
+    today = today or utcnow()
     birth = ensure_aware(birth_date) if birth_date.tzinfo else birth_date
 
     age = (

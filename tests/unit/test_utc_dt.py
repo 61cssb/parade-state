@@ -2,8 +2,6 @@
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
 from parade_state.utils import utc_dt
 
 
@@ -237,11 +235,12 @@ class TestHelpers:
 
     def test_get_age_before_birthday_this_year(self):
         """Test get_age before birthday in current year."""
-        today = datetime(2020, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+        # Test the specific scenario: June 1, 2020 with birthday Dec 31, 1990
         birth_date = datetime(1990, 12, 31, 0, 0, 0, tzinfo=timezone.utc)
-        # Mock current time by calculating manually
-        age = 2020 - 1990 - 1  # Before birthday
-        assert age == 29
+        test_date = datetime(2020, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+        age = utc_dt.get_age(birth_date, today=test_date)
+        assert age == 29  # Haven't had birthday yet in 2020
 
     def test_truncate_to_day_with_aware_datetime(self):
         """Test truncate_to_day preserves timezone."""
