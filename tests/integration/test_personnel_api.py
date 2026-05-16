@@ -5,9 +5,17 @@ from datetime import date, datetime, timedelta
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from parade_state.models.deployment import Deployment, DeploymentNotes, DeploymentPersonnelOverride
+from parade_state.models.deployment import (
+    Deployment,
+    DeploymentNotes,
+    DeploymentPersonnelOverride,
+)
 from parade_state.models.personnel import Personnel
-from tests.test_utils import assert_pagination_works, assert_404_response, assert_permission_denied
+from tests.test_utils import (
+    assert_pagination_works,
+    assert_404_response,
+    assert_permission_denied,
+)
 
 
 @pytest.mark.asyncio
@@ -743,7 +751,10 @@ async def test_get_personnel_from_different_estab_forbidden(
     )
 
     assert response.status_code == 400
-    assert "does not belong to this deployment's establishment" in response.json()["detail"]
+    assert (
+        "does not belong to this deployment's establishment"
+        in response.json()["detail"]
+    )
 
 
 # ============================================================================

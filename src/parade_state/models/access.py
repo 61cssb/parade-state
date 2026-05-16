@@ -20,11 +20,15 @@ class AccessLevel(Base):
 
     name: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     level_order: Mapped[int] = mapped_column(Integer, unique=True, index=True)
-    created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    created_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
     created_by: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True
     )
-    updated_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    updated_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
     updated_by: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True
     )
@@ -64,8 +68,12 @@ class User(Base):
     )
     first_sign_in_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True)
     last_sign_in_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True)
-    created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
-    updated_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    created_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
+    updated_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
 
     # Relationships
     access_level: Mapped[AccessLevel | None] = relationship(
@@ -104,9 +112,13 @@ class UserSubunitScope(Base):
     sub_unit_1: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sub_unit_2: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sub_unit_3: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    created_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
-    updated_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    updated_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
 
     # Relationships
     user: Mapped[User] = relationship(
@@ -146,7 +158,9 @@ class DeploymentUserAccess(Base):
         String(36), ForeignKey("deployments.id", ondelete="CASCADE"), index=True
     )
     granted_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
-    granted_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    granted_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
     revoked_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True)
 
     # Relationships

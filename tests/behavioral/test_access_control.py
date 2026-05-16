@@ -50,7 +50,9 @@ class TestUserAccessControl:
     """Test user access control and scoping logic."""
 
     @pytest.mark.asyncio
-    async def test_user_deployment_access_grant(self, db_session, sample_users, sample_deployment):
+    async def test_user_deployment_access_grant(
+        self, db_session, sample_users, sample_deployment
+    ):
         """Test granting user access to a deployment."""
         user = sample_users["user"]
         deployment = sample_deployment
@@ -78,7 +80,9 @@ class TestUserAccessControl:
         assert access_record.revoked_at is None
 
     @pytest.mark.asyncio
-    async def test_user_subunit_scope_assignment(self, db_session, sample_users, sample_deployment):
+    async def test_user_subunit_scope_assignment(
+        self, db_session, sample_users, sample_deployment
+    ):
         """Test assigning subunit scope to a user."""
         user = sample_users["user"]
         deployment = sample_deployment
@@ -108,7 +112,9 @@ class TestUserAccessControl:
         assert scope_record.sub_unit_2 is None  # Not specified
 
     @pytest.mark.asyncio
-    async def test_user_multiple_scopes_same_deployment(self, db_session, sample_users, sample_deployment):
+    async def test_user_multiple_scopes_same_deployment(
+        self, db_session, sample_users, sample_deployment
+    ):
         """Test user can have multiple scopes within same deployment."""
         user = sample_users["user"]
         deployment = sample_deployment
@@ -147,7 +153,9 @@ class TestUserAccessControl:
         assert platoon_names == {"Platoon 1", "Platoon 2"}
 
     @pytest.mark.asyncio
-    async def test_admin_bypasses_access_control(self, db_session, sample_users, sample_deployment):
+    async def test_admin_bypasses_access_control(
+        self, db_session, sample_users, sample_deployment
+    ):
         """Test that admin users bypass normal access controls."""
         admin = sample_users["admin"]
 
@@ -171,7 +179,9 @@ class TestColumnVisibility:
     async def test_column_visibility_hierarchy(self, db_session, sample_access_levels):
         """Test that column visibility follows access level hierarchy."""
         unit_level = sample_access_levels["unit"]  # level_order = 1 (most restrictive)
-        platoon_level = sample_access_levels["platoon"]  # level_order = 3 (least restrictive)
+        platoon_level = sample_access_levels[
+            "platoon"
+        ]  # level_order = 3 (least restrictive)
 
         # Column with sensitivity level = platoon (level_order = 3)
         # Should be visible to platoon level (3 >= 3) but not unit level (1 < 3)

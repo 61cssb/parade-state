@@ -106,7 +106,9 @@ async def test_get_invalid_session(db_session: AsyncSession):
     )
 
     # Manually expire the session
-    session.expires_at = utc_dt.ensure_naive(utc_dt.add_timedelta(utc_dt.utcnow(), days=-1))
+    session.expires_at = utc_dt.ensure_naive(
+        utc_dt.add_timedelta(utc_dt.utcnow(), days=-1)
+    )
     await db_session.commit()
 
     # Try to get expired session
@@ -183,11 +185,15 @@ async def test_invalidate_user_sessions(db_session: AsyncSession):
     )
 
     # Invalidate all sessions except session2
-    count = await invalidate_user_sessions(db_session, str(user.id), except_token=session2.token)
+    count = await invalidate_user_sessions(
+        db_session, str(user.id), except_token=session2.token
+    )
     assert count == 2
 
     # Verify session2 is still valid
-    retrieved_session = await get_valid_session(db_session, session2.token, update_last_accessed=False)
+    retrieved_session = await get_valid_session(
+        db_session, session2.token, update_last_accessed=False
+    )
     assert retrieved_session is not None
 
     # Verify session1 and session3 are invalid
@@ -229,7 +235,9 @@ async def test_cleanup_expired_sessions(db_session: AsyncSession):
         name=user.name,
         role=user.role,
     )
-    expired_session.expires_at = utc_dt.ensure_naive(utc_dt.add_timedelta(utc_dt.utcnow(), days=-1))
+    expired_session.expires_at = utc_dt.ensure_naive(
+        utc_dt.add_timedelta(utc_dt.utcnow(), days=-1)
+    )
     await db_session.commit()
 
     # Cleanup expired sessions
@@ -237,7 +245,9 @@ async def test_cleanup_expired_sessions(db_session: AsyncSession):
     assert count == 1
 
     # Verify valid session still exists
-    retrieved_session = await get_valid_session(db_session, valid_session.token, update_last_accessed=False)
+    retrieved_session = await get_valid_session(
+        db_session, valid_session.token, update_last_accessed=False
+    )
     assert retrieved_session is not None
 
     # Verify expired session is gone
@@ -297,14 +307,26 @@ async def test_session_last_accessed_update(db_session: AsyncSession):
 
     # Wait a bit and retrieve session again
     import asyncio
+
     await asyncio.sleep(0.1)
 
-    retrieved_session = await get_valid_session(db_session, session.token, update_last_accessed=True)
+    retrieved_session = await get_valid_session(
+        db_session, session.token, update_last_accessed=True
+    )
 
     # Make both datetimes comparable
-    original_comparable = make_aware(original_last_accessed) if original_last_accessed.tzinfo is None else original_last_accessed
-    retrieved_comparable = make_aware(retrieved_session.last_accessed_at) if retrieved_session.last_accessed_at.tzinfo is None else retrieved_session.last_accessed_at
+    original_comparable = (
+        make_aware(original_last_accessed)
+        if original_last_accessed.tzinfo is None
+        else original_last_accessed
+    )
+    retrieved_comparable = (
+        make_aware(retrieved_session.last_accessed_at)
+        if retrieved_session.last_accessed_at.tzinfo is None
+        else retrieved_session.last_accessed_at
+    )
 
     # Use a small tolerance for the comparison to avoid flaky tests
     from datetime import timedelta
+
     assert retrieved_comparable >= original_comparable + timedelta(milliseconds=50)

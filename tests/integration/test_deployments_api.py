@@ -6,11 +6,19 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from parade_state.models.attendance import AttendanceRecord
-from parade_state.models.deployment import Deployment, DeploymentNotes, DeploymentPersonnelOverride
+from parade_state.models.deployment import (
+    Deployment,
+    DeploymentNotes,
+    DeploymentPersonnelOverride,
+)
 from parade_state.models.personnel import Personnel
 from parade_state.models.schemas import DeploymentCreate, DeploymentUpdate
 from parade_state.utils import utc_dt
-from tests.test_utils import assert_pagination_works, assert_404_response, assert_permission_denied
+from tests.test_utils import (
+    assert_pagination_works,
+    assert_404_response,
+    assert_permission_denied,
+)
 
 
 @pytest.mark.asyncio

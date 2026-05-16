@@ -16,7 +16,9 @@ class TestPersonnelIdentity:
     """Test personnel identity and cross-CSV logic."""
 
     @pytest.mark.asyncio
-    async def test_personnel_internal_id_uniqueness(self, db_session, sample_estab, sample_users):
+    async def test_personnel_internal_id_uniqueness(
+        self, db_session, sample_estab, sample_users
+    ):
         """Test that personnel internal IDs are unique across the system."""
         admin_id = sample_users["admin"].id
 
@@ -48,7 +50,9 @@ class TestPersonnelIdentity:
         assert person1.full_name != person2.full_name  # Different people
 
     @pytest.mark.asyncio
-    async def test_personnel_pers_no_not_unique_within_estab(self, db_session, sample_estab, sample_users):
+    async def test_personnel_pers_no_not_unique_within_estab(
+        self, db_session, sample_estab, sample_users
+    ):
         """Test that pers_no is not enforced unique within an estab (though it should be)."""
         admin_id = sample_users["admin"].id
 
@@ -83,7 +87,9 @@ class TestPersonnelIdentity:
         assert person1.id != person2.id
 
     @pytest.mark.asyncio
-    async def test_personnel_identity_isolation_between_estabs(self, db_session, sample_users):
+    async def test_personnel_identity_isolation_between_estabs(
+        self, db_session, sample_users
+    ):
         """Test that personnel from different estabs are completely isolated."""
         admin_id = sample_users["admin"].id
 
@@ -193,7 +199,9 @@ class TestEstabVersioning:
             assert estab.status == to_status
 
     @pytest.mark.asyncio
-    async def test_estab_archived_blocks_new_deployments(self, db_session, sample_estab):
+    async def test_estab_archived_blocks_new_deployments(
+        self, db_session, sample_estab
+    ):
         """Test that archived estabs cannot be used for new deployments."""
         # This would be enforced by business logic
         # Archive the estab

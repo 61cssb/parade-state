@@ -36,7 +36,9 @@ class Personnel(Base):
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     updated_at: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
-    updated_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True
+    )
 
     # Relationships
     estab: Mapped["Estab"] = relationship(back_populates="personnel")

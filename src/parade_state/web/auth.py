@@ -92,9 +92,7 @@ async def login(request: Request):
         window.location.href = '/auth/login'
         ```
     """
-    redirect_uri = env.get(
-        "OAUTH_REDIRECT_URI", "http://localhost:8000/auth/callback"
-    )
+    redirect_uri = env.get("OAUTH_REDIRECT_URI", "http://localhost:8000/auth/callback")
 
     oauth = get_oauth()
     google = oauth.create_client("google")

@@ -68,6 +68,7 @@ async def test_engine(tmp_path):
 
     # Get the global engine that was just created
     from parade_state.db import _engine
+
     engine = _engine
 
     # Create all tables
@@ -312,7 +313,9 @@ def super_admin_token_headers() -> dict[str, str]:
 
 
 @pytest.fixture
-async def sample_session(db_session: AsyncSession, sample_deployment: Deployment, sample_users):
+async def sample_session(
+    db_session: AsyncSession, sample_deployment: Deployment, sample_users
+):
     """Create a sample session for testing."""
     admin_id = str(sample_users["admin"].id)
 
@@ -332,7 +335,9 @@ async def sample_session(db_session: AsyncSession, sample_deployment: Deployment
 
 
 @pytest.fixture
-async def sample_sessions(db_session: AsyncSession, sample_deployment: Deployment, sample_users):
+async def sample_sessions(
+    db_session: AsyncSession, sample_deployment: Deployment, sample_users
+):
     """Create multiple sample sessions for testing."""
     admin_id = str(sample_users["admin"].id)
 

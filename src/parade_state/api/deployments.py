@@ -689,7 +689,9 @@ async def update_deployment_notes(
 @router.get("/{deployment_id}/status", response_model=DeploymentStatusResponse)
 async def get_deployment_status(
     deployment_id: str,
-    status_date: date | None = Query(None, description="Date to get status for (defaults to today)"),
+    status_date: date | None = Query(
+        None, description="Date to get status for (defaults to today)"
+    ),
     user_id: str = Query(..., description="User ID making the request"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
@@ -850,10 +852,12 @@ async def export_deployment_csv(
     # Get all personnel records for this deployment
     # First get personnel with deployment overrides
     personnel_result = await db.execute(
-        select(Personnel).join(
+        select(Personnel)
+        .join(
             DeploymentPersonnelOverride,
             Personnel.id == DeploymentPersonnelOverride.personnel_id,
-        ).where(DeploymentPersonnelOverride.deployment_id == deployment_id)
+        )
+        .where(DeploymentPersonnelOverride.deployment_id == deployment_id)
     )
     personnel_with_overrides = personnel_result.scalars().all()
 
@@ -891,9 +895,7 @@ async def export_deployment_csv(
 
     # Get attendance records
     attendance_result = await db.execute(
-        select(AttendanceRecord).where(
-            AttendanceRecord.deployment_id == deployment_id
-        )
+        select(AttendanceRecord).where(AttendanceRecord.deployment_id == deployment_id)
     )
     attendance_records = attendance_result.scalars().all()
 
@@ -925,8 +927,14 @@ async def export_deployment_csv(
             "Override SubUnit 3",
             "Deployment Notes",
         ]
-        + [f"Session {s.date.strftime('%Y-%m-%d')} {s.session_type} Status" for s in sessions]
-        + [f"Session {s.date.strftime('%Y-%m-%d')} {s.session_type} Remarks" for s in sessions]
+        + [
+            f"Session {s.date.strftime('%Y-%m-%d')} {s.session_type} Status"
+            for s in sessions
+        ]
+        + [
+            f"Session {s.date.strftime('%Y-%m-%d')} {s.session_type} Remarks"
+            for s in sessions
+        ]
     )
 
     # Write personnel rows

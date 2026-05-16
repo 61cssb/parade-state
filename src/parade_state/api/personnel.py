@@ -317,7 +317,10 @@ async def list_personnel(
     sub_unit_3: str | None = Query(None, description="Filter by sub-unit 3"),
     status: str | None = Query(None, description="Filter by personnel status"),
     search: str | None = Query(None, description="Search by name or service number"),
-    sort_by: str | None = Query(None, description="Sort field (name, rank, unit, status, created_at, updated_at)"),
+    sort_by: str | None = Query(
+        None,
+        description="Sort field (name, rank, unit, status, created_at, updated_at)",
+    ),
     sort_order: str | None = Query(None, description="Sort order (asc, desc)"),
     limit: int = Query(100, ge=1, le=1000, description="Number of results to return"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),

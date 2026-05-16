@@ -23,9 +23,7 @@ def assert_pagination_works(
 
     # Request first page
     response = client.get(
-        endpoint,
-        headers=headers,
-        params={**base_params, "limit": limit, "offset": 0}
+        endpoint, headers=headers, params={**base_params, "limit": limit, "offset": 0}
     )
     assert response.status_code == 200
     first_page = response.json()
@@ -36,7 +34,7 @@ def assert_pagination_works(
     response = client.get(
         endpoint,
         headers=headers,
-        params={**base_params, "limit": limit, "offset": limit}
+        params={**base_params, "limit": limit, "offset": limit},
     )
     assert response.status_code == 200
     second_page = response.json()

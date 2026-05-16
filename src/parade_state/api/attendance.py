@@ -349,7 +349,9 @@ async def list_attendance_records(
         if not accessible_deployment_ids:
             return []  # No access to any deployments
 
-        query = query.where(AttendanceRecord.deployment_id.in_(accessible_deployment_ids))
+        query = query.where(
+            AttendanceRecord.deployment_id.in_(accessible_deployment_ids)
+        )
 
     # Apply filters
     if session_id:

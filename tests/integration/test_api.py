@@ -10,7 +10,9 @@ from parade_state.auth.session import create_user_session
 from tests.test_utils import assert_404_response, assert_permission_denied
 
 
-async def create_test_user_and_session(test_db, role: str = "user", status: str = "active"):
+async def create_test_user_and_session(
+    test_db, role: str = "user", status: str = "active"
+):
     """Helper to create a test user and session."""
     # Generate unique email using UUID to avoid conflicts
     unique_id = str(uuid.uuid4())[:8]
@@ -81,7 +83,9 @@ async def test_logout_with_valid_token(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_list_users_as_admin(client: TestClient, test_db):
     """Test listing users as admin."""
-    admin_user, admin_session = await create_test_user_and_session(test_db, role="admin")
+    admin_user, admin_session = await create_test_user_and_session(
+        test_db, role="admin"
+    )
 
     # Create some test users
     await create_test_user_and_session(test_db, role="user")
@@ -111,7 +115,9 @@ async def test_list_users_as_regular_user(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_get_user_as_admin(client: TestClient, test_db):
     """Test getting a specific user as admin."""
-    admin_user, admin_session = await create_test_user_and_session(test_db, role="admin")
+    admin_user, admin_session = await create_test_user_and_session(
+        test_db, role="admin"
+    )
     user, _ = await create_test_user_and_session(test_db, role="user")
 
     headers = {"Authorization": f"Bearer {admin_session.token}"}
@@ -151,14 +157,16 @@ async def test_get_other_user_as_regular_user(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_update_user_as_admin(client: TestClient, test_db):
     """Test updating user as admin."""
-    admin_user, admin_session = await create_test_user_and_session(test_db, role="admin")
+    admin_user, admin_session = await create_test_user_and_session(
+        test_db, role="admin"
+    )
     user, _ = await create_test_user_and_session(test_db, role="user")
 
     headers = {"Authorization": f"Bearer {admin_session.token}"}
     response = client.patch(
         f"/api/v1/users/{user.id}",
         json={"name": "Updated Name", "status": "active"},
-        headers=headers
+        headers=headers,
     )
 
     assert response.status_code == 200
@@ -169,14 +177,14 @@ async def test_update_user_as_admin(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_update_user_role_as_super_admin(client: TestClient, test_db):
     """Test promoting user to admin as super admin."""
-    super_admin, super_admin_session = await create_test_user_and_session(test_db, role="super_admin")
+    super_admin, super_admin_session = await create_test_user_and_session(
+        test_db, role="super_admin"
+    )
     user, _ = await create_test_user_and_session(test_db, role="user")
 
     headers = {"Authorization": f"Bearer {super_admin_session.token}"}
     response = client.patch(
-        f"/api/v1/users/{user.id}",
-        json={"role": "admin"},
-        headers=headers
+        f"/api/v1/users/{user.id}", json={"role": "admin"}, headers=headers
     )
 
     assert response.status_code == 200
@@ -192,9 +200,7 @@ async def test_update_user_role_as_regular_admin(client: TestClient, test_db):
 
     headers = {"Authorization": f"Bearer {admin_session.token}"}
     response = client.patch(
-        f"/api/v1/users/{user.id}",
-        json={"role": "super_admin"},
-        headers=headers
+        f"/api/v1/users/{user.id}", json={"role": "super_admin"}, headers=headers
     )
 
     assert response.status_code == 403
@@ -203,7 +209,9 @@ async def test_update_user_role_as_regular_admin(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_delete_user_as_super_admin(client: TestClient, test_db):
     """Test deleting user as super admin."""
-    super_admin, super_admin_session = await create_test_user_and_session(test_db, role="super_admin")
+    super_admin, super_admin_session = await create_test_user_and_session(
+        test_db, role="super_admin"
+    )
     user, _ = await create_test_user_and_session(test_db, role="user")
 
     headers = {"Authorization": f"Bearer {super_admin_session.token}"}
@@ -228,7 +236,9 @@ async def test_delete_user_as_regular_admin(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_self_deletion_prevention(client: TestClient, test_db):
     """Test that users cannot delete themselves."""
-    super_admin, super_admin_session = await create_test_user_and_session(test_db, role="super_admin")
+    super_admin, super_admin_session = await create_test_user_and_session(
+        test_db, role="super_admin"
+    )
 
     headers = {"Authorization": f"Bearer {super_admin_session.token}"}
     response = client.delete(f"/api/v1/users/{super_admin.id}", headers=headers)

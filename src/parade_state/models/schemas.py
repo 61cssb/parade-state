@@ -94,7 +94,9 @@ class DeploymentStatusResponse(BaseModel):
     deployment_id: str
     deployment_name: str
     date: date
-    deployment_status: Literal["draft", "active", "inactive", "archived", "closed", "finalized"]
+    deployment_status: Literal[
+        "draft", "active", "inactive", "archived", "closed", "finalized"
+    ]
     am_session: DeploymentStatusSessionInfo | None = None
     pm_session: DeploymentStatusSessionInfo | None = None
     units: list[DeploymentStatusUnitBreakdown]
@@ -341,9 +343,15 @@ class PersonnelResponse(PersonnelBase):
 class PersonnelUpdate(BaseModel):
     """Schema for updating personnel."""
 
-    rank: str | None = Field(None, min_length=1, max_length=50, description="Personnel rank")
-    name: str | None = Field(None, min_length=1, max_length=255, description="Full name")
-    unit: str | None = Field(None, min_length=1, max_length=255, description="Unit assignment")
+    rank: str | None = Field(
+        None, min_length=1, max_length=50, description="Personnel rank"
+    )
+    name: str | None = Field(
+        None, min_length=1, max_length=255, description="Full name"
+    )
+    unit: str | None = Field(
+        None, min_length=1, max_length=255, description="Unit assignment"
+    )
     sub_unit_1: str | None = Field(None, max_length=255, description="Sub-unit level 1")
     sub_unit_2: str | None = Field(None, max_length=255, description="Sub-unit level 2")
     sub_unit_3: str | None = Field(None, max_length=255, description="Sub-unit level 3")

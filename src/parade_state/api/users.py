@@ -6,7 +6,10 @@ from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from parade_state.auth.dependencies import require_authenticated_user, require_admin_user
+from parade_state.auth.dependencies import (
+    require_authenticated_user,
+    require_admin_user,
+)
 from parade_state.db import get_db_session
 from parade_state.models import AccessLevel, User
 from parade_state.utils import ids

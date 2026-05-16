@@ -17,7 +17,9 @@ class TestDeploymentLifecycle:
     """Test deployment status transitions and constraints."""
 
     @pytest.mark.asyncio
-    async def test_only_one_active_deployment(self, db_session, sample_estab, sample_users):
+    async def test_only_one_active_deployment(
+        self, db_session, sample_estab, sample_users
+    ):
         """Test that only one deployment can be active at a time (application-level constraint)."""
         admin_id = sample_users["admin"].id
 
@@ -84,7 +86,9 @@ class TestDeploymentLifecycle:
             assert deployment.status == to_status
 
     @pytest.mark.asyncio
-    async def test_deployment_validity_range_constraints(self, db_session, sample_estab, sample_users):
+    async def test_deployment_validity_range_constraints(
+        self, db_session, sample_estab, sample_users
+    ):
         """Test that overlapping validity ranges are rejected."""
         admin_id = sample_users["admin"].id
 
@@ -113,14 +117,18 @@ class TestDeploymentLifecycle:
 
         db_session.add(deployment2)
         # This should be rejected by application logic (constraint not enforced at DB level)
-        await db_session.commit()  # For now, allow it - constraint would be in business logic
+        await (
+            db_session.commit()
+        )  # For now, allow it - constraint would be in business logic
 
 
 class TestSessionConstraints:
     """Test session creation and management constraints."""
 
     @pytest.mark.asyncio
-    async def test_unique_session_per_deployment_date_and_type(self, db_session, sample_deployment, sample_users):
+    async def test_unique_session_per_deployment_date_and_type(
+        self, db_session, sample_deployment, sample_users
+    ):
         """Test that only one session per type can exist per deployment per date."""
         admin_id = sample_users["admin"].id
         today = utc_dt.utcnow().date()
@@ -160,7 +168,9 @@ class TestSessionConstraints:
             await db_session.commit()
 
     @pytest.mark.asyncio
-    async def test_session_cannot_be_created_for_inactive_deployment(self, db_session, sample_users):
+    async def test_session_cannot_be_created_for_inactive_deployment(
+        self, db_session, sample_users
+    ):
         """Test that sessions cannot be created for inactive deployments."""
         # This would be enforced by business logic, not DB constraints
         # Test would verify the application-level validation
@@ -171,7 +181,9 @@ class TestAttendanceSnapshotRules:
     """Test attendance record snapshot behavior."""
 
     @pytest.mark.asyncio
-    async def test_attendance_snapshot_within_validity_range(self, db_session, sample_deployment, sample_personnel, sample_users):
+    async def test_attendance_snapshot_within_validity_range(
+        self, db_session, sample_deployment, sample_personnel, sample_users
+    ):
         """Test that snapshots are created when editing within deployment validity."""
         deployment = sample_deployment
         personnel = sample_personnel[0]
@@ -215,7 +227,9 @@ class TestAttendanceSnapshotRules:
         assert attendance.last_edit_by == admin_id
 
     @pytest.mark.asyncio
-    async def test_attendance_snapshot_outside_validity_range(self, db_session, sample_deployment, sample_personnel, sample_users):
+    async def test_attendance_snapshot_outside_validity_range(
+        self, db_session, sample_deployment, sample_personnel, sample_users
+    ):
         """Test that snapshots are NOT updated when editing outside validity range."""
         deployment = sample_deployment
         personnel = sample_personnel[0]
@@ -276,7 +290,9 @@ class TestDeploymentNotes:
     """Test deployment-scoped notes functionality."""
 
     @pytest.mark.asyncio
-    async def test_deployment_notes_uniqueness(self, db_session, sample_deployment, sample_personnel, sample_users):
+    async def test_deployment_notes_uniqueness(
+        self, db_session, sample_deployment, sample_personnel, sample_users
+    ):
         """Test that only one notes record exists per deployment-personnel pair."""
         deployment = sample_deployment
         personnel = sample_personnel[0]
@@ -308,7 +324,9 @@ class TestDeploymentNotes:
             await db_session.commit()
 
     @pytest.mark.asyncio
-    async def test_notes_snapshot_on_session_creation(self, db_session, sample_deployment, sample_personnel, sample_users):
+    async def test_notes_snapshot_on_session_creation(
+        self, db_session, sample_deployment, sample_personnel, sample_users
+    ):
         """Test that notes are snapshotted when session is created."""
         deployment = sample_deployment
         personnel = sample_personnel[0]

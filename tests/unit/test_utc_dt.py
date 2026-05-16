@@ -86,6 +86,7 @@ class TestConversion:
         """Test to_utc converts aware datetime to UTC."""
         # Create datetime in UTC+5
         import datetime as dt
+
         tz_plus_5 = dt.timezone(dt.timedelta(hours=5))
         aware_dt = datetime(2020, 1, 1, 17, 0, 0, tzinfo=tz_plus_5)
         result = utc_dt.to_utc(aware_dt)
@@ -219,7 +220,9 @@ class TestHelpers:
         """Test get_age calculates correct age."""
         # Use exact date calculation to avoid leap year issues
         today = datetime.now(timezone.utc)
-        birth_date = datetime(today.year - 30, today.month, today.day, tzinfo=timezone.utc)
+        birth_date = datetime(
+            today.year - 30, today.month, today.day, tzinfo=timezone.utc
+        )
         age = utc_dt.get_age(birth_date)
         assert age == 30
 

@@ -8,7 +8,11 @@ from sqlalchemy import select
 from parade_state.models.attendance import Session
 from parade_state.models.deployment import Deployment
 from parade_state.utils import utc_dt
-from tests.test_utils import assert_pagination_works, assert_404_response, assert_permission_denied
+from tests.test_utils import (
+    assert_pagination_works,
+    assert_404_response,
+    assert_permission_denied,
+)
 
 
 @pytest.mark.asyncio
@@ -71,6 +75,7 @@ async def test_create_session_for_inactive_deployment_forbidden(
 
     # Grant admin access to this deployment for testing
     from parade_state.models import DeploymentUserAccess
+
     admin_access = DeploymentUserAccess(
         user_id=admin_id,
         deployment_id=str(deployment.id),
@@ -94,7 +99,10 @@ async def test_create_session_for_inactive_deployment_forbidden(
     )
 
     assert response.status_code == 400
-    assert "Sessions can only be created for active deployments" in response.json()["detail"]
+    assert (
+        "Sessions can only be created for active deployments"
+        in response.json()["detail"]
+    )
 
 
 @pytest.mark.asyncio
