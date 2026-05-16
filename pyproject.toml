@@ -93,6 +93,9 @@ ignore = [
     "UP017", # timezone.utc → UTC - cosmetic modernization, minimal benefit
     "UP007", # Union[X, Y] → X | Y - minor readability improvement
     "UP035", # typing → collections.abc imports - minimal benefit
+    # Code simplification rules that reduce readability
+    "SIM102", # Use single if instead of nested if (reduces clarity)
+    "SIM108", # Use ternary operator instead of if-else (less readable)
 ]
 
 [tool.ruff.lint.per-file-ignores]
