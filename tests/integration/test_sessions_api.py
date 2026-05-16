@@ -822,8 +822,6 @@ async def test_session_auto_sets_opened_at(
         "status": "open",
     }
 
-    before_creation = utc_dt.utcnow()
-
     response = client.post(
         "/api/v1/sessions/",
         json=session_data,
