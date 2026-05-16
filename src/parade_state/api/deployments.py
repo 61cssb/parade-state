@@ -1,15 +1,21 @@
 """Deployment management API endpoints."""
 
+from datetime import date
+
+import csv
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, select
+from fastapi.responses import StreamingResponse
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
+from parade_state.models.attendance import AttendanceRecord, Session
 from parade_state.models.deployment import (
     Deployment,
     DeploymentNotes,
     DeploymentPersonnelOverride,
 )
+from parade_state.models.personnel import Personnel
 from parade_state.models.schemas import (
     DeploymentCreate,
     DeploymentNotesCreate,
@@ -18,6 +24,9 @@ from parade_state.models.schemas import (
     DeploymentPersonnelOverrideCreate,
     DeploymentPersonnelOverrideResponse,
     DeploymentResponse,
+    DeploymentStatusResponse,
+    DeploymentStatusSessionInfo,
+    DeploymentStatusUnitBreakdown,
     DeploymentUpdate,
 )
 from parade_state.utils import utc_dt
@@ -670,3 +679,301 @@ async def update_deployment_notes(
     await db.refresh(notes)
 
     return notes
+
+
+# ============================================================================
+# Deployment Status
+# ============================================================================
+
+
+@router.get("/{deployment_id}/status", response_model=DeploymentStatusResponse)
+async def get_deployment_status(
+    deployment_id: str,
+    status_date: date | None = Query(None, description="Date to get status for (defaults to today)"),
+    user_id: str = Query(..., description="User ID making the request"),
+    user_role: str = Query(..., description="User role for authorization"),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Get deployment status for a specific date.
+
+    Returns current snapshot including:
+    - Deployment info
+    - Today's AM/PM session status
+    - Personnel counts by attendance status
+    - Unit-level breakdown
+
+    Defaults to today if no date provided.
+    """
+    # Verify deployment exists and user has access
+    deployment = await verify_deployment_access(deployment_id, user_id, user_role, db)
+
+    # Default to today if no date provided
+    if status_date is None:
+        status_date = utc_dt.utcnow().date()
+
+    # Get sessions for the date
+    sessions_result = await db.execute(
+        select(Session).where(
+            and_(
+                Session.deployment_id == deployment_id,
+                Session.date == status_date,
+            )
+        )
+    )
+    sessions = sessions_result.scalars().all()
+
+    # Initialize session info
+    am_session_info = None
+    pm_session_info = None
+
+    # Process sessions
+    for session in sessions:
+        # Get attendance records for this session
+        attendance_result = await db.execute(
+            select(
+                AttendanceRecord.status,
+                func.count(AttendanceRecord.id).label("count"),
+            )
+            .where(
+                and_(
+                    AttendanceRecord.session_id == session.id,
+                    AttendanceRecord.deployment_id == deployment_id,
+                )
+            )
+            .group_by(AttendanceRecord.status)
+        )
+        attendance_counts = attendance_result.all()
+
+        # Build status counts
+        counts = {"present": 0, "absent": 0, "excused": 0, "unknown": 0}
+        total = 0
+        for status_val, count in attendance_counts:
+            counts[status_val] = count
+            total += count
+
+        # Create session info
+        session_info = DeploymentStatusSessionInfo(
+            status=session.status,
+            present=counts["present"],
+            absent=counts["absent"],
+            excused=counts["excused"],
+            unknown=counts["unknown"],
+            total=total,
+        )
+
+        if session.session_type == "AM":
+            am_session_info = session_info
+        else:  # PM
+            pm_session_info = session_info
+
+    # Get unit-level breakdown
+    # Get all attendance records for the date with unit snapshots
+    unit_breakdown_result = await db.execute(
+        select(
+            AttendanceRecord.unit_snapshot,
+            AttendanceRecord.status,
+            func.count(AttendanceRecord.id).label("count"),
+        )
+        .where(
+            and_(
+                AttendanceRecord.deployment_id == deployment_id,
+                AttendanceRecord.session_id.in_([s.id for s in sessions]),
+            )
+        )
+        .group_by(AttendanceRecord.unit_snapshot, AttendanceRecord.status)
+    )
+    unit_records = unit_breakdown_result.all()
+
+    # Aggregate by unit
+    unit_stats = {}
+    for unit_name, status_val, count in unit_records:
+        if unit_name not in unit_stats:
+            unit_stats[unit_name] = {
+                "total": 0,
+                "present": 0,
+                "absent": 0,
+                "excused": 0,
+                "unknown": 0,
+            }
+        unit_stats[unit_name][status_val] = count
+        unit_stats[unit_name]["total"] += count
+
+    # Create unit breakdown list
+    units = [
+        DeploymentStatusUnitBreakdown(
+            name=unit_name,
+            total=stats["total"],
+            present=stats["present"],
+            absent=stats["absent"],
+            excused=stats["excused"],
+            unknown=stats["unknown"],
+        )
+        for unit_name, stats in sorted(unit_stats.items())
+    ]
+
+    return DeploymentStatusResponse(
+        deployment_id=deployment.id,
+        deployment_name=deployment.name,
+        date=status_date,
+        deployment_status=deployment.status,
+        am_session=am_session_info,
+        pm_session=pm_session_info,
+        units=units,
+    )
+
+
+# ============================================================================
+# CSV Export
+# ============================================================================
+
+
+@router.get("/{deployment_id}/export")
+async def export_deployment_csv(
+    deployment_id: str,
+    user_id: str = Query(..., description="User ID making the request"),
+    user_role: str = Query(..., description="User role for authorization"),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Export deployment data to CSV format for debugging and analysis.
+
+    Returns a CSV file containing:
+    - Personnel records with deployment-specific assignments
+    - Attendance records
+    - Session information
+    - Deployment notes
+
+    Access-controlled by deployment scope.
+    """
+    # Verify deployment exists and user has access
+    deployment = await verify_deployment_access(deployment_id, user_id, user_role, db)
+
+    # Get all personnel records for this deployment
+    # First get personnel with deployment overrides
+    personnel_result = await db.execute(
+        select(Personnel).join(
+            DeploymentPersonnelOverride,
+            Personnel.id == DeploymentPersonnelOverride.personnel_id,
+        ).where(DeploymentPersonnelOverride.deployment_id == deployment_id)
+    )
+    personnel_with_overrides = personnel_result.scalars().all()
+
+    # Also get personnel from the estab
+    personnel_result = await db.execute(
+        select(Personnel).where(Personnel.estab_id == deployment.estab_id)
+    )
+    all_personnel = personnel_result.scalars().all()
+
+    # Get deployment overrides
+    overrides_result = await db.execute(
+        select(DeploymentPersonnelOverride).where(
+            DeploymentPersonnelOverride.deployment_id == deployment_id
+        )
+    )
+    overrides = overrides_result.scalars().all()
+
+    # Create a mapping of personnel_id to override
+    override_map = {override.personnel_id: override for override in overrides}
+
+    # Get deployment notes
+    notes_result = await db.execute(
+        select(DeploymentNotes).where(DeploymentNotes.deployment_id == deployment_id)
+    )
+    notes = notes_result.scalars().all()
+
+    # Create a mapping of personnel_id to notes
+    notes_map = {note.personnel_id: note.notes for note in notes}
+
+    # Get sessions for this deployment
+    sessions_result = await db.execute(
+        select(Session).where(Session.deployment_id == deployment_id)
+    )
+    sessions = sessions_result.scalars().all()
+
+    # Get attendance records
+    attendance_result = await db.execute(
+        select(AttendanceRecord).where(
+            AttendanceRecord.deployment_id == deployment_id
+        )
+    )
+    attendance_records = attendance_result.scalars().all()
+
+    # Create a mapping of (session_id, personnel_id) to attendance record
+    attendance_map = {
+        (record.session_id, record.personnel_id): record
+        for record in attendance_records
+    }
+
+    # Generate CSV data
+    import io
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Write header
+    writer.writerow(
+        [
+            "Service Number",
+            "Rank",
+            "Name",
+            "Estab Unit",
+            "Estab SubUnit 1",
+            "Estab SubUnit 2",
+            "Estab SubUnit 3",
+            "Override Unit",
+            "Override SubUnit 1",
+            "Override SubUnit 2",
+            "Override SubUnit 3",
+            "Deployment Notes",
+        ]
+        + [f"Session {s.date.strftime('%Y-%m-%d')} {s.session_type} Status" for s in sessions]
+        + [f"Session {s.date.strftime('%Y-%m-%d')} {s.session_type} Remarks" for s in sessions]
+    )
+
+    # Write personnel rows
+    for person in all_personnel:
+        # Get override if exists
+        override = override_map.get(person.id)
+        person_notes = notes_map.get(person.id, "")
+
+        # Build row
+        row = [
+            person.pers_no,
+            person.rank,
+            person.full_name,
+            person.unit,
+            person.sub_unit_1 or "",
+            person.sub_unit_2 or "",
+            person.sub_unit_3 or "",
+            override.unit if override else "",
+            override.sub_unit_1 if override else "",
+            override.sub_unit_2 if override else "",
+            override.sub_unit_3 if override else "",
+            person_notes,
+        ]
+
+        # Add attendance data for each session
+        for session in sessions:
+            attendance = attendance_map.get((session.id, person.id))
+            if attendance:
+                row.append(attendance.status)
+                row.append(attendance.remarks or "")
+            else:
+                row.append("")  # No status
+                row.append("")  # No remarks
+
+        writer.writerow(row)
+
+    # Prepare response
+    csv_data = output.getvalue()
+    output.close()
+
+    # Create filename with deployment name and timestamp
+    filename = f"deployment_{deployment.name.replace(' ', '_')}_{utc_dt.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+
+    return StreamingResponse(
+        io.BytesIO(csv_data.encode("utf-8")),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+        },
+    )

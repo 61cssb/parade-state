@@ -66,6 +66,40 @@ class DeploymentListParams(BaseModel):
     offset: int = Field(0, ge=0)
 
 
+class DeploymentStatusSessionInfo(BaseModel):
+    """Schema for session information in deployment status."""
+
+    status: Literal["open", "closed", "finalized"]
+    present: int = 0
+    absent: int = 0
+    excused: int = 0
+    unknown: int = 0
+    total: int = 0
+
+
+class DeploymentStatusUnitBreakdown(BaseModel):
+    """Schema for unit-level breakdown in deployment status."""
+
+    name: str
+    total: int
+    present: int
+    absent: int
+    excused: int
+    unknown: int
+
+
+class DeploymentStatusResponse(BaseModel):
+    """Schema for deployment status response."""
+
+    deployment_id: str
+    deployment_name: str
+    date: date
+    deployment_status: Literal["draft", "active", "inactive", "archived", "closed", "finalized"]
+    am_session: DeploymentStatusSessionInfo | None = None
+    pm_session: DeploymentStatusSessionInfo | None = None
+    units: list[DeploymentStatusUnitBreakdown]
+
+
 # ============================================================================
 # Deployment Personnel Override Schemas
 # ============================================================================
