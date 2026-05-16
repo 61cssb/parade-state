@@ -27,11 +27,6 @@ class UserUpdate(BaseModel):
 router = APIRouter()
 
 
-# Aliases for backward compatibility within this module
-get_current_user = require_authenticated_user
-require_admin = require_admin_user
-
-
 @router.get("/")
 async def list_users(
     skip: int = Query(0, ge=0),
@@ -39,7 +34,7 @@ async def list_users(
     search: str | None = None,
     status_filter: str | None = None,
     role_filter: str | None = None,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List all users with optional filtering (admin only)."""
@@ -115,7 +110,7 @@ async def list_users(
 @router.get("/{user_id}")
 async def get_user(
     user_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_authenticated_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get a specific user by ID."""
@@ -170,7 +165,7 @@ async def get_user(
 async def update_user(
     user_id: str,
     update_data: UserUpdate,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Update user information (admin only)."""
@@ -259,7 +254,7 @@ async def update_user(
 @router.delete("/{user_id}")
 async def delete_user(
     user_id: str,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Delete a user (admin only)."""
