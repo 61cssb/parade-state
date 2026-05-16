@@ -1,12 +1,14 @@
 """Tests for API endpoints."""
 
-import pytest
 import uuid
 from datetime import datetime
+
+import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from parade_state.models import User
 from parade_state.auth.session import create_user_session
+from parade_state.models import User
 from tests.test_utils import assert_404_response, assert_permission_denied
 
 

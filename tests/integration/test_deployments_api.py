@@ -1,7 +1,8 @@
 """Tests for deployment API endpoints."""
 
-import pytest
 from datetime import datetime, timedelta
+
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -15,8 +16,8 @@ from parade_state.models.personnel import Personnel
 from parade_state.models.schemas import DeploymentCreate, DeploymentUpdate
 from parade_state.utils import utc_dt
 from tests.test_utils import (
-    assert_pagination_works,
     assert_404_response,
+    assert_pagination_works,
     assert_permission_denied,
 )
 

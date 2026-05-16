@@ -1,7 +1,8 @@
 """Behavioral tests for CSV ingestion and personnel identity."""
 
-import pytest
 from datetime import date, datetime
+
+import pytest
 from sqlalchemy import select
 
 from parade_state.models import (

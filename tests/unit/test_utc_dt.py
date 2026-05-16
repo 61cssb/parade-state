@@ -1,7 +1,8 @@
 """Unit tests for utc_dt utility module."""
 
-import pytest
 from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from parade_state.utils import utc_dt
 

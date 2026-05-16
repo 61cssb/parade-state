@@ -18,6 +18,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from ..db import Base
 
 if TYPE_CHECKING:
+    from .access import AccessLevel
+    from .deployment import Deployment
     from .personnel import Personnel
 
 

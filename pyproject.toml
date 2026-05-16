@@ -87,6 +87,12 @@ ignore = [
     "E501",  # line too long (handled by formatter)
     "B008",  # do not perform function calls in argument defaults
     "C901",  # too complex
+    # High-noise, low-benefit rules (disabled for better signal-to-noise ratio)
+    "B017",  # blind exception catching in tests - validates business logic, not implementation details
+    "ARG001", # unused arguments - FastAPI patterns, reserved params, stub functions
+    "UP017", # timezone.utc → UTC - cosmetic modernization, minimal benefit
+    "UP007", # Union[X, Y] → X | Y - minor readability improvement
+    "UP035", # typing → collections.abc imports - minimal benefit
 ]
 
 [tool.ruff.lint.per-file-ignores]

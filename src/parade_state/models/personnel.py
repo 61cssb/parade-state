@@ -9,7 +9,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from ..db import Base
 
 if TYPE_CHECKING:
+    from .attendance import AttendanceRecord
     from .csv_ingestion import Estab
+    from .deployment import DeploymentNotes, DeploymentPersonnelOverride
 
 
 class Personnel(Base):

@@ -250,7 +250,7 @@ def get_url(key: str, default: str | None = None) -> str | None:
             raise ValueError(f"Invalid URL: {value}")
         return value
     except Exception as e:
-        raise ValueError(f"Invalid URL for environment variable '{key}': {e}")
+        raise ValueError(f"Invalid URL for environment variable '{key}': {e}") from e
 
 
 def get_email(key: str, default: str | None = None) -> str | None:

@@ -1,7 +1,8 @@
 """Behavioral tests for deployment lifecycle and attendance logic."""
 
-import pytest
 from datetime import datetime, timedelta
+
+import pytest
 from sqlalchemy import select
 
 from parade_state.models import (
@@ -52,8 +53,6 @@ class TestDeploymentLifecycle:
         await db_session.commit()
 
         # Verify both deployments exist (database doesn't enforce single active deployment)
-        from sqlalchemy import select
-
         stmt = select(Deployment).where(Deployment.status == "active")
         result = await db_session.execute(stmt)
         active_deployments = result.scalars().all()

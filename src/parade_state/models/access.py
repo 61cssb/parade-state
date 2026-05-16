@@ -10,6 +10,7 @@ from ..utils import utc_dt
 
 if TYPE_CHECKING:
     from .auth_session import UserSession
+    from .csv_ingestion import ColumnMetadata
     from .deployment import Deployment
 
 

@@ -9,8 +9,6 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from parade_state.db import Base, get_session_maker, init_database
-
 # Ensure all models are imported so they're registered with Base
 import parade_state.models.access  # noqa: F401
 import parade_state.models.attendance  # noqa: F401
@@ -19,6 +17,7 @@ import parade_state.models.auth_session  # noqa: F401
 import parade_state.models.csv_ingestion  # noqa: F401
 import parade_state.models.deployment  # noqa: F401
 import parade_state.models.personnel  # noqa: F401
+from parade_state.db import Base, get_session_maker, init_database
 from parade_state.main import app
 from parade_state.models import (
     AccessLevel,
@@ -266,9 +265,9 @@ def client(session_maker):
     overridden to use the function-scoped test database. Each test gets
     its own client with a fresh database.
     """
-    from parade_state.main import app
-    from parade_state.db import get_db_session
     from fastapi.testclient import TestClient
+
+    from parade_state.db import get_db_session
 
     # Override the database dependency to use the test database
     async def override_get_db_session():

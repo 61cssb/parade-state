@@ -210,4 +210,4 @@ async def auth_callback(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Authentication failed",
-        )
+        ) from None

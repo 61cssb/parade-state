@@ -1,8 +1,8 @@
 """Deployment management API endpoints."""
 
+import csv
 from datetime import date
 
-import csv
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, func, select

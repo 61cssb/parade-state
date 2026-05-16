@@ -6,7 +6,6 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
-from parade_state.utils import utc_dt
 from parade_state.models import (
     AttendanceRecord,
     Deployment,
@@ -24,6 +23,7 @@ from parade_state.models.schemas import (
     PersonnelResponseWithDeployment,
     PersonnelUpdate,
 )
+from parade_state.utils import utc_dt
 
 router = APIRouter()
 

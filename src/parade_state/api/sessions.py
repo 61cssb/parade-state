@@ -5,6 +5,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from parade_state.api.access_control import get_user_accessible_deployments
 from parade_state.db import get_db_session
 from parade_state.models import Deployment, DeploymentUserAccess, Session
 from parade_state.models.schemas import (
@@ -13,7 +14,6 @@ from parade_state.models.schemas import (
     SessionUpdate,
 )
 from parade_state.utils import utc_dt
-from parade_state.api.access_control import get_user_accessible_deployments
 
 router = APIRouter()
 
@@ -203,7 +203,7 @@ async def create_session(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"A {session_data.session_type} session already exists for this deployment on this date",
-        )
+        ) from None
 
     # Note: Snapshot of deployment notes will be handled when attendance records are created
     # The session creation itself doesn't trigger snapshot - it happens when recording attendance

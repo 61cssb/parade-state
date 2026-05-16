@@ -207,8 +207,8 @@ def to_string(value: str | uuid_module.UUID) -> str:
         # Validate it's a valid UUID string
         try:
             uuid_module.UUID(value)
-        except ValueError:
-            raise ValueError(f"Invalid UUID string: '{value}'")
+        except ValueError as err:
+            raise ValueError(f"Invalid UUID string: '{value}'") from err
         return value
 
     if isinstance(value, uuid_module.UUID):

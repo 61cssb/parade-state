@@ -5,6 +5,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from parade_state.api.access_control import get_user_accessible_deployments
 from parade_state.db import get_db_session
 from parade_state.models import Deployment, DeploymentUserAccess
 from parade_state.models.attendance import AttendanceRecord, Session
@@ -21,7 +22,6 @@ from parade_state.models.schemas import (
     AttendanceRecordUpdate,
 )
 from parade_state.utils import utc_dt
-from parade_state.api.access_control import get_user_accessible_deployments
 
 router = APIRouter()
 
@@ -313,7 +313,7 @@ async def create_attendance_record(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Failed to create attendance record. Invalid session or personnel ID.",
-        )
+        ) from None
 
     return attendance
 
@@ -602,7 +602,7 @@ async def bulk_create_attendance(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Bulk creation failed: {str(e)}",
-        )
+        ) from None
 
     return created_records
 
@@ -699,6 +699,6 @@ async def bulk_update_attendance(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Bulk update failed: {str(e)}",
-        )
+        ) from None
 
     return updated_records

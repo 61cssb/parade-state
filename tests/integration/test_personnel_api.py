@@ -1,7 +1,8 @@
 """Tests for personnel management API endpoints."""
 
-import pytest
 from datetime import date, datetime, timedelta
+
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -12,8 +13,8 @@ from parade_state.models.deployment import (
 )
 from parade_state.models.personnel import Personnel
 from tests.test_utils import (
-    assert_pagination_works,
     assert_404_response,
+    assert_pagination_works,
     assert_permission_denied,
 )
 
@@ -678,8 +679,6 @@ async def test_list_personnel_from_different_estab_forbidden(
 ):
     """Test that personnel from different estab are not returned."""
     # Create personnel for different estab
-    from parade_state.models.personnel import Personnel
-
     other_personnel = Personnel(
         estab_id=str(sample_estab.id) + "different",  # Different estab
         pers_no="12345",
@@ -726,8 +725,6 @@ async def test_get_personnel_from_different_estab_forbidden(
 ):
     """Test that getting personnel from different estab returns error."""
     # Create personnel for different estab
-    from parade_state.models.personnel import Personnel
-
     other_personnel = Personnel(
         estab_id=str(sample_estab.id) + "different",  # Different estab
         pers_no="12345",

@@ -1,7 +1,8 @@
 """Tests for personnel attendance history endpoint."""
 
-import pytest
 from datetime import date, datetime, timedelta
+
+import pytest
 from fastapi.testclient import TestClient
 
 from parade_state.models.deployment import Deployment
@@ -210,7 +211,8 @@ async def test_get_personnel_attendance_history_wrong_estab(
     db_session,
 ):
     """Test that personnel from different estab cannot be queried."""
-    from parade_state.models import Estab, Deployment as DeploymentModel
+    from parade_state.models import Deployment as DeploymentModel
+    from parade_state.models import Estab
 
     admin_id = str(sample_users["admin"].id)
     personnel_id = str(sample_personnel[0].id)

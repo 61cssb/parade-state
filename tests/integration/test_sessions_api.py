@@ -1,7 +1,8 @@
 """Tests for session API endpoints."""
 
+from datetime import date, datetime, timedelta
+
 import pytest
-from datetime import datetime, timedelta, date
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -9,8 +10,8 @@ from parade_state.models.attendance import Session
 from parade_state.models.deployment import Deployment
 from parade_state.utils import utc_dt
 from tests.test_utils import (
-    assert_pagination_works,
     assert_404_response,
+    assert_pagination_works,
     assert_permission_denied,
 )
 

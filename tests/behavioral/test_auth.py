@@ -1,17 +1,18 @@
 """Tests for authentication system."""
 
+from datetime import datetime, timedelta
+
 import pytest
-from datetime import timedelta, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from parade_state.models import User, UserSession
 from parade_state.auth.session import (
+    cleanup_expired_sessions,
     create_user_session,
     get_valid_session,
     invalidate_session,
     invalidate_user_sessions,
-    cleanup_expired_sessions,
 )
+from parade_state.models import User, UserSession
 from parade_state.utils import utc_dt
 
 
@@ -327,6 +328,4 @@ async def test_session_last_accessed_update(db_session: AsyncSession):
     )
 
     # Use a small tolerance for the comparison to avoid flaky tests
-    from datetime import timedelta
-
     assert retrieved_comparable >= original_comparable + timedelta(milliseconds=50)

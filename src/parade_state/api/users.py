@@ -7,8 +7,8 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.auth.dependencies import (
-    require_authenticated_user,
     require_admin_user,
+    require_authenticated_user,
 )
 from parade_state.db import get_db_session
 from parade_state.models import AccessLevel, User
@@ -137,7 +137,7 @@ async def get_user(
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Invalid user ID format",
-        )
+        ) from None
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -182,7 +182,7 @@ async def update_user(
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Invalid user ID format",
-        )
+        ) from None
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -240,7 +240,7 @@ async def update_user(
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Invalid access level ID format",
-            )
+            ) from None
 
     await db.commit()
     await db.refresh(user)
@@ -278,7 +278,7 @@ async def delete_user(
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Invalid user ID format",
-        )
+        ) from None
 
     # Prevent self-deletion
     if str(current_user.id) == user_id:

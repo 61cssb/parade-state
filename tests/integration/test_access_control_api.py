@@ -1,10 +1,11 @@
 """Tests for access control management API endpoints."""
 
-import pytest
 from datetime import datetime
+
+import pytest
 from fastapi.testclient import TestClient
 
-from parade_state.models import User, Deployment, DeploymentUserAccess, UserSubunitScope
+from parade_state.models import Deployment, DeploymentUserAccess, User, UserSubunitScope
 from tests.test_utils import assert_permission_denied
 
 
