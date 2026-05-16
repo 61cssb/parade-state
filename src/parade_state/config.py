@@ -17,13 +17,13 @@ class Settings:
     DATABASE_URL: str = env.get(
         "DATABASE_URL",
         "sqlite+aiosqlite:///:memory:",
-    )
+    ) or "sqlite+aiosqlite:///:memory:"
 
     # Authentication
-    GOOGLE_CLIENT_ID: str = env.get("GOOGLE_CLIENT_ID", "")
-    GOOGLE_CLIENT_SECRET: str = env.get("GOOGLE_CLIENT_SECRET", "")
-    SESSION_SECRET: str = env.get("SESSION_SECRET", "dev-secret-change-in-production")
-    SUPER_ADMIN_EMAIL: str = env.get("SUPER_ADMIN_EMAIL", "")
+    GOOGLE_CLIENT_ID: str = env.get("GOOGLE_CLIENT_ID", "") or ""
+    GOOGLE_CLIENT_SECRET: str = env.get("GOOGLE_CLIENT_SECRET", "") or ""
+    SESSION_SECRET: str = env.get("SESSION_SECRET", "dev-secret-change-in-production") or "dev-secret-change-in-production"
+    SUPER_ADMIN_EMAIL: str = env.get("SUPER_ADMIN_EMAIL", "") or ""
 
     # CORS
     ALLOWED_ORIGINS: list[str] = env.get_list(
@@ -31,7 +31,7 @@ class Settings:
     )
 
     # Application URLs
-    APP_BASE_URL: str = env.get("APP_BASE_URL", "http://localhost:8000")
+    APP_BASE_URL: str = env.get("APP_BASE_URL", "http://localhost:8000") or "http://localhost:8000"
 
 
 @lru_cache

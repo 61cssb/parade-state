@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
     from parade_state.db import get_session_maker
 
     if get_session_maker() is None:
-        database_url = env.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+        database_url = env.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:") or "sqlite+aiosqlite:///:memory:"
         init_database(database_url)
     yield
     # Shutdown

@@ -166,7 +166,7 @@ async def is_retroactive_edit(
     now_naive = utc_dt.ensure_naive(now)
 
     # Handle both date and datetime objects
-    if hasattr(session_date, "date"):
+    if isinstance(session_date, utc_dt.datetime):
         session_date_naive = utc_dt.ensure_naive(session_date)
         return session_date_naive.date() < now_naive.date()
     else:

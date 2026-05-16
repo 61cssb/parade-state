@@ -241,7 +241,7 @@ async def invalidate_user_sessions(
     result = await db.execute(stmt)
     await db.commit()
 
-    return result.rowcount
+    return result.rowcount  # type: ignore[attr-defined]
 
 
 async def cleanup_expired_sessions(db: AsyncSession) -> int:
@@ -268,4 +268,4 @@ async def cleanup_expired_sessions(db: AsyncSession) -> int:
     result = await db.execute(stmt)
     await db.commit()
 
-    return result.rowcount
+    return result.rowcount  # type: ignore[attr-defined]

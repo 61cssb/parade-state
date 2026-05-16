@@ -755,7 +755,7 @@ async def get_deployment_status(
 
         # Create session info
         session_info = DeploymentStatusSessionInfo(
-            status=session.status,
+            status=session.status,  # type: ignore[assignment]
             present=counts["present"],
             absent=counts["absent"],
             excused=counts["excused"],
@@ -817,7 +817,7 @@ async def get_deployment_status(
         deployment_id=deployment.id,
         deployment_name=deployment.name,
         date=status_date,
-        deployment_status=deployment.status,
+        deployment_status=deployment.status,  # type: ignore[assignment]
         am_session=am_session_info,
         pm_session=pm_session_info,
         units=units,

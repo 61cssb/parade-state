@@ -315,6 +315,9 @@ async def test_session_last_accessed_update(db_session: AsyncSession):
         db_session, session.token, update_last_accessed=True
     )
 
+    # Ensure session was found
+    assert retrieved_session is not None, "Session should be found"
+
     # Make both datetimes comparable
     original_comparable = (
         make_aware(original_last_accessed)
