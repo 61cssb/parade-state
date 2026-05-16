@@ -230,7 +230,7 @@ async def grant_user_deployment_access(
 
     # Verify deployment exists and granting user has access
     # Allow self-grant for initial access setup
-    deployment, has_access = await verify_deployment_access_or_admin(
+    _, has_access = await verify_deployment_access_or_admin(
         deployment_id, granted_by, user_role, db, allow_self_grant=True
     )
 
@@ -304,7 +304,7 @@ async def revoke_user_deployment_access(
 
     # Verify deployment exists and revoking user has access
     # Allow admins to revoke even if they don't have access (for cleanup)
-    deployment, has_access = await verify_deployment_access_or_admin(
+    _, has_access = await verify_deployment_access_or_admin(
         deployment_id, revoked_by, user_role, db, allow_self_grant=True
     )
 
@@ -406,7 +406,7 @@ async def list_deployment_users(
     Only users with access to the deployment can see other users.
     """
     # Verify deployment exists and requesting user has access
-    deployment, has_access = await verify_deployment_access_or_admin(
+    _, has_access = await verify_deployment_access_or_admin(
         deployment_id, requesting_user_id, requesting_user_role, db
     )
 
@@ -459,7 +459,7 @@ async def create_user_subunit_scope(
         )
 
     # Verify deployment exists and creating user has access
-    deployment, has_access = await verify_deployment_access_or_admin(
+    _, has_access = await verify_deployment_access_or_admin(
         deployment_id, created_by, user_role, db, allow_self_grant=True
     )
 
@@ -539,7 +539,7 @@ async def delete_user_subunit_scope(
         )
 
     # Verify deployment exists and deleting user has access
-    deployment, has_access = await verify_deployment_access_or_admin(
+    _, has_access = await verify_deployment_access_or_admin(
         deployment_id, deleted_by, user_role, db, allow_self_grant=True
     )
 
@@ -603,7 +603,7 @@ async def list_user_subunit_scopes(
         )
 
     # Verify deployment exists and requesting user has access
-    deployment, has_access = await verify_deployment_access_or_admin(
+    _, has_access = await verify_deployment_access_or_admin(
         deployment_id, requesting_user_id, requesting_user_role, db
     )
 

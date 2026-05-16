@@ -364,8 +364,8 @@ async def list_personnel(
     if params.deployment_id:
         (
             personnel_list,
-            total_count,
-            deployment,
+            _,
+            _,
         ) = await get_deployment_personnel_with_overrides(
             params.deployment_id, params, user_id, user_role, db
         )
@@ -626,7 +626,7 @@ async def get_personnel_attendance_history(
     Supports date range filtering and pagination.
     """
     # Verify deployment access and personnel belongs to deployment
-    personnel, override, notes = await get_personnel_by_id_with_deployment_context(
+    _, _, _ = await get_personnel_by_id_with_deployment_context(
         personnel_id, deployment_id, user_id, user_role, db
     )
 

@@ -36,4 +36,6 @@ For authentication flow details, see:
 - [ARCHITECTURE.md - Security Architecture](../../docs/ARCHITECTURE.md#7-security-architecture)
 """
 
+from . import auth
+
 __all__ = ["auth"]

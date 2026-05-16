@@ -73,7 +73,7 @@ async def test_get_current_user_info_authorized(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_logout_with_valid_token(client: TestClient, test_db):
     """Test logout with valid token."""
-    user, session = await create_test_user_and_session(test_db)
+    _, session = await create_test_user_and_session(test_db)
 
     headers = {"Authorization": f"Bearer {session.token}"}
     response = client.post("/api/v1/auth/logout", headers=headers)
@@ -85,7 +85,7 @@ async def test_logout_with_valid_token(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_list_users_as_admin(client: TestClient, test_db):
     """Test listing users as admin."""
-    admin_user, admin_session = await create_test_user_and_session(
+    _, admin_session = await create_test_user_and_session(
         test_db, role="admin"
     )
 
@@ -106,7 +106,7 @@ async def test_list_users_as_admin(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_list_users_as_regular_user(client: TestClient, test_db):
     """Test that regular users cannot list users."""
-    user, session = await create_test_user_and_session(test_db, role="user")
+    _, session = await create_test_user_and_session(test_db, role="user")
 
     headers = {"Authorization": f"Bearer {session.token}"}
     response = client.get("/api/v1/users/", headers=headers)
@@ -117,7 +117,7 @@ async def test_list_users_as_regular_user(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_get_user_as_admin(client: TestClient, test_db):
     """Test getting a specific user as admin."""
-    admin_user, admin_session = await create_test_user_and_session(
+    _, admin_session = await create_test_user_and_session(
         test_db, role="admin"
     )
     user, _ = await create_test_user_and_session(test_db, role="user")
@@ -147,7 +147,7 @@ async def test_get_user_self(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_get_other_user_as_regular_user(client: TestClient, test_db):
     """Test that regular users cannot view other users."""
-    user1, session1 = await create_test_user_and_session(test_db, role="user")
+    _, session1 = await create_test_user_and_session(test_db, role="user")
     user2, _ = await create_test_user_and_session(test_db, role="user")
 
     headers = {"Authorization": f"Bearer {session1.token}"}
@@ -159,7 +159,7 @@ async def test_get_other_user_as_regular_user(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_update_user_as_admin(client: TestClient, test_db):
     """Test updating user as admin."""
-    admin_user, admin_session = await create_test_user_and_session(
+    _, admin_session = await create_test_user_and_session(
         test_db, role="admin"
     )
     user, _ = await create_test_user_and_session(test_db, role="user")
@@ -179,7 +179,7 @@ async def test_update_user_as_admin(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_update_user_role_as_super_admin(client: TestClient, test_db):
     """Test promoting user to admin as super admin."""
-    super_admin, super_admin_session = await create_test_user_and_session(
+    _, super_admin_session = await create_test_user_and_session(
         test_db, role="super_admin"
     )
     user, _ = await create_test_user_and_session(test_db, role="user")
@@ -197,7 +197,7 @@ async def test_update_user_role_as_super_admin(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_update_user_role_as_regular_admin(client: TestClient, test_db):
     """Test that regular admins cannot grant super admin role."""
-    admin, admin_session = await create_test_user_and_session(test_db, role="admin")
+    _, admin_session = await create_test_user_and_session(test_db, role="admin")
     user, _ = await create_test_user_and_session(test_db, role="user")
 
     headers = {"Authorization": f"Bearer {admin_session.token}"}
@@ -211,7 +211,7 @@ async def test_update_user_role_as_regular_admin(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_delete_user_as_super_admin(client: TestClient, test_db):
     """Test deleting user as super admin."""
-    super_admin, super_admin_session = await create_test_user_and_session(
+    _, super_admin_session = await create_test_user_and_session(
         test_db, role="super_admin"
     )
     user, _ = await create_test_user_and_session(test_db, role="user")
@@ -226,7 +226,7 @@ async def test_delete_user_as_super_admin(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_delete_user_as_regular_admin(client: TestClient, test_db):
     """Test that regular admins cannot delete users."""
-    admin, admin_session = await create_test_user_and_session(test_db, role="admin")
+    _, admin_session = await create_test_user_and_session(test_db, role="admin")
     user, _ = await create_test_user_and_session(test_db, role="user")
 
     headers = {"Authorization": f"Bearer {admin_session.token}"}
@@ -251,7 +251,7 @@ async def test_self_deletion_prevention(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_user_filtering(client: TestClient, test_db):
     """Test filtering users by status and role."""
-    admin, admin_session = await create_test_user_and_session(test_db, role="admin")
+    _, admin_session = await create_test_user_and_session(test_db, role="admin")
 
     # Create users with different statuses and roles
     await create_test_user_and_session(test_db, role="user", status="active")
@@ -276,7 +276,7 @@ async def test_user_filtering(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_user_search(client: TestClient, test_db):
     """Test searching users by name or email."""
-    admin, admin_session = await create_test_user_and_session(test_db, role="admin")
+    _, admin_session = await create_test_user_and_session(test_db, role="admin")
 
     # Create user with specific name
     user, _ = await create_test_user_and_session(test_db, role="user", status="active")
@@ -299,7 +299,7 @@ async def test_user_search(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_pagination(client: TestClient, test_db):
     """Test user list pagination."""
-    admin, admin_session = await create_test_user_and_session(test_db, role="admin")
+    _, admin_session = await create_test_user_and_session(test_db, role="admin")
 
     # Create multiple users
     for _ in range(5):

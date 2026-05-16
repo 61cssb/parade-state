@@ -59,4 +59,6 @@ For detailed authentication flow, see:
 - [ARCHITECTURE.md - Authentication Flow](../../docs/ARCHITECTURE.md#7-security-architecture)
 """
 
+from . import dependencies, oauth, session
+
 __all__ = ["dependencies", "oauth", "session"]
