@@ -849,19 +849,7 @@ async def export_deployment_csv(
     # Verify deployment exists and user has access
     deployment = await verify_deployment_access(deployment_id, user_id, user_role, db)
 
-    # Get all personnel records for this deployment
-    # First get personnel with deployment overrides
-    personnel_result = await db.execute(
-        select(Personnel)
-        .join(
-            DeploymentPersonnelOverride,
-            Personnel.id == DeploymentPersonnelOverride.personnel_id,
-        )
-        .where(DeploymentPersonnelOverride.deployment_id == deployment_id)
-    )
-    personnel_with_overrides = personnel_result.scalars().all()
-
-    # Also get personnel from the estab
+    # Get all personnel records for this deployment from the estab
     personnel_result = await db.execute(
         select(Personnel).where(Personnel.estab_id == deployment.estab_id)
     )
