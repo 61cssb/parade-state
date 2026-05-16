@@ -505,7 +505,7 @@ async def bulk_create_attendance(
     try:
         # Get all unique session IDs to verify they're open
         session_ids = list(
-            set([item.session_id for item in bulk_data.attendance_records])
+            {item.session_id for item in bulk_data.attendance_records}
         )
 
         # Verify all sessions are open and user has deployment access
@@ -642,9 +642,7 @@ async def bulk_update_attendance(
         records_data = {r[0].id: (r[0], r[1]) for r in results.all()}
 
         # Verify deployment access for all unique deployments in the request
-        unique_deployment_ids = set(
-            [session.deployment_id for attendance, session in records_data.values()]
-        )
+        unique_deployment_ids = {session.deployment_id for attendance, session in records_data.values()}
         for deployment_id in unique_deployment_ids:
             await verify_deployment_access(deployment_id, user_id, user_role, db)
 
