@@ -109,3 +109,28 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
+
+[tool.pyright]
+include = ["src", "tests"]
+exclude = [
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "**/migrations/**"
+]
+typeCheckingMode = "standard"
+reportMissingImports = "error"
+reportMissingTypeStubs = "error"
+reportUnusedCallResult = "none"
+reportUnusedClass = "warning"
+reportUnusedFunction = "warning"
+reportUnusedVariable = "warning"
+reportDuplicateImport = "error"
+reportUnnecessaryTypeIgnoreComment = "warning"
+strictParameterNoneValue = true
+pythonVersion = "3.12"
+pythonPlatform = "Linux"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.409",
+]
