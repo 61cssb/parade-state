@@ -8,8 +8,8 @@
 ## Current System Status
 
 ### Production-Ready Metrics
-- 224 tests passing (100% pass rate)
-- 30+ API endpoints fully implemented and tested
+- 234 tests passing (100% pass rate)
+- 31+ API endpoints fully implemented and tested
 - Enterprise-grade security with multi-tenant access control
 - Comprehensive documentation (architecture, security, deployment, testing)
 - Database migrations initialized and production-ready
@@ -25,6 +25,7 @@
 - **Advanced access control** (deployment-based multi-tenant security)
 - **CSV file upload** (SHA256 hashing, duplicate detection, column parsing)
 - **User management admin page** (inline role/status editing, search/filter, audit logging)
+- **Audit log API + admin page** (filterable, paginated, colored action badges)
 
 ### System Capabilities
 - Multi-tenant deployment isolation with access control
@@ -32,7 +33,7 @@
 - Role-based permissions (super_admin, admin, user)
 - Deployment access grants and revocation
 - Subunit scope filtering support
-- Comprehensive audit trails (user management, CSV uploads)
+- Comprehensive audit trails (user management, CSV uploads) with browsable admin view
 - Production deployment guides
 
 ---
@@ -40,7 +41,7 @@
 ## Current Phase: Frontend Development (Phase 9) - IN PROGRESS
 
 **Priority:** HIGH
-**Status:** Phase 9B + 9C-1 COMPLETE — Phase 9C-2 (Audit Log) NEXT
+**Status:** Phase 9B + 9C-1 + 9C-2 COMPLETE — Phase 9C-3 (Remaining Admin Pages) NEXT
 
 ### Phase 9A: Foundation — COMPLETED
 
@@ -73,28 +74,13 @@
 - [x] AuditLog entries created on user update and delete
 - [x] 3 integration tests for audit log verification
 
-### Phase 9C-2: Audit Log API + Page — NEXT SESSION
+### Phase 9C-2: Audit Log API + Page — COMPLETED
 
-**Goal:** Create audit log API endpoint and wire up the audit admin page.
-
-#### Task 1: Create Audit Log API
-
-**New file:** `src/parade_state/api/audit.py`
-
-**Endpoints:**
-- `GET /api/v1/audit/logs` — List audit entries with filtering (entity_type, action, user_id) and pagination
-
-**Auth pattern:** Query params (user_id, user_role) — consistent with CSV upload and deployments APIs.
-
-#### Task 2: Wire Up Audit Admin Page
-
-**Files to modify:**
-- [src/parade_state/admin_routes.py](src/parade_state/admin_routes.py) — Add DB queries to `admin_audit()` with filtering
-- [src/parade_state/templates/admin/audit.html](src/parade_state/templates/admin/audit.html) — Filter bar + audit table + pagination
-
-#### Task 3: Tests
-- Audit API tests (filtering, pagination, permission denied)
-- Verify user_name populated from User join
+- [x] `GET /api/v1/audit/logs` endpoint with filtering (entity_type, action, target_user_id) and pagination
+- [x] Admin page at `/admin/audit` with filter form, colored action badges, pagination footer
+- [x] User name/email resolved via left outer join (handles null user_id for system entries)
+- [x] 10 integration tests (filtering by entity_type/action/target_user_id, pagination, ordering, permissions, null user_id, user_name resolution)
+- [x] Action badges colored by type (red=delete, green=create, yellow=update, purple=archive, blue=close, pink=finalize) — ready for Phase 9C-3 operations
 
 #### Deferred CSV Pipeline Steps (Future Sessions)
 - **Step 2:** Column mapping UI (map raw CSV columns to canonical names)
@@ -150,6 +136,7 @@ git log --oneline --all
 ```
 
 **Recent Major Completions:**
+- **Phase 9C-2: Audit Log API + Page** (2026-06-22) - Audit log API with filtering/pagination, admin page with colored action badges, 10 integration tests
 - **Phase 9C-1: User Management** (2026-06-22) - Admin users page with search/filter, inline role/status editing, delete, audit log entries on user update/delete
 - **Phase 9B: Dashboard + CSV Upload** (2026-06-22) - Dashboard with real DB queries, CSV file upload API with SHA256 hashing/duplicate detection/column parsing, 9 integration tests
 - **Phase 9A: Frontend Foundation** (2026-06-22) - OAuth authentication, Jinja2 templates, admin interface, secure cookies, logout
@@ -160,6 +147,7 @@ git log --oneline --all
 - **Phase 1: Authentication** (Completed) - Google OAuth and user management
 
 **Priority Changes:**
+- **2026-06-22:** Phase 9C-2 complete. Audit log API + admin page implemented with filtering (entity_type, action, target_user_id), pagination, and colored action badges. Next: remaining admin pages (attendance marking, personnel browser, deployment management, session controls).
 - **2026-06-22:** Phase 9B + 9C-1 complete. Dashboard wired with real data, CSV upload implemented, user management page functional with audit logging. Next: audit log API + page.
 - **2026-06-22:** Phase 9A complete. OAuth login/logout working, 7 admin templates created. Next: wire up dashboard with real data and implement CSV upload step 1 (file ingestion).
 - **2026-06-22:** Phase 9 (Frontend) prioritized from LOW to HIGH. Admin interface completed with host-independent OAuth flow. Frontend development now critical for user acquisition and production validation.
@@ -167,6 +155,6 @@ git log --oneline --all
 
 ---
 
-**Next: Phase 9C-2 — Audit Log API + Page**
+**Next: Phase 9C-3 — Remaining Admin Pages**
 
-The audit log page is the natural next step — audit entries are already being generated by user management (role/status changes, deletions) and CSV uploads. Next session creates the audit API endpoint (`GET /api/v1/audit/logs` with filtering and pagination) and wires up the admin audit page with a filterable table.
+With the audit log complete, the foundation is fully in place — dashboard, CSV upload, user management, and audit visibility are all operational. Phase 9C-3 wires up the remaining admin pages: attendance marking (individual + bulk), personnel browser, deployment management, and session controls. Each of these will generate audit entries that automatically appear in the now-functional audit log page.

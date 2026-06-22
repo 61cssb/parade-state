@@ -50,6 +50,7 @@ This document clarifies the different types of endpoints in the Parade State app
 - `/api/v1/personnel/*` - Personnel management
 - `/api/v1/access-control/*` - Access control
 - `/api/v1/csv/*` - CSV upload and ingestion
+- `/api/v1/audit/*` - Audit log
 
 ### 3. CSV Upload API
 
@@ -72,7 +73,22 @@ This document clarifies the different types of endpoints in the Parade State app
 - Part of OpenAPI documentation (`/docs`, `/redoc`)
 - Intended for API clients (mobile apps, SPAs, scripts)
 
-### 3. Health & Utility Endpoints
+### 4. Audit Log API
+
+**Purpose:** Read-only access to system audit trail (user management actions, CSV uploads, future entity changes)
+
+**Endpoints:**
+- `GET /api/v1/audit/logs` - List audit entries with filtering (entity_type, action, target_user_id) and pagination
+
+**Auth pattern:** Query params (`user_id`, `user_role`) — consistent with CSV upload API. Requires admin or super_admin role.
+
+**Response:** Paginated list with `user_name` and `user_email` resolved via left outer join on User. System-generated entries (null `user_id`) return `user_name: null`.
+
+**Entity types:** attendance, deployment, session, user, csv_upload, estab, personnel, access_level, column_mapping
+
+**Actions:** create, update, delete, archive, close, finalize
+
+### 5. Health & Utility Endpoints
 - `GET /health` - Health check endpoint (returns JSON)
 - `GET /docs` - Swagger UI (OpenAPI documentation)
 - `GET /redoc` - ReDoc documentation
