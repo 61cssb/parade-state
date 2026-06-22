@@ -42,7 +42,7 @@
 ## Current Phase: Frontend Development (Phase 9) - IN PROGRESS
 
 **Priority:** HIGH
-**Status:** Phase 9B + 9C-1 + 9C-2 + 9C-3 COMPLETE — Phase 9C-4 (Mobile Optimization) NEXT
+**Status:** Phase 9C (Admin Pages) COMPLETE — Phase 9D (Non-Admin Views) NEXT
 
 ### Phase 9A: Foundation — COMPLETED
 
@@ -103,15 +103,78 @@
 - [x] API stays separate (`/api/v1/deployments/*`, `/api/v1/sessions/*`) — only HTML admin view combined
 - [x] 1 new test (draft deployment session creation), 1 updated test (inactive deployment now correctly tested)
 
-### Phase 9C-4: Mobile Optimization (Future)
+### Phase 9D: Non-Admin Views — NEXT
+
+**Goal:** User-facing deployment summary and attendance marking views for regular (non-admin) users.
+
+**Two view apps:**
+- `GET /deployment` — deployment summary with AM/PM session counts and unit breakdown
+- `GET /attendance` — attendance marking table with inline status/remarks editing
+
+**Design decisions (confirmed 2026-06-22):**
+- Simple table layout (no complex UI components)
+- Fixed columns hardcoded but not position-dependent in code (future-proof for column config)
+- Deployment selector dropdown (GET param, page reload)
+- Column manifest pattern deferred (depends on CSV Step 2 — column mapping)
+- Parade state format deferred (awaiting formal spec from stakeholder post-MVP approval)
+- Bulk marking remains admin-only
+- Skip graceful empty-state handling for now
+
+**Prerequisite: `get_current_user_optional()`**
+Currently only `get_current_admin_user_optional()` exists (filters to admin/super_admin roles). Need to add `get_current_user_optional()` in `src/parade_state/auth/admin_dependencies.py` — identical but without the role check (line 84). Allows any active authenticated user.
+
+**Files to create:**
+- `src/parade_state/web/deployment.py` — deployment view route (prefix `/deployment`)
+- `src/parade_state/web/attendance.py` — attendance view route (prefix `/attendance`)
+- `src/parade_state/templates/deployment.html` — deployment summary template
+- `src/parade_state/templates/attendance.html` — attendance marking template
+
+**Files to modify:**
+- `src/parade_state/auth/admin_dependencies.py` — add `get_current_user_optional()`
+- `src/parade_state/templates/base.html` — role-aware nav (Deployment/Attendance for all users, admin links conditional on `user.role in ['admin', 'super_admin']`)
+- `src/parade_state/main.py` — register new web routers
+
+**Deployment view (`/deployment?deployment_id=X`):**
+1. Auth via `get_current_user_optional()`, redirect to login if not authenticated
+2. Deployment dropdown: `get_user_accessible_deployments(user.id, user.role, db)`
+3. Default to most recent active deployment if no `deployment_id` param
+4. Verify access: `verify_deployment_access(deployment_id, user.id, user.role, db)`
+5. Query today's sessions (AM/PM) for the deployment
+6. For each session: attendance counts grouped by status (present/absent/excused/unknown/total)
+7. Unit breakdown: group by `unit_snapshot`, count by status
+8. Render: deployment selector, session summary cards, unit breakdown table
+
+**Attendance view (`/attendance?deployment_id=X&session_id=Y`):**
+1. Auth via `get_current_user_optional()`, redirect if not authenticated
+2. Deployment dropdown (same as deployment view)
+3. Session dropdown: list sessions for the deployment, default to most recent open
+4. Query attendance records joined with Personnel:
+   ```python
+   select(AttendanceRecord, Personnel)
+   .join(Personnel, AttendanceRecord.personnel_id == Personnel.id)
+   .where(AttendanceRecord.session_id == selected_session)
+   .order_by(Personnel.rank, Personnel.full_name)
+   ```
+5. Table columns (hardcoded): Rank, Name, Unit, Sub-unit, Status (dropdown), Remarks (text input)
+6. Status dropdown + remarks input disabled if session status != "open"
+7. JS: on change → `PATCH /api/v1/attendance/{id}?user_id=X&user_role=Y` (csv_upload.html pattern)
+
+**Reusable patterns:**
+- `get_current_admin_user_optional()` in admin_dependencies.py — copy without role check
+- `verify_deployment_access()`, `get_user_accessible_deployments()` in deployments.py / access_control.py
+- csv_upload.html JS auth pattern (template variables → query params)
+- users.html inline edit + showStatus pattern
+- audit.html GET form filter pattern
+- `get_session_maker()` + `async with session_maker() as db:` (from admin_routes.py)
+
+**Deferred items (await CSV Step 2):**
+- Column manifest pattern (configurable columns, sensitivity levels, display order)
+- Column mapping UI
+- Personnel browser (estab-scoped, not deployment-scoped)
+
+### Phase 9E: Mobile Optimization (Future)
 
 **Priority:** Responsive design for field use (tablets, mobile).
-
-### Out of Admin Scope
-
-The following were previously listed as admin pages but fall under non-admin (estab/deployment) views:
-- **Attendance marking** — individual and bulk operations (deployment-scoped, not admin-only)
-- **Personnel browser** — search, filter, manage personnel (estab-scoped, not admin-only)
 
 ---
 
@@ -172,6 +235,6 @@ git log --oneline --all
 
 ---
 
-**Next: Phase 9C-4 — Mobile Optimization (or Settings Page)**
+**Next: Phase 9D — Non-Admin Views**
 
-All core admin pages are now functional: dashboard, deployments + sessions (combined), users, CSV upload, and audit log. The remaining stub is the settings page (access levels, column sensitivity, column mapping). Phase 9C-4 is mobile optimization for field use (tablets, mobile). The settings page may be wired up opportunistically if config management becomes a priority before mobile work begins.
+All admin pages are functional (dashboard, deployments + sessions, users, CSV upload, audit log). Phase 9D builds the user-facing views: deployment summary at `/deployment` and attendance marking at `/attendance`. Prerequisite: `get_current_user_optional()` auth function (currently only admin auth exists). Design decisions and implementation details documented in the Phase 9D section above.

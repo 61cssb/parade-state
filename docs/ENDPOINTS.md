@@ -13,6 +13,10 @@ This document clarifies the different types of endpoints in the Parade State app
 - `GET /auth/callback` - OAuth callback handler (creates session, redirects to admin)
 - `GET /auth/logout` - Logout handler (clears cookies, redirects to login)
 
+**User-Facing View Routes (Phase 9D — planned):**
+- `GET /deployment` - Deployment summary (session counts, unit breakdown) — deployment selector dropdown
+- `GET /attendance` - Attendance marking table (inline status/remarks editing) — deployment + session selector
+
 **Admin Interface Routes:**
 - `GET /admin` - Admin dashboard
 - `GET /admin/deployments` - Deployments + sessions management page (combined master-detail view)
