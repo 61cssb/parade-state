@@ -1,12 +1,17 @@
 """Alembic environment configuration for async migrations."""
 
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
+from dotenv import load_dotenv
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
+
+# Load environment variables
+load_dotenv()
 
 # Import Base and models
 from parade_state.db import Base
@@ -15,6 +20,10 @@ from parade_state.models import *  # noqa: F401, F403
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# Override database URL from environment
+database_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

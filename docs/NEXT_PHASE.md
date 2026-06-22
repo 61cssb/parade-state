@@ -1,7 +1,7 @@
 # Next Implementation Phase
 
-**Last Updated:** 2026-05-16  
-**Status:** Production-Ready with Enterprise Security
+**Last Updated:** 2026-06-22  
+**Status:** Production-Ready Backend with Admin Interface
 
 ---
 
@@ -16,6 +16,8 @@
 
 ### **Completed Core Features**
 - ✅ Google OAuth authentication & role-based access control
+- ✅ **Admin interface with Jinja2 templates** (modern responsive UI)
+- ✅ **Host-independent OAuth flow** (works with any domain/hostname)
 - ✅ Complete deployment management (lifecycle, overrides, notes)
 - ✅ Attendance session management (AM/PM sessions, status transitions)
 - ✅ Comprehensive attendance tracking (individual & bulk operations)
@@ -33,11 +35,17 @@
 
 ---
 
-## 🚀 Next Phase: Reporting & Analytics (Phase 7) - REDUCED SCOPE
+## 🚀 Current Phase: Frontend Development (Phase 9) - PRIORITIZED
 
-**Priority:** MEDIUM
-**Estimated Duration:** 1 session
-**Why Now:** Access control foundation is complete. Building focused debugging/operational tools while deferring comprehensive reporting until stakeholder requirements are available.
+**Priority:** HIGH
+**Estimated Duration:** 3-5 sessions
+**Why Now:** No frontend means no users means no real data for testing reporting features. Frontend is now critical for user acquisition and production validation.
+
+**Strategic Rationale:**
+- Phase 7 (Reporting) requires production data to design meaningful reports
+- Can't test user flows or get stakeholder feedback without UI
+- Frontend unlocks user onboarding and real-world usage
+- Critical for validating the backend API in production scenarios
 
 ### **Strategic Rationale & Scope Decisions**
 
@@ -59,67 +67,107 @@
 
 ### **Implementation Plan**
 
-#### **API Endpoints to Implement**
-```
-GET  /api/v1/deployments/{id}/status         - Current deployment snapshot
-GET  /api/v1/deployments/{id}/export         - CSV export for debugging
-```
+#### **Frontend Architecture & Technology Stack**
 
-#### **Core Features**
+**Decision Required:** Frontend Framework Choice
+- **Option A:** **NiceGUI** (already mentioned in README)
+  - Pros: Python-based, integrates with FastAPI, rapid development
+  - Cons: Less flexible for custom UI, limited ecosystem
+  - Use case: Admin interfaces, internal tools
+  
+- **Option B:** **Modern React/Next.js**
+  - Pros: Rich ecosystem, modern UI patterns, better mobile support
+  - Cons: Separate build process, more complexity
+  - Use case: Consumer-facing apps, mobile-first UX
+  
+- **Option C:** **Vanilla HTML/JS + FastAPI Jinja2 templates**
+  - Pros: Simple, fast to implement, single codebase
+  - Cons: Limited interactivity, harder to scale
+  - Use case: MVP, rapid prototyping
 
-**1. Deployment Status Reports**
-- **Purpose:** Operational awareness and debugging
-- **Current deployment snapshot** - "What's the status right now?"
-- **Session status** - Show today's AM/PM sessions (open/closed/finalized)
-- **Personnel availability** - Quick headcount: total assigned, present, absent, excused
-- **Unit-level breakdown** - Aggregates by subunit
+**Recommendation:** Start with **Option C (Jinja2 templates)** for MVP, evaluate NiceGUI for admin features
 
-**Example output:**
-```json
-{
-  "deployment": "Alpha Company",
-  "date": "2026-05-16",
-  "am_session": {"status": "closed", "present": 45, "absent": 2, "excused": 1},
-  "pm_session": {"status": "open", "present": 43, "absent": 0, "excused": 0},
-  "units": [
-    {"name": "Platoon", "total": 30, "present": 28, "absent": 2}
-  ]
-}
-```
+#### **Core UI Features to Build**
 
-**2. CSV Export Utility**
-- **Purpose:** Debugging and data analysis
-- Export deployment data to CSV format
-- Include personnel, assignments, and attendance records
-- Useful for data analysis and troubleshooting
-- Access-controlled by deployment scope
+**1. Authentication & User Management**
+- Google OAuth login flow
+- User profile display
+- Deployment access indicators
+- Admin user management (for super_admins)
 
-#### **Technical Implementation**
-- Respect deployment access control (users only see their deployments)
-- Simple queries - no complex aggregations needed
-- Use Python's built-in `csv` module for exports
-- Stream responses for large datasets
-- Add basic logging for export operations
+**2. Main Dashboard**
+- User's deployment(s) overview
+- Quick status: today's AM/PM sessions
+- Personnel counts by status
+- Navigation to main features
+
+**3. Attendance Management**
+- Session list (today's AM/PM sessions)
+- Personnel roster with photos
+- Individual attendance marking (present/absent/excused)
+- Bulk attendance operations
+- Session status management (open/close/finalize)
+
+**4. Deployment Management**
+- Deployment listing and details
+- Personnel assignments and overrides
+- Deployment notes management
+- Subunit organization view
+
+**5. Personnel Browser**
+- Personnel search and filtering
+- Individual personnel details
+- Attendance history view
+- Assignment management
+
+#### **Technical Implementation Approach**
+
+**Phase 9A: Foundation (Session 1-2)**
+- [ ] Set up Jinja2 templates in FastAPI
+- [ ] Create base template with responsive layout
+- [ ] Implement Google OAuth login UI flow
+- [ ] Build main dashboard with deployment overview
+- [ ] Add basic navigation structure
+
+**Phase 9B: Core Features (Session 3-4)**
+- [ ] Build attendance marking interface
+- [ ] Implement personnel browser with search/filter
+- [ ] Create deployment management UI
+- [ ] Add session status controls
+- [ ] Implement bulk attendance operations
+
+**Phase 9C: Polish & Mobile (Session 5)**
+- [ ] Mobile responsiveness optimization
+- [ ] Loading states and error handling
+- [ ] Accessibility improvements
+- [ ] Performance optimization
+- [ ] User feedback and validation messages
 
 #### **Success Criteria**
-- [ ] Deployment status endpoint shows current session states
-- [ ] Deployment status shows personnel counts by status
-- [ ] CSV export can be downloaded for a deployment
-- [ ] Access control restricts data to user's deployment scope
-- [ ] All new functionality has comprehensive test coverage
-- [ ] Documentation updated with reduced scope rationale
+- [ ] Users can authenticate via Google OAuth
+- [ ] Users can view their deployment dashboard
+- [ ] Users can mark attendance for personnel
+- [ ] Users can manage deployment personnel assignments
+- [ ] UI is mobile-friendly for field use
+- [ ] All user flows respect access control rules
+- [ ] Frontend has appropriate error handling
+- [ ] Documentation includes frontend setup
 
 ---
 
-## 📋 Future Phases Overview
+## 📋 Deferred Phases
+
+### **Phase 7: Reporting & Analytics** (DEFERRED)
+**Why Deferred:** Requires production data to design meaningful reports. Can't build exception reporting without understanding real-world patterns. Will revisit after frontend launches and users generate data.
+
+**Original Plan:** Deployment status reports, CSV export, attendance summaries
+
+**New Timeline:** After Phase 9 completion and production data collection
 
 ### **Phase 8: Performance & Scalability** (MEDIUM Priority)
 **Focus:** Optimize for growing datasets and increased usage  
 **Key Areas:** Database indexing, query optimization, caching layer, background jobs
-
-### **Phase 9: Frontend Integration Support** (LOW Priority)  
-**Focus:** Mobile UI optimization and real-time features  
-**Key Areas:** Offline sync, mobile-optimized responses, WebSocket support
+**Timeline:** After Phase 9, before or during production scaling
 
 ---
 
@@ -143,16 +191,19 @@ git log --oneline --all
 ```
 
 **Recent Major Completions:**
+- **Phase 9: Frontend Development** (2026-06-22) - Admin interface with Jinja2 templates and OAuth
 - **Phase 5: Advanced Access Control** (2026-05-10) - Multi-tenant security
 - **Phase 4: Personnel Management** (2026-05-08) - Deployment-based personnel operations
 - **Phase 3: Attendance Sessions** (Completed) - AM/PM session management
 - **Phase 2: Deployments** (Completed) - Deployment lifecycle management
 - **Phase 1: Authentication** (Completed) - Google OAuth and user management
 
-**Scope Decision (2026-05-16):** Phase 7 reduced to deployment status + CSV export only. Comprehensive reporting deferred pending stakeholder requirements and production data analysis.
+**Priority Changes:**
+- **2026-06-22:** Phase 9 (Frontend) prioritized from LOW to HIGH. Admin interface completed with host-independent OAuth flow. Frontend development now critical for user acquisition and production validation.
+- **2026-05-16:** Phase 7 reduced to deployment status + CSV export only. Comprehensive reporting deferred pending stakeholder requirements and production data analysis.
 
 ---
 
-**Ready to start Phase 7: Reporting & Analytics (Reduced Scope)** 🚀
+**Ready to start Phase 9: Frontend Development** 🚀
 
-The system has a solid foundation with enterprise-grade security, comprehensive testing, and production-ready infrastructure. This reduced phase focuses on debugging and operational tools while deferring comprehensive reporting until stakeholder requirements are available.
+The system has a solid foundation with enterprise-grade security, comprehensive testing, and production-ready infrastructure. Frontend development is now the top priority to enable user onboarding, production testing, and real-world validation of the API.

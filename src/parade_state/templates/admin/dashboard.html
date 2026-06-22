@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Parade State Admin{% endblock %}
+
+{% block content %}
+<h2>Dashboard Overview</h2>
+
+<div class="stats">
+    <div class="stat-card">
+        <div class="stat-label">Active Deployments</div>
+        <div class="stat-value">0</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Open Sessions</div>
+        <div class="stat-value green">0</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Total Personnel</div>
+        <div class="stat-value purple">0</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Active Users</div>
+        <div class="stat-value orange">0</div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>Quick Actions</h3>
+    <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+        <button class="btn btn-primary">New Deployment</button>
+        <button class="btn btn-success">Open Session</button>
+        <button class="btn btn-primary" onclick="window.location.href='/admin/csv-upload'">Upload CSV</button>
+        <button class="btn btn-success">Add User</button>
+    </div>
+</div>
+
+<div class="card">
+    <h3>Recent Activity</h3>
+    <p style="color: #6b7280; margin-top: 1rem;">No recent activity</p>
+</div>
+{% endblock %}

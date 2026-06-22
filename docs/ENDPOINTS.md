@@ -1,0 +1,138 @@
+# API and Web Endpoint Documentation
+
+This document clarifies the different types of endpoints in the Parade State application.
+
+## Endpoint Types
+
+### 1. Web Views (HTML Responses)
+**Purpose:** User-facing pages that return HTML for browser rendering
+
+**Authentication Routes:**
+- `GET /auth/login` - Login page with "Sign in with Google" button
+- `GET /auth/oauth/start` - Initiates Google OAuth flow (redirects to Google)
+- `GET /auth/callback` - OAuth callback handler (creates session, redirects to admin)
+- `GET /auth/logout` - Logout handler (clears cookies, redirects to login)
+
+**Admin Interface Routes:**
+- `GET /admin` - Admin dashboard
+- `GET /admin/deployments` - Deployments management page
+- `GET /admin/sessions` - Sessions management page  
+- `GET /admin/users` - Users management page
+- `GET /admin/csv-upload` - CSV upload page
+- `GET /admin/settings` - Settings page
+- `GET /admin/audit` - Audit log page
+
+**Characteristics:**
+- Return HTML responses (Jinja2 templates)
+- Handle browser redirects (HTTP 302)
+- Use cookie-based authentication
+- **NOT** part of REST API
+- Intended for browser navigation, not API clients
+
+### 2. REST API Endpoints (JSON Responses)
+**Purpose:** JSON API for programmatic access
+
+**Authentication API:**
+- `POST /api/v1/auth/login` - Login with email/password (if implemented)
+- `POST /api/v1/auth/logout` - API logout
+- `GET /api/v1/auth/me` - Get current user info
+
+**Users API:**
+- `GET /api/v1/users/` - List users
+- `GET /api/v1/users/{id}` - Get user details
+- `PUT /api/v1/users/{id}` - Update user
+- `DELETE /api/v1/users/{id}` - Delete user
+
+**Other APIs:**
+- `/api/v1/deployments/*` - Deployment management
+- `/api/v1/sessions/*` - Session management
+- `/api/v1/attendance/*` - Attendance records
+- `/api/v1/personnel/*` - Personnel management
+- `/api/v1/access-control/*` - Access control
+
+**Characteristics:**
+- Return JSON responses
+- Use token-based authentication (Bearer token in Authorization header)
+- Part of OpenAPI documentation (`/docs`, `/redoc`)
+- Intended for API clients (mobile apps, SPAs, scripts)
+
+### 3. Health & Utility Endpoints
+- `GET /health` - Health check endpoint (returns JSON)
+- `GET /docs` - Swagger UI (OpenAPI documentation)
+- `GET /redoc` - ReDoc documentation
+
+## Authentication Flow
+
+### Web UI Authentication (Browser)
+```
+1. Browser: GET /auth/login
+2. Server: Returns login page (HTML)
+3. User: Clicks "Sign in with Google"
+4. Browser: GET /auth/oauth/start  
+5. Server: Redirects to Google OAuth
+6. User: Completes Google OAuth
+7. Google: Redirects to /auth/callback?code=xxx
+8. Server: Creates session, sets httponly cookie, redirects to /admin
+9. Browser: Accesses /admin with cookie
+10. Server: Validates cookie, returns admin dashboard (HTML)
+```
+
+### API Authentication (Programmatic)
+```
+1. Client: POST /api/v1/auth/login (or use OAuth)
+2. Server: Returns session token
+3. Client: Stores token
+4. Client: GET /api/v1/users/ -H "Authorization: Bearer {token}"
+5. Server: Validates token, returns user data (JSON)
+```
+
+## Route Registration
+
+In `main.py`:
+```python
+# Web routes (HTML responses)
+app.include_router(web_auth_router, prefix="/auth", tags=["web-auth"])
+app.include_router(admin_router, tags=["admin"])
+
+# API routes (JSON responses)  
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["api-auth"])
+app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
+# ... other API routers
+```
+
+## Important Notes
+
+1. **Cookie vs Token Authentication:**
+   - Web UI uses httponly cookies (secure, prevents XSS)
+   - API uses Bearer tokens (standard for programmatic access)
+
+2. **No Conflict:** 
+   - Web routes (`/auth/*`, `/admin/*`) return HTML
+   - API routes (`/api/v1/*`) return JSON
+   - Different paths, different purposes
+
+3. **Security:**
+   - Web cookies are httponly (JavaScript cannot access)
+   - API tokens should be stored securely by clients
+   - Both use the same session database backend
+
+4. **Documentation:**
+   - API endpoints: Auto-documented at `/docs` (Swagger UI)
+   - Web endpoints: Not in OpenAPI (they return HTML, not JSON)
+
+## File Organization
+
+**Web Routes:**
+- `src/parade_state/web/auth.py` - Authentication web views
+- `src/parade_state/admin_routes.py` - Admin interface routes
+- `src/parade_state/templates/` - Jinja2 templates
+
+**API Routes:**
+- `src/parade_state/api/auth.py` - Authentication API
+- `src/parade_state/api/users.py` - Users API
+- `src/parade_state/api/*.py` - Other API endpoints
+
+**Authentication Logic:**
+- `src/parade_state/auth/oauth.py` - OAuth client setup
+- `src/parade_state/auth/session.py` - Session creation/validation
+- `src/parade_state/auth/admin_dependencies.py` - Admin route protection

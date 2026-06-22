@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}CSV Upload - Parade State Admin{% endblock %}
+
+{% block content %}
+<h2>CSV Upload Pipeline</h2>
+<p style="color: #6b7280; margin-bottom: 1.5rem;">3-step upload process: Upload → Mapping → Diff Confirmation</p>
+
+<div class="card">
+    <h3>Step 1: Upload CSV File</h3>
+    <div style="margin-top: 1rem;">
+        <input type="file" accept=".csv" id="csvFile" style="margin-bottom: 1rem;">
+        <button class="btn btn-primary">Upload</button>
+    </div>
+</div>
+
+<div class="card">
+    <p style="color: #6b7280;">CSV upload pipeline coming soon...</p>
+</div>
+{% endblock %}

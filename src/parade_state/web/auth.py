@@ -60,6 +60,8 @@ This module depends on:
 - `parade_state.utils` - Environment and datetime utilities
 """
 
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,13 +80,13 @@ router = APIRouter()
 async def login(request: Request):
     """Initiate Google OAuth login flow.
 
-    Redirects user to Google OAuth consent screen for authorization.
+    Shows login page with button to initiate OAuth flow.
 
     Args:
         request: FastAPI Request object
 
     Returns:
-        RedirectResponse to Google OAuth
+        HTML login page with OAuth button
 
     Example:
         ```python
@@ -92,11 +94,73 @@ async def login(request: Request):
         window.location.href = '/auth/login'
         ```
     """
-    redirect_uri = env.get("OAUTH_REDIRECT_URI", "http://localhost:8000/auth/callback")
+    # Check if user is already authenticated
+    from parade_state.auth.admin_dependencies import get_current_admin_user_optional
+
+    current_admin = await get_current_admin_user_optional(request)
+    if current_admin:
+        # Already logged in, redirect to admin
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/admin", status_code=302)
+
+    # Show login page
+    from jinja2 import Environment, FileSystemLoader
+    from fastapi.responses import HTMLResponse
+    from pathlib import Path
+
+    templates_dir = Path(__file__).parent.parent / "templates"
+    env = Environment(loader=FileSystemLoader(str(templates_dir)), cache_size=0)
+    template = env.get_template("login.html")
+
+    html_content = template.render(request=request)
+    return HTMLResponse(content=html_content)
+
+
+@router.get("/oauth/start")
+async def start_oauth(request: Request):
+    """Start the OAuth flow with Google.
+
+    Redirects user to Google OAuth consent screen for authorization.
+
+    Args:
+        request: FastAPI Request object
+
+    Returns:
+        RedirectResponse to Google OAuth
+    """
+    # Build redirect URI dynamically from the incoming request
+    base_url = f"{request.url.scheme}://{request.url.netloc}"
+    redirect_uri = f"{base_url}/auth/callback"
 
     oauth = get_oauth()
     google = oauth.create_client("google")
     return await google.authorize_redirect(request, redirect_uri)
+
+
+@router.get("/logout")
+async def logout(request: Request):
+    """Logout user by clearing session cookie and redirecting to login."""
+    # Create redirect response to login page
+    response = RedirectResponse(url="/auth/login", status_code=302)
+
+    # Clear the session cookie by setting it to expire in the past
+    # This matches the exact parameters used in set_cookie
+    from datetime import timedelta
+    expires = utc_dt.utcnow() - timedelta(days=1)
+    expires_str = expires.strftime("%a, %d-%b-%Y %H:%M:%S GMT")
+
+    response.set_cookie(
+        "session_token",
+        "",  # Empty value
+        expires=expires_str,
+        path="/",
+        domain=None,
+        samesite="lax",
+        secure=False,
+        httponly=True
+    )
+
+    return response
 
 
 @router.get("/callback")
@@ -198,11 +262,28 @@ async def auth_callback(
             ip_address=request.client.host if request.client else None,
         )
 
-        # Redirect to frontend with session token
-        frontend_url = env.get("FRONTEND_URL", "http://localhost:3000")
-        redirect_url = f"{frontend_url}/auth/callback?token={user_session.token}"
+        # Build redirect URL dynamically and set cookie server-side
+        base_url = f"{request.url.scheme}://{request.url.netloc}"
 
-        return RedirectResponse(url=redirect_url)
+        # Create redirect response with authentication cookie
+        response = RedirectResponse(url=f"{base_url}/admin", status_code=302)
+
+        # Set the authentication cookie server-side for security
+        expires = utc_dt.utcnow() + timedelta(hours=24)
+        expires_str = expires.strftime("%a, %d-%b-%Y %H:%M:%S GMT")
+
+        response.set_cookie(
+            "session_token",
+            user_session.token,
+            expires=expires_str,
+            path="/",
+            domain=None,  # Allow for any domain
+            samesite="lax",
+            secure=False,  # Set to True for HTTPS in production
+            httponly=True  # Prevent JavaScript access (more secure)
+        )
+
+        return response
 
     except Exception as e:
         # Log error and return friendly message
