@@ -57,10 +57,10 @@ def schedule_session(date: utc_dt.date) -> utc_dt.datetime:
 
 ### **Type Annotations Using Utilities**
 
-When you need datetime/date types for annotations, import them from utility modules:
+When you need datetime/date types for annotations, always use the module-qualified form:
 
 ```python
-# ✅ CORRECT - Type annotations via utilities
+# ✅ CORRECT - Type annotations via module-qualified references
 from parade_state.utils import utc_dt
 
 def create_session(
@@ -87,6 +87,28 @@ def create_session(
 ) -> Session:
     pass
 ```
+
+### 🔒 **Module-Qualified References Only**
+
+Never import sub-attributes (types, functions, classes) directly from utility modules. Always reference them through the module namespace.
+
+```python
+# ✅ CORRECT - Module-qualified reference
+from parade_state.utils import utc_dt
+
+created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+
+# ❌ VIOLATION - Importing sub-attributes from utility module
+from parade_state.utils.utc_dt import datetime, date
+
+created_at: Mapped[datetime] = mapped_column(...)
+```
+
+**Why?** When another developer or agent sees `datetime` in code without the import line visible, they correctly assume it's the built-in — but they won't realize it's a re-export from `utc_dt` that may change in future. The `utc_dt.` prefix makes the dependency explicit and visible at every call site.
+
+**This rule applies to all utility modules:** `utc_dt`, `ids`, `env`, `cookies`
+
+**Exception:** Within `src/parade_state/utils/` submodules themselves, direct access is allowed since they ARE the utility implementations.
 
 ---
 

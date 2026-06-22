@@ -688,7 +688,7 @@ async def update_deployment_notes(
 @router.get("/{deployment_id}/status", response_model=DeploymentStatusResponse)
 async def get_deployment_status(
     deployment_id: str,
-    status_date: date | None = Query(
+    status_date: utc_dt.date | None = Query(
         None, description="Date to get status for (defaults to today)"
     ),
     user_id: str = Query(..., description="User ID making the request"),

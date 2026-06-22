@@ -5,7 +5,6 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from parade_state.utils import utc_dt
-from parade_state.utils.utc_dt import date, datetime
 
 # ============================================================================
 # Deployment Schemas
@@ -17,8 +16,8 @@ class DeploymentBase(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=255)
     estab_id: str = Field(..., min_length=1)
-    valid_from: datetime
-    valid_until: datetime
+    valid_from: utc_dt.datetime
+    valid_until: utc_dt.datetime
     notes: str | None = None
 
 
@@ -26,7 +25,7 @@ class DeploymentCreate(DeploymentBase):
     """Schema for creating a deployment."""
 
     status: Literal["draft", "active", "inactive"] = "draft"
-    scheduled_activation: datetime | None = None
+    scheduled_activation: utc_dt.datetime | None = None
 
 
 class DeploymentUpdate(BaseModel):
@@ -36,9 +35,9 @@ class DeploymentUpdate(BaseModel):
     status: (
         Literal["draft", "active", "inactive", "archived", "closed", "finalized"] | None
     ) = None
-    valid_from: datetime | None = None
-    valid_until: datetime | None = None
-    scheduled_activation: datetime | None = None
+    valid_from: utc_dt.datetime | None = None
+    valid_until: utc_dt.datetime | None = None
+    scheduled_activation: utc_dt.datetime | None = None
     notes: str | None = None
 
 
@@ -47,12 +46,12 @@ class DeploymentResponse(DeploymentBase):
 
     id: str
     status: str
-    scheduled_activation: datetime | None
+    scheduled_activation: utc_dt.datetime | None
     personnel_count: int
-    created_at: datetime
+    created_at: utc_dt.datetime
     created_by: str
-    activated_at: datetime | None
-    deactivated_at: datetime | None
+    activated_at: utc_dt.datetime | None
+    deactivated_at: utc_dt.datetime | None
 
     class Config:
         from_attributes = True
@@ -95,7 +94,7 @@ class DeploymentStatusResponse(BaseModel):
 
     deployment_id: str
     deployment_name: str
-    date: date
+    date: utc_dt.date
     deployment_status: Literal[
         "draft", "active", "inactive", "archived", "closed", "finalized"
     ]
@@ -129,9 +128,9 @@ class DeploymentPersonnelOverrideResponse(BaseModel):
     sub_unit_1: str | None
     sub_unit_2: str | None
     sub_unit_3: str | None
-    created_at: datetime
+    created_at: utc_dt.datetime
     created_by: str
-    updated_at: datetime
+    updated_at: utc_dt.datetime
 
     class Config:
         from_attributes = True
@@ -162,9 +161,9 @@ class DeploymentNotesResponse(BaseModel):
     deployment_id: str
     personnel_id: str
     notes: str
-    created_at: datetime
+    created_at: utc_dt.datetime
     created_by: str
-    updated_at: datetime
+    updated_at: utc_dt.datetime
     updated_by: str
     notes_version: int
 
@@ -181,7 +180,7 @@ class SessionBase(BaseModel):
     """Base session schema."""
 
     deployment_id: str
-    date: datetime
+    date: utc_dt.datetime
     session_type: Literal["AM", "PM"]
 
 
@@ -202,10 +201,10 @@ class SessionResponse(SessionBase):
 
     id: str
     status: str
-    created_at: datetime
+    created_at: utc_dt.datetime
     created_by: str
-    opened_at: datetime
-    closed_at: datetime | None
+    opened_at: utc_dt.datetime
+    closed_at: utc_dt.datetime | None
     closed_by: str | None
 
     class Config:
@@ -217,8 +216,8 @@ class SessionListParams(BaseModel):
 
     deployment_id: str | None = None
     status: str | None = None
-    date_from: datetime | None = None
-    date_to: datetime | None = None
+    date_from: utc_dt.datetime | None = None
+    date_to: utc_dt.datetime | None = None
     limit: int = Field(100, ge=1, le=1000)
     offset: int = Field(0, ge=0)
 
@@ -258,11 +257,11 @@ class AttendanceRecordResponse(BaseModel):
     sub_unit_1_snapshot: str | None
     sub_unit_2_snapshot: str | None
     sub_unit_3_snapshot: str | None
-    created_at: datetime
+    created_at: utc_dt.datetime
     created_by: str
-    updated_at: datetime
+    updated_at: utc_dt.datetime
     updated_by: str
-    last_edit_at: datetime | None
+    last_edit_at: utc_dt.datetime | None
     last_edit_by: str | None
     is_retroactive_edit: bool
 
@@ -333,8 +332,8 @@ class PersonnelResponse(PersonnelBase):
     id: str
     estab_id: str
     status: str
-    created_at: datetime
-    updated_at: datetime | None
+    created_at: utc_dt.datetime
+    updated_at: utc_dt.datetime | None
     created_by: str
     updated_by: str | None
 
@@ -393,8 +392,8 @@ class PersonnelResponseWithDeployment(PersonnelBase):
     id: str
     estab_id: str
     status: str
-    created_at: datetime
-    updated_at: datetime | None
+    created_at: utc_dt.datetime
+    updated_at: utc_dt.datetime | None
     created_by: str
     updated_by: str | None
     # Deployment-specific fields (included when deployment_id is provided)
@@ -411,13 +410,13 @@ class PersonnelAttendanceHistoryItem(BaseModel):
 
     id: str
     session_id: str
-    session_date: datetime
+    session_date: utc_dt.datetime
     session_type: Literal["AM", "PM"]
     session_status: Literal["open", "closed", "finalized"]
     status: Literal["present", "absent", "excused", "unknown"]
     remarks: str | None
-    created_at: datetime
-    updated_at: datetime
+    created_at: utc_dt.datetime
+    updated_at: utc_dt.datetime
 
     class Config:
         from_attributes = True
@@ -439,8 +438,8 @@ class PersonnelAttendanceHistoryResponse(BaseModel):
 
     personnel_id: str
     deployment_id: str
-    date_from: date | None
-    date_to: date | None
+    date_from: utc_dt.date | None
+    date_to: utc_dt.date | None
     stats: PersonnelAttendanceHistoryStats
     attendance_records: list[PersonnelAttendanceHistoryItem]
     total_count: int
@@ -465,8 +464,8 @@ class DeploymentUserAccessResponse(BaseModel):
     user_id: str
     deployment_id: str
     granted_by: str
-    granted_at: datetime
-    revoked_at: datetime | None
+    granted_at: utc_dt.datetime
+    revoked_at: utc_dt.datetime | None
 
     class Config:
         from_attributes = True
@@ -491,9 +490,9 @@ class UserSubunitScopeResponse(BaseModel):
     sub_unit_1: str | None
     sub_unit_2: str | None
     sub_unit_3: str | None
-    created_at: datetime
+    created_at: utc_dt.datetime
     created_by: str
-    updated_at: datetime
+    updated_at: utc_dt.datetime
 
     class Config:
         from_attributes = True

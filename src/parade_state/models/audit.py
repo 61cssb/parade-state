@@ -4,7 +4,6 @@ from sqlalchemy import Enum, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from parade_state.utils import utc_dt
-from parade_state.utils.utc_dt import datetime
 
 from ..db import Base
 
@@ -14,7 +13,7 @@ class AuditLog(Base):
 
     __tablename__ = "audit_logs"
 
-    timestamp: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()), index=True)
+    timestamp: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()), index=True)
     user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True
     )

@@ -15,7 +15,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from parade_state.utils import utc_dt
-from parade_state.utils.utc_dt import date, datetime
 
 from ..db import Base
 
@@ -30,20 +29,20 @@ class Estab(Base):
 
     __tablename__ = "estabs"
 
-    caa: Mapped[date] = mapped_column(Date, unique=True, index=True)
+    caa: Mapped[utc_dt.date] = mapped_column(Date, unique=True, index=True)
     csv_hash: Mapped[str] = mapped_column(String(64), index=True)
     status: Mapped[str] = mapped_column(
         Enum("draft", "confirmed", "archived", name="estab_status"),
         default="draft",
     )
     personnel_count: Mapped[int] = mapped_column(Integer, default=0)
-    uploaded_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    uploaded_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     uploaded_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     confirmed_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True)
     confirmed_by: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
@@ -75,11 +74,11 @@ class CsvUpload(Base):
     raw_content: Mapped[bytes] = mapped_column(LargeBinary)
     sha256_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     line_count: Mapped[int] = mapped_column(Integer)
-    uploaded_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    uploaded_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     uploaded_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     mapping_confirmed_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True)
     diff_confirmed_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True)
-    created_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     status: Mapped[str] = mapped_column(
         Enum(
             "received",
@@ -114,7 +113,7 @@ class ColumnMapping(Base):
         ),
         default="auto_detected",
     )
-    created_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     created_by: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True
     )
@@ -160,8 +159,8 @@ class ColumnMetadata(Base):
         String(36), ForeignKey("access_levels.id"), nullable=True
     )
     is_required: Mapped[bool] = mapped_column(default=False)
-    created_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
-    updated_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    updated_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
 
     # Relationships
     estab: Mapped[Estab] = relationship(back_populates="column_metadata")

@@ -6,7 +6,6 @@ from sqlalchemy import Date, Enum, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from parade_state.utils import utc_dt
-from parade_state.utils.utc_dt import date, datetime
 
 from ..db import Base
 
@@ -23,7 +22,7 @@ class Session(Base):
     deployment_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("deployments.id", ondelete="CASCADE")
     )
-    date: Mapped[date] = mapped_column(Date, index=True)
+    date: Mapped[utc_dt.date] = mapped_column(Date, index=True)
     session_type: Mapped[str] = mapped_column(
         Enum("AM", "PM", name="session_type"),
     )
@@ -31,9 +30,9 @@ class Session(Base):
         Enum("open", "closed", "finalized", name="session_status"),
         default="open",
     )
-    created_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
-    opened_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    opened_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     closed_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True)
     closed_by: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True
@@ -91,9 +90,9 @@ class AttendanceRecord(Base):
     sub_unit_1_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sub_unit_2_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sub_unit_3_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
-    updated_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    updated_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     updated_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     last_edit_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True)
     last_edit_by: Mapped[str | None] = mapped_column(

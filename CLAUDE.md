@@ -202,16 +202,14 @@ if not user:
 
 ❌ **Don't use UUID objects for database queries:**
 ```python
-user_id = uuid.UUID(user_id_str)  # Unnecessary conversion
+user_id = ids.to_uuid(user_id_str)  # Unnecessary conversion
 result = await db.execute(select(User).where(User.id == user_id))
 ```
 
 ✅ **Do use strings for database operations:**
 ```python
 # Validate UUID format if needed, but use string for queries
-try:
-    uuid.UUID(user_id)  # Just validation
-except ValueError:
+if not ids.is_valid(user_id):
     raise HTTPException(status_code=400, detail="Invalid user ID format")
 
 result = await db.execute(select(User).where(User.id == user_id))

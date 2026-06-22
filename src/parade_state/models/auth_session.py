@@ -6,7 +6,6 @@ from sqlalchemy import DateTime, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from parade_state.utils import utc_dt
-from parade_state.utils.utc_dt import datetime
 
 from ..db import Base
 
@@ -26,11 +25,11 @@ class UserSession(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[utc_dt.datetime] = mapped_column(
         DateTime, default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()), nullable=False
     )
-    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    last_accessed_at: Mapped[datetime] = mapped_column(
+    expires_at: Mapped[utc_dt.datetime] = mapped_column(DateTime, nullable=False)
+    last_accessed_at: Mapped[utc_dt.datetime] = mapped_column(
         DateTime, default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()), nullable=False
     )
     user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
