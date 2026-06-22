@@ -547,3 +547,36 @@ class CsvUploadListItem(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ============================================================================
+# Audit Log Schemas
+# ============================================================================
+
+
+class AuditLogListItem(BaseModel):
+    """Schema for a single audit log entry in list responses."""
+
+    id: str
+    timestamp: utc_dt.datetime
+    user_id: str | None = None
+    user_name: str | None = None
+    user_email: str | None = None
+    entity_type: str
+    entity_id: str
+    action: str
+    changes: str | None = None
+    description: str
+    ip_address: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class AuditLogListResponse(BaseModel):
+    """Schema for paginated audit log list response."""
+
+    items: list[AuditLogListItem]
+    total: int
+    limit: int
+    offset: int

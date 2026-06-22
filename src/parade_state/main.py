@@ -19,6 +19,7 @@ load_dotenv()
 from parade_state.api import (
     access_control,
     attendance,
+    audit,
     auth,
     csv_upload,
     deployments,
@@ -108,3 +109,4 @@ app.include_router(
     access_control.router, prefix="/api/v1/access-control", tags=["access-control"]
 )
 app.include_router(csv_upload.router, prefix="/api/v1/csv", tags=["csv-upload"])
+app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])

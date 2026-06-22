@@ -5,13 +5,81 @@
 {% block content %}
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
     <h2>Audit Log</h2>
-    <div style="display: flex; gap: 0.5rem;">
-        <button class="btn btn-primary">Filter</button>
-        <button class="btn btn-success">Export</button>
-    </div>
+    <span style="color: #6b7280; font-size: 0.875rem;">{{ total }} total entries</span>
 </div>
 
 <div class="card">
-    <p style="color: #6b7280;">Audit log viewer coming soon...</p>
+    <form method="get" action="/admin/audit" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+        <select name="entity_type" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            <option value="">All Entity Types</option>
+            {% for et in entity_types %}
+            <option value="{{ et }}" {% if entity_type == et %}selected{% endif %}>{{ et }}</option>
+            {% endfor %}
+        </select>
+        <select name="action" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            <option value="">All Actions</option>
+            {% for a in actions %}
+            <option value="{{ a }}" {% if action == a %}selected{% endif %}>{{ a }}</option>
+            {% endfor %}
+        </select>
+        <input type="text" name="target_user_id" value="{{ target_user_id }}" placeholder="Filter by user ID"
+               style="flex: 1; min-width: 200px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+        <button type="submit" class="btn btn-primary">Filter</button>
+        <a href="/admin/audit" class="btn" style="background: #e5e7eb; color: #374151; padding: 0.5rem 1rem; border-radius: 0.25rem; text-decoration: none;">Clear</a>
+    </form>
+
+    {% if logs %}
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                <th style="padding: 0.5rem;">Timestamp</th>
+                <th style="padding: 0.5rem;">User</th>
+                <th style="padding: 0.5rem;">Entity Type</th>
+                <th style="padding: 0.5rem;">Action</th>
+                <th style="padding: 0.5rem;">Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in logs %}
+            <tr style="border-bottom: 1px solid #e5e7eb;">
+                <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280; white-space: nowrap;">
+                    {{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}
+                </td>
+                <td style="padding: 0.5rem;">{{ log.user_name }}</td>
+                <td style="padding: 0.5rem; font-size: 0.85rem;">{{ log.entity_type }}</td>
+                <td style="padding: 0.5rem;">
+                    <span style="padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem;
+                        {% if log.action == 'delete' %}background: #fee2e2; color: #991b1b;
+                        {% elif log.action == 'create' %}background: #d1fae5; color: #065f46;
+                        {% elif log.action == 'update' %}background: #fef3c7; color: #92400e;
+                        {% elif log.action == 'archive' %}background: #f3e8ff; color: #6b21a8;
+                        {% elif log.action == 'close' %}background: #dbeafe; color: #1e40af;
+                        {% elif log.action == 'finalize' %}background: #fce7f3; color: #9d174d;
+                        {% else %}background: #e5e7eb; color: #374151;{% endif %}">{{ log.action }}</span>
+                </td>
+                <td style="padding: 0.5rem;">{{ log.description }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e5e7eb;">
+        <span style="color: #6b7280; font-size: 0.875rem;">
+            Page {{ page }} of {{ total_pages }}
+        </span>
+        <div style="display: flex; gap: 0.5rem;">
+            {% if page > 1 %}
+            <a href="/admin/audit?entity_type={{ entity_type }}&action={{ action }}&target_user_id={{ target_user_id }}&page={{ page - 1 }}"
+               class="btn" style="background: #e5e7eb; color: #374151; padding: 0.5rem 1rem; border-radius: 0.25rem; text-decoration: none;">Previous</a>
+            {% endif %}
+            {% if page < total_pages %}
+            <a href="/admin/audit?entity_type={{ entity_type }}&action={{ action }}&target_user_id={{ target_user_id }}&page={{ page + 1 }}"
+               class="btn btn-primary" style="text-decoration: none;">Next</a>
+            {% endif %}
+        </div>
+    </div>
+    {% else %}
+    <p style="color: #6b7280; margin-top: 1rem;">No audit entries found.</p>
+    {% endif %}
 </div>
 {% endblock %}

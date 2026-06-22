@@ -25,6 +25,20 @@ from parade_state.models import (
 router = APIRouter()
 depends_admin = Depends(require_admin_user_flexible)
 
+# Audit log filter dropdown options (mirrors AuditLog model enum values)
+AUDIT_ENTITY_TYPES = [
+    "attendance",
+    "deployment",
+    "session",
+    "user",
+    "csv_upload",
+    "estab",
+    "personnel",
+    "access_level",
+    "column_mapping",
+]
+AUDIT_ACTIONS = ["create", "update", "delete", "archive", "close", "finalize"]
+
 # Global Jinja2 environment (singleton)
 _jinja_env = None
 
@@ -334,11 +348,60 @@ async def admin_settings(
 @router.get("/admin/audit", response_class=HTMLResponse)
 async def admin_audit(
     request: Request,
+    entity_type: str | None = None,
+    action: str | None = None,
+    target_user_id: str | None = None,
+    page: int = 1,
 ):
-    """Render the audit log page."""
+    """Render the audit log page with filtering and pagination."""
     current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
+
+    limit = 50
+    offset = (page - 1) * limit
+
+    session_maker = get_session_maker()
+    async with session_maker() as db:
+        conditions = []
+        if entity_type:
+            conditions.append(AuditLog.entity_type == entity_type)
+        if action:
+            conditions.append(AuditLog.action == action)
+        if target_user_id:
+            conditions.append(AuditLog.user_id == target_user_id)
+
+        data_query = (
+            select(AuditLog, User)
+            .join(User, AuditLog.user_id == User.id, isouter=True)
+            .order_by(AuditLog.timestamp.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        for cond in conditions:
+            data_query = data_query.where(cond)
+
+        rows = (await db.execute(data_query)).all()
+
+        count_query = select(func.count()).select_from(AuditLog)
+        for cond in conditions:
+            count_query = count_query.where(cond)
+        total = (await db.execute(count_query)).scalar_one()
+
+    logs = [
+        {
+            "timestamp": log.timestamp,
+            "user_name": user_obj.name if user_obj else "System",
+            "entity_type": log.entity_type,
+            "entity_id": log.entity_id,
+            "action": log.action,
+            "description": log.description,
+            "ip_address": log.ip_address,
+        }
+        for log, user_obj in rows
+    ]
+
+    total_pages = max(1, (total + limit - 1) // limit)
 
     env = get_templates(request)
     template = env.get_template("admin/audit.html")
@@ -352,6 +415,15 @@ async def admin_audit(
             "role": current_admin.role,
         },
         active_page="audit",
+        logs=logs,
+        entity_type=entity_type or "",
+        action=action or "",
+        target_user_id=target_user_id or "",
+        page=page,
+        total_pages=total_pages,
+        total=total,
+        entity_types=AUDIT_ENTITY_TYPES,
+        actions=AUDIT_ACTIONS,
     )
 
     return HTMLResponse(content=html_content)
