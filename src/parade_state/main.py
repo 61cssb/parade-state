@@ -20,6 +20,7 @@ from parade_state.api import (
     access_control,
     attendance,
     auth,
+    csv_upload,
     deployments,
     personnel,
     sessions,
@@ -106,3 +107,4 @@ app.include_router(personnel.router, prefix="/api/v1", tags=["personnel"])
 app.include_router(
     access_control.router, prefix="/api/v1/access-control", tags=["access-control"]
 )
+app.include_router(csv_upload.router, prefix="/api/v1/csv", tags=["csv-upload"])

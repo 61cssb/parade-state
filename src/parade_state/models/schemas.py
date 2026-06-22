@@ -509,3 +509,41 @@ class UserSubunitScopeListParams(BaseModel):
 
     deployment_id: str | None = None
     unit: str | None = None
+
+
+# ============================================================================
+# CSV Upload Schemas
+# ============================================================================
+
+
+class CsvUploadResponse(BaseModel):
+    """Schema for CSV upload response."""
+
+    id: str
+    sha256_hash: str
+    line_count: int
+    detected_columns: list[str]
+    status: str
+    uploaded_at: utc_dt.datetime
+    uploaded_by: str
+    is_duplicate: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class CsvUploadListItem(BaseModel):
+    """Schema for CSV upload list item (metadata only, no raw_content)."""
+
+    id: str
+    sha256_hash: str
+    line_count: int
+    status: str
+    uploaded_at: utc_dt.datetime
+    uploaded_by: str
+    estab_id: str | None = None
+    mapping_confirmed_at: utc_dt.datetime | None = None
+    diff_confirmed_at: utc_dt.datetime | None = None
+
+    class Config:
+        from_attributes = True

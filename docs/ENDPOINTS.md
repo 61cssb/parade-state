@@ -40,7 +40,7 @@ This document clarifies the different types of endpoints in the Parade State app
 **Users API:**
 - `GET /api/v1/users/` - List users
 - `GET /api/v1/users/{id}` - Get user details
-- `PUT /api/v1/users/{id}` - Update user
+- `PATCH /api/v1/users/{id}` - Update user (creates AuditLog entry)
 - `DELETE /api/v1/users/{id}` - Delete user
 
 **Other APIs:**
@@ -49,20 +49,20 @@ This document clarifies the different types of endpoints in the Parade State app
 - `/api/v1/attendance/*` - Attendance records
 - `/api/v1/personnel/*` - Personnel management
 - `/api/v1/access-control/*` - Access control
-- `/api/v1/csv/*` - CSV upload and ingestion *(planned — see [NEXT_PHASE.md](NEXT_PHASE.md))*
+- `/api/v1/csv/*` - CSV upload and ingestion
 
-### 3. CSV Upload API (Planned)
+### 3. CSV Upload API
 
 **Purpose:** CSV file ingestion for establishment/roster data
 
-**Planned Endpoints:**
-- `POST /api/v1/csv/upload` - Upload CSV file (returns upload ID, hash, detected columns)
-- `GET /api/v1/csv/uploads` - List previous uploads
+**Endpoints:**
+- `POST /api/v1/csv/upload` - Upload CSV file (returns upload ID, SHA256 hash, detected columns, line count, duplicate flag)
+- `GET /api/v1/csv/uploads` - List previous uploads (paginated, metadata only)
 
-**Status:** Models exist ([csv_ingestion.py](src/parade_state/models/csv_ingestion.py)), API endpoints to be implemented in Phase 9B.
+**Status:** Step 1 (file ingestion) implemented. Models in [csv_ingestion.py](src/parade_state/models/csv_ingestion.py).
 
 **3-Step Pipeline:**
-1. **Upload** (planned) — File ingestion, hashing, column detection
+1. **Upload** (implemented) — File ingestion, SHA256 hashing, column detection, duplicate detection
 2. **Mapping** (deferred) — Map raw columns to canonical names
 3. **Diff** (deferred) — Compare against current active establishment
 

@@ -4,17 +4,119 @@
 
 {% block content %}
 <h2>CSV Upload Pipeline</h2>
-<p style="color: #6b7280; margin-bottom: 1.5rem;">3-step upload process: Upload → Mapping → Diff Confirmation</p>
+<p style="color: #6b7280; margin-bottom: 1.5rem;">3-step upload process: Upload &rarr; Mapping &rarr; Diff Confirmation</p>
 
 <div class="card">
     <h3>Step 1: Upload CSV File</h3>
     <div style="margin-top: 1rem;">
         <input type="file" accept=".csv" id="csvFile" style="margin-bottom: 1rem;">
-        <button class="btn btn-primary">Upload</button>
+        <button class="btn btn-primary" id="uploadBtn" onclick="uploadCsv()">Upload</button>
     </div>
+    <div id="uploadStatus" style="margin-top: 1rem;"></div>
+    <div id="uploadResult" style="margin-top: 1rem;"></div>
 </div>
 
 <div class="card">
-    <p style="color: #6b7280;">CSV upload pipeline coming soon...</p>
+    <h3>Recent Uploads</h3>
+    {% if recent_uploads %}
+    <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                <th style="padding: 0.5rem;">Uploaded At</th>
+                <th style="padding: 0.5rem;">Hash</th>
+                <th style="padding: 0.5rem;">Lines</th>
+                <th style="padding: 0.5rem;">Status</th>
+                <th style="padding: 0.5rem;">Estab</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for upload in recent_uploads %}
+            <tr style="border-bottom: 1px solid #e5e7eb;">
+                <td style="padding: 0.5rem;">{{ upload.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ upload.sha256_hash }}</td>
+                <td style="padding: 0.5rem;">{{ upload.line_count }}</td>
+                <td style="padding: 0.5rem;">
+                    <span class="btn {% if upload.status == 'received' %}btn-primary{% elif upload.status == 'failed' %}btn-success{% endif %}" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">{{ upload.status }}</span>
+                </td>
+                <td style="padding: 0.5rem;">{{ upload.estab_id or '--' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: #6b7280; margin-top: 1rem;">No uploads yet.</p>
+    {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const ADMIN_USER_ID = "{{ user.id }}";
+    const ADMIN_USER_ROLE = "{{ user.role }}";
+
+    async function uploadCsv() {
+        const fileInput = document.getElementById('csvFile');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const statusDiv = document.getElementById('uploadStatus');
+        const resultDiv = document.getElementById('uploadResult');
+
+        if (!fileInput.files.length) {
+            statusDiv.innerHTML = '<p style="color: #ef4444;">Please select a file first.</p>';
+            return;
+        }
+
+        const file = fileInput.files[0];
+
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = 'Uploading...';
+        statusDiv.innerHTML = '<p style="color: #6b7280;">Uploading file...</p>';
+        resultDiv.innerHTML = '';
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await fetch('/api/v1/csv/upload?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
+                method: 'POST',
+                body: formData,
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                if (data.is_duplicate) {
+                    statusDiv.innerHTML = '<p style="color: #f59e0b; font-weight: bold;">Duplicate file detected! This CSV was already uploaded.</p>';
+                } else {
+                    statusDiv.innerHTML = '<p style="color: #10b981; font-weight: bold;">Upload successful!</p>';
+                }
+
+                let columnsHtml = data.detected_columns.map(function(col) {
+                    return '<span style="display: inline-block; background: #e0e7ff; color: #3730a3; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0.25rem; font-size: 0.85rem;">' + col + '</span>';
+                }).join('');
+
+                resultDiv.innerHTML =
+                    '<div style="background: #f0fdf4; padding: 1rem; border-radius: 0.5rem; border: 1px solid #bbf7d0;">' +
+                    '<h4 style="margin-bottom: 0.5rem;">Upload Details</h4>' +
+                    '<table style="width: 100%;">' +
+                    '<tr><td style="font-weight: bold; padding: 0.25rem;">Upload ID:</td><td style="padding: 0.25rem; font-family: monospace;">' + data.id + '</td></tr>' +
+                    '<tr><td style="font-weight: bold; padding: 0.25rem;">SHA256 Hash:</td><td style="padding: 0.25rem; font-family: monospace; font-size: 0.8rem;">' + data.sha256_hash + '</td></tr>' +
+                    '<tr><td style="font-weight: bold; padding: 0.25rem;">Data Lines:</td><td style="padding: 0.25rem;">' + data.line_count + '</td></tr>' +
+                    '<tr><td style="font-weight: bold; padding: 0.25rem;">Status:</td><td style="padding: 0.25rem;">' + data.status + '</td></tr>' +
+                    '</table>' +
+                    '<div style="margin-top: 0.5rem;">' +
+                    '<strong>Detected Columns (' + data.detected_columns.length + '):</strong>' +
+                    '<div style="margin-top: 0.25rem;">' + columnsHtml + '</div>' +
+                    '</div>' +
+                    '</div>';
+            } else {
+                statusDiv.innerHTML = '<p style="color: #ef4444;">Upload failed: ' + (data.detail || 'Unknown error') + '</p>';
+            }
+        } catch (error) {
+            statusDiv.innerHTML = '<p style="color: #ef4444;">Network error: ' + error.message + '</p>';
+        } finally {
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = 'Upload';
+        }
+    }
+</script>
 {% endblock %}

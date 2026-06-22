@@ -11,7 +11,7 @@ from parade_state.auth.dependencies import (
     require_authenticated_user,
 )
 from parade_state.db import get_db_session
-from parade_state.models import AccessLevel, User
+from parade_state.models import AccessLevel, AuditLog, User
 from parade_state.utils import ids
 
 
@@ -188,8 +188,12 @@ async def update_user(
             detail="User not found",
         )
 
+    # Track changes for audit log
+    changes = []
+
     # Update fields
     if update_data.name is not None:
+        changes.append(f"name: '{user.name}' -> '{update_data.name}'")
         user.name = update_data.name
 
     if update_data.status is not None:
@@ -198,6 +202,7 @@ async def update_user(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Invalid status value",
             )
+        changes.append(f"status: '{user.status}' -> '{update_data.status}'")
         user.status = update_data.status
 
     if update_data.role is not None:
@@ -213,6 +218,7 @@ async def update_user(
                 status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="Only super admins can grant super admin role",
             )
+        changes.append(f"role: '{user.role}' -> '{update_data.role}'")
         user.role = update_data.role
 
     if update_data.access_level_id is not None:
@@ -230,12 +236,24 @@ async def update_user(
                     detail="Access level not found",
                 )
 
+            changes.append(f"access_level_id: '{user.access_level_id}' -> '{update_data.access_level_id}'")
             user.access_level_id = update_data.access_level_id
         except ValueError:
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Invalid access level ID format",
             ) from None
+
+    # Create audit log entry if any changes were made
+    if changes:
+        audit_log = AuditLog(
+            user_id=str(current_user.id),
+            entity_type="user",
+            entity_id=user_id,
+            action="update",
+            description=f"Updated user '{user.email}': {', '.join(changes)}",
+        )
+        db.add(audit_log)
 
     await db.commit()
     await db.refresh(user)
@@ -291,7 +309,20 @@ async def delete_user(
             detail="User not found",
         )
 
+    user_email = user.email
+
     await db.delete(user)
+
+    # Create audit log entry (after delete, before commit)
+    audit_log = AuditLog(
+        user_id=str(current_user.id),
+        entity_type="user",
+        entity_id=user_id,
+        action="delete",
+        description=f"Deleted user '{user_email}'",
+    )
+    db.add(audit_log)
+
     await db.commit()
 
     return {"message": "User deleted successfully"}

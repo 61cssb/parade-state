@@ -5,42 +5,44 @@
 
 ---
 
-## 🎯 Current System Status
+## Current System Status
 
-### **Production-Ready Metrics**
-- ✅ **208 tests** passing (100% pass rate)
-- ✅ **28+ API endpoints** fully implemented and tested  
-- ✅ **Enterprise-grade security** with multi-tenant access control
-- ✅ **Comprehensive documentation** (architecture, security, deployment, testing)
-- ✅ **Database migrations** initialized and production-ready
+### Production-Ready Metrics
+- 224 tests passing (100% pass rate)
+- 30+ API endpoints fully implemented and tested
+- Enterprise-grade security with multi-tenant access control
+- Comprehensive documentation (architecture, security, deployment, testing)
+- Database migrations initialized and production-ready
 
-### **Completed Core Features**
-- ✅ Google OAuth authentication & role-based access control
-- ✅ **Admin interface with Jinja2 templates** (modern responsive UI)
-- ✅ **Host-independent OAuth flow** (works with any domain/hostname)
-- ✅ Complete deployment management (lifecycle, overrides, notes)
-- ✅ Attendance session management (AM/PM sessions, status transitions)
-- ✅ Comprehensive attendance tracking (individual & bulk operations)
-- ✅ Personnel management API (deployment-based listing, filtering, search)
-- ✅ **Advanced access control** (deployment-based multi-tenant security)
+### Completed Core Features
+- Google OAuth authentication & role-based access control
+- **Admin interface with Jinja2 templates** (modern responsive UI)
+- **Host-independent OAuth flow** (works with any domain/hostname)
+- Complete deployment management (lifecycle, overrides, notes)
+- Attendance session management (AM/PM sessions, status transitions)
+- Comprehensive attendance tracking (individual & bulk operations)
+- Personnel management API (deployment-based listing, filtering, search)
+- **Advanced access control** (deployment-based multi-tenant security)
+- **CSV file upload** (SHA256 hashing, duplicate detection, column parsing)
+- **User management admin page** (inline role/status editing, search/filter, audit logging)
 
-### **System Capabilities**
+### System Capabilities
 - Multi-tenant deployment isolation with access control
 - Automatic data filtering by deployment scope
 - Role-based permissions (super_admin, admin, user)
 - Deployment access grants and revocation
 - Subunit scope filtering support
-- Comprehensive audit trails
+- Comprehensive audit trails (user management, CSV uploads)
 - Production deployment guides
 
 ---
 
-## 🚀 Current Phase: Frontend Development (Phase 9) - IN PROGRESS
+## Current Phase: Frontend Development (Phase 9) - IN PROGRESS
 
 **Priority:** HIGH
-**Status:** Phase 9A (Foundation) COMPLETE — Phase 9B (Core Features) NEXT
+**Status:** Phase 9B + 9C-1 COMPLETE — Phase 9C-2 (Audit Log) NEXT
 
-### **Phase 9A: Foundation — COMPLETED ✅**
+### Phase 9A: Foundation — COMPLETED
 
 - [x] Set up Jinja2 templates in FastAPI (singleton pattern, cache_size=0)
 - [x] Create base template with responsive layout
@@ -51,77 +53,68 @@
 - [x] Logout functionality (no redirect loops)
 - [x] 7 admin page templates created (dashboard, deployments, sessions, users, csv-upload, settings, audit)
 
-### **Phase 9B: Dashboard Wiring + CSV Upload — NEXT SESSION**
+### Phase 9B: Dashboard Wiring + CSV Upload — COMPLETED
 
-**Goal:** Make the dashboard and CSV upload pages functional with real data.
+- [x] Dashboard shows real counts (active deployments, open sessions, active personnel, active users)
+- [x] Dashboard shows recent audit log activity (last 10 entries with user names)
+- [x] CSV upload accepts .csv files with SHA256 hashing and duplicate detection
+- [x] CSV upload detects and displays columns
+- [x] CSV upload shows previous uploads list
+- [x] Added `"id": current_admin.id` to all 7 template user dicts
+- [x] 9 integration tests for CSV upload API
+- [x] Documentation updated ([ENDPOINTS.md](ENDPOINTS.md))
 
-#### **Task 1: Wire Up Dashboard with Real Data**
+### Phase 9C-1: User Management — COMPLETED
 
-**Files to modify:**
-- [src/parade_state/admin_routes.py](src/parade_state/admin_routes.py) — Add database queries to `admin_dashboard()`
-- [src/parade_state/templates/admin/dashboard.html](src/parade_state/templates/admin/dashboard.html) — Replace hardcoded zeros with template variables
+- [x] User management page with search/filter (name, email, status, role)
+- [x] Inline role editing via dropdown (PATCH /api/v1/users/{id})
+- [x] Inline status editing via dropdown
+- [x] Delete user with confirmation (super_admin only)
+- [x] AuditLog entries created on user update and delete
+- [x] 3 integration tests for audit log verification
 
-**Queries needed (use `get_session_maker()` pattern):**
-- Count active deployments (`Deployment.status == "active"`)
-- Count open sessions (`Session.status == "open"`)
-- Count active personnel (`Personnel.status == "active"`)
-- Count active users (`User.status == "active"`)
-- Fetch last 10 AuditLog entries (join with User for names)
+### Phase 9C-2: Audit Log API + Page — NEXT SESSION
 
-**Template changes:**
-- Replace `0` values with `{{ active_deployments }}`, `{{ open_sessions }}`, etc.
-- Replace "No recent activity" with table looping through `recent_activity`
+**Goal:** Create audit log API endpoint and wire up the audit admin page.
 
-**Also:** Add `"id": current_admin.id` to all 7 `template.render()` user dicts (enables templates to call API endpoints with user identity).
+#### Task 1: Create Audit Log API
 
-#### **Task 2: CSV Upload — Step 1 (File Ingestion)**
-
-**New file:** `src/parade_state/api/csv_upload.py`
+**New file:** `src/parade_state/api/audit.py`
 
 **Endpoints:**
-- `POST /api/v1/csv/upload` — Accept file, compute SHA256 hash, check duplicates, parse headers, store raw content in CsvUpload, create audit log entry
-- `GET /api/v1/csv/uploads` — List recent uploads (metadata only)
+- `GET /api/v1/audit/logs` — List audit entries with filtering (entity_type, action, user_id) and pagination
+
+**Auth pattern:** Query params (user_id, user_role) — consistent with CSV upload and deployments APIs.
+
+#### Task 2: Wire Up Audit Admin Page
 
 **Files to modify:**
-- [src/parade_state/main.py](src/parade_state/main.py) — Register CSV upload router
-- [src/parade_state/admin_routes.py](src/parade_state/admin_routes.py) — Fetch recent uploads in `admin_csv_upload()`
-- [src/parade_state/templates/admin/csv_upload.html](src/parade_state/templates/admin/csv_upload.html) — Functional upload form with JS fetch(), results display, uploads table
+- [src/parade_state/admin_routes.py](src/parade_state/admin_routes.py) — Add DB queries to `admin_audit()` with filtering
+- [src/parade_state/templates/admin/audit.html](src/parade_state/templates/admin/audit.html) — Filter bar + audit table + pagination
 
-**Backend models already exist:** CsvUpload, ColumnMapping, ColumnMetadata, Estab (see [src/parade_state/models/csv_ingestion.py](src/parade_state/models/csv_ingestion.py))
+#### Task 3: Tests
+- Audit API tests (filtering, pagination, permission denied)
+- Verify user_name populated from User join
 
-**Dependencies available:** `python-multipart` already installed
-
-#### **Task 3: Documentation Updates**
-- Update [docs/ENDPOINTS.md](docs/ENDPOINTS.md) with new CSV endpoints
-- Update this file with completion status
-
-#### **Deferred CSV Pipeline Steps (Future Sessions)**
+#### Deferred CSV Pipeline Steps (Future Sessions)
 - **Step 2:** Column mapping UI (map raw CSV columns to canonical names)
 - **Step 3:** Diff confirmation (compare new upload vs current active Estab)
 - ColumnMetadata record creation
 - Estab creation from CSV data
 - Personnel record generation from mapped CSV rows
 
-### **Phase 9C: Remaining Admin Pages (Future Sessions)**
+### Phase 9C-3: Remaining Admin Pages (Future Sessions)
 
-**Priority order after dashboard + CSV upload:**
+**Priority order after audit log:**
 1. **Attendance marking** — Individual and bulk operations
 2. **Personnel browser** — Search, filter, manage personnel
 3. **Deployment management** — Create/manage deployments, assignments, overrides
 4. **Session controls** — Open/close/finalize sessions, bulk operations
 5. **Mobile optimization** — Responsive design for field use
 
-#### **Success Criteria for Phase 9B**
-- [ ] Dashboard shows real counts from database
-- [ ] Dashboard shows recent audit log activity
-- [ ] CSV upload accepts .csv files and stores them
-- [ ] CSV upload detects and displays columns
-- [ ] CSV upload shows previous uploads list
-- [ ] No 404s or Internal Server Errors
-
 ---
 
-## 📋 Deferred Phases
+## Deferred Phases
 
 ### **Phase 7: Reporting & Analytics** (DEFERRED)
 **Why Deferred:** Requires production data to design meaningful reports. Can't build exception reporting without understanding real-world patterns. Will revisit after frontend launches and users generate data.
@@ -137,7 +130,7 @@
 
 ---
 
-## 📖 Technical Documentation
+## Technical Documentation
 
 For detailed information on completed features and system architecture, see:
 
@@ -149,7 +142,7 @@ For detailed information on completed features and system architecture, see:
 
 ---
 
-## 🔄 Implementation History
+## Implementation History
 
 For detailed implementation history, see git commit log:
 ```bash
@@ -157,6 +150,8 @@ git log --oneline --all
 ```
 
 **Recent Major Completions:**
+- **Phase 9C-1: User Management** (2026-06-22) - Admin users page with search/filter, inline role/status editing, delete, audit log entries on user update/delete
+- **Phase 9B: Dashboard + CSV Upload** (2026-06-22) - Dashboard with real DB queries, CSV file upload API with SHA256 hashing/duplicate detection/column parsing, 9 integration tests
 - **Phase 9A: Frontend Foundation** (2026-06-22) - OAuth authentication, Jinja2 templates, admin interface, secure cookies, logout
 - **Phase 5: Advanced Access Control** (2026-05-10) - Multi-tenant security
 - **Phase 4: Personnel Management** (2026-05-08) - Deployment-based personnel operations
@@ -165,12 +160,13 @@ git log --oneline --all
 - **Phase 1: Authentication** (Completed) - Google OAuth and user management
 
 **Priority Changes:**
+- **2026-06-22:** Phase 9B + 9C-1 complete. Dashboard wired with real data, CSV upload implemented, user management page functional with audit logging. Next: audit log API + page.
 - **2026-06-22:** Phase 9A complete. OAuth login/logout working, 7 admin templates created. Next: wire up dashboard with real data and implement CSV upload step 1 (file ingestion).
 - **2026-06-22:** Phase 9 (Frontend) prioritized from LOW to HIGH. Admin interface completed with host-independent OAuth flow. Frontend development now critical for user acquisition and production validation.
 - **2026-05-16:** Phase 7 reduced to deployment status + CSV export only. Comprehensive reporting deferred pending stakeholder requirements and production data analysis.
 
 ---
 
-**Next: Phase 9B — Dashboard Wiring + CSV Upload** 🚀
+**Next: Phase 9C-2 — Audit Log API + Page**
 
-Authentication is working. Admin templates exist. Next session focuses on making the dashboard functional with real database queries and implementing CSV file ingestion (step 1 of the upload pipeline). See the detailed plan above.
+The audit log page is the natural next step — audit entries are already being generated by user management (role/status changes, deletions) and CSV uploads. Next session creates the audit API endpoint (`GET /api/v1/audit/logs` with filtering and pagination) and wires up the admin audit page with a filterable table.
