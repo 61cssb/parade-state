@@ -165,10 +165,10 @@ async def create_session(
         session_data.deployment_id, user_id, user_role, db
     )
 
-    if deployment.status != "active":
+    if deployment.status not in ["draft", "active"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Sessions can only be created for active deployments",
+            detail="Sessions can only be created for draft or active deployments",
         )
 
     # Check session uniqueness (deployment + date + session_type)

@@ -39,6 +39,16 @@ AUDIT_ENTITY_TYPES = [
 ]
 AUDIT_ACTIONS = ["create", "update", "delete", "archive", "close", "finalize"]
 
+# Deployment status filter dropdown options (mirrors Deployment model enum)
+DEPLOYMENT_STATUSES = [
+    "draft",
+    "active",
+    "inactive",
+    "archived",
+    "closed",
+    "finalized",
+]
+
 # Global Jinja2 environment (singleton)
 _jinja_env = None
 
@@ -139,11 +149,62 @@ async def admin_dashboard(
 @router.get("/admin/deployments", response_class=HTMLResponse)
 async def admin_deployments(
     request: Request,
+    status_filter: str | None = None,
 ):
-    """Render the deployments management page."""
+    """Render the deployments management page with expandable session sub-views."""
     current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
+
+    session_maker = get_session_maker()
+    async with session_maker() as db:
+        query = select(Deployment).order_by(Deployment.created_at.desc()).limit(100)
+        if status_filter:
+            query = query.where(Deployment.status == status_filter)
+
+        deployments_result = await db.execute(query)
+        deployments = deployments_result.scalars().all()
+
+        # Batch-load sessions for all deployments on the page
+        sessions_by_deployment: dict[str, list] = {}
+        if deployments:
+            deployment_ids = [str(d.id) for d in deployments]
+            sessions_result = await db.execute(
+                select(SessionModel)
+                .where(SessionModel.deployment_id.in_(deployment_ids))
+                .order_by(SessionModel.date.desc(), SessionModel.created_at.desc())
+            )
+            for session in sessions_result.scalars().all():
+                sessions_by_deployment.setdefault(
+                    str(session.deployment_id), []
+                ).append(session)
+
+    deployments_data = [
+        {
+            "id": str(d.id),
+            "name": d.name,
+            "status": d.status,
+            "valid_from": d.valid_from,
+            "valid_until": d.valid_until,
+            "notes": d.notes,
+            "created_at": d.created_at,
+        }
+        for d in deployments
+    ]
+
+    sessions_data = {
+        dep_id: [
+            {
+                "id": str(s.id),
+                "deployment_id": str(s.deployment_id),
+                "date": s.date,
+                "session_type": s.session_type,
+                "status": s.status,
+            }
+            for s in sessions
+        ]
+        for dep_id, sessions in sessions_by_deployment.items()
+    }
 
     env = get_templates(request)
     template = env.get_template("admin/deployments.html")
@@ -157,35 +218,19 @@ async def admin_deployments(
             "role": current_admin.role,
         },
         active_page="deployments",
+        deployments=deployments_data,
+        sessions_by_deployment=sessions_data,
+        status_filter=status_filter or "",
+        deployment_statuses=DEPLOYMENT_STATUSES,
     )
 
     return HTMLResponse(content=html_content)
 
 
 @router.get("/admin/sessions", response_class=HTMLResponse)
-async def admin_sessions(
-    request: Request,
-):
-    """Render the sessions management page."""
-    current_admin = await get_current_admin_user_optional(request)
-    if not current_admin:
-        return RedirectResponse(url="/auth/login", status_code=302)
-
-    env = get_templates(request)
-    template = env.get_template("admin/sessions.html")
-
-    html_content = template.render(
-        request=request,
-        user={
-            "id": current_admin.id,
-            "name": current_admin.name,
-            "email": current_admin.email,
-            "role": current_admin.role,
-        },
-        active_page="sessions",
-    )
-
-    return HTMLResponse(content=html_content)
+async def admin_sessions(request: Request):
+    """Redirect to combined deployments page (sessions managed there)."""
+    return RedirectResponse(url="/admin/deployments", status_code=302)
 
 
 @router.get("/admin/users", response_class=HTMLResponse)

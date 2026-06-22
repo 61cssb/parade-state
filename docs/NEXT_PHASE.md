@@ -8,7 +8,7 @@
 ## Current System Status
 
 ### Production-Ready Metrics
-- 234 tests passing (100% pass rate)
+- 235 tests passing (100% pass rate)
 - 31+ API endpoints fully implemented and tested
 - Enterprise-grade security with multi-tenant access control
 - Comprehensive documentation (architecture, security, deployment, testing)
@@ -26,6 +26,7 @@
 - **CSV file upload** (SHA256 hashing, duplicate detection, column parsing)
 - **User management admin page** (inline role/status editing, search/filter, audit logging)
 - **Audit log API + admin page** (filterable, paginated, colored action badges)
+- **Combined deployment + session admin page** (master-detail with status transitions, session creation)
 
 ### System Capabilities
 - Multi-tenant deployment isolation with access control
@@ -33,7 +34,7 @@
 - Role-based permissions (super_admin, admin, user)
 - Deployment access grants and revocation
 - Subunit scope filtering support
-- Comprehensive audit trails (user management, CSV uploads) with browsable admin view
+- Comprehensive audit trails (user management, CSV uploads, deployment/session transitions) with browsable admin view
 - Production deployment guides
 
 ---
@@ -41,7 +42,7 @@
 ## Current Phase: Frontend Development (Phase 9) - IN PROGRESS
 
 **Priority:** HIGH
-**Status:** Phase 9B + 9C-1 + 9C-2 COMPLETE — Phase 9C-3 (Remaining Admin Pages) NEXT
+**Status:** Phase 9B + 9C-1 + 9C-2 + 9C-3 COMPLETE — Phase 9C-4 (Mobile Optimization) NEXT
 
 ### Phase 9A: Foundation — COMPLETED
 
@@ -89,33 +90,18 @@
 - Estab creation from CSV data
 - Personnel record generation from mapped CSV rows
 
-### Phase 9C-3: Deployment + Session Management (Combined View)
+### Phase 9C-3: Deployment + Session Management — COMPLETED
 
-**Scope:** Combined deployment and session admin page at `/admin/deployments`. Sessions are presented as an expandable detail section within each deployment row (master-detail pattern). The existing `/admin/sessions` stub will redirect here or be removed.
-
-**Rationale:** Sessions only exist as children of deployments. The admin workflow is deployment-centric: pick deployment → view sessions → manage status. Separate pages force back-and-forth navigation. Session closure cascades from deployment closure — combining makes the impact visible.
-
-**API stays separate:** `/api/v1/deployments/*` and `/api/v1/sessions/*` remain independent routers. Only the HTML admin view is combined.
-
-**In scope:**
-1. **Deployment list** — table with status badges, filter by status, validity range
-2. **Deployment actions** — activate, deactivate, archive, close, finalize (hardcoded status transitions, not user-editable)
-3. **Deployment attributes** — name, validity range, notes (inline edit or detail panel)
-4. **Session sub-view** — expandable per-deployment list of sessions with status badges
-5. **Session actions** — close, finalize (hardcoded transitions)
-6. **Session creation** — pick date + AM/PM, pre-populates personnel as absent
-7. **Delete** (super_admin only) — deployment (blocked if active/finalized), session (blocked if finalized)
-
-**Out of scope (deferred):**
-- Personnel override management UI (complex, low frequency)
-- Deployment notes per-personnel (deferred to personnel browser work)
-- Clone (same-estab) and migrate (cross-estab) workflows
-- CSV export of deployment data
-- Manual deployment access grant UI (PRD §17: auto-granted on creation)
-
-**PRD compliance note:** API currently blocks session creation for `draft` deployments, but PRD §8 allows creating sessions in advance for draft or active deployments. API should be updated to match PRD as part of this phase.
-
-**Access control clarification:** PRD §17 specifies auto-grant behavior as the user-facing default. The `DeploymentUserAccess` API model remains available for explicit admin grants via API if needed, but no UI surface is required for MVP.
+- [x] Combined admin page at `/admin/deployments` with expandable session sub-views per deployment
+- [x] `/admin/sessions` redirects to `/admin/deployments` (Sessions nav link removed)
+- [x] Deployment list with status-colored cards, filter by status
+- [x] Deployment status transitions: activate, close, archive, finalize (hardcoded action buttons per valid transitions)
+- [x] Session sub-view with status badges and action buttons (close, finalize)
+- [x] Inline session creation form (date + AM/PM) for draft and active deployments
+- [x] Delete (super_admin only) for deployments (blocked if active/finalized) and sessions (blocked if finalized)
+- [x] PRD §8 compliance fix: API now allows session creation for draft deployments (was blocked to active-only)
+- [x] API stays separate (`/api/v1/deployments/*`, `/api/v1/sessions/*`) — only HTML admin view combined
+- [x] 1 new test (draft deployment session creation), 1 updated test (inactive deployment now correctly tested)
 
 ### Phase 9C-4: Mobile Optimization (Future)
 
@@ -165,6 +151,7 @@ git log --oneline --all
 ```
 
 **Recent Major Completions:**
+- **Phase 9C-3: Deployment + Session Management** (2026-06-22) - Combined admin page with expandable session sub-views, status transitions, session creation, PRD §8 compliance fix, 1 new + 1 updated test
 - **Phase 9C-2: Audit Log API + Page** (2026-06-22) - Audit log API with filtering/pagination, admin page with colored action badges, 10 integration tests
 - **Phase 9C-1: User Management** (2026-06-22) - Admin users page with search/filter, inline role/status editing, delete, audit log entries on user update/delete
 - **Phase 9B: Dashboard + CSV Upload** (2026-06-22) - Dashboard with real DB queries, CSV file upload API with SHA256 hashing/duplicate detection/column parsing, 9 integration tests
@@ -176,6 +163,7 @@ git log --oneline --all
 - **Phase 1: Authentication** (Completed) - Google OAuth and user management
 
 **Priority Changes:**
+- **2026-06-22:** Phase 9C-3 complete. Combined deployment + session admin page at `/admin/deployments` with expandable sub-views, status transitions, inline session creation. PRD §8 compliance fix (draft deployments can now create sessions). `/admin/sessions` redirects to `/admin/deployments`. Next: mobile optimization (Phase 9C-4) or settings page wiring.
 - **2026-06-22:** Phase 9C-2 complete. Audit log API + admin page implemented with filtering (entity_type, action, target_user_id), pagination, and colored action badges. Next: remaining admin pages (attendance marking, personnel browser, deployment management, session controls).
 - **2026-06-22:** Phase 9B + 9C-1 complete. Dashboard wired with real data, CSV upload implemented, user management page functional with audit logging. Next: audit log API + page.
 - **2026-06-22:** Phase 9A complete. OAuth login/logout working, 7 admin templates created. Next: wire up dashboard with real data and implement CSV upload step 1 (file ingestion).
@@ -184,6 +172,6 @@ git log --oneline --all
 
 ---
 
-**Next: Phase 9C-3 — Remaining Admin Pages**
+**Next: Phase 9C-4 — Mobile Optimization (or Settings Page)**
 
-With the audit log complete, the foundation is fully in place — dashboard, CSV upload, user management, and audit visibility are all operational. Phase 9C-3 wires up the remaining admin pages: attendance marking (individual + bulk), personnel browser, deployment management, and session controls. Each of these will generate audit entries that automatically appear in the now-functional audit log page.
+All core admin pages are now functional: dashboard, deployments + sessions (combined), users, CSV upload, and audit log. The remaining stub is the settings page (access levels, column sensitivity, column mapping). Phase 9C-4 is mobile optimization for field use (tablets, mobile). The settings page may be wired up opportunistically if config management becomes a priority before mobile work begins.

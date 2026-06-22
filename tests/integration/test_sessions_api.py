@@ -64,7 +64,7 @@ async def test_create_session_for_inactive_deployment_forbidden(
     deployment = Deployment(
         name="Inactive Deployment",
         estab_id=str(sample_estab.id),
-        status="draft",  # Not active
+        status="inactive",
         valid_from=utc_dt.utcnow() - timedelta(days=1),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         personnel_count=3,
@@ -101,9 +101,63 @@ async def test_create_session_for_inactive_deployment_forbidden(
 
     assert response.status_code == 400
     assert (
-        "Sessions can only be created for active deployments"
+        "Sessions can only be created for draft or active deployments"
         in response.json()["detail"]
     )
+
+
+@pytest.mark.asyncio
+async def test_create_session_for_draft_deployment_allowed(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    admin_id: str,
+    db_session,
+    sample_estab,
+    sample_users,
+):
+    """Test that sessions can be created for draft deployments (PRD §8)."""
+    deployment = Deployment(
+        name="Draft Deployment",
+        estab_id=str(sample_estab.id),
+        status="draft",
+        valid_from=utc_dt.utcnow() - timedelta(days=1),
+        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        personnel_count=3,
+        created_by=str(sample_users["admin"].id),
+    )
+
+    db_session.add(deployment)
+    await db_session.commit()
+
+    from parade_state.models import DeploymentUserAccess
+
+    admin_access = DeploymentUserAccess(
+        user_id=admin_id,
+        deployment_id=str(deployment.id),
+        granted_by=admin_id,
+    )
+    db_session.add(admin_access)
+    await db_session.commit()
+
+    session_date = date.today()
+    session_data = {
+        "deployment_id": str(deployment.id),
+        "date": session_date.isoformat(),
+        "session_type": "AM",
+    }
+
+    response = client.post(
+        "/api/v1/sessions/",
+        json=session_data,
+        headers=admin_token_headers,
+        params={"user_id": admin_id, "user_role": "admin"},
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["deployment_id"] == str(deployment.id)
+    assert data["session_type"] == "AM"
+    assert data["status"] == "open"
 
 
 @pytest.mark.asyncio

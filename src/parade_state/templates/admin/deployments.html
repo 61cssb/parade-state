@@ -5,10 +5,271 @@
 {% block content %}
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
     <h2>Deployments</h2>
-    <button class="btn btn-primary">New Deployment</button>
+    <span style="color: #6b7280; font-size: 0.875rem;">{{ deployments|length }} deployments</span>
 </div>
 
 <div class="card">
-    <p style="color: #6b7280;">Deployments management coming soon...</p>
+    <form method="get" action="/admin/deployments" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+        <select name="status_filter" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            <option value="">All Statuses</option>
+            {% for s in deployment_statuses %}
+            <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-primary">Filter</button>
+        <a href="/admin/deployments" class="btn" style="background: #e5e7eb; color: #374151; padding: 0.5rem 1rem; border-radius: 0.25rem; text-decoration: none;">Clear</a>
+    </form>
+
+    {% if deployments %}
+    {% for d in deployments %}
+    <div class="card" style="margin-bottom: 1rem; border-left: 4px solid
+        {% if d.status == 'active' %}#10b981
+        {% elif d.status == 'draft' %}#9ca3af
+        {% elif d.status == 'inactive' %}#f59e0b
+        {% elif d.status == 'closed' %}#3b82f6
+        {% elif d.status == 'finalized' %}#8b5cf6
+        {% elif d.status == 'archived' %}#4b5563
+        {% else %}#e5e7eb{% endif %};">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <button onclick="toggleSessions('{{ d.id }}')" id="toggle-{{ d.id }}"
+                        style="background: none; border: none; cursor: pointer; font-size: 1rem; padding: 0.25rem;">▸</button>
+                <strong>{{ d.name }}</strong>
+                <span style="padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem;
+                    {% if d.status == 'active' %}background: #d1fae5; color: #065f46;
+                    {% elif d.status == 'draft' %}background: #f3f4f6; color: #374151;
+                    {% elif d.status == 'inactive' %}background: #fef3c7; color: #92400e;
+                    {% elif d.status == 'closed' %}background: #dbeafe; color: #1e40af;
+                    {% elif d.status == 'finalized' %}background: #ede9fe; color: #5b21b6;
+                    {% elif d.status == 'archived' %}background: #e5e7eb; color: #4b5563;
+                    {% else %}background: #e5e7eb; color: #374151;{% endif %}">{{ d.status }}</span>
+            </div>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <span style="font-size: 0.8rem; color: #6b7280;">
+                    {{ d.valid_from.strftime('%Y-%m-%d') }} → {{ d.valid_until.strftime('%Y-%m-%d') }}
+                </span>
+                {% if d.status == 'draft' %}
+                <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                        onclick="transitionDeployment('{{ d.id }}', 'active')">Activate</button>
+                {% elif d.status == 'active' %}
+                <button class="btn" style="background: #3b82f6; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                        onclick="transitionDeployment('{{ d.id }}', 'closed')">Close</button>
+                {% elif d.status == 'inactive' %}
+                <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                        onclick="transitionDeployment('{{ d.id }}', 'active')">Activate</button>
+                <button class="btn" style="background: #3b82f6; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                        onclick="transitionDeployment('{{ d.id }}', 'closed')">Close</button>
+                <button class="btn" style="background: #6b7280; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                        onclick="transitionDeployment('{{ d.id }}', 'archived')">Archive</button>
+                {% elif d.status == 'closed' %}
+                <button class="btn" style="background: #8b5cf6; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                        onclick="transitionDeployment('{{ d.id }}', 'finalized')">Finalize</button>
+                {% endif %}
+                {% if user.role == 'super_admin' and d.status not in ['active', 'finalized'] %}
+                <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                        onclick="deleteDeployment('{{ d.id }}', '{{ d.name }}')">Delete</button>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if d.notes %}
+        <p style="margin-top: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ d.notes }}</p>
+        {% endif %}
+
+        <div id="sessions-{{ d.id }}" style="display: none; margin-top: 1rem;">
+            <h4 style="margin-bottom: 0.5rem; font-size: 0.9rem;">Sessions</h4>
+            {% set sessions = sessions_by_deployment.get(d.id, []) %}
+            {% if sessions %}
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 0.75rem;">
+                <thead>
+                    <tr style="text-align: left; border-bottom: 1px solid #e5e7eb;">
+                        <th style="padding: 0.4rem; font-size: 0.8rem;">Date</th>
+                        <th style="padding: 0.4rem; font-size: 0.8rem;">Type</th>
+                        <th style="padding: 0.4rem; font-size: 0.8rem;">Status</th>
+                        <th style="padding: 0.4rem; font-size: 0.8rem;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in sessions %}
+                    <tr style="border-bottom: 1px solid #f3f4f6;">
+                        <td style="padding: 0.4rem; font-size: 0.85rem;">{{ s.date.strftime('%Y-%m-%d') }}</td>
+                        <td style="padding: 0.4rem; font-size: 0.85rem;">{{ s.session_type }}</td>
+                        <td style="padding: 0.4rem;">
+                            <span style="padding: 0.1rem 0.4rem; border-radius: 0.2rem; font-size: 0.7rem;
+                                {% if s.status == 'open' %}background: #d1fae5; color: #065f46;
+                                {% elif s.status == 'closed' %}background: #dbeafe; color: #1e40af;
+                                {% elif s.status == 'finalized' %}background: #ede9fe; color: #5b21b6;
+                                {% else %}background: #e5e7eb; color: #374151;{% endif %}">{{ s.status }}</span>
+                        </td>
+                        <td style="padding: 0.4rem;">
+                            <div style="display: flex; gap: 0.25rem;">
+                                {% if s.status == 'open' %}
+                                <button class="btn" style="background: #3b82f6; color: white; font-size: 0.7rem; padding: 0.15rem 0.4rem;"
+                                        onclick="transitionSession('{{ s.id }}', 'closed')">Close</button>
+                                {% elif s.status == 'closed' %}
+                                <button class="btn" style="background: #8b5cf6; color: white; font-size: 0.7rem; padding: 0.15rem 0.4rem;"
+                                        onclick="transitionSession('{{ s.id }}', 'finalized')">Finalize</button>
+                                {% endif %}
+                                {% if user.role == 'super_admin' and s.status != 'finalized' %}
+                                <button class="btn" style="background: #ef4444; color: white; font-size: 0.7rem; padding: 0.15rem 0.4rem;"
+                                        onclick="deleteSession('{{ s.id }}')">Delete</button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color: #6b7280; font-size: 0.85rem; margin-bottom: 0.75rem;">No sessions yet.</p>
+            {% endif %}
+
+            {% if d.status in ['draft', 'active'] %}
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                <input type="date" id="new-session-date-{{ d.id }}" style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
+                <select id="new-session-type-{{ d.id }}" style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
+                    <option value="AM">AM</option>
+                    <option value="PM">PM</option>
+                </select>
+                <button class="btn btn-success" style="font-size: 0.75rem; padding: 0.3rem 0.6rem;"
+                        onclick="createSession('{{ d.id }}')">+ Create session</button>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p style="color: #6b7280;">No deployments found.</p>
+    {% endif %}
 </div>
+
+<div id="statusMessage" style="margin-top: 1rem;"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const ADMIN_USER_ID = "{{ user.id }}";
+    const ADMIN_USER_ROLE = "{{ user.role }}";
+
+    function toggleSessions(deploymentId) {
+        const div = document.getElementById('sessions-' + deploymentId);
+        const btn = document.getElementById('toggle-' + deploymentId);
+        if (div.style.display === 'none') {
+            div.style.display = 'block';
+            btn.textContent = '▾';
+        } else {
+            div.style.display = 'none';
+            btn.textContent = '▸';
+        }
+    }
+
+    async function transitionDeployment(deploymentId, newStatus) {
+        try {
+            const response = await fetch('/api/v1/deployments/' + deploymentId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: newStatus }),
+            });
+            if (response.ok) {
+                showStatus('Deployment transitioned to ' + newStatus + '.', 'success');
+                setTimeout(function() { location.reload(); }, 800);
+            } else {
+                const data = await response.json();
+                showStatus('Transition failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    async function transitionSession(sessionId, newStatus) {
+        try {
+            const response = await fetch('/api/v1/sessions/' + sessionId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: newStatus }),
+            });
+            if (response.ok) {
+                showStatus('Session transitioned to ' + newStatus + '.', 'success');
+                setTimeout(function() { location.reload(); }, 800);
+            } else {
+                const data = await response.json();
+                showStatus('Transition failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    async function createSession(deploymentId) {
+        const dateInput = document.getElementById('new-session-date-' + deploymentId);
+        const typeInput = document.getElementById('new-session-type-' + deploymentId);
+        if (!dateInput.value) {
+            showStatus('Please select a date.', 'error');
+            return;
+        }
+        try {
+            const response = await fetch('/api/v1/sessions/?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    deployment_id: deploymentId,
+                    date: dateInput.value,
+                    session_type: typeInput.value,
+                }),
+            });
+            if (response.ok) {
+                showStatus('Session created.', 'success');
+                setTimeout(function() { location.reload(); }, 800);
+            } else {
+                const data = await response.json();
+                showStatus('Create failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    async function deleteDeployment(deploymentId, name) {
+        if (!confirm('Delete deployment "' + name + '"? This cannot be undone.')) return;
+        try {
+            const response = await fetch('/api/v1/deployments/' + deploymentId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
+                method: 'DELETE',
+            });
+            if (response.ok) {
+                showStatus('Deployment deleted.', 'success');
+                setTimeout(function() { location.reload(); }, 800);
+            } else {
+                const data = await response.json();
+                showStatus('Delete failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    async function deleteSession(sessionId) {
+        if (!confirm('Delete this session? This cannot be undone.')) return;
+        try {
+            const response = await fetch('/api/v1/sessions/' + sessionId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
+                method: 'DELETE',
+            });
+            if (response.ok) {
+                showStatus('Session deleted.', 'success');
+                setTimeout(function() { location.reload(); }, 800);
+            } else {
+                const data = await response.json();
+                showStatus('Delete failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    function showStatus(message, type) {
+        const div = document.getElementById('statusMessage');
+        const color = type === 'success' ? '#10b981' : '#ef4444';
+        div.innerHTML = '<p style="color: ' + color + '; font-weight: bold;">' + message + '</p>';
+    }
+</script>
 {% endblock %}
