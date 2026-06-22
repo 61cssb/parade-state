@@ -13,8 +13,8 @@ This document clarifies the different types of endpoints in the Parade State app
 - `GET /auth/callback` - OAuth callback handler (creates session, redirects to admin)
 - `GET /auth/logout` - Logout handler (clears cookies, redirects to login)
 
-**User-Facing View Routes (Phase 9D — planned):**
-- `GET /deployment` - Deployment summary (session counts, unit breakdown) — deployment selector dropdown
+**User-Facing View Routes (Phase 9D):**
+- `GET /deployment` - Deployment summary (today's AM/PM session counts, unit breakdown) — deployment selector dropdown
 - `GET /attendance` - Attendance marking table (inline status/remarks editing) — deployment + session selector
 
 **Admin Interface Routes:**
@@ -109,9 +109,9 @@ This document clarifies the different types of endpoints in the Parade State app
 5. Server: Redirects to Google OAuth
 6. User: Completes Google OAuth
 7. Google: Redirects to /auth/callback?code=xxx
-8. Server: Creates session, sets httponly cookie, redirects to /admin
-9. Browser: Accesses /admin with cookie
-10. Server: Validates cookie, returns admin dashboard (HTML)
+8. Server: Creates session, sets httponly cookie, redirects to /admin (admins) or /deployment (regular users)
+9. Browser: Accesses page with cookie
+10. Server: Validates cookie, returns appropriate view (HTML)
 ```
 
 ### API Authentication (Programmatic)
@@ -129,6 +129,8 @@ In `main.py`:
 ```python
 # Web routes (HTML responses)
 app.include_router(web_auth_router, prefix="/auth", tags=["web-auth"])
+app.include_router(web_deployment_router, tags=["web-deployment"])
+app.include_router(web_attendance_router, tags=["web-attendance"])
 app.include_router(admin_router, tags=["admin"])
 
 # API routes (JSON responses)  
@@ -161,6 +163,8 @@ app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 
 **Web Routes:**
 - `src/parade_state/web/auth.py` - Authentication web views
+- `src/parade_state/web/deployment.py` - Deployment summary view (non-admin)
+- `src/parade_state/web/attendance.py` - Attendance marking view (non-admin)
 - `src/parade_state/admin_routes.py` - Admin interface routes
 - `src/parade_state/templates/` - Jinja2 templates
 

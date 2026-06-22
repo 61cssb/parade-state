@@ -150,12 +150,16 @@
     </div>
 
     <div class="nav">
+        <a href="/deployment" class="{% if active_page == 'deployment' %}active{% endif %}">Deployment</a>
+        <a href="/attendance" class="{% if active_page == 'attendance' %}active{% endif %}">Attendance</a>
+        {% if user and user.role in ['admin', 'super_admin'] %}
         <a href="/admin" class="{% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a>
         <a href="/admin/deployments" class="{% if active_page == 'deployments' %}active{% endif %}">Deployments</a>
         <a href="/admin/users" class="{% if active_page == 'users' %}active{% endif %}">Users</a>
         <a href="/admin/csv-upload" class="{% if active_page == 'csv-upload' %}active{% endif %}">CSV Upload</a>
         <a href="/admin/settings" class="{% if active_page == 'settings' %}active{% endif %}">Settings</a>
         <a href="/admin/audit" class="{% if active_page == 'audit' %}active{% endif %}">Audit Log</a>
+        {% endif %}
     </div>
 
     <div class="container">

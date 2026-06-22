@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block title %}Attendance - Parade State{% endblock %}
+
+{% block content %}
+<h2>Attendance Marking</h2>
+
+<!-- Deployment + Session selectors -->
+<div class="card">
+    <form method="get" action="/attendance" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <label for="deployment_id" style="font-weight: bold;">Deployment:</label>
+            <select name="deployment_id" id="deployment_id" onchange="this.form.submit()"
+                    style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; min-width: 250px;">
+                {% for d in deployments %}
+                <option value="{{ d.id }}" {% if selected_deployment and d.id == selected_deployment.id %}selected{% endif %}>
+                    {{ d.name }} ({{ d.status }})
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        {% if selected_deployment %}
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <label for="session_id" style="font-weight: bold;">Session:</label>
+            <select name="session_id" id="session_id" onchange="this.form.submit()"
+                    style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; min-width: 250px;">
+                {% for s in sessions %}
+                <option value="{{ s.id }}" {% if selected_session and s.id == selected_session.id %}selected{% endif %}>
+                    {{ s.date.strftime('%Y-%m-%d') }} {{ s.session_type }} ({{ s.status }})
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+    </form>
+</div>
+
+{% if selected_deployment and selected_session %}
+{% set is_open = selected_session.status == 'open' %}
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3>
+            {{ selected_session.date.strftime('%Y-%m-%d') }} {{ selected_session.session_type }}
+            <span style="padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem;
+                {% if selected_session.status == 'open' %}background: #d1fae5; color: #065f46;
+                {% elif selected_session.status == 'closed' %}background: #dbeafe; color: #1e40af;
+                {% elif selected_session.status == 'finalized' %}background: #ede9fe; color: #5b21b6;
+                {% else %}background: #e5e7eb; color: #374151;{% endif %}">{{ selected_session.status }}</span>
+        </h3>
+        {% if not is_open %}
+        <span style="font-size: 0.85rem; color: #6b7280;">Read-only — session is {{ selected_session.status }}.</span>
+        {% endif %}
+    </div>
+
+    {% if attendance_records %}
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                <th style="padding: 0.5rem;">Rank</th>
+                <th style="padding: 0.5rem;">Name</th>
+                <th style="padding: 0.5rem;">Unit</th>
+                <th style="padding: 0.5rem;">Sub-unit</th>
+                <th style="padding: 0.5rem;">Status</th>
+                <th style="padding: 0.5rem;">Remarks</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in attendance_records %}
+            <tr style="border-bottom: 1px solid #e5e7eb;" data-record-id="{{ r.id }}">
+                <td style="padding: 0.5rem;">{{ r.rank }}</td>
+                <td style="padding: 0.5rem;">{{ r.full_name }}</td>
+                <td style="padding: 0.5rem;">{{ r.unit }}</td>
+                <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_1 or '' }}</td>
+                <td style="padding: 0.5rem;">
+                    <select data-attendance-id="{{ r.id }}" data-field="status"
+                            {% if not is_open %}disabled{% endif %}
+                            onchange="updateAttendance('{{ r.id }}', 'status', this.value)"
+                            style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                        <option value="present" {% if r.status == 'present' %}selected{% endif %}>Present</option>
+                        <option value="absent" {% if r.status == 'absent' %}selected{% endif %}>Absent</option>
+                        <option value="excused" {% if r.status == 'excused' %}selected{% endif %}>Excused</option>
+                        <option value="unknown" {% if r.status == 'unknown' %}selected{% endif %}>Unknown</option>
+                    </select>
+                </td>
+                <td style="padding: 0.5rem;">
+                    <input type="text" data-attendance-id="{{ r.id }}" data-field="remarks"
+                           value="{{ r.remarks }}"
+                           {% if not is_open %}disabled{% endif %}
+                           onchange="updateAttendance('{{ r.id }}', 'remarks', this.value)"
+                           style="width: 100%; min-width: 200px; padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: #6b7280;">No attendance records for this session.</p>
+    {% endif %}
+</div>
+{% elif selected_deployment %}
+<div class="card">
+    <p style="color: #6b7280;">No sessions available for this deployment.</p>
+</div>
+{% else %}
+<div class="card">
+    <p style="color: #6b7280;">No deployments available. Contact an administrator to get access.</p>
+</div>
+{% endif %}
+
+<div id="statusMessage" style="margin-top: 1rem;"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const USER_ID = "{{ user.id }}";
+    const USER_ROLE = "{{ user.role }}";
+
+    async function updateAttendance(attendanceId, field, value) {
+        const body = {};
+        body[field] = value;
+
+        try {
+            const response = await fetch('/api/v1/attendance/' + attendanceId + '?user_id=' + USER_ID + '&user_role=' + USER_ROLE, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+
+            if (response.ok) {
+                showStatus(field.charAt(0).toUpperCase() + field.slice(1) + ' updated.', 'success');
+            } else {
+                const data = await response.json();
+                showStatus('Update failed: ' + (data.detail || 'Unknown error'), 'error');
+                location.reload();
+            }
+        } catch (error) {
+            showStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    function showStatus(message, type) {
+        const div = document.getElementById('statusMessage');
+        const color = type === 'success' ? '#10b981' : '#ef4444';
+        div.innerHTML = '<p style="color: ' + color + '; font-weight: bold;">' + message + '</p>';
+        setTimeout(function() {
+            div.innerHTML = '';
+        }, 3000);
+    }
+</script>
+{% endblock %}

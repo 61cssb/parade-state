@@ -31,6 +31,8 @@ from parade_state.admin_routes import router as admin_router
 from parade_state.db import init_database
 from parade_state.utils import env
 from parade_state.web.auth import router as web_auth_router
+from parade_state.web.attendance import router as web_attendance_router
+from parade_state.web.deployment import router as web_deployment_router
 
 
 @asynccontextmanager
@@ -92,6 +94,10 @@ async def health_check():
 # Include routers
 # User-facing web routes (OAuth flows, redirects)
 app.include_router(web_auth_router, prefix="/auth", tags=["web-auth"])
+
+# User-facing web routes (non-admin views)
+app.include_router(web_deployment_router, tags=["web-deployment"])
+app.include_router(web_attendance_router, tags=["web-attendance"])
 
 # Admin interface routes
 app.include_router(admin_router, tags=["admin"])

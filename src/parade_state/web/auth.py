@@ -93,13 +93,21 @@ async def login(request: Request):
         ```
     """
     # Check if user is already authenticated
-    from parade_state.auth.admin_dependencies import get_current_admin_user_optional
+    from parade_state.auth.admin_dependencies import (
+        get_current_admin_user_optional,
+        get_current_user_optional,
+    )
 
     current_admin = await get_current_admin_user_optional(request)
     if current_admin:
-        # Already logged in, redirect to admin
         from fastapi.responses import RedirectResponse
         return RedirectResponse(url="/admin", status_code=302)
+
+    # Check if a regular (non-admin) user is already authenticated
+    current_user = await get_current_user_optional(request)
+    if current_user:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/deployment", status_code=302)
 
     # Show login page
     from jinja2 import Environment, FileSystemLoader
@@ -250,7 +258,9 @@ async def auth_callback(
         base_url = f"{request.url.scheme}://{request.url.netloc}"
 
         # Create redirect response with authentication cookie
-        response = RedirectResponse(url=f"{base_url}/admin", status_code=302)
+        # Redirect admins to admin dashboard, regular users to deployment view
+        redirect_path = "/admin" if user.role in ["admin", "super_admin"] else "/deployment"
+        response = RedirectResponse(url=f"{base_url}{redirect_path}", status_code=302)
 
         # Set the authentication cookie using centralized cookie utility
         cookies.set_auth_cookie(response, user_session.token, expires_hours=24)

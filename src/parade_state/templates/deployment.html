@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Deployment Summary - Parade State{% endblock %}
+
+{% block content %}
+<h2>Deployment Summary</h2>
+
+<!-- Deployment selector -->
+<div class="card">
+    <form method="get" action="/deployment" style="display: flex; gap: 0.5rem; align-items: center;">
+        <label for="deployment_id" style="font-weight: bold;">Deployment:</label>
+        <select name="deployment_id" id="deployment_id" onchange="this.form.submit()"
+                style="flex: 1; max-width: 400px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            {% for d in deployments %}
+            <option value="{{ d.id }}" {% if selected_deployment and d.id == selected_deployment.id %}selected{% endif %}>
+                {{ d.name }} ({{ d.status }})
+            </option>
+            {% endfor %}
+        </select>
+    </form>
+</div>
+
+{% if selected_deployment %}
+<p style="color: #6b7280; margin-bottom: 1rem;">
+    Showing sessions for {{ today }}.
+</p>
+
+<!-- Session summary cards -->
+{% if sessions %}
+<div class="stats">
+    {% for s in sessions %}
+    <div class="stat-card">
+        <div class="stat-label">{{ s.session_type }} Session ({{ s.status }})</div>
+        <div style="display: flex; gap: 1.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
+            <div>
+                <span style="font-size: 0.75rem; color: #6b7280;">Present</span>
+                <div class="stat-value green">{{ s.present }}</div>
+            </div>
+            <div>
+                <span style="font-size: 0.75rem; color: #6b7280;">Absent</span>
+                <div class="stat-value" style="color: #ef4444;">{{ s.absent }}</div>
+            </div>
+            <div>
+                <span style="font-size: 0.75rem; color: #6b7280;">Excused</span>
+                <div class="stat-value orange">{{ s.excused }}</div>
+            </div>
+            <div>
+                <span style="font-size: 0.75rem; color: #6b7280;">Unknown</span>
+                <div class="stat-value purple">{{ s.unknown }}</div>
+            </div>
+            <div>
+                <span style="font-size: 0.75rem; color: #6b7280;">Total</span>
+                <div class="stat-value">{{ s.total }}</div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card">
+    <p style="color: #6b7280;">No sessions scheduled for today.</p>
+</div>
+{% endif %}
+
+<!-- Unit breakdown -->
+{% if unit_breakdown %}
+<div class="card">
+    <h3 style="margin-bottom: 1rem;">Unit Breakdown</h3>
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                <th style="padding: 0.5rem;">Unit</th>
+                <th style="padding: 0.5rem; text-align: center;">Present</th>
+                <th style="padding: 0.5rem; text-align: center;">Absent</th>
+                <th style="padding: 0.5rem; text-align: center;">Excused</th>
+                <th style="padding: 0.5rem; text-align: center;">Unknown</th>
+                <th style="padding: 0.5rem; text-align: center;">Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in unit_breakdown %}
+            <tr style="border-bottom: 1px solid #e5e7eb;">
+                <td style="padding: 0.5rem; font-weight: bold;">{{ u.unit }}</td>
+                <td style="padding: 0.5rem; text-align: center; color: #10b981; font-weight: bold;">{{ u.present }}</td>
+                <td style="padding: 0.5rem; text-align: center; color: #ef4444;">{{ u.absent }}</td>
+                <td style="padding: 0.5rem; text-align: center; color: #f59e0b;">{{ u.excused }}</td>
+                <td style="padding: 0.5rem; text-align: center; color: #8b5cf6;">{{ u.unknown }}</td>
+                <td style="padding: 0.5rem; text-align: center; font-weight: bold;">{{ u.total }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% else %}
+<div class="card">
+    <p style="color: #6b7280;">No deployments available. Contact an administrator to get access.</p>
+</div>
+{% endif %}
+{% endblock %}

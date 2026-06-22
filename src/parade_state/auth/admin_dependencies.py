@@ -87,6 +87,46 @@ async def get_current_admin_user_optional(
     return None
 
 
+async def get_current_user_optional(
+    request: Request,
+) -> User | None:
+    """Get current authenticated user from session without requiring admin role.
+
+    Identical to get_current_admin_user_optional() but allows any active
+    authenticated user (no role check). Used by non-admin views like
+    deployment summary and attendance marking.
+
+    Args:
+        request: FastAPI Request object
+
+    Returns:
+        User object if authenticated and active, None otherwise
+    """
+    token = await get_token_from_request(request)
+    if not token:
+        return None
+
+    # Get database session maker
+    from parade_state.db import get_session_maker
+
+    session_maker = get_session_maker()
+    if not session_maker:
+        return None
+
+    async with session_maker() as db:
+        session = await get_valid_session(db, token, update_last_accessed=True)
+        if not session:
+            return None
+
+        result = await db.execute(select(User).where(User.id == session.user_id))
+        user = result.scalar_one_or_none()
+
+        if user and user.status == "active":
+            return user
+
+    return None
+
+
 async def require_admin_user_flexible(
     request: Request,
 ) -> User:
