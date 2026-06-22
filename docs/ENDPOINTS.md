@@ -49,6 +49,22 @@ This document clarifies the different types of endpoints in the Parade State app
 - `/api/v1/attendance/*` - Attendance records
 - `/api/v1/personnel/*` - Personnel management
 - `/api/v1/access-control/*` - Access control
+- `/api/v1/csv/*` - CSV upload and ingestion *(planned — see [NEXT_PHASE.md](NEXT_PHASE.md))*
+
+### 3. CSV Upload API (Planned)
+
+**Purpose:** CSV file ingestion for establishment/roster data
+
+**Planned Endpoints:**
+- `POST /api/v1/csv/upload` - Upload CSV file (returns upload ID, hash, detected columns)
+- `GET /api/v1/csv/uploads` - List previous uploads
+
+**Status:** Models exist ([csv_ingestion.py](src/parade_state/models/csv_ingestion.py)), API endpoints to be implemented in Phase 9B.
+
+**3-Step Pipeline:**
+1. **Upload** (planned) — File ingestion, hashing, column detection
+2. **Mapping** (deferred) — Map raw columns to canonical names
+3. **Diff** (deferred) — Compare against current active establishment
 
 **Characteristics:**
 - Return JSON responses

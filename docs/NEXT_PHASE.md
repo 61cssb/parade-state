@@ -35,123 +35,89 @@
 
 ---
 
-## 🚀 Current Phase: Frontend Development (Phase 9) - PRIORITIZED
+## 🚀 Current Phase: Frontend Development (Phase 9) - IN PROGRESS
 
 **Priority:** HIGH
-**Estimated Duration:** 3-5 sessions
-**Why Now:** No frontend means no users means no real data for testing reporting features. Frontend is now critical for user acquisition and production validation.
+**Status:** Phase 9A (Foundation) COMPLETE — Phase 9B (Core Features) NEXT
 
-**Strategic Rationale:**
-- Phase 7 (Reporting) requires production data to design meaningful reports
-- Can't test user flows or get stakeholder feedback without UI
-- Frontend unlocks user onboarding and real-world usage
-- Critical for validating the backend API in production scenarios
+### **Phase 9A: Foundation — COMPLETED ✅**
 
-### **Strategic Rationale & Scope Decisions**
+- [x] Set up Jinja2 templates in FastAPI (singleton pattern, cache_size=0)
+- [x] Create base template with responsive layout
+- [x] Implement Google OAuth login UI flow (login page, OAuth start, callback)
+- [x] Host-independent OAuth (dynamic redirect URIs)
+- [x] Secure server-side cookie management (httponly, centralized in utils.cookies)
+- [x] Protected admin routes with authentication checks
+- [x] Logout functionality (no redirect loops)
+- [x] 7 admin page templates created (dashboard, deployments, sessions, users, csv-upload, settings, audit)
 
-**✅ What We're Building:**
-1. **Deployment Status Reports** - Operational debugging and awareness
-2. **CSV Export Utility** - Data export for debugging and analysis
+### **Phase 9B: Dashboard Wiring + CSV Upload — NEXT SESSION**
 
-**❌ What We're Deferring:**
-- **Attendance Summary Reports** - No report format from stakeholders yet
-- **Personnel Attendance History** - Not requested, UX unclear
-- **Exception Reporting** - Need production data first to understand patterns
+**Goal:** Make the dashboard and CSV upload pages functional with real data.
 
-**Decision Rationale:**
-- Stakeholders haven't provided report formats/requirements
-- Need production data before designing exception reporting
-- Personnel history UX is unclear without use cases
-- Focus on tools that provide immediate debugging value
-- Can build comprehensive reports once requirements are clear
+#### **Task 1: Wire Up Dashboard with Real Data**
 
-### **Implementation Plan**
+**Files to modify:**
+- [src/parade_state/admin_routes.py](src/parade_state/admin_routes.py) — Add database queries to `admin_dashboard()`
+- [src/parade_state/templates/admin/dashboard.html](src/parade_state/templates/admin/dashboard.html) — Replace hardcoded zeros with template variables
 
-#### **Frontend Architecture & Technology Stack**
+**Queries needed (use `get_session_maker()` pattern):**
+- Count active deployments (`Deployment.status == "active"`)
+- Count open sessions (`Session.status == "open"`)
+- Count active personnel (`Personnel.status == "active"`)
+- Count active users (`User.status == "active"`)
+- Fetch last 10 AuditLog entries (join with User for names)
 
-**Decision Required:** Frontend Framework Choice
-- **Option A:** **NiceGUI** (already mentioned in README)
-  - Pros: Python-based, integrates with FastAPI, rapid development
-  - Cons: Less flexible for custom UI, limited ecosystem
-  - Use case: Admin interfaces, internal tools
-  
-- **Option B:** **Modern React/Next.js**
-  - Pros: Rich ecosystem, modern UI patterns, better mobile support
-  - Cons: Separate build process, more complexity
-  - Use case: Consumer-facing apps, mobile-first UX
-  
-- **Option C:** **Vanilla HTML/JS + FastAPI Jinja2 templates**
-  - Pros: Simple, fast to implement, single codebase
-  - Cons: Limited interactivity, harder to scale
-  - Use case: MVP, rapid prototyping
+**Template changes:**
+- Replace `0` values with `{{ active_deployments }}`, `{{ open_sessions }}`, etc.
+- Replace "No recent activity" with table looping through `recent_activity`
 
-**Recommendation:** Start with **Option C (Jinja2 templates)** for MVP, evaluate NiceGUI for admin features
+**Also:** Add `"id": current_admin.id` to all 7 `template.render()` user dicts (enables templates to call API endpoints with user identity).
 
-#### **Core UI Features to Build**
+#### **Task 2: CSV Upload — Step 1 (File Ingestion)**
 
-**1. Authentication & User Management**
-- Google OAuth login flow
-- User profile display
-- Deployment access indicators
-- Admin user management (for super_admins)
+**New file:** `src/parade_state/api/csv_upload.py`
 
-**2. Main Dashboard**
-- User's deployment(s) overview
-- Quick status: today's AM/PM sessions
-- Personnel counts by status
-- Navigation to main features
+**Endpoints:**
+- `POST /api/v1/csv/upload` — Accept file, compute SHA256 hash, check duplicates, parse headers, store raw content in CsvUpload, create audit log entry
+- `GET /api/v1/csv/uploads` — List recent uploads (metadata only)
 
-**3. Attendance Management**
-- Session list (today's AM/PM sessions)
-- Personnel roster with photos
-- Individual attendance marking (present/absent/excused)
-- Bulk attendance operations
-- Session status management (open/close/finalize)
+**Files to modify:**
+- [src/parade_state/main.py](src/parade_state/main.py) — Register CSV upload router
+- [src/parade_state/admin_routes.py](src/parade_state/admin_routes.py) — Fetch recent uploads in `admin_csv_upload()`
+- [src/parade_state/templates/admin/csv_upload.html](src/parade_state/templates/admin/csv_upload.html) — Functional upload form with JS fetch(), results display, uploads table
 
-**4. Deployment Management**
-- Deployment listing and details
-- Personnel assignments and overrides
-- Deployment notes management
-- Subunit organization view
+**Backend models already exist:** CsvUpload, ColumnMapping, ColumnMetadata, Estab (see [src/parade_state/models/csv_ingestion.py](src/parade_state/models/csv_ingestion.py))
 
-**5. Personnel Browser**
-- Personnel search and filtering
-- Individual personnel details
-- Attendance history view
-- Assignment management
+**Dependencies available:** `python-multipart` already installed
 
-#### **Technical Implementation Approach**
+#### **Task 3: Documentation Updates**
+- Update [docs/ENDPOINTS.md](docs/ENDPOINTS.md) with new CSV endpoints
+- Update this file with completion status
 
-**Phase 9A: Foundation (Session 1-2)**
-- [ ] Set up Jinja2 templates in FastAPI
-- [ ] Create base template with responsive layout
-- [ ] Implement Google OAuth login UI flow
-- [ ] Build main dashboard with deployment overview
-- [ ] Add basic navigation structure
+#### **Deferred CSV Pipeline Steps (Future Sessions)**
+- **Step 2:** Column mapping UI (map raw CSV columns to canonical names)
+- **Step 3:** Diff confirmation (compare new upload vs current active Estab)
+- ColumnMetadata record creation
+- Estab creation from CSV data
+- Personnel record generation from mapped CSV rows
 
-**Phase 9B: Core Features (Session 3-4)**
-- [ ] Build attendance marking interface
-- [ ] Implement personnel browser with search/filter
-- [ ] Create deployment management UI
-- [ ] Add session status controls
-- [ ] Implement bulk attendance operations
+### **Phase 9C: Remaining Admin Pages (Future Sessions)**
 
-**Phase 9C: Polish & Mobile (Session 5)**
-- [ ] Mobile responsiveness optimization
-- [ ] Loading states and error handling
-- [ ] Accessibility improvements
-- [ ] Performance optimization
-- [ ] User feedback and validation messages
+**Priority order after dashboard + CSV upload:**
+1. **Attendance marking** — Individual and bulk operations
+2. **Personnel browser** — Search, filter, manage personnel
+3. **Deployment management** — Create/manage deployments, assignments, overrides
+4. **Session controls** — Open/close/finalize sessions, bulk operations
+5. **Mobile optimization** — Responsive design for field use
 
-#### **Success Criteria**
-- [ ] Users can authenticate via Google OAuth
-- [ ] Users can view their deployment dashboard
-- [ ] Users can mark attendance for personnel
-- [ ] Users can manage deployment personnel assignments
-- [ ] UI is mobile-friendly for field use
-- [ ] All user flows respect access control rules
-- [ ] Frontend has appropriate error handling
-- [ ] Documentation includes frontend setup
+#### **Success Criteria for Phase 9B**
+- [ ] Dashboard shows real counts from database
+- [ ] Dashboard shows recent audit log activity
+- [ ] CSV upload accepts .csv files and stores them
+- [ ] CSV upload detects and displays columns
+- [ ] CSV upload shows previous uploads list
+- [ ] No 404s or Internal Server Errors
 
 ---
 
@@ -191,7 +157,7 @@ git log --oneline --all
 ```
 
 **Recent Major Completions:**
-- **Phase 9: Frontend Development** (2026-06-22) - Admin interface with Jinja2 templates and OAuth
+- **Phase 9A: Frontend Foundation** (2026-06-22) - OAuth authentication, Jinja2 templates, admin interface, secure cookies, logout
 - **Phase 5: Advanced Access Control** (2026-05-10) - Multi-tenant security
 - **Phase 4: Personnel Management** (2026-05-08) - Deployment-based personnel operations
 - **Phase 3: Attendance Sessions** (Completed) - AM/PM session management
@@ -199,11 +165,12 @@ git log --oneline --all
 - **Phase 1: Authentication** (Completed) - Google OAuth and user management
 
 **Priority Changes:**
+- **2026-06-22:** Phase 9A complete. OAuth login/logout working, 7 admin templates created. Next: wire up dashboard with real data and implement CSV upload step 1 (file ingestion).
 - **2026-06-22:** Phase 9 (Frontend) prioritized from LOW to HIGH. Admin interface completed with host-independent OAuth flow. Frontend development now critical for user acquisition and production validation.
 - **2026-05-16:** Phase 7 reduced to deployment status + CSV export only. Comprehensive reporting deferred pending stakeholder requirements and production data analysis.
 
 ---
 
-**Ready to start Phase 9: Frontend Development** 🚀
+**Next: Phase 9B — Dashboard Wiring + CSV Upload** 🚀
 
-The system has a solid foundation with enterprise-grade security, comprehensive testing, and production-ready infrastructure. Frontend development is now the top priority to enable user onboarding, production testing, and real-world validation of the API.
+Authentication is working. Admin templates exist. Next session focuses on making the dashboard functional with real database queries and implementing CSV file ingestion (step 1 of the upload pipeline). See the detailed plan above.
