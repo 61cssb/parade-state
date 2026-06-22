@@ -2,11 +2,9 @@
 
 {% block title %}Users - Parade State Admin{% endblock %}
 
-{% block content %}
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-    <h2>Users</h2>
-</div>
+{% block page_title %}Users{% endblock %}
 
+{% block content %}
 <div class="card">
     <form method="get" action="/admin/users" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
         <input type="text" name="search" value="{{ search }}" placeholder="Search name or email..."
