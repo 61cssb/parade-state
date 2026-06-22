@@ -89,14 +89,43 @@
 - Estab creation from CSV data
 - Personnel record generation from mapped CSV rows
 
-### Phase 9C-3: Remaining Admin Pages (Future Sessions)
+### Phase 9C-3: Deployment + Session Management (Combined View)
 
-**Priority order after audit log:**
-1. **Attendance marking** — Individual and bulk operations
-2. **Personnel browser** — Search, filter, manage personnel
-3. **Deployment management** — Create/manage deployments, assignments, overrides
-4. **Session controls** — Open/close/finalize sessions, bulk operations
-5. **Mobile optimization** — Responsive design for field use
+**Scope:** Combined deployment and session admin page at `/admin/deployments`. Sessions are presented as an expandable detail section within each deployment row (master-detail pattern). The existing `/admin/sessions` stub will redirect here or be removed.
+
+**Rationale:** Sessions only exist as children of deployments. The admin workflow is deployment-centric: pick deployment → view sessions → manage status. Separate pages force back-and-forth navigation. Session closure cascades from deployment closure — combining makes the impact visible.
+
+**API stays separate:** `/api/v1/deployments/*` and `/api/v1/sessions/*` remain independent routers. Only the HTML admin view is combined.
+
+**In scope:**
+1. **Deployment list** — table with status badges, filter by status, validity range
+2. **Deployment actions** — activate, deactivate, archive, close, finalize (hardcoded status transitions, not user-editable)
+3. **Deployment attributes** — name, validity range, notes (inline edit or detail panel)
+4. **Session sub-view** — expandable per-deployment list of sessions with status badges
+5. **Session actions** — close, finalize (hardcoded transitions)
+6. **Session creation** — pick date + AM/PM, pre-populates personnel as absent
+7. **Delete** (super_admin only) — deployment (blocked if active/finalized), session (blocked if finalized)
+
+**Out of scope (deferred):**
+- Personnel override management UI (complex, low frequency)
+- Deployment notes per-personnel (deferred to personnel browser work)
+- Clone (same-estab) and migrate (cross-estab) workflows
+- CSV export of deployment data
+- Manual deployment access grant UI (PRD §17: auto-granted on creation)
+
+**PRD compliance note:** API currently blocks session creation for `draft` deployments, but PRD §8 allows creating sessions in advance for draft or active deployments. API should be updated to match PRD as part of this phase.
+
+**Access control clarification:** PRD §17 specifies auto-grant behavior as the user-facing default. The `DeploymentUserAccess` API model remains available for explicit admin grants via API if needed, but no UI surface is required for MVP.
+
+### Phase 9C-4: Mobile Optimization (Future)
+
+**Priority:** Responsive design for field use (tablets, mobile).
+
+### Out of Admin Scope
+
+The following were previously listed as admin pages but fall under non-admin (estab/deployment) views:
+- **Attendance marking** — individual and bulk operations (deployment-scoped, not admin-only)
+- **Personnel browser** — search, filter, manage personnel (estab-scoped, not admin-only)
 
 ---
 

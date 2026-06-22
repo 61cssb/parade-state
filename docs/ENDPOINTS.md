@@ -15,12 +15,13 @@ This document clarifies the different types of endpoints in the Parade State app
 
 **Admin Interface Routes:**
 - `GET /admin` - Admin dashboard
-- `GET /admin/deployments` - Deployments management page
-- `GET /admin/sessions` - Sessions management page  
+- `GET /admin/deployments` - Deployments + sessions management page (combined master-detail view)
 - `GET /admin/users` - Users management page
 - `GET /admin/csv-upload` - CSV upload page
 - `GET /admin/settings` - Settings page
 - `GET /admin/audit` - Audit log page
+
+**Note:** Sessions are managed within the deployments page (expandable per-deployment section). The REST APIs `/api/v1/deployments/*` and `/api/v1/sessions/*` remain separate.
 
 **Characteristics:**
 - Return HTML responses (Jinja2 templates)
