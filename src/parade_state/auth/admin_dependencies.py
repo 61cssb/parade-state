@@ -11,6 +11,7 @@ from sqlalchemy import select
 from parade_state.auth.session import get_valid_session
 from parade_state.db import get_db_session
 from parade_state.models import User
+from parade_state.utils import cookies
 
 security = HTTPBearer(auto_error=False)
 
@@ -34,8 +35,8 @@ async def get_token_from_request(request: Request) -> str | None:
     if auth_header and auth_header.startswith("Bearer "):
         return auth_header[7:]
 
-    # Try cookie
-    token = request.cookies.get("session_token")
+    # Try cookie using centralized utility
+    token = cookies.get_auth_token(request)
     if token:
         return token
 

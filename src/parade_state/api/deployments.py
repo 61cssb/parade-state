@@ -1,7 +1,6 @@
 """Deployment management API endpoints."""
 
 import csv
-from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse

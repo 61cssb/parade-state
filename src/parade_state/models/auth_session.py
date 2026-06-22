@@ -1,12 +1,12 @@
 """Authentication session models for user session management."""
 
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from parade_state.utils import utc_dt
+from parade_state.utils.utc_dt import datetime
 
 from ..db import Base
 

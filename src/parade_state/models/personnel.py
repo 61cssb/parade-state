@@ -1,10 +1,12 @@
 """Personnel and establishment models."""
 
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import JSON, Enum, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from parade_state.utils import utc_dt
+from parade_state.utils.utc_dt import datetime
 
 from ..db import Base
 
@@ -35,9 +37,9 @@ class Personnel(Base):
         default="active",
         index=True,
     )
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
-    updated_at: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
+    updated_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True, index=True)
     updated_by: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True
     )

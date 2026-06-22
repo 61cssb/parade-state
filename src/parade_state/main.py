@@ -1,8 +1,6 @@
 """FastAPI application setup and configuration."""
 
-import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -13,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from parade_state.utils import utc_dt, env
+from parade_state.utils import env, utc_dt
 
 # Load environment variables from .env file
 load_dotenv()

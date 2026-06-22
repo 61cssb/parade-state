@@ -1,10 +1,12 @@
 """Deployment and related models."""
 
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Enum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from parade_state.utils import utc_dt
+from parade_state.utils.utc_dt import datetime
 
 from ..db import Base
 
@@ -38,12 +40,12 @@ class Deployment(Base):
     )
     valid_from: Mapped[datetime] = mapped_column()
     valid_until: Mapped[datetime] = mapped_column()
-    scheduled_activation: Mapped[datetime | None] = mapped_column(nullable=True)
+    scheduled_activation: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True)
     personnel_count: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
-    activated_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    deactivated_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    activated_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True)
+    deactivated_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
@@ -86,9 +88,9 @@ class DeploymentPersonnelOverride(Base):
     sub_unit_1: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sub_unit_2: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sub_unit_3: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
-    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
 
     # Relationships
     deployment: Mapped[Deployment] = relationship(back_populates="personnel_overrides")
@@ -121,9 +123,9 @@ class DeploymentNotes(Base):
         String(36), ForeignKey("personnel.id", ondelete="CASCADE")
     )
     notes: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
-    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     updated_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     notes_version: Mapped[int] = mapped_column(Integer, default=1)
 

@@ -60,8 +60,6 @@ This module depends on:
 - `parade_state.utils` - Environment and datetime utilities
 """
 
-from datetime import timedelta
-
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,7 +69,7 @@ from parade_state.auth.oauth import get_oauth
 from parade_state.auth.session import create_user_session
 from parade_state.db import get_db_session
 from parade_state.models import User
-from parade_state.utils import env, utc_dt
+from parade_state.utils import cookies, env, utc_dt
 
 router = APIRouter()
 
@@ -143,22 +141,8 @@ async def logout(request: Request):
     # Create redirect response to login page
     response = RedirectResponse(url="/auth/login", status_code=302)
 
-    # Clear the session cookie by setting it to expire in the past
-    # This matches the exact parameters used in set_cookie
-    from datetime import timedelta
-    expires = utc_dt.utcnow() - timedelta(days=1)
-    expires_str = expires.strftime("%a, %d-%b-%Y %H:%M:%S GMT")
-
-    response.set_cookie(
-        "session_token",
-        "",  # Empty value
-        expires=expires_str,
-        path="/",
-        domain=None,
-        samesite="lax",
-        secure=False,
-        httponly=True
-    )
+    # Clear the session cookie using centralized cookie utility
+    cookies.clear_auth_cookie(response)
 
     return response
 
@@ -268,20 +252,8 @@ async def auth_callback(
         # Create redirect response with authentication cookie
         response = RedirectResponse(url=f"{base_url}/admin", status_code=302)
 
-        # Set the authentication cookie server-side for security
-        expires = utc_dt.utcnow() + timedelta(hours=24)
-        expires_str = expires.strftime("%a, %d-%b-%Y %H:%M:%S GMT")
-
-        response.set_cookie(
-            "session_token",
-            user_session.token,
-            expires=expires_str,
-            path="/",
-            domain=None,  # Allow for any domain
-            samesite="lax",
-            secure=False,  # Set to True for HTTPS in production
-            httponly=True  # Prevent JavaScript access (more secure)
-        )
+        # Set the authentication cookie using centralized cookie utility
+        cookies.set_auth_cookie(response, user_session.token, expires_hours=24)
 
         return response
 

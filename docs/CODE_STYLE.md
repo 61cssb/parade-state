@@ -327,46 +327,6 @@ Follow RESTful conventions:
 @router.get("/create_user")        # Wrong HTTP method
 ```
 
-### **Response Models**
-
-Use Pydantic models for responses:
-
-```python
-# ✅ CORRECT - Explicit response models
-@router.get("/users/{user_id}", response_model=UserResponse)
-async def get_user(user_id: str):
-    return {
-        "id": str(user.id),
-        "email": user.email,
-        "name": user.name,
-    }
-
-# ❌ VIOLATION - Untyped responses
-@router.get("/users/{user_id}")
-async def get_user(user_id: str):
-    return user  # Unclear what this returns
-```
-
-### **Response Models**
-
-Use Pydantic models for responses:
-
-```python
-# ✅ CORRECT - Explicit response models
-@router.get("/users/{user_id}", response_model=UserResponse)
-async def get_user(user_id: str):
-    return {
-        "id": str(user.id),
-        "email": user.email,
-        "name": user.name,
-    }
-
-# ❌ VIOLATION - Untyped responses
-@router.get("/users/{user_id}")
-async def get_user(user_id: str):
-    return user  # Unclear what this returns
-```
-
 ### **HTTP Methods and Status Codes**
 
 Use appropriate HTTP methods and status codes:

@@ -1,9 +1,11 @@
 """Pydantic schemas for API request/response validation."""
 
-from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+from parade_state.utils import utc_dt
+from parade_state.utils.utc_dt import date, datetime
 
 # ============================================================================
 # Deployment Schemas
