@@ -1,6 +1,6 @@
 # Next Implementation Phase
 
-**Last Updated:** 2026-06-22
+**Last Updated:** 2026-06-24
 **Status:** Production-Ready Backend with User-Facing Views
 
 ---
@@ -29,6 +29,10 @@
 - **Combined deployment + session admin page** (master-detail with status transitions, session creation)
 - **Non-admin deployment summary view** (AM/PM session counts, unit breakdown)
 - **Non-admin attendance marking view** (inline status/remarks editing, role-aware nav)
+- **Estab admin view** (`/admin/estabs`) with CAA date, source filename, personnel count, status
+- **`CsvUpload.original_filename`** — upload-time filename now stored (was only in audit log)
+- **Estab API** (`GET /api/v1/estabs`, `GET /api/v1/estabs/{id}`) — list/detail with latest CsvUpload join
+- **Non-admin estab browser** (`/estab`) — roster table with estab selector, search, unit filter; row-numbered for easy counting
 
 ### System Capabilities
 - Multi-tenant deployment isolation with access control
@@ -153,6 +157,43 @@
 
 ---
 
+### Phase 9F: Estab Views — COMPLETED (2026-06-24)
+
+**Goal:** Surface estab data to both admins (management view) and regular users (roster browser).
+
+**Completed features:**
+- [x] `CsvUpload.original_filename` column + Alembic migration `a1b2c3d4e5f6`
+- [x] `GET /api/v1/estabs` (list) and `GET /api/v1/estabs/{id}` (detail), admin-only, with latest-CsvUpload join for source filename
+- [x] `POST /api/v1/csv/upload` stores `original_filename`
+- [x] Admin estab management page at `/admin/estabs` (CAA date, source file, personnel count, status filter)
+- [x] Non-admin estab browser at `/estab` — roster table with row numbers, estab selector, search, unit filter
+- [x] Nav: "Estab" link in user sidebar (between Attendance and Admin section); "Estabs" link in admin sidebar
+- [x] 235 tests still passing (no regressions)
+
+**Design decisions:**
+- File reference stored on `CsvUpload` (normalized) and surfaced via join in estab views. Denormalization to `Estab` deferred — see Pending Decisions.
+- Estab browser is open to all authenticated users (org-wide reference data). Deployment-based subunit scoping is a possible future refinement.
+
+**Files added:**
+- `src/parade_state/api/estabs.py`
+- `src/parade_state/web/estab.py`
+- `src/parade_state/templates/admin/estabs.html`
+- `src/parade_state/templates/estab.html`
+- `src/parade_state/migrations/versions/a1b2c3d4e5f6_add_original_filename_to_csv_uploads.py`
+
+---
+
+### Pending Decisions
+
+**Estab file-reference convention (2026-06-24).** Each Estab is currently associated with its source file via `CsvUpload.original_filename` (upload-time filename, joined via `estab.csv_uploads`). Open questions:
+- Should this be denormalized onto `Estab` directly (e.g., `Estab.source_filename`) for cheaper queries / independent renaming?
+- Should the identifier be a filename, a content-addressed hash (`sha256_hash` already exists), or an opaque upload ID?
+- Naming: `original_filename` vs `source_filename` vs `source_file_ref`.
+
+Defer until the diff-confirmation step (Phase 9C-2 deferred work) forces a concrete decision.
+
+---
+
 ## Deferred Phases
 
 ### **Phase 7: Reporting & Analytics** (DEFERRED)
@@ -189,6 +230,7 @@ git log --oneline --all
 ```
 
 **Recent Major Completions:**
+- **Phase 9F: Estab Views** (2026-06-24) - Admin estab management page (`/admin/estabs`), non-admin estab browser (`/estab`) with row-numbered roster table and search/unit filter, estab API endpoints, `CsvUpload.original_filename` column + migration `a1b2c3d4e5f6`. File-reference naming convention deferred (see Pending Decisions).
 - **Phase 9D: Non-Admin Views** (2026-06-22) - Deployment summary view (`/deployment`) with AM/PM session counts and unit breakdown, attendance marking view (`/attendance`) with inline status/remarks editing, `get_current_user_optional()` auth function, role-aware nav, OAuth callback role-aware redirect
 - **Phase 9C-3: Deployment + Session Management** (2026-06-22) - Combined admin page with expandable session sub-views, status transitions, session creation, PRD §8 compliance fix, 1 new + 1 updated test
 - **Phase 9C-2: Audit Log API + Page** (2026-06-22) - Audit log API with filtering/pagination, admin page with colored action badges, 10 integration tests
@@ -202,6 +244,7 @@ git log --oneline --all
 - **Phase 1: Authentication** (Completed) - Google OAuth and user management
 
 **Priority Changes:**
+- **2026-06-24:** Phase 9F complete. Admin estab management page (`/admin/estabs`) and non-admin estab browser (`/estab`) shipped. Added `CsvUpload.original_filename` column (migration `a1b2c3d4e5f6`) and `GET /api/v1/estabs` endpoints. Estab browser shows row-numbered roster table with search/unit filter, open to all authenticated users. Next: mobile optimization (Phase 9E) or diff-confirmation step (Phase 9C-2 deferred work).
 - **2026-06-22:** Phase 9D complete. Non-admin user-facing views implemented: deployment summary (`/deployment`) with AM/PM session counts and unit breakdown, attendance marking (`/attendance`) with inline status/remarks editing. Added `get_current_user_optional()` auth function. Role-aware nav in base.html. OAuth callback now redirects admins to `/admin` and regular users to `/deployment`. Next: mobile optimization (Phase 9E).
 - **2026-06-22:** Phase 9C-3 complete. Combined deployment + session admin page at `/admin/deployments` with expandable sub-views, status transitions, inline session creation. PRD §8 compliance fix (draft deployments can now create sessions). `/admin/sessions` redirects to `/admin/deployments`. Next: mobile optimization (Phase 9C-4) or settings page wiring.
 - **2026-06-22:** Phase 9C-2 complete. Audit log API + admin page implemented with filtering (entity_type, action, target_user_id), pagination, and colored action badges. Next: remaining admin pages (attendance marking, personnel browser, deployment management, session controls).
@@ -214,4 +257,4 @@ git log --oneline --all
 
 **Next: Phase 9E — Mobile Optimization**
 
-Phase 9D is complete. User-facing deployment summary (`/deployment`) and attendance marking (`/attendance`) views are live with role-aware navigation. Regular users can view attendance summaries and mark attendance inline. All 235 tests pass with no regressions. Next: responsive design optimization for field use (tablets, mobile).
+Phase 9F is complete. Admin estab management (`/admin/estabs`) and non-admin estab browser (`/estab`) are live. The estab browser shows a row-numbered roster table (unit/sub-unit columns leftmost) with search and unit filter. `CsvUpload.original_filename` is now stored and surfaced via the estab API and admin views. All 235 tests pass with no regressions. Next: responsive design optimization for field use (tablets, mobile), or the diff-confirmation step (Phase 9C-2 deferred work) if CSV pipeline continuation is prioritized.

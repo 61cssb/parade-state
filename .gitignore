@@ -156,6 +156,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+/fixtures
 
 # Spyder project settings
 .spyderproject
@@ -217,3 +218,6 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 *.db
+
+# Other project files
+/experiments

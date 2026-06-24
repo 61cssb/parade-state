@@ -15,6 +15,7 @@ from parade_state.models import (
     AuditLog,
     CsvUpload,
     Deployment,
+    Estab,
     Personnel,
     User,
 )
@@ -359,6 +360,84 @@ async def admin_csv_upload(
         },
         active_page="csv-upload",
         recent_uploads=recent_uploads,
+    )
+
+    return HTMLResponse(content=html_content)
+
+
+@router.get("/admin/estabs", response_class=HTMLResponse)
+async def admin_estabs(
+    request: Request,
+    status_filter: str | None = None,
+):
+    """Render the estabs management page."""
+    current_admin = await get_current_admin_user_optional(request)
+    if not current_admin:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    session_maker = get_session_maker()
+    async with session_maker() as db:
+        # Most recent CsvUpload per estab (provides original_filename).
+        latest_upload_subq = (
+            select(
+                CsvUpload.estab_id.label("estab_id"),
+                CsvUpload.original_filename.label("original_filename"),
+            )
+            .where(CsvUpload.estab_id.is_not(None))
+            .order_by(CsvUpload.estab_id, CsvUpload.uploaded_at.desc())
+            .subquery()
+        )
+
+        query = (
+            select(
+                Estab.id,
+                Estab.caa,
+                Estab.status,
+                Estab.personnel_count,
+                Estab.uploaded_at,
+                Estab.csv_hash,
+                latest_upload_subq.c.original_filename,
+            )
+            .outerjoin(
+                latest_upload_subq,
+                latest_upload_subq.c.estab_id == Estab.id,
+            )
+            .order_by(Estab.uploaded_at.desc())
+            .limit(100)
+        )
+        if status_filter:
+            query = query.where(Estab.status == status_filter)
+
+        rows = (await db.execute(query)).all()
+
+    estabs = [
+        {
+            "id": str(row.id),
+            "caa": row.caa,
+            "status": row.status,
+            "personnel_count": row.personnel_count,
+            "uploaded_at": row.uploaded_at,
+            "csv_hash": row.csv_hash[:12] + "...",
+            "original_filename": row.original_filename or "—",
+        }
+        for row in rows
+    ]
+
+    env = get_templates(request)
+    template = env.get_template("admin/estabs.html")
+
+    html_content = template.render(
+        request=request,
+        user={
+            "id": current_admin.id,
+            "name": current_admin.name,
+            "email": current_admin.email,
+            "role": current_admin.role,
+        },
+        active_page="estabs",
+        estabs=estabs,
+        status_filter=status_filter or "",
+        estab_statuses=["draft", "confirmed", "archived"],
     )
 
     return HTMLResponse(content=html_content)

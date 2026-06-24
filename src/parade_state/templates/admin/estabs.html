@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Estabs - Parade State Admin{% endblock %}
+
+{% block page_title %}Estabs{% endblock %}
+
+{% block content %}
+<p style="color: #6b7280; margin-bottom: 1.5rem;">
+    Base personnel rosters pinned by CAA date. Each estab is associated with its source CSV upload.
+</p>
+
+<div class="card">
+    <h3>Estabs</h3>
+    <form method="get" style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+        <label for="status_filter" style="font-size: 0.875rem; color: #374151;">Status:</label>
+        <select name="status_filter" id="status_filter" onchange="this.form.submit()" style="padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            <option value="" {% if not status_filter %}selected{% endif %}>All</option>
+            {% for s in estab_statuses %}
+            <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+    </form>
+
+    {% if estabs %}
+    <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                <th style="padding: 0.5rem;">CAA Date</th>
+                <th style="padding: 0.5rem;">Source File</th>
+                <th style="padding: 0.5rem;">Personnel</th>
+                <th style="padding: 0.5rem;">Status</th>
+                <th style="padding: 0.5rem;">Uploaded At</th>
+                <th style="padding: 0.5rem;">CSV Hash</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for estab in estabs %}
+            <tr style="border-bottom: 1px solid #e5e7eb;">
+                <td style="padding: 0.5rem;">{{ estab.caa }}</td>
+                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ estab.original_filename }}</td>
+                <td style="padding: 0.5rem;">{{ estab.personnel_count }}</td>
+                <td style="padding: 0.5rem;">
+                    <span class="btn {% if estab.status == 'confirmed' %}btn-success{% elif estab.status == 'archived' %}btn-primary{% else %}btn-primary{% endif %}" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">{{ estab.status }}</span>
+                </td>
+                <td style="padding: 0.5rem;">{{ estab.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ estab.csv_hash }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: #6b7280; margin-top: 1rem;">No estabs yet. Upload and process a CSV to create one.</p>
+    {% endif %}
+</div>
+{% endblock %}

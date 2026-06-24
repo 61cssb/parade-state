@@ -521,6 +521,7 @@ class CsvUploadResponse(BaseModel):
 
     id: str
     sha256_hash: str
+    original_filename: str | None = None
     line_count: int
     detected_columns: list[str]
     status: str
@@ -537,6 +538,7 @@ class CsvUploadListItem(BaseModel):
 
     id: str
     sha256_hash: str
+    original_filename: str | None = None
     line_count: int
     status: str
     uploaded_at: utc_dt.datetime
@@ -547,6 +549,37 @@ class CsvUploadListItem(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ============================================================================
+# Estab Schemas
+# ============================================================================
+
+
+class EstabListItem(BaseModel):
+    """Schema for an Estab list item (summary view)."""
+
+    id: str
+    caa: utc_dt.date
+    status: str
+    personnel_count: int
+    uploaded_at: utc_dt.datetime
+    uploaded_by: str
+    csv_hash: str
+    # From the most recent linked CsvUpload (null until an upload is linked).
+    original_filename: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class EstabResponse(EstabListItem):
+    """Schema for a single Estab detail response."""
+
+    notes: str | None = None
+    confirmed_at: utc_dt.datetime | None = None
+    confirmed_by: str | None = None
+    created_at: utc_dt.datetime
 
 
 # ============================================================================

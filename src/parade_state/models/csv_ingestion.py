@@ -73,6 +73,7 @@ class CsvUpload(Base):
     )
     raw_content: Mapped[bytes] = mapped_column(LargeBinary)
     sha256_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     line_count: Mapped[int] = mapped_column(Integer)
     uploaded_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     uploaded_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
