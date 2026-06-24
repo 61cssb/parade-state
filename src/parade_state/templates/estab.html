@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Estab Browser - Parade State{% endblock %}
+
+{% block page_title %}Estab Browser{% endblock %}
+
+{% block content %}
+{% if estabs %}
+<!-- Estab selector -->
+<div class="card">
+    <form method="get" action="/estab" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+        <label for="estab_id" style="font-weight: bold;">Estab:</label>
+        <select name="estab_id" id="estab_id" onchange="this.form.submit()"
+                style="flex: 1; min-width: 240px; max-width: 400px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            {% for e in estabs %}
+            <option value="{{ e.id }}" {% if selected_estab and e.id == selected_estab.id %}selected{% endif %}>
+                CAA {{ e.caa }} ({{ e.status }}) — {{ e.personnel_count }} pers
+            </option>
+            {% endfor %}
+        </select>
+    </form>
+</div>
+
+{% if selected_estab %}
+<!-- Filters -->
+<div class="card">
+    <form method="get" action="/estab" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+        <input type="hidden" name="estab_id" value="{{ selected_estab.id }}">
+        <input type="text" name="search" value="{{ search }}" placeholder="Search name, rank, pers no..."
+               style="flex: 1; min-width: 200px; max-width: 300px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+        <select name="unit" onchange="this.form.submit()"
+                style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            <option value="" {% if not unit %}selected{% endif %}>All units</option>
+            {% for u in units %}
+            <option value="{{ u }}" {% if unit == u %}selected{% endif %}>{{ u }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-primary">Filter</button>
+        {% if search or unit %}
+        <a href="/estab?estab_id={{ selected_estab.id }}" class="btn" style="background: #e5e7eb; color: #374151; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.25rem; font-size: 0.875rem;">Clear</a>
+        {% endif %}
+    </form>
+</div>
+
+<div class="card">
+    <h3 style="margin-bottom: 0.5rem;">
+        CAA {{ selected_estab.caa }}
+        <span style="font-size: 0.875rem; font-weight: normal; color: #6b7280;">
+            — {{ total_count }} personnel match
+        </span>
+    </h3>
+
+    {% if personnel %}
+    <div style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                <th style="padding: 0.5rem;">#</th>
+                <th style="padding: 0.5rem;">Unit</th>
+                <th style="padding: 0.5rem;">Sub Unit 1</th>
+                <th style="padding: 0.5rem;">Sub Unit 2</th>
+                <th style="padding: 0.5rem;">Sub Unit 3</th>
+                <th style="padding: 0.5rem;">Rank</th>
+                <th style="padding: 0.5rem;">Full Name</th>
+                <th style="padding: 0.5rem;">Pers No</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in personnel %}
+            <tr style="border-bottom: 1px solid #e5e7eb;">
+                <td style="padding: 0.5rem; color: #9ca3af; font-variant-numeric: tabular-nums;">{{ loop.index }}</td>
+                <td style="padding: 0.5rem;">{{ p.unit or '—' }}</td>
+                <td style="padding: 0.5rem;">{{ p.sub_unit_1 or '—' }}</td>
+                <td style="padding: 0.5rem;">{{ p.sub_unit_2 or '—' }}</td>
+                <td style="padding: 0.5rem;">{{ p.sub_unit_3 or '—' }}</td>
+                <td style="padding: 0.5rem; white-space: nowrap;">{{ p.rank }}</td>
+                <td style="padding: 0.5rem;">{{ p.full_name }}</td>
+                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.85rem;">{{ p.pers_no }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% if total_count > personnel|length %}
+    <p style="color: #6b7280; margin-top: 1rem; font-size: 0.85rem;">
+        Showing first {{ personnel|length }} of {{ total_count }}. Refine your search to see more.
+    </p>
+    {% endif %}
+    {% else %}
+    <p style="color: #6b7280; margin-top: 1rem;">No personnel match the current filters.</p>
+    {% endif %}
+</div>
+{% endif %}
+{% else %}
+<div class="card">
+    <p style="color: #6b7280;">No estabs available yet.</p>
+</div>
+{% endif %}
+{% endblock %}

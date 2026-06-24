@@ -111,6 +111,7 @@ async def upload_csv(
         return CsvUploadResponse(
             id=existing_upload.id,
             sha256_hash=existing_upload.sha256_hash,
+            original_filename=existing_upload.original_filename,
             line_count=existing_upload.line_count,
             detected_columns=detected_columns,
             status=existing_upload.status,
@@ -124,6 +125,7 @@ async def upload_csv(
     upload = CsvUpload(
         raw_content=raw_bytes,
         sha256_hash=sha256_hash,
+        original_filename=file.filename,
         line_count=line_count,
         uploaded_by=user_id,
     )
@@ -152,6 +154,7 @@ async def upload_csv(
         return CsvUploadResponse(
             id=existing_upload.id,
             sha256_hash=existing_upload.sha256_hash,
+            original_filename=existing_upload.original_filename,
             line_count=existing_upload.line_count,
             detected_columns=detected_columns,
             status=existing_upload.status,
@@ -165,6 +168,7 @@ async def upload_csv(
     return CsvUploadResponse(
         id=upload.id,
         sha256_hash=upload.sha256_hash,
+        original_filename=upload.original_filename,
         line_count=upload.line_count,
         detected_columns=detected_columns,
         status=upload.status,
@@ -198,6 +202,7 @@ async def list_csv_uploads(
         select(
             CsvUpload.id,
             CsvUpload.sha256_hash,
+            CsvUpload.original_filename,
             CsvUpload.line_count,
             CsvUpload.status,
             CsvUpload.uploaded_at,
@@ -218,6 +223,7 @@ async def list_csv_uploads(
         CsvUploadListItem(
             id=row.id,
             sha256_hash=row.sha256_hash,
+            original_filename=row.original_filename,
             line_count=row.line_count,
             status=row.status,
             uploaded_at=row.uploaded_at,

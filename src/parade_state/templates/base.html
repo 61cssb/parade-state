@@ -484,11 +484,19 @@
                class="{% if active_page == 'attendance' %}active{% endif %}">
                 <span class="icon">✅</span><span>Attendance</span>
             </a>
+            <a href="/estab" title="Estab Browser"
+               class="{% if active_page == 'estab' %}active{% endif %}">
+                <span class="icon">👥</span><span>Estab</span>
+            </a>
             {% if user and user.role in ['admin', 'super_admin'] %}
             <div class="nav-section-label">Admin</div>
             <a href="/admin" title="Dashboard"
                class="{% if active_page == 'dashboard' %}active{% endif %}">
                 <span class="icon">🏠</span><span>Dashboard</span>
+            </a>
+            <a href="/admin/estabs" title="Estabs"
+               class="{% if active_page == 'estabs' %}active{% endif %}">
+                <span class="icon">📋</span><span>Estabs</span>
             </a>
             <a href="/admin/deployments" title="Deployments"
                class="{% if active_page == 'deployments' %}active{% endif %}">

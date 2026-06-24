@@ -23,6 +23,7 @@ from parade_state.api import (
     auth,
     csv_upload,
     deployments,
+    estabs,
     personnel,
     sessions,
     users,
@@ -33,6 +34,7 @@ from parade_state.utils import env
 from parade_state.web.auth import router as web_auth_router
 from parade_state.web.attendance import router as web_attendance_router
 from parade_state.web.deployment import router as web_deployment_router
+from parade_state.web.estab import router as web_estab_router
 
 
 @asynccontextmanager
@@ -98,6 +100,7 @@ app.include_router(web_auth_router, prefix="/auth", tags=["web-auth"])
 # User-facing web routes (non-admin views)
 app.include_router(web_deployment_router, tags=["web-deployment"])
 app.include_router(web_attendance_router, tags=["web-attendance"])
+app.include_router(web_estab_router, tags=["web-estab"])
 
 # Admin interface routes
 app.include_router(admin_router, tags=["admin"])
@@ -115,4 +118,5 @@ app.include_router(
     access_control.router, prefix="/api/v1/access-control", tags=["access-control"]
 )
 app.include_router(csv_upload.router, prefix="/api/v1/csv", tags=["csv-upload"])
+app.include_router(estabs.router, prefix="/api/v1/estabs", tags=["estabs"])
 app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])

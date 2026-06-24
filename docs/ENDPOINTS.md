@@ -13,15 +13,17 @@ This document clarifies the different types of endpoints in the Parade State app
 - `GET /auth/callback` - OAuth callback handler (creates session, redirects to admin)
 - `GET /auth/logout` - Logout handler (clears cookies, redirects to login)
 
-**User-Facing View Routes (Phase 9D):**
+**User-Facing View Routes (Phase 9D / 9F):**
 - `GET /deployment` - Deployment summary (today's AM/PM session counts, unit breakdown) — deployment selector dropdown
 - `GET /attendance` - Attendance marking table (inline status/remarks editing) — deployment + session selector
+- `GET /estab` - Estab browser (row-numbered roster table with unit/sub-unit columns, search, unit filter) — estab selector dropdown
 
 **Admin Interface Routes:**
 - `GET /admin` - Admin dashboard
 - `GET /admin/deployments` - Deployments + sessions management page (combined master-detail view)
 - `GET /admin/users` - Users management page
 - `GET /admin/csv-upload` - CSV upload page
+- `GET /admin/estabs` - Estab management page (CAA date, source file, personnel count, status filter)
 - `GET /admin/settings` - Settings page
 - `GET /admin/audit` - Audit log page
 
@@ -55,6 +57,7 @@ This document clarifies the different types of endpoints in the Parade State app
 - `/api/v1/personnel/*` - Personnel management
 - `/api/v1/access-control/*` - Access control
 - `/api/v1/csv/*` - CSV upload and ingestion
+- `/api/v1/estabs/*` - Estab list/detail (admin-only, with latest CsvUpload join)
 - `/api/v1/audit/*` - Audit log
 
 ### 3. CSV Upload API
@@ -165,12 +168,14 @@ app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 - `src/parade_state/web/auth.py` - Authentication web views
 - `src/parade_state/web/deployment.py` - Deployment summary view (non-admin)
 - `src/parade_state/web/attendance.py` - Attendance marking view (non-admin)
+- `src/parade_state/web/estab.py` - Estab browser view (non-admin)
 - `src/parade_state/admin_routes.py` - Admin interface routes
 - `src/parade_state/templates/` - Jinja2 templates
 
 **API Routes:**
 - `src/parade_state/api/auth.py` - Authentication API
 - `src/parade_state/api/users.py` - Users API
+- `src/parade_state/api/estabs.py` - Estab list/detail API
 - `src/parade_state/api/*.py` - Other API endpoints
 
 **Authentication Logic:**

@@ -129,15 +129,15 @@ Once running, visit:
 
 ## Current System Status
 
-✅ **Production-Ready** with admin interface:
-- 208 tests passing (100% pass rate)
-- 28+ API endpoints fully implemented and tested
-- **Admin interface with Jinja2 templates** (7 pages, responsive design)
+✅ **Production-Ready** with admin + user-facing interface:
+- 235 tests passing (100% pass rate)
+- 31+ API endpoints fully implemented and tested
+- **Admin interface with Jinja2 templates** (8 pages: dashboard, deployments, users, CSV upload, estabs, settings, audit)
+- **User-facing views** (deployment summary, attendance marking, estab browser)
 - **Host-independent Google OAuth** (works with any domain)
 - Multi-tenant deployment access control
 - Comprehensive audit trails
-- 93.77% test coverage
-- **Current Phase:** Admin interface complete, ready for mobile attendance UI
+- **Current Phase:** Frontend development — mobile optimization next
 
 ## Health Check
 
