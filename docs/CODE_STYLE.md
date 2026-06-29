@@ -395,7 +395,7 @@ class Personnel(Base):
 - Example:
 ```python
 class Personnel(Base):
-    pers_no: Mapped[str] = mapped_column(String(255), index=True)
+    short_id: Mapped[str] = mapped_column(String(8), index=True)  # cross-estab person identity
     rank: Mapped[str] = mapped_column(String(50), index=True)
     status: Mapped[str] = mapped_column(
         Enum("active", "archived", name="personnel_status"),

@@ -289,12 +289,12 @@ for personnel in personnel_list:
 
 **4. Search Functionality:**
 ```python
-# Full-text search across name and service number
+# Full-text search across name and short_id
 if search_term:
     query = query.where(
         or_(
             Personnel.full_name.ilike(f"%{search_term}%"),
-            Personnel.pers_no.ilike(f"%{search_term}%")
+            Personnel.short_id.ilike(f"%{search_term}%")
         )
     )
 ```
@@ -392,7 +392,7 @@ LEFT JOIN deployment_personnel_overrides dop
   ON dop.personnel_id = p.id AND dop.deployment_id = :deployment_id
 WHERE p.estab_id = (SELECT estab_id FROM deployments WHERE id = :deployment_id)
   AND (p.unit = :filter_unit OR :filter_unit IS NULL)
-  AND (p.full_name LIKE :search OR p.pers_no LIKE :search OR :search IS NULL)
+  AND (p.full_name LIKE :search OR p.short_id LIKE :search OR :search IS NULL)
 
 # Attendance history query
 SELECT ar.*, s.date, s.session_type

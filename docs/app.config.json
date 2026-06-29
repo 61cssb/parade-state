@@ -32,14 +32,8 @@
         "subunitLevel": 3
       },
       {
-        "canonicalName": "pers_no",
-        "description": "Unique personnel identifier. Used as the stable key for cross-version matching, notes transfer, and attendance history.",
-        "type": "text",
-        "nullable": false
-      },
-      {
         "canonicalName": "rank",
-        "description": "Personnel rank for display",
+        "description": "Personnel rank for display; also used to disambiguate duplicate names during cross-estab person matching",
         "type": "text",
         "nullable": true
       },

@@ -1,6 +1,6 @@
 # Next Implementation Phase
 
-**Last Updated:** 2026-06-24
+**Last Updated:** 2026-06-29
 **Status:** Production-Ready Backend with User-Facing Views
 
 ---
@@ -8,7 +8,7 @@
 ## Current System Status
 
 ### Production-Ready Metrics
-- 235 tests passing (100% pass rate)
+- 245 tests passing (100% pass rate)
 - 31+ API endpoints fully implemented and tested
 - Enterprise-grade security with multi-tenant access control
 - Comprehensive documentation (architecture, security, deployment, testing)
@@ -33,6 +33,7 @@
 - **`CsvUpload.original_filename`** — upload-time filename now stored (was only in audit log)
 - **Estab API** (`GET /api/v1/estabs`, `GET /api/v1/estabs/{id}`) — list/detail with latest CsvUpload join
 - **Non-admin estab browser** (`/estab`) — roster table with estab selector, search, unit filter; row-numbered for easy counting
+- **`short_id` personnel identity** (2026-06-29) — `pers_no` dropped entirely (no longer imported or stored); replaced with server-minted 8-char base62 `short_id` as the cross-estab person identifier. Migration `c3d4e5f6a7b8` (batch-mode for SQLite). See [docs/SPECIFICATION.md](SPECIFICATION.md) §3.2.1.
 
 ### System Capabilities
 - Multi-tenant deployment isolation with access control
@@ -230,6 +231,7 @@ git log --oneline --all
 ```
 
 **Recent Major Completions:**
+- **short_id Refactor** (2026-06-29) - Replaced `Personnel.pers_no` (opaque, sensitive external key, no longer imported or stored) with `Personnel.short_id` — a server-minted 8-char base62 cross-estab person identifier. Added `ids.short_id()` and `ids.mint_unique_short_id()`. Migration `c3d4e5f6a7b8` (uses `batch_alter_table` for SQLite compatibility). Updated API, web/views, schemas, tests, and all docs. 245 tests passing.
 - **Phase 9F: Estab Views** (2026-06-24) - Admin estab management page (`/admin/estabs`), non-admin estab browser (`/estab`) with row-numbered roster table and search/unit filter, estab API endpoints, `CsvUpload.original_filename` column + migration `a1b2c3d4e5f6`. File-reference naming convention deferred (see Pending Decisions).
 - **Phase 9D: Non-Admin Views** (2026-06-22) - Deployment summary view (`/deployment`) with AM/PM session counts and unit breakdown, attendance marking view (`/attendance`) with inline status/remarks editing, `get_current_user_optional()` auth function, role-aware nav, OAuth callback role-aware redirect
 - **Phase 9C-3: Deployment + Session Management** (2026-06-22) - Combined admin page with expandable session sub-views, status transitions, session creation, PRD §8 compliance fix, 1 new + 1 updated test
@@ -244,6 +246,7 @@ git log --oneline --all
 - **Phase 1: Authentication** (Completed) - Google OAuth and user management
 
 **Priority Changes:**
+- **2026-06-29:** `short_id` refactor complete. `Personnel.pers_no` dropped (never imported or stored); replaced with server-minted 8-char base62 `short_id` (cross-estab person identity). Migration `c3d4e5f6a7b8` (batch-mode for SQLite). 245 tests passing. Next: mobile optimization (Phase 9E) or diff-confirmation step.
 - **2026-06-24:** Phase 9F complete. Admin estab management page (`/admin/estabs`) and non-admin estab browser (`/estab`) shipped. Added `CsvUpload.original_filename` column (migration `a1b2c3d4e5f6`) and `GET /api/v1/estabs` endpoints. Estab browser shows row-numbered roster table with search/unit filter, open to all authenticated users. Next: mobile optimization (Phase 9E) or diff-confirmation step (Phase 9C-2 deferred work).
 - **2026-06-22:** Phase 9D complete. Non-admin user-facing views implemented: deployment summary (`/deployment`) with AM/PM session counts and unit breakdown, attendance marking (`/attendance`) with inline status/remarks editing. Added `get_current_user_optional()` auth function. Role-aware nav in base.html. OAuth callback now redirects admins to `/admin` and regular users to `/deployment`. Next: mobile optimization (Phase 9E).
 - **2026-06-22:** Phase 9C-3 complete. Combined deployment + session admin page at `/admin/deployments` with expandable sub-views, status transitions, inline session creation. PRD §8 compliance fix (draft deployments can now create sessions). `/admin/sessions` redirects to `/admin/deployments`. Next: mobile optimization (Phase 9C-4) or settings page wiring.

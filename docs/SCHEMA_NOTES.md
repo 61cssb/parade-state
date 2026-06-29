@@ -33,18 +33,18 @@ For a scoped user viewing a deployment:
 -- Effective personnel assignment = override if present, else estab
 WITH effective_assignment AS (
     SELECT
-        ps.id           AS personnel_id,
-        ps.pers_no,
-        COALESCE(dpo.unit,        ps.unit)        AS unit,
-        COALESCE(dpo.sub_unit_1,  ps.sub_unit_1)  AS sub_unit_1,
-        COALESCE(dpo.sub_unit_2,  ps.sub_unit_2)  AS sub_unit_2,
-        COALESCE(dpo.sub_unit_3,  ps.sub_unit_3)  AS sub_unit_3
-    FROM personnel_snapshots ps
-    JOIN deployments d ON d.csv_upload_id = ps.csv_upload_id
+        p.id            AS personnel_id,
+        p.short_id,
+        COALESCE(dpo.unit,        p.unit)        AS unit,
+        COALESCE(dpo.sub_unit_1,  p.sub_unit_1)  AS sub_unit_1,
+        COALESCE(dpo.sub_unit_2,  p.sub_unit_2)  AS sub_unit_2,
+        COALESCE(dpo.sub_unit_3,  p.sub_unit_3)  AS sub_unit_3
+    FROM personnel p
+    JOIN deployments d ON d.estab_id = p.estab_id
     LEFT JOIN deployment_personnel_overrides dpo
-        ON dpo.deployment_id = d.id AND dpo.pers_no = ps.pers_no
+        ON dpo.deployment_id = d.id AND dpo.personnel_id = p.id
     WHERE d.id = :deployment_id
-      AND NOT ps.archived
+      AND p.status = 'active'
 )
 SELECT ea.*
 FROM effective_assignment ea
@@ -72,7 +72,7 @@ function writeAttendance(record, deployment):
     update status, remarks, notes_snapshot always
 
     if now >= deployment.valid_from AND now <= deployment.valid_until:
-        resolve effective assignment for pers_no (override ?? estab)
+        resolve effective assignment for the personnel row (override ?? estab)
         update unit_snapshot, sub_unit_1_snapshot, sub_unit_2_snapshot, sub_unit_3_snapshot
         set snapshot_taken_at = now
     else:
@@ -106,18 +106,17 @@ On session create, populate `attendance_records` for all non-archived personnel 
 
 ```sql
 INSERT INTO attendance_records
-    (session_id, deployment_id, personnel_id, pers_no, status, notes_snapshot)
+    (session_id, deployment_id, personnel_id, status, notes_snapshot)
 SELECT
     :session_id,
     :deployment_id,
-    ps.id,
-    ps.pers_no,
+    p.id,
     'absent',
-    COALESCE(dn.notes_text, '')
-FROM personnel_snapshots ps
-JOIN deployments d ON d.csv_upload_id = ps.csv_upload_id AND d.id = :deployment_id
-LEFT JOIN deployment_notes dn ON dn.deployment_id = :deployment_id AND dn.pers_no = ps.pers_no
-WHERE NOT ps.archived
+    COALESCE(dn.notes, '')
+FROM personnel p
+JOIN deployments d ON d.estab_id = p.estab_id AND d.id = :deployment_id
+LEFT JOIN deployment_notes dn ON dn.deployment_id = :deployment_id AND dn.personnel_id = p.id
+WHERE p.status = 'active'
 ON CONFLICT (session_id, personnel_id) DO NOTHING;
 ```
 
@@ -128,30 +127,40 @@ This means every session starts fully populated (all absent) and notes are froze
 ## Notes write-back from attendance view
 
 When a user edits notes in the attendance session view:
-1. UPSERT into `deployment_notes (deployment_id, pers_no)` with new text.
+1. UPSERT into `deployment_notes (deployment_id, personnel_id)` with new text.
 2. UPDATE `attendance_records.notes_snapshot` for the current session's record.
 3. Do NOT update `notes_snapshot` in other sessions' attendance records (those are historical).
 
 ---
 
-## Notes transfer on new CSV confirmation
+## Notes transfer on new estab confirmation
+
+Notes follow the *person*, not the row. When a new estab is confirmed, personnel are matched
+to prior estabs by `short_id` (same person — see cross-estab matching in SPECIFICATION §3.2.1).
+Notes from the prior active deployment are copied onto the matched personnel rows in the new
+deployment:
 
 ```sql
-INSERT INTO deployment_notes (deployment_id, pers_no, notes_text, updated_at, updated_by)
+INSERT INTO deployment_notes (deployment_id, personnel_id, notes, updated_at, updated_by)
 SELECT
     :new_deployment_id,
-    dn.pers_no,
-    dn.notes_text,
+    new_p.id,
+    dn.notes,
     NOW(),
     :system_user_id
 FROM deployment_notes dn
 JOIN deployments old_d ON old_d.id = dn.deployment_id
+JOIN personnel old_p ON old_p.id = dn.personnel_id
+JOIN personnel new_p ON new_p.short_id = old_p.short_id   -- same person, cross-estab
 WHERE old_d.id = :prior_deployment_id
-  AND dn.pers_no IN (
-      SELECT pers_no FROM personnel_snapshots WHERE csv_upload_id = :new_csv_upload_id AND NOT archived
-  )
-ON CONFLICT (deployment_id, pers_no) DO NOTHING;
+  AND new_p.estab_id = :new_estab_id
+  AND new_p.status = 'active'
+ON CONFLICT (deployment_id, personnel_id) DO NOTHING;
 ```
+
+Unmatched persons (no `short_id` counterpart in the prior deployment) start with no transferred
+notes. Admin-confirmed matches from the diff-review step are what make `short_id` line up across
+estabs.
 
 ---
 

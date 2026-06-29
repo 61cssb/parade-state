@@ -5,6 +5,13 @@
 **Last updated:** 2026-05-06  
 **Changelog v0.4:** Tech stack pinned (FastAPI + NiceGUI + SQLAlchemy + APScheduler + Railway); deployment section updated for Railway; APScheduler job store model specified; mobile attendance UI confirmed as static HTML/JS for MVP; Vue SFC refactor deferred; Flask removed.
 
+> ⚠️ **SUPERSEDED — personnel identity sections.** This is a historical document.
+> References to `pers_no` as an imported/used identifier are **obsolete**. `pers_no` is no
+> longer imported or stored (it is an opaque, sensitive external primary key and is dropped on
+> parse). Personnel are now identified by a server-generated 8-char base62 `short_id` that is
+> stable across estabs; cross-estab matching uses `full_name` (rank disambiguates). See
+> [SPECIFICATION.md §3.2.1](SPECIFICATION.md) for the current model.
+
 ---
 
 ## 1. Problem Statement
