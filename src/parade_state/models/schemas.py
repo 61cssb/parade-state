@@ -317,7 +317,7 @@ class AttendanceListParams(BaseModel):
 class PersonnelBase(BaseModel):
     """Base personnel schema."""
 
-    service_number: str = Field(..., min_length=1)
+    short_id: str = Field(..., min_length=1)
     rank: str = Field(..., min_length=1)
     name: str = Field(..., min_length=1)
     unit: str = Field(..., min_length=1)

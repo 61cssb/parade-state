@@ -626,7 +626,6 @@ async def test_get_deployment_status_with_sessions(
     # Create personnel
     personnel1 = Personnel(
         estab_id="estab-1",
-        pers_no="12345",
         rank="PTE",
         full_name="John Doe",
         unit="Coy A",
@@ -636,7 +635,6 @@ async def test_get_deployment_status_with_sessions(
 
     personnel2 = Personnel(
         estab_id="estab-1",
-        pers_no="67890",
         rank="PTE",
         full_name="Jane Smith",
         unit="Coy B",
@@ -731,7 +729,6 @@ async def test_export_deployment_csv(
     # Create personnel
     personnel = Personnel(
         estab_id="estab-1",
-        pers_no="12345",
         rank="PTE",
         full_name="John Doe",
         unit="Coy A",
@@ -779,9 +776,8 @@ async def test_export_deployment_csv(
 
     # Verify CSV content
     csv_content = response.content.decode("utf-8")
-    assert "Service Number" in csv_content
+    assert personnel.short_id in csv_content
     assert "Rank" in csv_content
-    assert "12345" in csv_content
     assert "John Doe" in csv_content
     assert "Override Unit" in csv_content
     assert "Test notes" in csv_content

@@ -1,6 +1,6 @@
-"""Behavioral tests for CSV ingestion and personnel identity."""
+"""Behavioral tests for personnel identity (short_id) and estab versioning."""
 
-from datetime import date, datetime
+from datetime import date
 
 import pytest
 from sqlalchemy import select
@@ -10,34 +10,55 @@ from parade_state.models import (
     Estab,
     Personnel,
 )
-from parade_state.utils import utc_dt
+from parade_state.utils import ids, utc_dt
 
 
 class TestPersonnelIdentity:
-    """Test personnel identity and cross-CSV logic."""
+    """Test personnel identity via the cross-estab short_id."""
 
     @pytest.mark.asyncio
-    async def test_personnel_internal_id_uniqueness(
+    async def test_personnel_short_id_auto_generated(
         self, db_session, sample_estab, sample_users
     ):
-        """Test that personnel internal IDs are unique across the system."""
+        """A Personnel row gets an 8-char base62 short_id by default."""
         admin_id = sample_users["admin"].id
 
-        # Create two personnel with same pers_no but different internal IDs
-        person1 = Personnel(
+        person = Personnel(
             estab_id=sample_estab.id,
-            pers_no="12345",
             rank="PTE",
             full_name="John Doe",
             unit="Coy A",
             created_by=admin_id,
         )
+        db_session.add(person)
+        await db_session.commit()
 
+        assert isinstance(person.short_id, str)
+        assert len(person.short_id) == 8
+        # Auto-minted value uses the base62 alphabet (no ambiguous look-alikes)
+        alphabet = set(
+            "23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+        )
+        assert set(person.short_id).issubset(alphabet)
+
+    @pytest.mark.asyncio
+    async def test_personnel_distinct_rows_get_distinct_short_ids(
+        self, db_session, sample_estab, sample_users
+    ):
+        """Two distinct persons get distinct row ids and distinct short_ids."""
+        admin_id = sample_users["admin"].id
+
+        person1 = Personnel(
+            estab_id=sample_estab.id,
+            rank="PTE",
+            full_name="John Doe",
+            unit="Coy A",
+            created_by=admin_id,
+        )
         person2 = Personnel(
             estab_id=sample_estab.id,
-            pers_no="12345",  # Same external ID
             rank="PTE",
-            full_name="John Doe Jr",  # Different person
+            full_name="John Doe Jr",
             unit="Coy B",
             created_by=admin_id,
         )
@@ -45,56 +66,17 @@ class TestPersonnelIdentity:
         db_session.add_all([person1, person2])
         await db_session.commit()
 
-        # Verify they have different internal IDs
         assert person1.id != person2.id
-        assert person1.pers_no == person2.pers_no  # Same external reference
-        assert person1.full_name != person2.full_name  # Different people
+        assert person1.short_id != person2.short_id
+        assert person1.full_name != person2.full_name
 
     @pytest.mark.asyncio
-    async def test_personnel_pers_no_not_unique_within_estab(
-        self, db_session, sample_estab, sample_users
-    ):
-        """Test that pers_no is not enforced unique within an estab (though it should be)."""
-        admin_id = sample_users["admin"].id
-
-        # This should be prevented by business logic, but test the constraint
-        person1 = Personnel(
-            estab_id=sample_estab.id,
-            pers_no="12345",
-            rank="PTE",
-            full_name="John Doe",
-            unit="Coy A",
-            created_by=admin_id,
-        )
-
-        # Try to create another with same pers_no in same estab
-        person2 = Personnel(
-            estab_id=sample_estab.id,
-            pers_no="12345",  # Same pers_no in same estab
-            rank="CPL",
-            full_name="Jane Doe",
-            unit="Coy A",
-            created_by=admin_id,
-        )
-
-        db_session.add(person1)
-        db_session.add(person2)
-
-        # This might succeed at DB level but should be prevented by business logic
-        await db_session.commit()
-
-        # Verify both exist (constraint not enforced at DB level)
-        assert person1.pers_no == person2.pers_no
-        assert person1.id != person2.id
-
-    @pytest.mark.asyncio
-    async def test_personnel_identity_isolation_between_estabs(
+    async def test_personnel_short_id_shared_across_estabs(
         self, db_session, sample_users
     ):
-        """Test that personnel from different estabs are completely isolated."""
+        """The same person appearing in two estabs shares one short_id across rows."""
         admin_id = sample_users["admin"].id
 
-        # Create two different estabs
         estab1 = Estab(
             caa=date(2024, 1, 1),
             csv_hash="hash1",
@@ -102,7 +84,6 @@ class TestPersonnelIdentity:
             uploaded_by=admin_id,
             confirmed_by=admin_id,
         )
-
         estab2 = Estab(
             caa=date(2024, 2, 1),
             csv_hash="hash2",
@@ -110,23 +91,22 @@ class TestPersonnelIdentity:
             uploaded_by=admin_id,
             confirmed_by=admin_id,
         )
-
         db_session.add_all([estab1, estab2])
         await db_session.commit()
 
-        # Create personnel with same pers_no in different estabs
+        # The same individual, deliberately assigned one short_id across estabs.
+        shared_short_id = ids.short_id()
         person1 = Personnel(
             estab_id=estab1.id,
-            pers_no="12345",
+            short_id=shared_short_id,
             rank="PTE",
             full_name="John Doe",
             unit="Coy A",
             created_by=admin_id,
         )
-
         person2 = Personnel(
             estab_id=estab2.id,
-            pers_no="12345",  # Same pers_no, different estab
+            short_id=shared_short_id,  # same person, different estab
             rank="PTE",
             full_name="John Doe",
             unit="Coy A",
@@ -136,10 +116,84 @@ class TestPersonnelIdentity:
         db_session.add_all([person1, person2])
         await db_session.commit()
 
-        # Verify they are completely separate entities
+        # Distinct rows, distinct estabs, but ONE cross-estab person identity.
         assert person1.estab_id != person2.estab_id
-        assert person1.pers_no == person2.pers_no
         assert person1.id != person2.id
+        assert person1.short_id == person2.short_id
+
+    @pytest.mark.asyncio
+    async def test_personnel_estab_short_id_unique_constraint(
+        self, db_session, sample_estab, sample_users
+    ):
+        """UNIQUE(estab_id, short_id): two rows, same estab, same short_id must fail."""
+        admin_id = sample_users["admin"].id
+        clashing_short_id = ids.short_id()
+
+        person1 = Personnel(
+            estab_id=sample_estab.id,
+            short_id=clashing_short_id,
+            rank="PTE",
+            full_name="John Doe",
+            unit="Coy A",
+            created_by=admin_id,
+        )
+        person2 = Personnel(
+            estab_id=sample_estab.id,  # same estab
+            short_id=clashing_short_id,  # same short_id in same estab
+            rank="CPL",
+            full_name="Jane Doe",
+            unit="Coy A",
+            created_by=admin_id,
+        )
+
+        db_session.add_all([person1, person2])
+        with pytest.raises(Exception):  # IntegrityError from the unique constraint
+            await db_session.commit()
+        await db_session.rollback()
+
+    @pytest.mark.asyncio
+    async def test_personnel_different_persons_different_short_ids(
+        self, db_session, sample_users
+    ):
+        """Different persons in different estabs have different short_ids."""
+        admin_id = sample_users["admin"].id
+
+        estab1 = Estab(
+            caa=date(2024, 1, 1),
+            csv_hash="hash1",
+            status="confirmed",
+            uploaded_by=admin_id,
+            confirmed_by=admin_id,
+        )
+        estab2 = Estab(
+            caa=date(2024, 2, 1),
+            csv_hash="hash2",
+            status="confirmed",
+            uploaded_by=admin_id,
+            confirmed_by=admin_id,
+        )
+        db_session.add_all([estab1, estab2])
+        await db_session.commit()
+
+        person1 = Personnel(
+            estab_id=estab1.id,
+            rank="PTE",
+            full_name="John Doe",
+            unit="Coy A",
+            created_by=admin_id,
+        )
+        person2 = Personnel(
+            estab_id=estab2.id,
+            rank="PTE",
+            full_name="Jane Smith",  # a different person
+            unit="Coy A",
+            created_by=admin_id,
+        )
+
+        db_session.add_all([person1, person2])
+        await db_session.commit()
+
+        assert person1.short_id != person2.short_id
 
 
 class TestEstabVersioning:
@@ -222,8 +276,8 @@ class TestColumnMapping:
         """Test that each canonical column can only be mapped once."""
         # Create first mapping
         mapping1 = ColumnMapping(
-            raw_name="Personal Number",
-            canonical_name="pers_no",
+            raw_name="Full Name",
+            canonical_name="full_name",
             status="admin_confirmed",
         )
 
@@ -232,8 +286,8 @@ class TestColumnMapping:
 
         # Try to create second mapping for same canonical
         mapping2 = ColumnMapping(
-            raw_name="Employee ID",
-            canonical_name="pers_no",  # Same canonical
+            raw_name="Employee Name",
+            canonical_name="full_name",  # Same canonical
             status="admin_confirmed",
         )
 
@@ -246,8 +300,8 @@ class TestColumnMapping:
         """Test that different raw names can map to different canonicals."""
         mappings = [
             ColumnMapping(
-                raw_name="Personal Number",
-                canonical_name="pers_no",
+                raw_name="Unit",
+                canonical_name="unit",
                 status="admin_confirmed",
             ),
             ColumnMapping(
@@ -272,7 +326,7 @@ class TestColumnMapping:
 
         assert len(all_mappings) == 3
         canonical_names = {m.canonical_name for m in all_mappings}
-        assert canonical_names == {"pers_no", "full_name", "rank"}
+        assert canonical_names == {"unit", "full_name", "rank"}
 
     @pytest.mark.asyncio
     async def test_column_mapping_status_transitions(self, db_session):

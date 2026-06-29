@@ -225,9 +225,12 @@ UserSubunitScope
 
 ```
 Personnel
-├── id: UUID (PK) ← Internal system identity (NOT pers_no)
+├── id: UUID (PK) ← Row identity; one row per (estab, person)
+├── short_id: str (8-char base62) ← Cross-estab PERSON identity
+│   └── Shared by every row belonging to the same individual, across all estabs.
+│       Generated server-side; globally unique per person (application-enforced
+│       via match-then-generate with collision retry). Human-facing identifier.
 ├── estab_id: UUID (FK Estab, on_delete=CASCADE)
-├── pers_no: str (external reference ID; unique within estab only)
 ├── rank: str
 ├── full_name: str
 ├── unit: str
@@ -241,9 +244,16 @@ Personnel
 ```
 
 **Constraints:**
-- UNIQUE(estab_id, pers_no) within an estab version
-- pers_no is external reference; internal id is the system identity
-- Cross-CSV note linking uses id + estab context, NOT pers_no
+- UNIQUE(estab_id, short_id): at most one row per person per estab
+- `short_id` is globally unique per *person* (application-enforced). All rows for the same
+  individual share one `short_id`; no two distinct persons ever share one.
+- Cross-estab person recognition on ingest matches on `full_name` (rank disambiguates duplicate
+  names); matches are confirmed by the admin during CSV diff review.
+- `pers_no` is **never imported or stored**. It is an opaque, sensitive primary key from an
+  external system. If present in an uploaded CSV/XLSX it is silently dropped during parsing —
+  it is not mapped to a canonical column and is not written to `extra_fields`.
+- Notes, overrides, and attendance link to `Personnel.id` (the row PK). Cross-estab continuity
+  (notes transfer, history) follows the person via `short_id`.
 
 ### 3.3 Attendance Tracking
 
@@ -328,19 +338,26 @@ Deployment created (draft)
 ```
 CSV1.raw_columns    ColumnMapping              App.canonical
 ─────────────────   ────────────────────────   ──────────────
-"PersonalNumber" ──→ confirmed mapping ────→ pers_no
 "Name" ────────────→ confirmed mapping ────→ full_name
 "Rank" ────────────→ confirmed mapping ────→ rank
 "Unit" ────────────→ confirmed mapping ────→ unit
 (unmapped columns: stored in extra_fields JSON)
 
+"PersonalNumber" ──→ NEVER MAPPED. pers_no is an opaque external primary key and is
+                     dropped during parsing. It is not a canonical column and is never
+                     stored (not even in extra_fields).
+
 CSV2 (later upload)
-"Employee No" ────→ auto-detected mapping ─→ (conflicts with pers_no ← "PersonalNumber")
+"Employee No" ────→ auto-detected mapping ─→ (conflicts with full_name ← "Name")
                      [admin confirms/rejects]
 
-Result: canonical pers_no can only receive from ONE of "PersonalNumber" OR "Employee No"
-        but different CSVs can have different raw names → same canonical
+Result: each canonical name receives from at most ONE raw column per CSV,
+        but different CSVs can use different raw names for the same canonical.
 ```
+
+**Person identity is not sourced from the CSV.** There is no canonical column for personnel
+identity. The cross-estab person key (`short_id`) is minted server-side and attached during
+ingest via name+rank matching (see §3.2.1).
 
 ### 4.4 CSV Upload Pipeline
 
@@ -461,9 +478,11 @@ Declared in app.config.json (deployment-time change, not admin UI):
 | sub_unit_1 | Subunit level 1 |
 | sub_unit_2 | Subunit level 2 |
 | sub_unit_3 | Subunit level 3 |
-| pers_no | Unique personnel identifier (cross-version matching key) |
-| rank | Display |
-| full_name | Display |
+| rank | Display; also used to disambiguate duplicate names during cross-estab matching |
+| full_name | Display; primary key for cross-estab person matching |
+
+**Note:** There is **no** `pers_no` canonical column. Personnel identity (`short_id`) is generated
+by the application, not imported from the CSV.
 
 ### 6.3 Deployment Operations
 

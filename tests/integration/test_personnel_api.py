@@ -50,7 +50,7 @@ async def test_list_personnel_with_deployment_context(
     first_personnel = data[0]
     assert "id" in first_personnel
     assert "name" in first_personnel
-    assert "service_number" in first_personnel
+    assert "short_id" in first_personnel
     assert "deployment_id" in first_personnel
     assert first_personnel["deployment_id"] == str(sample_deployment.id)
     assert "has_override" in first_personnel
@@ -217,7 +217,7 @@ async def test_list_personnel_with_search(
 
 
 @pytest.mark.asyncio
-async def test_list_personnel_with_search_by_service_number(
+async def test_list_personnel_with_search_by_short_id(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
@@ -225,9 +225,9 @@ async def test_list_personnel_with_search_by_service_number(
     sample_deployment: Deployment,
     sample_personnel,
 ):
-    """Test listing personnel with search by service number."""
-    # Search for first personnel's service number
-    search_term = sample_personnel[0].pers_no[:5]  # Use first 5 characters
+    """Test listing personnel with search by short_id."""
+    # Search for first personnel's short_id (first 5 chars)
+    search_term = sample_personnel[0].short_id[:5]
 
     response = client.get(
         "/api/v1/personnel",
@@ -245,13 +245,13 @@ async def test_list_personnel_with_search_by_service_number(
     assert isinstance(data, list)
     assert len(data) > 0
 
-    # Check that search term matches service number
+    # Check that search term matches short_id
     found = False
     for personnel in data:
-        if search_term.lower() in personnel["service_number"].lower():
+        if search_term.lower() in personnel["short_id"].lower():
             found = True
             break
-    assert found, "Search term should match at least one personnel service number"
+    assert found, "Search term should match at least one personnel short_id"
 
 
 @pytest.mark.asyncio
@@ -681,7 +681,6 @@ async def test_list_personnel_from_different_estab_forbidden(
     # Create personnel for different estab
     other_personnel = Personnel(
         estab_id=str(sample_estab.id) + "different",  # Different estab
-        pers_no="12345",
         rank="Private",
         full_name="Other Person",
         unit="Other Unit",
@@ -727,7 +726,6 @@ async def test_get_personnel_from_different_estab_forbidden(
     # Create personnel for different estab
     other_personnel = Personnel(
         estab_id=str(sample_estab.id) + "different",  # Different estab
-        pers_no="12345",
         rank="Private",
         full_name="Other Person",
         unit="Other Unit",

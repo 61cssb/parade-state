@@ -188,7 +188,6 @@ async def sample_personnel(db_session: AsyncSession, sample_estab, sample_users)
     personnel = [
         Personnel(
             estab_id=estab_id,
-            pers_no="12345",
             rank="PTE",
             full_name="John Doe",
             unit="Coy A",
@@ -198,7 +197,6 @@ async def sample_personnel(db_session: AsyncSession, sample_estab, sample_users)
         ),
         Personnel(
             estab_id=estab_id,
-            pers_no="67890",
             rank="CPL",
             full_name="Jane Smith",
             unit="Coy A",
@@ -208,7 +206,6 @@ async def sample_personnel(db_session: AsyncSession, sample_estab, sample_users)
         ),
         Personnel(
             estab_id=estab_id,
-            pers_no="11111",
             rank="SGT",
             full_name="Bob Johnson",
             unit="Coy A",

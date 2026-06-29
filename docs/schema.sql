@@ -248,21 +248,21 @@ COMMENT ON TABLE column_metadata IS
 CREATE TABLE personnel_snapshots (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     csv_upload_id   UUID NOT NULL REFERENCES csv_uploads(id),
-    pers_no         TEXT NOT NULL,                     -- unique personnel identifier
+    short_id        TEXT NOT NULL,                     -- 8-char base62 cross-estab person identity (shared across estabs for the same person)
     unit            TEXT NOT NULL,
     sub_unit_1      TEXT,
     sub_unit_2      TEXT,
     sub_unit_3      TEXT,
     rank            TEXT,
     full_name       TEXT NOT NULL,
-    extra_fields    JSONB NOT NULL DEFAULT '{}',       -- all non-canonical columns
+    extra_fields    JSONB NOT NULL DEFAULT '{}',       -- all non-canonical columns (pers_no is NEVER stored here)
     archived        BOOLEAN NOT NULL DEFAULT FALSE,    -- true for leavers on new CSV import
     archived_at     TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (csv_upload_id, pers_no)
+    UNIQUE (csv_upload_id, short_id)
 );
 
-CREATE INDEX idx_personnel_snapshots_pers_no ON personnel_snapshots(pers_no);
+CREATE INDEX idx_personnel_snapshots_short_id ON personnel_snapshots(short_id);
 CREATE INDEX idx_personnel_snapshots_csv_upload ON personnel_snapshots(csv_upload_id) WHERE NOT archived;
 CREATE INDEX idx_personnel_snapshots_subunit ON personnel_snapshots(csv_upload_id, unit, sub_unit_1, sub_unit_2, sub_unit_3);
 CREATE INDEX idx_personnel_extra_fields ON personnel_snapshots USING gin(extra_fields);
@@ -270,7 +270,8 @@ CREATE INDEX idx_personnel_extra_fields ON personnel_snapshots USING gin(extra_f
 COMMENT ON TABLE personnel_snapshots IS
     'Parsed personnel data per CSV version. Immutable after population. '
     'extra_fields holds all columns not mapped to a required canonical field. '
-    'archived=true for leavers (present in prior CSV, absent in new).';
+    'short_id is the cross-estab person key (minted by the application, matched by name+rank). '
+    'archived=true for leavers (present in prior estab, absent in new).';
 
 
 -- ---------------------------------------------------------------------------
@@ -325,7 +326,7 @@ COMMENT ON COLUMN deployments.scheduled_activation IS
 CREATE TABLE deployment_personnel_overrides (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     deployment_id   UUID NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
-    pers_no         TEXT NOT NULL,
+    personnel_id    UUID NOT NULL REFERENCES personnel_snapshots(id),
     unit            TEXT NOT NULL,
     sub_unit_1      TEXT,
     sub_unit_2      TEXT,
@@ -334,17 +335,17 @@ CREATE TABLE deployment_personnel_overrides (
     created_by      UUID REFERENCES users(id),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_by      UUID REFERENCES users(id),
-    UNIQUE (deployment_id, pers_no)
+    UNIQUE (deployment_id, personnel_id)
 );
 
 COMMENT ON TABLE deployment_personnel_overrides IS
-    'Per-deployment subunit remappings. Takes precedence over estab assignment for the given pers_no. '
+    'Per-deployment subunit remappings. Takes precedence over estab assignment for the given personnel row. '
     'Absence of a row = inherit estab assignment. Editable at any time (no write-lock).';
 
 
 -- ---------------------------------------------------------------------------
 -- 12. DEPLOYMENT NOTES
---     Canonical notes store, keyed by (deployment_id, pers_no).
+--     Canonical notes store, keyed by (deployment_id, personnel_id).
 --     Notes are deployment-scoped and persist across sessions.
 --     Edited from both deployment view and attendance session view.
 -- ---------------------------------------------------------------------------
@@ -352,19 +353,19 @@ COMMENT ON TABLE deployment_personnel_overrides IS
 CREATE TABLE deployment_notes (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     deployment_id   UUID NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
-    pers_no         TEXT NOT NULL,
+    personnel_id    UUID NOT NULL REFERENCES personnel_snapshots(id),
     notes_text      TEXT NOT NULL DEFAULT '',
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_by      UUID REFERENCES users(id),
-    UNIQUE (deployment_id, pers_no)
+    UNIQUE (deployment_id, personnel_id)
 );
 
-CREATE INDEX idx_deployment_notes_lookup ON deployment_notes(deployment_id, pers_no);
+CREATE INDEX idx_deployment_notes_lookup ON deployment_notes(deployment_id, personnel_id);
 
 COMMENT ON TABLE deployment_notes IS
     'Canonical deployment-scoped notes per personnel. '
     'Written from both deployment view and attendance session view (write-back from session). '
-    'Transferred to new deployment by pers_no on new CSV confirmation.';
+    'Transferred to a new deployment by following the person across estabs via short_id on new estab confirmation.';
 
 
 -- ---------------------------------------------------------------------------
@@ -408,7 +409,6 @@ CREATE TABLE attendance_records (
     session_id          UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     deployment_id       UUID NOT NULL REFERENCES deployments(id),
     personnel_id        UUID NOT NULL REFERENCES personnel_snapshots(id),
-    pers_no             TEXT NOT NULL,                 -- denormalised for query convenience
 
     -- Attendance data
     status              TEXT NOT NULL DEFAULT 'absent' CHECK (status IN ('present', 'absent')),
@@ -432,7 +432,7 @@ CREATE TABLE attendance_records (
 );
 
 CREATE INDEX idx_attendance_session ON attendance_records(session_id);
-CREATE INDEX idx_attendance_personnel ON attendance_records(pers_no);
+CREATE INDEX idx_attendance_personnel ON attendance_records(personnel_id);
 CREATE INDEX idx_attendance_deployment ON attendance_records(deployment_id);
 
 COMMENT ON TABLE attendance_records IS

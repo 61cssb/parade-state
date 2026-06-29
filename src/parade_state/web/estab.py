@@ -28,7 +28,7 @@ async def estab_view(
     """Render the estab browser page.
 
     Shows an estab selector and a table of personnel for the selected estab.
-    Optional filters: text search (rank/name/pers_no) and unit filter.
+    Optional filters: text search (rank/name/short_id) and unit filter.
     """
     current_user = await get_current_user_optional(request)
     if not current_user:
@@ -80,7 +80,7 @@ async def estab_view(
             query = query.where(
                 or_(
                     Personnel.full_name.ilike(pattern),
-                    Personnel.pers_no.ilike(pattern),
+                    Personnel.short_id.ilike(pattern),
                     Personnel.rank.ilike(pattern),
                 )
             )
@@ -103,7 +103,7 @@ async def estab_view(
             count_query = count_query.where(
                 or_(
                     Personnel.full_name.ilike(pattern),
-                    Personnel.pers_no.ilike(pattern),
+                    Personnel.short_id.ilike(pattern),
                     Personnel.rank.ilike(pattern),
                 )
             )
@@ -135,7 +135,7 @@ async def estab_view(
         {
             "rank": p.rank,
             "full_name": p.full_name,
-            "pers_no": p.pers_no,
+            "short_id": p.short_id,
             "unit": p.unit,
             "sub_unit_1": p.sub_unit_1,
             "sub_unit_2": p.sub_unit_2,
