@@ -108,13 +108,13 @@ def apply_personnel_filters(query, params: PersonnelListParams):
     if params.sub_unit_3:
         query = query.where(Personnel.sub_unit_3 == params.sub_unit_3)
 
-    # Search across name and service number
+    # Search across name and short_id
     if params.search:
         search_term = f"%{params.search}%"
         query = query.where(
             or_(
                 Personnel.full_name.ilike(search_term),
-                Personnel.pers_no.ilike(search_term),
+                Personnel.short_id.ilike(search_term),
             )
         )
 
@@ -225,7 +225,7 @@ async def get_deployment_personnel_with_overrides(
         response = PersonnelResponseWithDeployment(
             id=personnel.id,
             estab_id=personnel.estab_id,
-            service_number=personnel.pers_no,
+            short_id=personnel.short_id,
             rank=personnel.rank,
             name=personnel.full_name,
             unit=personnel.unit,
@@ -394,7 +394,7 @@ async def list_personnel(
         PersonnelResponseWithDeployment(
             id=p.id,
             estab_id=p.estab_id,
-            service_number=p.pers_no,
+            short_id=p.short_id,
             rank=p.rank,
             name=p.full_name,
             unit=p.unit,
@@ -438,7 +438,7 @@ async def get_personnel(
         return PersonnelResponseWithDeployment(
             id=personnel.id,
             estab_id=personnel.estab_id,
-            service_number=personnel.pers_no,
+            short_id=personnel.short_id,
             rank=personnel.rank,
             name=personnel.full_name,
             unit=personnel.unit,
@@ -474,7 +474,7 @@ async def get_personnel(
         return PersonnelResponseWithDeployment(
             id=personnel.id,
             estab_id=personnel.estab_id,
-            service_number=personnel.pers_no,
+            short_id=personnel.short_id,
             rank=personnel.rank,
             name=personnel.full_name,
             unit=personnel.unit,
@@ -536,7 +536,7 @@ async def update_personnel(
         return PersonnelResponseWithDeployment(
             id=personnel.id,
             estab_id=personnel.estab_id,
-            service_number=personnel.pers_no,
+            short_id=personnel.short_id,
             rank=personnel.rank,
             name=personnel.full_name,
             unit=personnel.unit,
@@ -579,7 +579,7 @@ async def update_personnel(
         return PersonnelResponseWithDeployment(
             id=personnel.id,
             estab_id=personnel.estab_id,
-            service_number=personnel.pers_no,
+            short_id=personnel.short_id,
             rank=personnel.rank,
             name=personnel.full_name,
             unit=personnel.unit,

@@ -901,7 +901,7 @@ async def export_deployment_csv(
     # Write header
     writer.writerow(
         [
-            "Service Number",
+            "ID",
             "Rank",
             "Name",
             "Estab Unit",
@@ -932,7 +932,7 @@ async def export_deployment_csv(
 
         # Build row
         row = [
-            person.pers_no,
+            person.short_id,
             person.rank,
             person.full_name,
             person.unit,

@@ -2,10 +2,10 @@
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, Enum, ForeignKey, String
+from sqlalchemy import JSON, Enum, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from parade_state.utils import utc_dt
+from parade_state.utils import ids, utc_dt
 
 from ..db import Base
 
@@ -16,14 +16,20 @@ if TYPE_CHECKING:
 
 
 class Personnel(Base):
-    """Individual personnel record, sourced from CSV estab."""
+    """Individual personnel record, sourced from CSV estab.
+
+    Identity: ``id`` is the row PK (one row per estab-person pairing). ``short_id``
+    is the cross-estab person identifier — an 8-char base62 string shared by every
+    row belonging to the same individual across estabs. Minted server-side; never
+    sourced from the CSV (``pers_no`` is dropped on parse, never stored).
+    """
 
     __tablename__ = "personnel"
 
     estab_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("estabs.id", ondelete="CASCADE"), index=True
     )
-    pers_no: Mapped[str] = mapped_column(String(255), index=True)
+    short_id: Mapped[str] = mapped_column(String(8), default=ids.short_id, index=True)
     rank: Mapped[str] = mapped_column(String(50), index=True)
     full_name: Mapped[str] = mapped_column(String(255), index=True)
     unit: Mapped[str] = mapped_column(String(255), index=True)
@@ -56,11 +62,12 @@ class Personnel(Base):
     )
 
     __table_args__ = (
+        UniqueConstraint("estab_id", "short_id", name="uq_personnel_estab_short_id"),
         {"schema": None},  # Default schema
     )
 
     def __repr__(self) -> str:
         return (
-            f"<Personnel(pers_no={self.pers_no!r}, "
+            f"<Personnel(short_id={self.short_id!r}, "
             f"name={self.full_name!r}, status={self.status!r})>"
         )
