@@ -29,6 +29,8 @@ this module may expand to support other ID types in the future.
 **Generation:**
 - ids.uuid4() - Generate random UUID (version 4)
 - ids.uuid4_str() - Generate UUID as string
+- ids.short_id() - Generate a random 8-char base62 short ID (personnel identifier)
+- ids.mint_unique_short_id(is_taken) - Mint a short ID guaranteed unique per a taken-check
 
 **Validation:**
 - ids.is_valid(value) - Check if value is valid UUID
@@ -69,6 +71,69 @@ All conversion functions raise ValueError with descriptive messages:
 """
 
 import uuid as uuid_module
+from collections.abc import Callable
+from typing import Protocol
+
+# Base62 alphabet (URL-safe, no ambiguous chars). Used for shortened personnel IDs.
+# Ordered digits-first so lexicographic sort is stable; omits 0/O/1/l/I look-alikes.
+_BASE62_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+_SHORT_ID_LENGTH = 8
+
+
+def short_id(length: int = _SHORT_ID_LENGTH) -> str:
+    """Generate a random shortened ID using the base62 alphabet.
+
+    Uses ``secrets`` for a CSPRNG-backed draw. With the default 8-char length the
+    keyspace is 62**8 (~2.18e14); collision resistance for up to 100K lifetime IDs
+    is provided by pairing this with :func:`mint_unique_short_id`, which retries
+    on collision against a taken-check.
+
+    Args:
+        length: Number of characters to generate (default 8).
+
+    Returns:
+        A random short ID string, e.g. ``"7Kq2F9xZ"``.
+    """
+    import secrets
+
+    return "".join(secrets.choice(_BASE62_ALPHABET) for _ in range(length))
+
+
+class _ShortIdTakenChecker(Protocol):
+    def __call__(self, candidate: str) -> bool: ...
+
+
+def mint_unique_short_id(
+    is_taken: Callable[[str], bool],
+    *,
+    max_attempts: int = 32,
+    length: int = _SHORT_ID_LENGTH,
+) -> str:
+    """Mint a short ID guaranteed not to collide per ``is_taken``.
+
+    Repeatedly draws a fresh short ID until ``is_taken(candidate)`` returns False
+    (or ``max_attempts`` is exhausted). The caller supplies ``is_taken`` so this
+    stays framework-agnostic — typically a DB lookup against existing short IDs.
+
+    Args:
+        is_taken: Callable returning True if ``candidate`` is already in use.
+        max_attempts: Give-up threshold (raises RuntimeError). 32 attempts against
+            a ~2.18e14 keyspace makes collision exhaustion effectively impossible.
+        length: Short ID length (default 8).
+
+    Returns:
+        A short ID for which ``is_taken`` returned False.
+
+    Raises:
+        RuntimeError: If every attempt collided (extremely unlikely).
+    """
+    for _ in range(max_attempts):
+        candidate = short_id(length)
+        if not is_taken(candidate):
+            return candidate
+    raise RuntimeError(
+        f"Could not mint a unique {length}-char short_id after {max_attempts} attempts"
+    )
 
 
 def uuid4() -> uuid_module.UUID:
