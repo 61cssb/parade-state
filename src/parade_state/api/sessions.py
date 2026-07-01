@@ -6,8 +6,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.api.access_control import get_user_accessible_deployments
+from parade_state.api.attendance import is_retroactive_edit
 from parade_state.db import get_db_session
 from parade_state.models import Deployment, DeploymentUserAccess, Session
+from parade_state.models.attendance import AttendanceRecord
+from parade_state.models.deployment import (
+    DeploymentNotes,
+    DeploymentPersonnelExclusion,
+    DeploymentPersonnelOverride,
+)
+from parade_state.models.personnel import Personnel
 from parade_state.models.schemas import (
     SessionCreate,
     SessionResponse,
@@ -196,8 +204,7 @@ async def create_session(
 
     try:
         db.add(session)
-        await db.commit()
-        await db.refresh(session)
+        await db.flush()  # Assign session.id without committing
     except IntegrityError:
         await db.rollback()
         raise HTTPException(
@@ -205,10 +212,100 @@ async def create_session(
             detail=f"A {session_data.session_type} session already exists for this deployment on this date",
         ) from None
 
-    # Note: Snapshot of deployment notes will be handled when attendance records are created
-    # The session creation itself doesn't trigger snapshot - it happens when recording attendance
+    # Auto-populate attendance records for the full deployment roster
+    await _populate_session_roster(session, deployment, user_id, db)
+
+    await db.commit()
+    await db.refresh(session)
 
     return session
+
+
+async def _populate_session_roster(
+    session: Session,
+    deployment: Deployment,
+    user_id: str,
+    db: AsyncSession,
+) -> None:
+    """Create attendance records for all included personnel in the deployment roster.
+
+    Uses batch queries to avoid N+1 when populating a large roster.
+    Personnel default to 'absent' — admins/users mark them as present/excused later.
+    """
+    # Batch-load roster (active personnel belonging to the deployment's estab)
+    roster_result = await db.execute(
+        select(Personnel).where(
+            Personnel.estab_id == deployment.estab_id,
+            Personnel.status == "active",
+        )
+    )
+    all_roster = roster_result.scalars().all()
+
+    if not all_roster:
+        return
+
+    # Batch-load exclusions for this deployment
+    excl_result = await db.execute(
+        select(DeploymentPersonnelExclusion.personnel_id).where(
+            DeploymentPersonnelExclusion.deployment_id == str(deployment.id),
+        )
+    )
+    excluded_ids = {str(row[0]) for row in excl_result.all()}
+
+    # Batch-load overrides for snapshot data
+    override_result = await db.execute(
+        select(DeploymentPersonnelOverride).where(
+            DeploymentPersonnelOverride.deployment_id == str(deployment.id),
+        )
+    )
+    override_map = {
+        str(o.personnel_id): o for o in override_result.scalars().all()
+    }
+
+    # Batch-load deployment notes for snapshot data
+    notes_result = await db.execute(
+        select(DeploymentNotes).where(
+            DeploymentNotes.deployment_id == str(deployment.id),
+        )
+    )
+    notes_map = {
+        str(n.personnel_id): n.notes for n in notes_result.scalars().all()
+    }
+
+    is_retroactive = await is_retroactive_edit(session.date)
+
+    for person in all_roster:
+        if str(person.id) in excluded_ids:
+            continue
+
+        override = override_map.get(str(person.id))
+        if override:
+            unit = override.unit
+            sub1 = override.sub_unit_1
+            sub2 = override.sub_unit_2
+            sub3 = override.sub_unit_3
+        else:
+            unit = person.unit
+            sub1 = person.sub_unit_1
+            sub2 = person.sub_unit_2
+            sub3 = person.sub_unit_3
+
+        db.add(
+            AttendanceRecord(
+                session_id=str(session.id),
+                personnel_id=str(person.id),
+                deployment_id=str(deployment.id),
+                status="absent",
+                notes_snapshot=notes_map.get(str(person.id)),
+                unit_snapshot=unit,
+                sub_unit_1_snapshot=sub1,
+                sub_unit_2_snapshot=sub2,
+                sub_unit_3_snapshot=sub3,
+                created_by=user_id,
+                updated_by=user_id,
+                is_retroactive_edit=is_retroactive,
+            )
+        )
 
 
 @router.get("/", response_model=list[SessionResponse])

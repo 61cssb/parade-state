@@ -113,7 +113,6 @@ async def deployment_view(
                     "present": counts.get("present", 0),
                     "absent": counts.get("absent", 0),
                     "excused": counts.get("excused", 0),
-                    "unknown": counts.get("unknown", 0),
                     "total": total,
                 }
             )
@@ -145,7 +144,6 @@ async def deployment_view(
                         "present": 0,
                         "absent": 0,
                         "excused": 0,
-                        "unknown": 0,
                         "total": 0,
                     }
                 unit_map[key][status_val] = unit_map[key].get(status_val, 0) + count_val

@@ -627,7 +627,7 @@ async def get_personnel_attendance_history(
 
     Returns attendance records with summary statistics including:
     - Total sessions attended
-    - Present/absent/excused/unknown counts
+    - Present/absent/excused counts
     - Attendance rate (present + excused / total)
 
     Supports date range filtering and pagination.
@@ -676,7 +676,6 @@ async def get_personnel_attendance_history(
     present_count = 0
     absent_count = 0
     excused_count = 0
-    unknown_count = 0
 
     for record, session in records:
         # Count by status
@@ -686,8 +685,6 @@ async def get_personnel_attendance_history(
             absent_count += 1
         elif record.status == "excused":
             excused_count += 1
-        elif record.status == "unknown":
-            unknown_count += 1
 
         attendance_items.append(
             PersonnelAttendanceHistoryItem(
@@ -705,7 +702,7 @@ async def get_personnel_attendance_history(
 
     # Calculate attendance rate
     # Attendance rate = (present + excused) / total_sessions
-    total_sessions = present_count + absent_count + excused_count + unknown_count
+    total_sessions = present_count + absent_count + excused_count
     if total_sessions > 0:
         attendance_rate = ((present_count + excused_count) / total_sessions) * 100
     else:
@@ -717,7 +714,6 @@ async def get_personnel_attendance_history(
         present_count=present_count,
         absent_count=absent_count,
         excused_count=excused_count,
-        unknown_count=unknown_count,
         attendance_rate=round(attendance_rate, 2),
     )
 
