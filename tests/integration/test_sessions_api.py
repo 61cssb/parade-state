@@ -6,8 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from parade_state.models.attendance import Session
-from parade_state.models.deployment import Deployment
+from parade_state.models.attendance import AttendanceRecord, Session
+from parade_state.models.deployment import Deployment, DeploymentPersonnelExclusion
 from parade_state.utils import utc_dt
 from tests.test_utils import (
     assert_404_response,
@@ -896,3 +896,137 @@ async def test_session_auto_sets_opened_at(
     # Use naive UTC time for comparison since opened_at is naive
     time_diff = abs((utc_dt.ensure_naive(utc_dt.utcnow()) - opened_at).total_seconds())
     assert time_diff < 60  # Less than 1 minute difference
+
+
+# ============================================================================
+# Session auto-population tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_create_session_auto_populates_attendance_records(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    admin_id: str,
+    db_session,
+    sample_deployment: Deployment,
+    sample_personnel,
+):
+    """Creating a session should auto-create attendance records for all roster personnel."""
+    session_data = {
+        "deployment_id": str(sample_deployment.id),
+        "date": date.today().isoformat(),
+        "session_type": "PM",
+        "status": "open",
+    }
+
+    response = client.post(
+        "/api/v1/sessions/",
+        json=session_data,
+        headers=admin_token_headers,
+        params={"user_id": admin_id, "user_role": "admin"},
+    )
+
+    assert response.status_code == 201
+    session_id = response.json()["id"]
+
+    # Query attendance records for the new session
+    result = await db_session.execute(
+        select(AttendanceRecord).where(AttendanceRecord.session_id == session_id)
+    )
+    records = result.scalars().all()
+
+    # Should have one record per personnel (3 sample personnel)
+    assert len(records) == 3
+    # All should default to "absent"
+    assert all(r.status == "absent" for r in records)
+    # All should reference the correct deployment
+    assert all(r.deployment_id == str(sample_deployment.id) for r in records)
+
+
+@pytest.mark.asyncio
+async def test_create_session_excludes_excluded_personnel(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    admin_id: str,
+    db_session,
+    sample_deployment: Deployment,
+    sample_personnel,
+):
+    """Excluded personnel should not get attendance records on session creation."""
+    # Exclude the first personnel
+    exclusion = DeploymentPersonnelExclusion(
+        deployment_id=str(sample_deployment.id),
+        personnel_id=str(sample_personnel[0].id),
+        excluded_by=admin_id,
+    )
+    db_session.add(exclusion)
+    await db_session.commit()
+
+    session_data = {
+        "deployment_id": str(sample_deployment.id),
+        "date": date.today().isoformat(),
+        "session_type": "AM",
+        "status": "open",
+    }
+
+    response = client.post(
+        "/api/v1/sessions/",
+        json=session_data,
+        headers=admin_token_headers,
+        params={"user_id": admin_id, "user_role": "admin"},
+    )
+
+    assert response.status_code == 201
+    session_id = response.json()["id"]
+
+    result = await db_session.execute(
+        select(AttendanceRecord).where(AttendanceRecord.session_id == session_id)
+    )
+    records = result.scalars().all()
+
+    # 3 personnel minus 1 excluded = 2 records
+    assert len(records) == 2
+    excluded_ids = {str(r.personnel_id) for r in records}
+    assert str(sample_personnel[0].id) not in excluded_ids
+
+
+@pytest.mark.asyncio
+async def test_create_session_status_unknown_rejected(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    admin_id: str,
+    sample_deployment: Deployment,
+):
+    """Attendance status 'unknown' should no longer be valid (422 from schema validation)."""
+    # This is validated at the schema level — creating an attendance record with
+    # "unknown" should be rejected by Pydantic before reaching the endpoint.
+    session_data = {
+        "deployment_id": str(sample_deployment.id),
+        "date": date.today().isoformat(),
+        "session_type": "AM",
+    }
+
+    # Create session first
+    response = client.post(
+        "/api/v1/sessions/",
+        json=session_data,
+        headers=admin_token_headers,
+        params={"user_id": admin_id, "user_role": "admin"},
+    )
+    assert response.status_code == 201
+    session_id = response.json()["id"]
+
+    # Try to create an attendance record with "unknown" status
+    attendance_data = {
+        "session_id": session_id,
+        "personnel_id": "00000000-0000-0000-0000-000000000001",
+        "status": "unknown",
+    }
+    response = client.post(
+        "/api/v1/attendance/",
+        json=attendance_data,
+        headers=admin_token_headers,
+        params={"user_id": admin_id, "user_role": "admin"},
+    )
+    assert response.status_code == 422
