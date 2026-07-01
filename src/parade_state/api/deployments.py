@@ -4,7 +4,7 @@ import csv
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
@@ -257,6 +257,43 @@ async def update_deployment(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="valid_until must be after valid_from",
+            )
+
+    # Check no sessions fall outside the new date range
+    if update_data.valid_from is not None or update_data.valid_until is not None:
+        new_valid_from = (
+            update_data.valid_from
+            if update_data.valid_from is not None
+            else deployment.valid_from
+        )
+        new_valid_until = (
+            update_data.valid_until
+            if update_data.valid_until is not None
+            else deployment.valid_until
+        )
+
+        out_of_range_result = await db.execute(
+            select(Session).where(
+                and_(
+                    Session.deployment_id == deployment_id,
+                    or_(
+                        Session.date < new_valid_from.date(),
+                        Session.date > new_valid_until.date(),
+                    ),
+                ),
+            )
+        )
+        out_of_range = out_of_range_result.scalars().all()
+        if out_of_range:
+            dates = ", ".join(
+                s.date.strftime("%Y-%m-%d") + " " + s.session_type for s in out_of_range
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Cannot change dates: {len(out_of_range)} session(s) fall "
+                    f"outside the new range ({dates}). Delete those sessions first."
+                ),
             )
 
     # Update fields
@@ -906,7 +943,7 @@ async def get_deployment_status(
         attendance_counts = attendance_result.all()
 
         # Build status counts
-        counts = {"present": 0, "absent": 0, "excused": 0, "unknown": 0}
+        counts = {"present": 0, "absent": 0, "excused": 0}
         total = 0
         for status_val, count in attendance_counts:
             counts[status_val] = count
@@ -918,7 +955,6 @@ async def get_deployment_status(
             present=counts["present"],
             absent=counts["absent"],
             excused=counts["excused"],
-            unknown=counts["unknown"],
             total=total,
         )
 
@@ -954,7 +990,6 @@ async def get_deployment_status(
                 "present": 0,
                 "absent": 0,
                 "excused": 0,
-                "unknown": 0,
             }
         unit_stats[unit_name][status_val] = count
         unit_stats[unit_name]["total"] += count
@@ -967,7 +1002,6 @@ async def get_deployment_status(
             present=stats["present"],
             absent=stats["absent"],
             excused=stats["excused"],
-            unknown=stats["unknown"],
         )
         for unit_name, stats in sorted(unit_stats.items())
     ]
