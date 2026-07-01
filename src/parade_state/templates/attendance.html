@@ -53,33 +53,66 @@
     </div>
 
     {% if attendance_records %}
-    <table style="width: 100%; border-collapse: collapse;">
+    <!-- Column filters -->
+    <div style="display: flex; gap: 0.75rem; margin-bottom: 0.75rem; flex-wrap: wrap; align-items: center;">
+        <span style="font-size: 0.8rem; color: #6b7280; font-weight: 600;">Filter:</span>
+        <select id="filter-unit" onchange="applyFilters()"
+                style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
+            <option value="">All Units</option>
+        </select>
+        <select id="filter-sub1" onchange="applyFilters()"
+                style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
+            <option value="">All Sub-unit 1</option>
+        </select>
+        <select id="filter-sub2" onchange="applyFilters()"
+                style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
+            <option value="">All Sub-unit 2</option>
+        </select>
+        <span id="filter-count" style="font-size: 0.8rem; color: #6b7280;"></span>
+    </div>
+
+    <table id="attendance-table" style="width: 100%; border-collapse: collapse;">
         <thead>
             <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
-                <th style="padding: 0.5rem;">Rank</th>
-                <th style="padding: 0.5rem;">Name</th>
-                <th style="padding: 0.5rem;">Unit</th>
-                <th style="padding: 0.5rem;">Sub-unit</th>
-                <th style="padding: 0.5rem;">Status</th>
+                <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('rank')">
+                    Rank <span id="sort-rank"></span>
+                </th>
+                <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('name')">
+                    Name <span id="sort-name"></span>
+                </th>
+                <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('unit')">
+                    Unit <span id="sort-unit"></span>
+                </th>
+                <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('sub1')">
+                    Sub-unit 1 <span id="sort-sub1"></span>
+                </th>
+                <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('sub2')">
+                    Sub-unit 2 <span id="sort-sub2"></span>
+                </th>
+                <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('status')">
+                    Status <span id="sort-status"></span>
+                </th>
                 <th style="padding: 0.5rem;">Remarks</th>
             </tr>
         </thead>
-        <tbody>
+        <tbody id="attendance-body">
             {% for r in attendance_records %}
-            <tr style="border-bottom: 1px solid #e5e7eb;" data-record-id="{{ r.id }}">
+            <tr style="border-bottom: 1px solid #e5e7eb;" data-record-id="{{ r.id }}"
+                data-unit="{{ r.unit }}" data-sub1="{{ r.sub_unit_1 or '' }}" data-sub2="{{ r.sub_unit_2 or '' }}"
+                data-rank="{{ r.rank }}" data-name="{{ r.full_name }}" data-status="{{ r.status }}">
                 <td style="padding: 0.5rem;">{{ r.rank }}</td>
                 <td style="padding: 0.5rem;">{{ r.full_name }}</td>
                 <td style="padding: 0.5rem;">{{ r.unit }}</td>
                 <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_1 or '' }}</td>
+                <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_2 or '' }}</td>
                 <td style="padding: 0.5rem;">
-                    <select data-attendance-id="{{ r.id }}" data-field="status"
+                    <select class="status-select" data-attendance-id="{{ r.id }}" data-field="status"
                             {% if not is_open %}disabled{% endif %}
                             onchange="updateAttendance('{{ r.id }}', 'status', this.value)"
-                            style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                            style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-weight: 600;">
                         <option value="present" {% if r.status == 'present' %}selected{% endif %}>Present</option>
                         <option value="absent" {% if r.status == 'absent' %}selected{% endif %}>Absent</option>
                         <option value="excused" {% if r.status == 'excused' %}selected{% endif %}>Excused</option>
-                        <option value="unknown" {% if r.status == 'unknown' %}selected{% endif %}>Unknown</option>
                     </select>
                 </td>
                 <td style="padding: 0.5rem;">
@@ -128,6 +161,7 @@
 
             if (response.ok) {
                 showStatus(field.charAt(0).toUpperCase() + field.slice(1) + ' updated.', 'success');
+                if (field === 'status') updateStatusColors();
             } else {
                 const data = await response.json();
                 showStatus('Update failed: ' + (data.detail || 'Unknown error'), 'error');
@@ -146,5 +180,100 @@
             div.innerHTML = '';
         }, 3000);
     }
+
+    // --- Column filtering ---
+
+    function populateFilters() {
+        const rows = document.querySelectorAll('#attendance-body tr');
+        const units = new Set(), sub1s = new Set(), sub2s = new Set();
+        rows.forEach(function(row) {
+            if (row.dataset.unit) units.add(row.dataset.unit);
+            if (row.dataset.sub1) sub1s.add(row.dataset.sub1);
+            if (row.dataset.sub2) sub2s.add(row.dataset.sub2);
+        });
+        addOptions('filter-unit', units);
+        addOptions('filter-sub1', sub1s);
+        addOptions('filter-sub2', sub2s);
+    }
+
+    function addOptions(selectId, values) {
+        const select = document.getElementById(selectId);
+        const current = select.value;
+        [...values].sort().forEach(function(v) {
+            const opt = document.createElement('option');
+            opt.value = v;
+            opt.textContent = v;
+            select.appendChild(opt);
+        });
+        select.value = current;
+    }
+
+    function applyFilters() {
+        const fu = document.getElementById('filter-unit').value;
+        const f1 = document.getElementById('filter-sub1').value;
+        const f2 = document.getElementById('filter-sub2').value;
+        const rows = document.querySelectorAll('#attendance-body tr');
+        let visible = 0;
+        rows.forEach(function(row) {
+            const match = (!fu || row.dataset.unit === fu)
+                && (!f1 || row.dataset.sub1 === f1)
+                && (!f2 || row.dataset.sub2 === f2);
+            row.style.display = match ? '' : 'none';
+            if (match) visible++;
+        });
+        document.getElementById('filter-count').textContent =
+            visible !== rows.length ? '(' + visible + ' of ' + rows.length + ')' : '';
+    }
+
+    // --- Column sorting ---
+
+    let sortCol = null, sortAsc = true;
+
+    function sortBy(col) {
+        if (sortCol === col) {
+            sortAsc = !sortAsc;
+        } else {
+            sortCol = col;
+            sortAsc = true;
+        }
+        // Update arrow indicators
+        ['rank','name','unit','sub1','sub2','status'].forEach(function(c) {
+            document.getElementById('sort-' + c).textContent = c === col ? (sortAsc ? '\u25B2' : '\u25BC') : '';
+        });
+        const tbody = document.getElementById('attendance-body');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.sort(function(a, b) {
+            let va = a.dataset[col] || '', vb = b.dataset[col] || '';
+            // Status uses order: present < absent < excused
+            if (col === 'status') {
+                const order = {present:0, absent:1, excused:2};
+                va = order[va] ?? 9; vb = order[vb] ?? 9;
+                return sortAsc ? va - vb : vb - va;
+            }
+            return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+        });
+        rows.forEach(function(r) { tbody.appendChild(r); });
+    }
+
+    // --- Status dropdown color coding ---
+
+    function updateStatusColors() {
+        const colors = {
+            present: { bg: '#d1fae5', fg: '#065f46' },
+            absent:  { bg: '#fee2e2', fg: '#991b1b' },
+            excused: { bg: '#fef3c7', fg: '#92400e' },
+        };
+        document.querySelectorAll('.status-select').forEach(function(sel) {
+            const c = colors[sel.value] || { bg: '#fff', fg: '#374151' };
+            sel.style.backgroundColor = c.bg;
+            sel.style.color = c.fg;
+        });
+    }
+
+    // Initialize filters and colors on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        populateFilters();
+        updateStatusColors();
+    });
 </script>
 {% endblock %}

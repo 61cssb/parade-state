@@ -80,7 +80,6 @@ class DeploymentStatusSessionInfo(BaseModel):
     present: int = 0
     absent: int = 0
     excused: int = 0
-    unknown: int = 0
     total: int = 0
 
 
@@ -92,7 +91,6 @@ class DeploymentStatusUnitBreakdown(BaseModel):
     present: int
     absent: int
     excused: int
-    unknown: int
 
 
 class DeploymentStatusResponse(BaseModel):
@@ -238,14 +236,14 @@ class AttendanceRecordCreate(BaseModel):
 
     session_id: str
     personnel_id: str
-    status: Literal["present", "absent", "excused", "unknown"] = "absent"
+    status: Literal["present", "absent", "excused"] = "absent"
     remarks: str | None = None
 
 
 class AttendanceRecordUpdate(BaseModel):
     """Schema for updating an attendance record."""
 
-    status: Literal["present", "absent", "excused", "unknown"] | None = None
+    status: Literal["present", "absent", "excused"] | None = None
     remarks: str | None = None
 
 
@@ -280,7 +278,7 @@ class AttendanceRecordBulkCreateItem(BaseModel):
 
     session_id: str
     personnel_id: str
-    status: Literal["present", "absent", "excused", "unknown"] = "absent"
+    status: Literal["present", "absent", "excused"] = "absent"
     remarks: str | None = None
 
 
@@ -294,7 +292,7 @@ class AttendanceRecordBulkUpdateItem(BaseModel):
     """Schema for a single attendance record in bulk update operation."""
 
     id: str
-    status: Literal["present", "absent", "excused", "unknown"] | None = None
+    status: Literal["present", "absent", "excused"] | None = None
     remarks: str | None = None
 
 
@@ -419,7 +417,7 @@ class PersonnelAttendanceHistoryItem(BaseModel):
     session_date: utc_dt.datetime
     session_type: Literal["AM", "PM"]
     session_status: Literal["open", "closed", "finalized"]
-    status: Literal["present", "absent", "excused", "unknown"]
+    status: Literal["present", "absent", "excused"]
     remarks: str | None
     created_at: utc_dt.datetime
     updated_at: utc_dt.datetime
@@ -435,7 +433,6 @@ class PersonnelAttendanceHistoryStats(BaseModel):
     present_count: int
     absent_count: int
     excused_count: int
-    unknown_count: int
     attendance_rate: float  # Percentage of present + excused vs total
 
 

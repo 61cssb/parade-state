@@ -45,10 +45,6 @@
                 <div class="stat-value orange">{{ s.excused }}</div>
             </div>
             <div>
-                <span style="font-size: 0.75rem; color: #6b7280;">Unknown</span>
-                <div class="stat-value purple">{{ s.unknown }}</div>
-            </div>
-            <div>
                 <span style="font-size: 0.75rem; color: #6b7280;">Total</span>
                 <div class="stat-value">{{ s.total }}</div>
             </div>
@@ -73,7 +69,6 @@
                 <th style="padding: 0.5rem; text-align: center;">Present</th>
                 <th style="padding: 0.5rem; text-align: center;">Absent</th>
                 <th style="padding: 0.5rem; text-align: center;">Excused</th>
-                <th style="padding: 0.5rem; text-align: center;">Unknown</th>
                 <th style="padding: 0.5rem; text-align: center;">Total</th>
             </tr>
         </thead>
@@ -84,7 +79,6 @@
                 <td style="padding: 0.5rem; text-align: center; color: #10b981; font-weight: bold;">{{ u.present }}</td>
                 <td style="padding: 0.5rem; text-align: center; color: #ef4444;">{{ u.absent }}</td>
                 <td style="padding: 0.5rem; text-align: center; color: #f59e0b;">{{ u.excused }}</td>
-                <td style="padding: 0.5rem; text-align: center; color: #8b5cf6;">{{ u.unknown }}</td>
                 <td style="padding: 0.5rem; text-align: center; font-weight: bold;">{{ u.total }}</td>
             </tr>
             {% endfor %}

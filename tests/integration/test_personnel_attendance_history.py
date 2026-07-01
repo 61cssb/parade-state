@@ -48,7 +48,6 @@ async def test_get_personnel_attendance_history_basic(
     assert "present_count" in stats
     assert "absent_count" in stats
     assert "excused_count" in stats
-    assert "unknown_count" in stats
     assert "attendance_rate" in stats
 
     # Verify statistics match the sample data
@@ -56,7 +55,6 @@ async def test_get_personnel_attendance_history_basic(
     assert stats["present_count"] == 1
     assert stats["absent_count"] == 1
     assert stats["excused_count"] == 1
-    assert stats["unknown_count"] == 0
     # Attendance rate = (1 + 1) / 3 = 66.67%
     assert abs(stats["attendance_rate"] - 66.67) < 0.1
 
@@ -266,7 +264,6 @@ async def test_get_personnel_attendance_history_no_records(
     assert data["stats"]["present_count"] == 0
     assert data["stats"]["absent_count"] == 0
     assert data["stats"]["excused_count"] == 0
-    assert data["stats"]["unknown_count"] == 0
     assert data["stats"]["attendance_rate"] == 0.0
 
 
@@ -286,8 +283,8 @@ async def test_get_personnel_attendance_history_various_statuses(
     personnel_id = str(sample_personnel[0].id)
     admin_id = str(sample_users["admin"].id)
 
-    # Create an additional session with "unknown" status
-    unknown_session = Session(
+    # Create an additional session with another "absent" status
+    extra_session = Session(
         deployment_id=str(sample_deployment.id),
         date=date.today() - timedelta(days=2),
         session_type="PM",
@@ -295,19 +292,19 @@ async def test_get_personnel_attendance_history_various_statuses(
         created_by=admin_id,
         opened_at=utc_dt.utcnow(),
     )
-    db_session.add(unknown_session)
+    db_session.add(extra_session)
     await db_session.commit()
 
-    # Create attendance record with "unknown" status
-    unknown_record = AttendanceRecord(
-        session_id=str(unknown_session.id),
+    # Create attendance record with "absent" status
+    extra_record = AttendanceRecord(
+        session_id=str(extra_session.id),
         personnel_id=personnel_id,
         deployment_id=str(sample_deployment.id),
-        status="unknown",
+        status="absent",
         created_by=admin_id,
         updated_by=admin_id,
     )
-    db_session.add(unknown_record)
+    db_session.add(extra_record)
     await db_session.commit()
 
     # Get attendance history
@@ -324,13 +321,12 @@ async def test_get_personnel_attendance_history_various_statuses(
     assert response.status_code == 200
     data = response.json()
 
-    # Should now have 4 records with all status types
+    # Should now have 4 records (2 absent, 1 present, 1 excused)
     assert data["total_count"] == 4
     stats = data["stats"]
     assert stats["present_count"] == 1
-    assert stats["absent_count"] == 1
+    assert stats["absent_count"] == 2
     assert stats["excused_count"] == 1
-    assert stats["unknown_count"] == 1
     # Attendance rate = (1 + 1) / 4 = 50%
     assert abs(stats["attendance_rate"] - 50.0) < 0.1
 

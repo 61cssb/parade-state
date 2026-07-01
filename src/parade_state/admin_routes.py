@@ -23,6 +23,7 @@ from parade_state.models import (
 from parade_state.models import (
     Session as SessionModel,
 )
+from parade_state.utils import utc_dt
 
 router = APIRouter()
 depends_admin = Depends(require_admin_user_flexible)
@@ -208,6 +209,56 @@ async def admin_deployments(
         for dep_id, sessions in sessions_by_deployment.items()
     }
 
+    # Compute next-session hints for autofill in the session creation form
+    next_session_hints: dict[str, dict[str, str]] = {}
+    now = utc_dt.utcnow()
+    today = now.date()
+    for d in deployments:
+        dep_id = str(d.id)
+        sessions = sessions_by_deployment.get(dep_id, [])
+        if not sessions:
+            # No sessions — infer from current time and deployment start date
+            base_date = max(today, d.valid_from.date())
+            if base_date > today:
+                # Deployment starts in the future — first session is start date AM
+                next_session_hints[dep_id] = {
+                    "date": base_date.strftime("%Y-%m-%d"),
+                    "session_type": "AM",
+                }
+            elif now.hour < 12:
+                next_session_hints[dep_id] = {
+                    "date": today.strftime("%Y-%m-%d"),
+                    "session_type": "AM",
+                }
+            elif now.hour < 18:
+                next_session_hints[dep_id] = {
+                    "date": today.strftime("%Y-%m-%d"),
+                    "session_type": "PM",
+                }
+            else:
+                next_session_hints[dep_id] = {
+                    "date": (today + utc_dt.timedelta(days=1)).strftime("%Y-%m-%d"),
+                    "session_type": "AM",
+                }
+            continue
+
+        # sessions sorted by date desc, so [0] is the latest
+        latest_date = sessions[0].date
+        has_pm_on_latest = any(
+            s.date == latest_date and s.session_type == "PM" for s in sessions
+        )
+        if has_pm_on_latest:
+            next_date = latest_date + utc_dt.timedelta(days=1)
+            next_session_hints[dep_id] = {
+                "date": next_date.strftime("%Y-%m-%d"),
+                "session_type": "AM",
+            }
+        else:
+            next_session_hints[dep_id] = {
+                "date": latest_date.strftime("%Y-%m-%d"),
+                "session_type": "PM",
+            }
+
     env = get_templates(request)
     template = env.get_template("admin/deployments.html")
 
@@ -222,6 +273,7 @@ async def admin_deployments(
         active_page="deployments",
         deployments=deployments_data,
         sessions_by_deployment=sessions_data,
+        next_session_hints=next_session_hints,
         status_filter=status_filter or "",
         deployment_statuses=DEPLOYMENT_STATUSES,
     )

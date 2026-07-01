@@ -79,7 +79,6 @@ class AttendanceRecord(Base):
             "present",
             "absent",
             "excused",
-            "unknown",
             name="attendance_status",
         ),
         default="absent",

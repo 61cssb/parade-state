@@ -259,6 +259,42 @@ uv run pytest -k "personnel"
 
 ---
 
+## Wrap-up Workflow
+
+When finishing a feature or set of changes, follow these steps in order:
+
+### 1. Review Test Coverage
+
+- Focus on **critical behavioral tests** — what the system does, not how it's implemented
+- Avoid fragile tests that assert on implementation details (internal function calls, specific SQL, etc.)
+- Verify new endpoints have happy-path + error-case coverage
+- Run `uv run pytest -x --no-cov` for fast feedback, then full suite for completeness
+
+### 2. Update Documentation
+
+Keep docs in sync with code changes. Check these files:
+- **[docs/SPECIFICATION.md](docs/SPECIFICATION.md)** — data models, enums, business rules
+- **[docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)** — implementation status
+- **[docs/api.yaml](docs/api.yaml)** — API endpoint schemas and descriptions
+- **[docs/NEXT_PHASE.md](docs/NEXT_PHASE.md)** — roadmap and completed features
+
+### 3. Commit in Auditable Chunks
+
+Organize commits so each tells a coherent story:
+1. `feat:` source code changes (split by feature if large)
+2. `test:` behavioral tests for new features
+3. `docs:` documentation updates
+
+Each commit message should explain **why**, not just **what**.
+
+### 4. Create GitHub PR
+
+- Push feature branch: `git push -u origin feat/<branch-name>`
+- Create PR with `gh pr create`
+- Include a summary of changes and a test plan checklist
+
+---
+
 ## Additional Guidelines
 
 For detailed guidance on specific topics, refer to these documents:

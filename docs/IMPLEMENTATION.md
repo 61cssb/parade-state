@@ -184,6 +184,8 @@ async def test_example(client, sample_users, sample_deployment):
 - Deployment notes with version tracking
 - Validity window enforcement
 - Manual activation/deactivation
+- **Deployment date editing:** Admin UI supports editing valid_from/valid_until via an inline form; API validates that no sessions fall outside the new date range
+- **Admin deployments page:** Auto-expands active deployment on page load; per-session "Update" button linking to /attendance; autofills next session date/type
 - **Endpoints:** 7 deployment management endpoints
 
 **Attendance Session Management (✅ Complete)**
@@ -191,6 +193,7 @@ async def test_example(client, sample_users, sample_deployment):
 - Sequential status transitions (open → closed → finalized)
 - Session uniqueness constraints (one per type per deployment per day)
 - Proper validation and error handling
+- **Auto-population:** Creating a session automatically generates AttendanceRecord entries for all active personnel in the deployment's estab (minus exclusions), with status='absent'
 - **Endpoints:** 5 session management endpoints
 
 **Attendance Management (✅ Complete)**
@@ -200,6 +203,8 @@ async def test_example(client, sample_users, sample_deployment):
 - Retroactive edit detection and tracking
 - Complete audit trail (created/updated/last_edit timestamps)
 - Session status validation (open/closed/finalized)
+- Attendance status enum: present, absent, excused (default: absent)
+- **Attendance page UI enhancements:** Color-coded status dropdown (present=green, absent=red, excused=yellow), sub-unit 1 & 2 columns displayed, column filter and sort support
 - **Endpoints:** 8 attendance management endpoints
 
 **Personnel Management (✅ Session 1 Complete)**

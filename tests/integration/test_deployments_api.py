@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from parade_state.models.attendance import AttendanceRecord
+from parade_state.models.attendance import AttendanceRecord, Session
 from parade_state.models.csv_ingestion import Estab
 from parade_state.models.deployment import (
     Deployment,
@@ -905,3 +905,103 @@ async def test_export_deployment_csv_unauthorized(
     # This might succeed with current access control implementation
     # but should be restricted once proper scopes are enforced
     assert response.status_code in [200, 403, 404]
+
+
+# ============================================================================
+# Deployment date editing validation tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_dates_rejects_sessions_outside_range(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    admin_id: str,
+    db_session,
+    sample_deployment: Deployment,
+    sample_users,
+):
+    """Updating dates that exclude existing sessions should return 400."""
+    # Create a session on a specific date within the current range
+    session = Session(
+        deployment_id=str(sample_deployment.id),
+        date=date.today(),
+        session_type="AM",
+        status="open",
+        created_by=admin_id,
+        opened_at=utc_dt.utcnow(),
+    )
+    db_session.add(session)
+    await db_session.commit()
+
+    # Try to narrow valid_until to before the session date
+    response = client.patch(
+        f"/api/v1/deployments/{sample_deployment.id}",
+        json={
+            "valid_until": (date.today() - timedelta(days=1)).isoformat()
+            + "T23:59:59",
+        },
+        headers=admin_token_headers,
+        params={"user_id": admin_id, "user_role": "admin"},
+    )
+
+    assert response.status_code == 400
+    assert "fall outside" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_dates_succeeds_when_sessions_in_range(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    admin_id: str,
+    db_session,
+    sample_deployment: Deployment,
+):
+    """Updating dates that keep all sessions within range should succeed."""
+    # Create a session today
+    session = Session(
+        deployment_id=str(sample_deployment.id),
+        date=date.today(),
+        session_type="AM",
+        status="open",
+        created_by=admin_id,
+        opened_at=utc_dt.utcnow(),
+    )
+    db_session.add(session)
+    await db_session.commit()
+
+    # Widen the range — should succeed
+    new_valid_from = (date.today() - timedelta(days=10)).isoformat() + "T00:00:00"
+    new_valid_until = (date.today() + timedelta(days=60)).isoformat() + "T23:59:59"
+
+    response = client.patch(
+        f"/api/v1/deployments/{sample_deployment.id}",
+        json={"valid_from": new_valid_from, "valid_until": new_valid_until},
+        headers=admin_token_headers,
+        params={"user_id": admin_id, "user_role": "admin"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["valid_until"].startswith(
+        (date.today() + timedelta(days=60)).isoformat()
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_dates_no_sessions_succeeds(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    admin_id: str,
+    sample_deployment: Deployment,
+):
+    """Updating dates on a deployment with no sessions should always succeed."""
+    new_valid_from = (date.today() - timedelta(days=5)).isoformat() + "T00:00:00"
+
+    response = client.patch(
+        f"/api/v1/deployments/{sample_deployment.id}",
+        json={"valid_from": new_valid_from},
+        headers=admin_token_headers,
+        params={"user_id": admin_id, "user_role": "admin"},
+    )
+
+    assert response.status_code == 200

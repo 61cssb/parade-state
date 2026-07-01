@@ -115,6 +115,8 @@ async def attendance_view(
                         "unit": record.unit_snapshot or person.unit,
                         "sub_unit_1": record.sub_unit_1_snapshot
                         or person.sub_unit_1,
+                        "sub_unit_2": record.sub_unit_2_snapshot
+                        or person.sub_unit_2,
                         "status": record.status,
                         "remarks": record.remarks or "",
                     }
