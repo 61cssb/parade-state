@@ -67,6 +67,9 @@ class Deployment(Base):
     attendance_records: Mapped[list["AttendanceRecord"]] = relationship(
         back_populates="deployment"
     )
+    personnel_exclusions: Mapped[list["DeploymentPersonnelExclusion"]] = relationship(
+        back_populates="deployment", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Deployment(name={self.name!r}, status={self.status!r})>"
@@ -106,6 +109,43 @@ class DeploymentPersonnelOverride(Base):
     def __repr__(self) -> str:
         return (
             f"<DeploymentPersonnelOverride(deployment_id={self.deployment_id!r}, "
+            f"personnel_id={self.personnel_id!r})>"
+        )
+
+
+class DeploymentPersonnelExclusion(Base):
+    """Records a personnel excluded from a specific deployment's roster."""
+
+    __tablename__ = "deployment_personnel_exclusions"
+
+    deployment_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("deployments.id", ondelete="CASCADE")
+    )
+    personnel_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("personnel.id", ondelete="CASCADE")
+    )
+    excluded_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
+    excluded_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
+    created_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
+
+    # Relationships
+    deployment: Mapped[Deployment] = relationship(back_populates="personnel_exclusions")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "deployment_id",
+            "personnel_id",
+            name="unique_deployment_personnel_exclusion",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<DeploymentPersonnelExclusion(deployment_id={self.deployment_id!r}, "
             f"personnel_id={self.personnel_id!r})>"
         )
 

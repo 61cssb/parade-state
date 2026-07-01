@@ -1,6 +1,6 @@
 # Next Implementation Phase
 
-**Last Updated:** 2026-06-29
+**Last Updated:** 2026-07-01
 **Status:** Production-Ready Backend with User-Facing Views
 
 ---
@@ -34,6 +34,9 @@
 - **Estab API** (`GET /api/v1/estabs`, `GET /api/v1/estabs/{id}`) — list/detail with latest CsvUpload join
 - **Non-admin estab browser** (`/estab`) — roster table with estab selector, search, unit filter; row-numbered for easy counting
 - **`short_id` personnel identity** (2026-06-29) — `pers_no` dropped entirely (no longer imported or stored); replaced with server-minted 8-char base62 `short_id` as the cross-estab person identifier. Migration `c3d4e5f6a7b8` (batch-mode for SQLite). See [docs/SPECIFICATION.md](SPECIFICATION.md) §3.2.1.
+- **Deployment creation from estab** (2026-07-01) — GUI modal on `/admin/estabs` for confirmed estabs; API validates estab existence + confirmed status (400 on failure). UI uses military date/time format (YYYYMMDD HHMM) with hardcoded Singapore timezone (+08:00).
+- **Estab lifecycle management** (2026-07-01) — `PATCH /api/v1/estabs/{id}` for draft↔confirmed transitions (confirm/unconfirm); `DELETE /api/v1/estabs/{id}` for super_admin-only cascade deletion (draft/confirmed only). Migration `d4e5f6a7b8c9`.
+- **Deployment personnel exclusion** (2026-07-01) — New `DeploymentPersonnelExclusion` model; `POST/DELETE /api/v1/deployments/{id}/exclusions` endpoints (draft-only); admin page at `/admin/deployments/{id}/personnel` with checkbox-based multi-row editing, client-side search, batch update, and change tracking. Excluded personnel filtered from all deployment views via shared listing function.
 
 ### System Capabilities
 - Multi-tenant deployment isolation with access control
@@ -246,6 +249,7 @@ git log --oneline --all
 - **Phase 1: Authentication** (Completed) - Google OAuth and user management
 
 **Priority Changes:**
+- **2026-07-01:** Deployment management enhancements complete. Three feature sets shipped: (1) Deployment creation from estab via GUI modal on `/admin/estabs` with API-level estab validation (must exist + be confirmed). (2) Estab lifecycle management — `PATCH` for draft↔confirmed transitions, `DELETE` for super_admin cascade deletion. (3) Deployment personnel exclusion — new `DeploymentPersonnelExclusion` model, draft-only API endpoints, admin page at `/admin/deployments/{id}/personnel` with checkbox-based multi-row editing. Personnel listing function updated to filter excluded personnel from all deployment views. Migration `d4e5f6a7b8c9`. 270 tests passing.
 - **2026-06-29:** `short_id` refactor complete. `Personnel.pers_no` dropped (never imported or stored); replaced with server-minted 8-char base62 `short_id` (cross-estab person identity). Migration `c3d4e5f6a7b8` (batch-mode for SQLite). 245 tests passing. Next: mobile optimization (Phase 9E) or diff-confirmation step.
 - **2026-06-24:** Phase 9F complete. Admin estab management page (`/admin/estabs`) and non-admin estab browser (`/estab`) shipped. Added `CsvUpload.original_filename` column (migration `a1b2c3d4e5f6`) and `GET /api/v1/estabs` endpoints. Estab browser shows row-numbered roster table with search/unit filter, open to all authenticated users. Next: mobile optimization (Phase 9E) or diff-confirmation step (Phase 9C-2 deferred work).
 - **2026-06-22:** Phase 9D complete. Non-admin user-facing views implemented: deployment summary (`/deployment`) with AM/PM session counts and unit breakdown, attendance marking (`/attendance`) with inline status/remarks editing. Added `get_current_user_optional()` auth function. Role-aware nav in base.html. OAuth callback now redirects admins to `/admin` and regular users to `/deployment`. Next: mobile optimization (Phase 9E).
@@ -260,4 +264,4 @@ git log --oneline --all
 
 **Next: Phase 9E — Mobile Optimization**
 
-Phase 9F is complete. Admin estab management (`/admin/estabs`) and non-admin estab browser (`/estab`) are live. The estab browser shows a row-numbered roster table (unit/sub-unit columns leftmost) with search and unit filter. `CsvUpload.original_filename` is now stored and surfaced via the estab API and admin views. All 235 tests pass with no regressions. Next: responsive design optimization for field use (tablets, mobile), or the diff-confirmation step (Phase 9C-2 deferred work) if CSV pipeline continuation is prioritized.
+Deployment management enhancements complete (2026-07-01): deployment creation from estab via GUI modal, estab confirm/unconfirm/delete with cascade, and deployment personnel exclusion with checkbox-based admin UI. All deployment views respect exclusions automatically via the shared listing function. 270 tests passing. Next: responsive design optimization for field use (tablets, mobile), or the diff-confirmation step (Phase 9C-2 deferred work) if CSV pipeline continuation is prioritized.

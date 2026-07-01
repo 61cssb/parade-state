@@ -10,7 +10,12 @@ from .csv_ingestion import (
     CsvUpload,
     Estab,
 )
-from .deployment import Deployment, DeploymentNotes, DeploymentPersonnelOverride
+from .deployment import (
+    Deployment,
+    DeploymentNotes,
+    DeploymentPersonnelExclusion,
+    DeploymentPersonnelOverride,
+)
 from .personnel import Personnel
 
 __all__ = [
@@ -28,6 +33,7 @@ __all__ = [
     "Estab",
     "Deployment",
     "DeploymentNotes",
+    "DeploymentPersonnelExclusion",
     "DeploymentPersonnelOverride",
     "Personnel",
 ]

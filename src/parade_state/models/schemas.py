@@ -28,6 +28,12 @@ class DeploymentCreate(DeploymentBase):
     scheduled_activation: utc_dt.datetime | None = None
 
 
+class ExclusionCreate(BaseModel):
+    """Schema for excluding a personnel from a deployment."""
+
+    personnel_id: str = Field(..., min_length=1)
+
+
 class DeploymentUpdate(BaseModel):
     """Schema for updating a deployment."""
 
@@ -580,6 +586,13 @@ class EstabResponse(EstabListItem):
     confirmed_at: utc_dt.datetime | None = None
     confirmed_by: str | None = None
     created_at: utc_dt.datetime
+
+
+class EstabUpdate(BaseModel):
+    """Schema for updating an estab (status transitions + notes)."""
+
+    status: Literal["confirmed", "draft"] | None = None
+    notes: str | None = None
 
 
 # ============================================================================

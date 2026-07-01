@@ -28,6 +28,7 @@ from parade_state.models import (
     CsvUpload,
     Deployment,
     DeploymentNotes,
+    DeploymentPersonnelExclusion,
     DeploymentPersonnelOverride,
     DeploymentUserAccess,
     Estab,

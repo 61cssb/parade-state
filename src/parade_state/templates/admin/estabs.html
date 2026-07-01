@@ -31,6 +31,7 @@
                 <th style="padding: 0.5rem;">Status</th>
                 <th style="padding: 0.5rem;">Uploaded At</th>
                 <th style="padding: 0.5rem;">CSV Hash</th>
+                <th style="padding: 0.5rem;">Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -44,6 +45,25 @@
                 </td>
                 <td style="padding: 0.5rem;">{{ estab.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
                 <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ estab.csv_hash }}</td>
+                <td style="padding: 0.5rem; white-space: nowrap;">
+                    {% if estab.status == 'draft' %}
+                    <button class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                            onclick="confirmEstab('{{ estab.id }}', '{{ estab.caa }}')">Confirm</button>
+                    {% endif %}
+                    {% if estab.status == 'confirmed' %}
+                    <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                            onclick="openCreateModal('{{ estab.id }}', '{{ estab.caa }}', {{ estab.personnel_count }})">Create Deployment</button>
+                    <button class="btn" style="background: #f59e0b; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
+                            onclick="unconfirmEstab('{{ estab.id }}', '{{ estab.caa }}')">Unconfirm</button>
+                    {% endif %}
+                    {% if estab.status in ['draft', 'confirmed'] and user.role == 'super_admin' %}
+                    <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
+                            onclick="deleteEstab('{{ estab.id }}', '{{ estab.caa }}')">Delete</button>
+                    {% endif %}
+                    {% if estab.status not in ['draft', 'confirmed'] %}
+                    <span style="font-size: 0.75rem; color: #9ca3af;">—</span>
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
@@ -52,4 +72,298 @@
     <p style="color: #6b7280; margin-top: 1rem;">No estabs yet. Upload and process a CSV to create one.</p>
     {% endif %}
 </div>
+
+{# Create Deployment modal #}
+<div id="create-modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeCreateModal()"></div>
+<div id="create-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 500px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">Create Deployment</h3>
+        <button type="button" onclick="closeCreateModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
+    </div>
+
+    <div style="background: #f9fafb; border-radius: 0.375rem; padding: 0.75rem; margin-bottom: 1rem; font-size: 0.875rem;">
+        <strong>Source Estab:</strong> CAA <span id="modal-estab-caa">—</span> &middot; <span id="modal-estab-personnel">—</span> personnel
+    </div>
+
+    <form id="create-deployment-form" onsubmit="event.preventDefault(); submitCreateDeployment();">
+        <div style="margin-bottom: 0.75rem;">
+            <label for="dep-name" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Deployment Name <span style="color: #ef4444;">*</span></label>
+            <input type="text" id="dep-name" required style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" placeholder="e.g. MVT, FTX">
+        </div>
+
+        <div style="margin-bottom: 0.75rem;">
+            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Valid From <span style="color: #ef4444;">*</span> <span style="color: #9ca3af; font-weight: normal;">(YYYYMMDD HHMM, Singapore time)</span></label>
+            <div style="display: flex; gap: 0.5rem;">
+                <input type="text" id="dep-from-date" required pattern="\d{8}" maxlength="8" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 9rem;" placeholder="YYYYMMDD" onchange="onFromDateChange()">
+                <input type="text" id="dep-from-time" required pattern="\d{4}" maxlength="4" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 7rem;" placeholder="HHMM">
+            </div>
+        </div>
+
+        <div style="margin-bottom: 0.75rem;">
+            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Valid Until <span style="color: #ef4444;">*</span> <span style="color: #9ca3af; font-weight: normal;">(YYYYMMDD HHMM, Singapore time)</span></label>
+            <div style="display: flex; gap: 0.5rem;">
+                <input type="text" id="dep-until-date" required pattern="\d{8}" maxlength="8" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 9rem;" placeholder="YYYYMMDD">
+                <input type="text" id="dep-until-time" required pattern="\d{4}" maxlength="4" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 7rem;" placeholder="HHMM">
+            </div>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+            <label for="dep-notes" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Notes</label>
+            <textarea id="dep-notes" rows="2" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-family: inherit;" placeholder="Optional"></textarea>
+        </div>
+
+        <div id="modal-status" style="margin-bottom: 0.75rem;"></div>
+
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+            <button type="button" onclick="closeCreateModal()" style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: white; cursor: pointer;">Cancel</button>
+            <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1rem;">Create Deployment</button>
+        </div>
+    </form>
+</div>
+
+<div id="statusMessage" style="margin-top: 1rem;"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const ADMIN_USER_ID = "{{ user.id }}";
+    const ADMIN_USER_ROLE = "{{ user.role }}";
+    const SINGAPORE_OFFSET = "+08:00";
+    let activeEstabId = null;
+
+    function openCreateModal(estabId, caa, personnelCount) {
+        activeEstabId = estabId;
+        document.getElementById('modal-estab-caa').textContent = caa;
+        document.getElementById('modal-estab-personnel').textContent = personnelCount;
+        document.getElementById('modal-status').innerHTML = '';
+        document.getElementById('create-deployment-form').reset();
+        // Autofill valid_from/until to next day with default ops hours
+        const nextDay = tomorrowYYYYMMDD();
+        document.getElementById('dep-from-date').value = nextDay;
+        document.getElementById('dep-from-time').value = '0800';
+        document.getElementById('dep-until-date').value = nextDay;
+        document.getElementById('dep-until-time').value = '1700';
+        document.getElementById('create-modal-backdrop').style.display = 'block';
+        document.getElementById('create-modal').style.display = 'block';
+        document.getElementById('dep-name').focus();
+    }
+
+    function todayYYYYMMDD() {
+        const d = new Date();
+        return '' + d.getFullYear()
+            + String(d.getMonth() + 1).padStart(2, '0')
+            + String(d.getDate()).padStart(2, '0');
+    }
+
+    function tomorrowYYYYMMDD() {
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        return '' + d.getFullYear()
+            + String(d.getMonth() + 1).padStart(2, '0')
+            + String(d.getDate()).padStart(2, '0');
+    }
+
+    function onFromDateChange() {
+        const fromDate = document.getElementById('dep-from-date').value.trim();
+        const untilDate = document.getElementById('dep-until-date').value.trim();
+        if (/^\d{8}$/.test(fromDate) && /^\d{8}$/.test(untilDate) && fromDate > untilDate) {
+            document.getElementById('dep-until-date').value = fromDate;
+        }
+    }
+
+    function closeCreateModal() {
+        document.getElementById('create-modal-backdrop').style.display = 'none';
+        document.getElementById('create-modal').style.display = 'none';
+        activeEstabId = null;
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && document.getElementById('create-modal').style.display === 'block') {
+            closeCreateModal();
+        }
+    });
+
+    function showStatus(message, type) {
+        const div = document.getElementById('modal-status');
+        const color = type === 'success' ? '#10b981' : '#ef4444';
+        div.innerHTML = '<p style="color: ' + color + '; font-size: 0.875rem; margin: 0;">' + message + '</p>';
+    }
+
+    function showPageStatus(message, type) {
+        const div = document.getElementById('statusMessage');
+        const color = type === 'success' ? '#10b981' : '#ef4444';
+        div.innerHTML = '<p style="color: ' + color + '; font-weight: bold;">' + message + '</p>';
+    }
+
+    async function confirmEstab(estabId, caa) {
+        if (!confirm('Confirm estab with CAA date ' + caa + '?')) return;
+        try {
+            const response = await fetch(
+                '/api/v1/estabs/' + estabId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: 'confirmed' }),
+                }
+            );
+            if (response.ok) {
+                showPageStatus('Estab confirmed.', 'success');
+                setTimeout(function() { location.reload(); }, 800);
+            } else {
+                const data = await response.json();
+                showPageStatus('Confirm failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showPageStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    async function unconfirmEstab(estabId, caa) {
+        const message =
+            'Revert estab with CAA date ' + caa + ' back to draft status?\n\n' +
+            'This will clear confirmation metadata (confirmed_at, confirmed_by).\n' +
+            'The "Create Deployment" button will be hidden until re-confirmed.\n' +
+            'Existing deployments based on this estab are NOT affected.\n\n' +
+            'Intended for testing/maintenance only.';
+        if (!confirm(message)) return;
+        try {
+            const response = await fetch(
+                '/api/v1/estabs/' + estabId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: 'draft' }),
+                }
+            );
+            if (response.ok) {
+                showPageStatus('Estab reverted to draft.', 'success');
+                setTimeout(function() { location.reload(); }, 800);
+            } else {
+                const data = await response.json();
+                showPageStatus('Unconfirm failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showPageStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    async function deleteEstab(estabId, caa) {
+        const message =
+            'Delete estab with CAA date ' + caa + '?\n\n' +
+            'This will permanently delete:\n' +
+            '  - All personnel records in this estab\n' +
+            '  - All deployments based on this estab\n' +
+            '  - All sessions and attendance records under those deployments\n\n' +
+            'This cannot be undone.';
+        if (!confirm(message)) return;
+        try {
+            const response = await fetch(
+                '/api/v1/estabs/' + estabId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                { method: 'DELETE' }
+            );
+            if (response.ok) {
+                showPageStatus('Estab deleted.', 'success');
+                setTimeout(function() { location.reload(); }, 800);
+            } else {
+                const data = await response.json();
+                showPageStatus('Delete failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showPageStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    function toIso8601(dateStr, timeStr) {
+        // YYYYMMDD + HHMM -> YYYY-MM-DDTHH:MM:00+08:00 (Singapore time)
+        const yyyy = dateStr.slice(0, 4);
+        const mm = dateStr.slice(4, 6);
+        const dd = dateStr.slice(6, 8);
+        const hh = timeStr.slice(0, 2);
+        const min = timeStr.slice(2, 4);
+        return yyyy + '-' + mm + '-' + dd + 'T' + hh + ':' + min + ':00' + SINGAPORE_OFFSET;
+    }
+
+    function validateDateTime(dateStr, timeStr, label) {
+        if (!/^\d{8}$/.test(dateStr)) {
+            return label + ' date must be YYYYMMDD.';
+        }
+        if (!/^\d{4}$/.test(timeStr)) {
+            return label + ' time must be HHMM.';
+        }
+        const month = parseInt(dateStr.slice(4, 6), 10);
+        const day = parseInt(dateStr.slice(6, 8), 10);
+        const hour = parseInt(timeStr.slice(0, 2), 10);
+        const minute = parseInt(timeStr.slice(2, 4), 10);
+        if (month < 1 || month > 12) return label + ' month must be 01-12.';
+        if (day < 1 || day > 31) return label + ' day must be 01-31.';
+        if (hour > 23) return label + ' hour must be 00-23.';
+        if (minute > 59) return label + ' minute must be 00-59.';
+        return null;
+    }
+
+    async function submitCreateDeployment() {
+        const name = document.getElementById('dep-name').value.trim();
+        const fromDate = document.getElementById('dep-from-date').value.trim();
+        const fromTime = document.getElementById('dep-from-time').value.trim();
+        const untilDate = document.getElementById('dep-until-date').value.trim();
+        const untilTime = document.getElementById('dep-until-time').value.trim();
+        const notes = document.getElementById('dep-notes').value.trim();
+
+        if (!name) {
+            showStatus('Deployment name is required.', 'error');
+            return;
+        }
+
+        let err = validateDateTime(fromDate, fromTime, 'Valid from');
+        if (err) { showStatus(err, 'error'); return; }
+        err = validateDateTime(untilDate, untilTime, 'Valid until');
+        if (err) { showStatus(err, 'error'); return; }
+
+        if (fromDate < todayYYYYMMDD()) {
+            showStatus('Valid from date cannot be earlier than today.', 'error');
+            return;
+        }
+        if (untilDate < fromDate) {
+            showStatus('Valid until date cannot be earlier than valid from.', 'error');
+            return;
+        }
+
+        const validFrom = toIso8601(fromDate, fromTime);
+        const validUntil = toIso8601(untilDate, untilTime);
+
+        if (validUntil <= validFrom) {
+            showStatus('Valid until must be after valid from.', 'error');
+            return;
+        }
+
+        const payload = {
+            name: name,
+            estab_id: activeEstabId,
+            valid_from: validFrom,
+            valid_until: validUntil,
+            status: 'draft',
+            notes: notes || null,
+        };
+
+        try {
+            const response = await fetch(
+                '/api/v1/deployments/?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                }
+            );
+            if (response.ok) {
+                showStatus('Deployment created. Redirecting…', 'success');
+                setTimeout(function() { window.location.href = '/admin/deployments'; }, 700);
+            } else {
+                const data = await response.json();
+                showStatus('Create failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showStatus('Network error: ' + error.message, 'error');
+        }
+    }
+</script>
 {% endblock %}

@@ -1,12 +1,13 @@
 """Tests for deployment API endpoints."""
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from parade_state.models.attendance import AttendanceRecord
+from parade_state.models.csv_ingestion import Estab
 from parade_state.models.deployment import (
     Deployment,
     DeploymentNotes,
@@ -24,12 +25,13 @@ from tests.test_utils import (
 
 @pytest.mark.asyncio
 async def test_create_deployment_as_admin(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session,
+    sample_estab,
 ):
     """Test deployment creation by admin."""
     deployment_data = {
         "name": "Test Deployment",
-        "estab_id": "test-estab-123",
+        "estab_id": str(sample_estab.id),
         "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
         "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
         "status": "draft",
@@ -47,7 +49,7 @@ async def test_create_deployment_as_admin(
     data = response.json()
     assert data["name"] == "Test Deployment"
     assert data["status"] == "draft"
-    assert data["estab_id"] == "test-estab-123"
+    assert data["estab_id"] == str(sample_estab.id)
 
 
 @pytest.mark.asyncio
@@ -75,12 +77,13 @@ async def test_create_deployment_as_regular_user_forbidden(
 
 @pytest.mark.asyncio
 async def test_create_deployment_invalid_date_range(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
+    client: TestClient, admin_token_headers: dict[str, str], db_session,
+    sample_estab,
 ):
     """Test deployment creation with invalid date range."""
     deployment_data = {
         "name": "Test Deployment",
-        "estab_id": "test-estab-123",
+        "estab_id": str(sample_estab.id),
         "valid_from": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
         "valid_until": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
     }
@@ -94,6 +97,95 @@ async def test_create_deployment_invalid_date_range(
 
     assert response.status_code == 400
     assert "valid_until must be after valid_from" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_non_existent_estab(
+    client: TestClient, admin_token_headers: dict[str, str], db_session
+):
+    """Test deployment creation fails when estab does not exist."""
+    deployment_data = {
+        "name": "Test Deployment",
+        "estab_id": "does-not-exist",
+        "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
+        "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
+    }
+
+    response = client.post(
+        "/api/v1/deployments/",
+        json=deployment_data,
+        headers=admin_token_headers,
+        params={"user_id": "admin-user-id", "user_role": "admin"},
+    )
+
+    assert response.status_code == 400
+    assert "not found" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_draft_estab(
+    client: TestClient, admin_token_headers: dict[str, str], db_session,
+    sample_users,
+):
+    """Test deployment creation fails when estab is not confirmed."""
+    draft_estab = Estab(
+        caa=date(2024, 3, 1),
+        csv_hash="draft-hash",
+        status="draft",
+        uploaded_by=str(sample_users["admin"].id),
+    )
+    db_session.add(draft_estab)
+    await db_session.commit()
+
+    deployment_data = {
+        "name": "Test Deployment",
+        "estab_id": str(draft_estab.id),
+        "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
+        "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
+    }
+
+    response = client.post(
+        "/api/v1/deployments/",
+        json=deployment_data,
+        headers=admin_token_headers,
+        params={"user_id": "admin-user-id", "user_role": "admin"},
+    )
+
+    assert response.status_code == 400
+    assert "must be confirmed" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_archived_estab(
+    client: TestClient, admin_token_headers: dict[str, str], db_session,
+    sample_users,
+):
+    """Test deployment creation fails when estab is archived."""
+    archived_estab = Estab(
+        caa=date(2023, 6, 1),
+        csv_hash="archived-hash",
+        status="archived",
+        uploaded_by=str(sample_users["admin"].id),
+    )
+    db_session.add(archived_estab)
+    await db_session.commit()
+
+    deployment_data = {
+        "name": "Test Deployment",
+        "estab_id": str(archived_estab.id),
+        "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
+        "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
+    }
+
+    response = client.post(
+        "/api/v1/deployments/",
+        json=deployment_data,
+        headers=admin_token_headers,
+        params={"user_id": "admin-user-id", "user_role": "admin"},
+    )
+
+    assert response.status_code == 400
+    assert "must be confirmed" in response.json()["detail"]
 
 
 @pytest.mark.asyncio

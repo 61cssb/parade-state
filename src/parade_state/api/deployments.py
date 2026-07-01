@@ -9,9 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
 from parade_state.models.attendance import AttendanceRecord, Session
+from parade_state.models.csv_ingestion import Estab
 from parade_state.models.deployment import (
     Deployment,
     DeploymentNotes,
+    DeploymentPersonnelExclusion,
     DeploymentPersonnelOverride,
 )
 from parade_state.models.personnel import Personnel
@@ -27,6 +29,7 @@ from parade_state.models.schemas import (
     DeploymentStatusSessionInfo,
     DeploymentStatusUnitBreakdown,
     DeploymentUpdate,
+    ExclusionCreate,
 )
 from parade_state.utils import utc_dt
 
@@ -119,6 +122,25 @@ async def create_deployment(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins and super admins can create deployments",
+        )
+
+    # Verify estab exists and is confirmed
+    result = await db.execute(
+        select(Estab).where(Estab.id == deployment_data.estab_id)
+    )
+    estab = result.scalar_one_or_none()
+    if not estab:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Estab {deployment_data.estab_id} not found",
+        )
+    if estab.status != "confirmed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Cannot create deployment from estab in '{estab.status}' status. "
+                "Estab must be confirmed."
+            ),
         )
 
     # Validate date range
@@ -435,6 +457,144 @@ async def deactivate_deployment(
     await db.refresh(deployment)
 
     return deployment
+
+
+# ============================================================================
+# Deployment Personnel Exclusions
+# ============================================================================
+
+
+@router.post(
+    "/{deployment_id}/exclusions",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_exclusion(
+    deployment_id: str,
+    exclusion_data: ExclusionCreate,
+    user_id: str = Query(..., description="User ID creating the exclusion"),
+    user_role: str = Query(..., description="User role for authorization"),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Exclude a personnel from a deployment's roster.
+
+    Requires admin or super_admin role. Only allowed when deployment is in
+    draft status. Idempotent — excluding an already-excluded personnel
+    returns 200 with no change.
+    """
+    if user_role not in ["admin", "super_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins and super admins can manage exclusions",
+        )
+
+    # Verify deployment exists and is draft
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+    deployment = result.scalar_one_or_none()
+    if not deployment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Deployment not found: {deployment_id}",
+        )
+    if deployment.status != "draft":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Exclusions can only be modified for draft deployments "
+                f"(current status: '{deployment.status}')."
+            ),
+        )
+
+    # Verify personnel belongs to this deployment's estab
+    personnel_result = await db.execute(
+        select(Personnel).where(
+            Personnel.id == exclusion_data.personnel_id,
+            Personnel.estab_id == deployment.estab_id,
+        )
+    )
+    if not personnel_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Personnel not found in this deployment's estab.",
+        )
+
+    # Check if already excluded (idempotent)
+    existing = await db.execute(
+        select(DeploymentPersonnelExclusion).where(
+            DeploymentPersonnelExclusion.deployment_id == deployment_id,
+            DeploymentPersonnelExclusion.personnel_id == exclusion_data.personnel_id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        return {"detail": "Personnel already excluded"}
+
+    exclusion = DeploymentPersonnelExclusion(
+        deployment_id=deployment_id,
+        personnel_id=exclusion_data.personnel_id,
+        excluded_by=user_id,
+    )
+    db.add(exclusion)
+    await db.commit()
+
+    return {"detail": "Personnel excluded"}
+
+
+@router.delete(
+    "/{deployment_id}/exclusions/{personnel_id}",
+    status_code=status.HTTP_200_OK,
+)
+async def delete_exclusion(
+    deployment_id: str,
+    personnel_id: str,
+    user_id: str = Query(..., description="User ID removing the exclusion"),
+    user_role: str = Query(..., description="User role for authorization"),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Re-include a previously excluded personnel in a deployment's roster.
+
+    Requires admin or super_admin role. Only allowed when deployment is in
+    draft status.
+    """
+    if user_role not in ["admin", "super_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins and super admins can manage exclusions",
+        )
+
+    # Verify deployment exists and is draft
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+    deployment = result.scalar_one_or_none()
+    if not deployment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Deployment not found: {deployment_id}",
+        )
+    if deployment.status != "draft":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Exclusions can only be modified for draft deployments "
+                f"(current status: '{deployment.status}')."
+            ),
+        )
+
+    # Find and delete the exclusion
+    result = await db.execute(
+        select(DeploymentPersonnelExclusion).where(
+            DeploymentPersonnelExclusion.deployment_id == deployment_id,
+            DeploymentPersonnelExclusion.personnel_id == personnel_id,
+        )
+    )
+    exclusion = result.scalar_one_or_none()
+    if not exclusion:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Personnel is not excluded from this deployment.",
+        )
+
+    await db.delete(exclusion)
+    await db.commit()
+
+    return {"detail": "Personnel re-included"}
 
 
 # ============================================================================

@@ -585,6 +585,7 @@ Estab (CSV source of truth)
  ├── Deployment (operational windows)
  │    ├── DeploymentPersonnelOverride
  │    ├── DeploymentNotes
+ │    ├── DeploymentPersonnelExclusion (draft-only roster filtering)
  │    ├── Session (AM/PM windows)
  │    │    └── AttendanceRecord
  │    ├── DeploymentUserAccess (user grants)

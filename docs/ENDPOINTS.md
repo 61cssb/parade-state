@@ -21,9 +21,10 @@ This document clarifies the different types of endpoints in the Parade State app
 **Admin Interface Routes:**
 - `GET /admin` - Admin dashboard
 - `GET /admin/deployments` - Deployments + sessions management page (combined master-detail view)
+- `GET /admin/deployments/{id}/personnel` - Deployment personnel management (checkbox-based include/exclude, draft-only editing)
 - `GET /admin/users` - Users management page
 - `GET /admin/csv-upload` - CSV upload page
-- `GET /admin/estabs` - Estab management page (CAA date, source file, personnel count, status filter)
+- `GET /admin/estabs` - Estab management page (CAA date, source file, personnel count, status filter, confirm/unconfirm/delete actions)
 - `GET /admin/settings` - Settings page
 - `GET /admin/audit` - Audit log page
 
@@ -51,13 +52,13 @@ This document clarifies the different types of endpoints in the Parade State app
 - `DELETE /api/v1/users/{id}` - Delete user
 
 **Other APIs:**
-- `/api/v1/deployments/*` - Deployment management
+- `/api/v1/deployments/*` - Deployment management (CRUD, lifecycle transitions, personnel exclusions, overrides, notes, status export)
 - `/api/v1/sessions/*` - Session management
 - `/api/v1/attendance/*` - Attendance records
 - `/api/v1/personnel/*` - Personnel management
 - `/api/v1/access-control/*` - Access control
 - `/api/v1/csv/*` - CSV upload and ingestion
-- `/api/v1/estabs/*` - Estab list/detail (admin-only, with latest CsvUpload join)
+- `/api/v1/estabs/*` - Estab list/detail (admin-only), confirm/unconfirm (PATCH), delete (super_admin, DELETE)
 - `/api/v1/audit/*` - Audit log
 
 ### 3. CSV Upload API
