@@ -50,6 +50,8 @@
                     {{ d.valid_from.strftime('%Y-%m-%d') }} → {{ d.valid_until.strftime('%Y-%m-%d') }}
                 </span>
                 {% if d.status == 'draft' %}
+                <a class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; text-decoration: none;"
+                   href="/admin/deployments/{{ d.id }}/personnel">Manage Personnel</a>
                 <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
                         onclick="transitionDeployment('{{ d.id }}', 'active')">Activate</button>
                 {% elif d.status == 'active' %}

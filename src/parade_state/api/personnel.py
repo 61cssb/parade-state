@@ -10,6 +10,7 @@ from parade_state.models import (
     AttendanceRecord,
     Deployment,
     DeploymentNotes,
+    DeploymentPersonnelExclusion,
     DeploymentPersonnelOverride,
     DeploymentUserAccess,
     Personnel,
@@ -164,6 +165,12 @@ async def get_deployment_personnel_with_overrides(
 
     # Get base personnel query
     query = select(Personnel).where(Personnel.estab_id == deployment.estab_id)
+
+    # Exclude personnel filtered out for this deployment
+    excluded_subq = select(DeploymentPersonnelExclusion.personnel_id).where(
+        DeploymentPersonnelExclusion.deployment_id == deployment_id
+    )
+    query = query.where(~Personnel.id.in_(excluded_subq))
 
     # Apply filters
     query = apply_personnel_filters(query, params)

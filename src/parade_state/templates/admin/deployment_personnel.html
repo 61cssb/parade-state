@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+
+{% block title %}Deployment Personnel - Parade State Admin{% endblock %}
+
+{% block page_title %}Personnel — {{ deployment.name }}{% endblock %}
+
+{% block content %}
+<p style="margin-bottom: 1rem;">
+    <a href="/admin/deployments" style="color: #3b82f6; text-decoration: none;">&larr; Back to Deployments</a>
+</p>
+
+<div style="display: flex; gap: 1rem; margin-bottom: 1.5rem; font-size: 0.875rem;">
+    <span><strong>{{ included_count }}</strong> included</span>
+    <span style="color: #9ca3af;">|</span>
+    <span><strong>{{ excluded_count }}</strong> excluded</span>
+    <span style="color: #9ca3af;">|</span>
+    <span><strong>{{ total_count }}</strong> total in estab</span>
+</div>
+
+{% if not is_draft %}
+<div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 0.375rem; padding: 0.75rem 1rem; margin-bottom: 1.5rem; font-size: 0.875rem; color: #92400e;">
+    This deployment is currently <strong>{{ deployment.status }}</strong>. Exclusions can only be modified while the deployment is in <strong>draft</strong> status.
+</div>
+{% endif %}
+
+<input type="text" id="search-input" placeholder="Search by name or short ID…" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 100%; max-width: 300px; margin-bottom: 1rem; box-sizing: border-box;">
+
+{% if is_draft %}
+<p style="color: #374151; font-size: 0.875rem; margin-bottom: 0.75rem;">
+    Select personnel to include in this deployment. Checked rows will be included; unchecked rows will be excluded.
+</p>
+{% endif %}
+
+<div class="card">
+    <table id="personnel-table" style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                <th style="padding: 0.5rem; width: 2rem;">
+                    {% if is_draft %}
+                    <input type="checkbox" id="select-all" onchange="onSelectAll(this.checked)">
+                    {% endif %}
+                </th>
+                <th style="padding: 0.5rem;">Rank</th>
+                <th style="padding: 0.5rem;">Name</th>
+                <th style="padding: 0.5rem;">Unit</th>
+                <th style="padding: 0.5rem;">Sub-Unit</th>
+                <th style="padding: 0.5rem;">Short ID</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in personnel_rows %}
+            <tr id="row-{{ p.id }}"
+                data-personnel-id="{{ p.id }}"
+                data-initial-included="{{ 'false' if p.is_excluded else 'true' }}"
+                data-searchable="{{ p.full_name|lower }} {{ p.short_id|lower }}"
+                style="border-bottom: 1px solid #f3f4f6; {% if p.is_excluded %}background: #fafafa;{% endif %}">
+                <td style="padding: 0.5rem;">
+                    {% if is_draft %}
+                    <input type="checkbox" class="row-checkbox"
+                           data-personnel-id="{{ p.id }}"
+                           {% if not p.is_excluded %}checked{% endif %}
+                           onchange="onRowToggle('{{ p.id }}')">
+                    {% else %}
+                    <input type="checkbox" disabled {% if not p.is_excluded %}checked{% endif %}>
+                    {% endif %}
+                </td>
+                <td style="padding: 0.5rem;">{{ p.rank }}</td>
+                <td style="padding: 0.5rem;">{{ p.full_name }}</td>
+                <td style="padding: 0.5rem;">{{ p.unit }}</td>
+                <td style="padding: 0.5rem;">{{ p.sub_unit_1 or '—' }}</td>
+                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.85rem;">{{ p.short_id }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if not personnel_rows %}
+    <p style="color: #6b7280; margin-top: 1rem;">No personnel found.</p>
+    {% endif %}
+</div>
+
+{# Sticky action bar #}
+{% if is_draft %}
+<div id="action-bar" style="position: sticky; bottom: 0; left: 0; right: 0; background: white;
+     border-top: 2px solid #e5e7eb; padding: 0.75rem 1rem; display: flex; gap: 0.75rem;
+     align-items: center; justify-content: flex-end; z-index: 50; margin-top: 1rem;">
+    <span id="change-count" style="font-size: 0.875rem; color: #6b7280;">0 changes</span>
+    <button type="button" class="btn" style="background: #e5e7eb; color: #374151; padding: 0.5rem 1rem; border-radius: 0.25rem; border: none; cursor: pointer;"
+            onclick="resetChanges()">Reset</button>
+    <button type="button" id="update-btn" class="btn btn-primary" disabled
+            style="padding: 0.5rem 1.5rem; border-radius: 0.25rem; border: none; cursor: pointer; opacity: 0.5;"
+            onclick="applyChanges()">Update</button>
+</div>
+{% endif %}
+
+<div id="statusMessage" style="margin-top: 1rem;"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const DEPLOYMENT_ID = "{{ deployment.id }}";
+    const ADMIN_USER_ID = "{{ user.id }}";
+    const ADMIN_USER_ROLE = "{{ user.role }}";
+    let hasUnsavedChanges = false;
+
+    // --- Change tracking ---
+    function onRowToggle(personnelId) {
+        const row = document.getElementById('row-' + personnelId);
+        const checkbox = row.querySelector('.row-checkbox');
+        const initialIncluded = row.dataset.initialIncluded === 'true';
+        const currentIncluded = checkbox.checked;
+        const isChanged = currentIncluded !== initialIncluded;
+
+        if (isChanged) {
+            row.classList.add('changed-row');
+        } else {
+            row.classList.remove('changed-row');
+        }
+        updateActionBar();
+    }
+
+    function getChangedRows() {
+        const rows = document.querySelectorAll('#personnel-table tbody tr');
+        const toExclude = [];
+        const toInclude = [];
+        rows.forEach(function(row) {
+            const pid = row.dataset.personnelId;
+            if (!pid) return;
+            const checkbox = row.querySelector('.row-checkbox');
+            if (!checkbox) return;
+            const initialIncluded = row.dataset.initialIncluded === 'true';
+            const currentIncluded = checkbox.checked;
+            if (currentIncluded === initialIncluded) return;
+            if (currentIncluded) {
+                toInclude.push(pid);  // was excluded, now included
+            } else {
+                toExclude.push(pid);  // was included, now excluded
+            }
+        });
+        return { toExclude: toExclude, toInclude: toInclude };
+    }
+
+    function updateActionBar() {
+        const changes = getChangedRows();
+        const count = changes.toExclude.length + changes.toInclude.length;
+        hasUnsavedChanges = count > 0;
+
+        const countEl = document.getElementById('change-count');
+        const updateBtn = document.getElementById('update-btn');
+        countEl.textContent = count + ' row' + (count === 1 ? '' : 's') + ' to update';
+        countEl.style.color = count > 0 ? '#f59e0b' : '#6b7280';
+        countEl.style.fontWeight = count > 0 ? 'bold' : 'normal';
+
+        updateBtn.disabled = count === 0;
+        updateBtn.style.opacity = count === 0 ? '0.5' : '1';
+    }
+
+    // --- Select all (visible rows only) ---
+    function onSelectAll(checked) {
+        document.querySelectorAll('#personnel-table tbody tr').forEach(function(row) {
+            if (row.style.display === 'none') return;
+            const checkbox = row.querySelector('.row-checkbox');
+            if (!checkbox || checkbox.disabled) return;
+            if (checkbox.checked !== checked) {
+                checkbox.checked = checked;
+                onRowToggle(row.dataset.personnelId);
+            }
+        });
+    }
+
+    // --- Client-side search ---
+    document.getElementById('search-input').addEventListener('input', function(e) {
+        const query = e.target.value.toLowerCase().trim();
+        document.querySelectorAll('#personnel-table tbody tr').forEach(function(row) {
+            const text = row.dataset.searchable || '';
+            row.style.display = text.includes(query) ? '' : 'none';
+        });
+        // Update select-all checkbox based on visible rows
+        const visibleCheckboxes = Array.from(document.querySelectorAll('#personnel-table tbody tr'))
+            .filter(r => r.style.display !== 'none')
+            .map(r => r.querySelector('.row-checkbox'))
+            .filter(c => c && !c.disabled);
+        const selectAll = document.getElementById('select-all');
+        if (visibleCheckboxes.length === 0) {
+            selectAll.checked = false;
+            selectAll.indeterminate = false;
+        } else if (visibleCheckboxes.every(c => c.checked)) {
+            selectAll.checked = true;
+            selectAll.indeterminate = false;
+        } else if (visibleCheckboxes.some(c => c.checked)) {
+            selectAll.checked = false;
+            selectAll.indeterminate = true;
+        } else {
+            selectAll.checked = false;
+            selectAll.indeterminate = false;
+        }
+    });
+
+    // --- Reset ---
+    function resetChanges() {
+        document.querySelectorAll('#personnel-table tbody tr').forEach(function(row) {
+            const checkbox = row.querySelector('.row-checkbox');
+            if (!checkbox) return;
+            checkbox.checked = row.dataset.initialIncluded === 'true';
+            row.classList.remove('changed-row');
+        });
+        var selectAll = document.getElementById('select-all');
+        if (selectAll) selectAll.checked = false;
+        updateActionBar();
+    }
+
+    // --- Apply changes (batch) ---
+    async function applyChanges() {
+        const changes = getChangedRows();
+        if (changes.toExclude.length === 0 && changes.toInclude.length === 0) return;
+
+        const updateBtn = document.getElementById('update-btn');
+        updateBtn.disabled = true;
+        updateBtn.textContent = 'Updating…';
+        updateBtn.style.opacity = '0.5';
+
+        const baseUrl = '/api/v1/deployments/' + DEPLOYMENT_ID + '/exclusions';
+        const params = '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE;
+
+        const requests = [];
+        // POST for each person to exclude
+        changes.toExclude.forEach(function(pid) {
+            requests.push(fetch(baseUrl + params, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ personnel_id: pid }),
+            }));
+        });
+        // DELETE for each person to re-include
+        changes.toInclude.forEach(function(pid) {
+            requests.push(fetch(baseUrl + '/' + pid + params, { method: 'DELETE' }));
+        });
+
+        try {
+            const results = await Promise.allSettled(requests);
+            const failures = results.filter(function(r) { return r.status === 'rejected' || !r.value.ok; });
+            if (failures.length === 0) {
+                hasUnsavedChanges = false;
+                showStatus('All changes saved.', 'success');
+                setTimeout(function() { location.reload(); }, 600);
+            } else {
+                const firstFail = failures[0];
+                let detail = 'Unknown error';
+                if (firstFail.status === 'rejected') {
+                    detail = firstFail.reason.message;
+                } else {
+                    const data = await firstFail.value.json();
+                    detail = data.detail || 'Unknown error';
+                }
+                showStatus('Update failed (' + failures.length + ' of ' + results.length + '): ' + detail, 'error');
+                updateBtn.disabled = false;
+                updateBtn.textContent = 'Update';
+                updateBtn.style.opacity = '1';
+            }
+        } catch (error) {
+            showStatus('Network error: ' + error.message, 'error');
+            updateBtn.disabled = false;
+            updateBtn.textContent = 'Update';
+            updateBtn.style.opacity = '1';
+        }
+    }
+
+    function showStatus(message, type) {
+        const div = document.getElementById('statusMessage');
+        const color = type === 'success' ? '#10b981' : '#ef4444';
+        div.innerHTML = '<p style="color: ' + color + '; font-weight: bold;">' + message + '</p>';
+    }
+
+    // --- Warn before leaving with unsaved changes ---
+    window.addEventListener('beforeunload', function(e) {
+        if (hasUnsavedChanges) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+</script>
+
+<style>
+    .changed-row {
+        background: #fef3c7 !important;
+    }
+    .changed-row td {
+        background: #fef3c7 !important;
+    }
+</style>
+{% endblock %}

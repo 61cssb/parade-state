@@ -15,6 +15,7 @@ from parade_state.models import (
     AuditLog,
     CsvUpload,
     Deployment,
+    DeploymentPersonnelExclusion,
     Estab,
     Personnel,
     User,
@@ -223,6 +224,91 @@ async def admin_deployments(
         sessions_by_deployment=sessions_data,
         status_filter=status_filter or "",
         deployment_statuses=DEPLOYMENT_STATUSES,
+    )
+
+    return HTMLResponse(content=html_content)
+
+
+@router.get("/admin/deployments/{deployment_id}/personnel", response_class=HTMLResponse)
+async def admin_deployment_personnel(
+    request: Request,
+    deployment_id: str,
+):
+    """Render the deployment personnel management page (included/excluded lists)."""
+    current_admin = await get_current_admin_user_optional(request)
+    if not current_admin:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    session_maker = get_session_maker()
+    async with session_maker() as db:
+        # Fetch deployment
+        result = await db.execute(
+            select(Deployment).where(Deployment.id == deployment_id)
+        )
+        deployment = result.scalar_one_or_none()
+        if not deployment:
+            return RedirectResponse(url="/admin/deployments", status_code=302)
+
+        # Fetch all estab personnel
+        personnel_query = (
+            select(Personnel)
+            .where(Personnel.estab_id == deployment.estab_id)
+            .order_by(Personnel.unit, Personnel.sub_unit_1, Personnel.rank, Personnel.full_name)
+        )
+        personnel_result = await db.execute(personnel_query)
+        all_personnel = personnel_result.scalars().all()
+
+        # Fetch exclusion records for this deployment
+        exclusions_result = await db.execute(
+            select(DeploymentPersonnelExclusion).where(
+                DeploymentPersonnelExclusion.deployment_id == deployment_id
+            )
+        )
+        exclusions = exclusions_result.scalars().all()
+        excluded_map = {str(e.personnel_id) for e in exclusions}
+
+    # Build unified list with is_excluded flag
+    personnel_rows = []
+    included_count = 0
+    excluded_count = 0
+    for p in all_personnel:
+        is_excluded = str(p.id) in excluded_map
+        if is_excluded:
+            excluded_count += 1
+        else:
+            included_count += 1
+        personnel_rows.append({
+            "id": str(p.id),
+            "short_id": p.short_id,
+            "rank": p.rank,
+            "full_name": p.full_name,
+            "unit": p.unit,
+            "sub_unit_1": p.sub_unit_1,
+            "is_excluded": is_excluded,
+        })
+
+    env = get_templates(request)
+    template = env.get_template("admin/deployment_personnel.html")
+
+    html_content = template.render(
+        request=request,
+        user={
+            "id": current_admin.id,
+            "name": current_admin.name,
+            "email": current_admin.email,
+            "role": current_admin.role,
+        },
+        active_page="deployments",
+        deployment={
+            "id": str(deployment.id),
+            "name": deployment.name,
+            "status": deployment.status,
+        },
+        is_draft=deployment.status == "draft",
+        personnel_rows=personnel_rows,
+        included_count=included_count,
+        excluded_count=excluded_count,
+        total_count=len(all_personnel),
     )
 
     return HTMLResponse(content=html_content)

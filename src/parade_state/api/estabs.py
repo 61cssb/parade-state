@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
 from parade_state.models import CsvUpload, Estab
-from parade_state.models.schemas import EstabListItem, EstabResponse
+from parade_state.models.schemas import EstabListItem, EstabResponse, EstabUpdate
+from parade_state.utils import utc_dt
 
 router = APIRouter()
 
@@ -86,6 +87,117 @@ async def get_estab(
     """
     _require_admin(user_role)
 
+    row = await _load_estab_with_filename(db, estab_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Estab not found: {estab_id}",
+        )
+
+    return _row_to_response(row)
+
+
+@router.patch("/{estab_id}", response_model=EstabResponse)
+async def update_estab(
+    estab_id: str,
+    update_data: EstabUpdate,
+    user_id: str = Query(..., description="User ID making the update"),
+    user_role: str = Query(..., description="User role for authorization"),
+    db: AsyncSession = Depends(get_db_session),
+) -> EstabResponse:
+    """Update an estab (currently only draft → confirmed transition).
+
+    Requires admin or super_admin role.
+    """
+    _require_admin(user_role)
+
+    result = await db.execute(select(Estab).where(Estab.id == estab_id))
+    estab = result.scalar_one_or_none()
+    if not estab:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Estab not found: {estab_id}",
+        )
+
+    if update_data.status == "confirmed":
+        if estab.status != "draft":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Only draft estabs can be confirmed "
+                    f"(current status: '{estab.status}')."
+                ),
+            )
+        estab.status = "confirmed"
+        estab.confirmed_at = utc_dt.utcnow()
+        estab.confirmed_by = user_id
+
+    elif update_data.status == "draft":
+        if estab.status != "confirmed":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Only confirmed estabs can be reverted to draft "
+                    f"(current status: '{estab.status}')."
+                ),
+            )
+        estab.status = "draft"
+        estab.confirmed_at = None
+        estab.confirmed_by = None
+
+    if update_data.notes is not None:
+        estab.notes = update_data.notes
+
+    await db.commit()
+
+    row = await _load_estab_with_filename(db, estab_id)
+    return _row_to_response(row)
+
+
+@router.delete("/{estab_id}")
+async def delete_estab(
+    estab_id: str,
+    user_id: str = Query(..., description="User ID making the request"),
+    user_role: str = Query(..., description="User role for authorization"),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Delete an estab and cascade-delete all dependent data.
+
+    Requires super_admin role. Only draft or confirmed estabs can be deleted.
+    Cascades to personnel, deployments, sessions, attendance records, and
+    related data.
+    """
+    if user_role != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super admins can delete estabs",
+        )
+
+    result = await db.execute(select(Estab).where(Estab.id == estab_id))
+    estab = result.scalar_one_or_none()
+    if not estab:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Estab not found: {estab_id}",
+        )
+
+    if estab.status not in ("draft", "confirmed"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Can only delete draft or confirmed estabs "
+                f"(current status: '{estab.status}')."
+            ),
+        )
+
+    await db.delete(estab)
+    await db.commit()
+
+    return {"detail": f"Estab {estab_id} deleted"}
+
+
+async def _load_estab_with_filename(db: AsyncSession, estab_id: str):
+    """Fetch a single estab row joined with its latest CsvUpload's filename."""
     latest_upload = (
         select(
             CsvUpload.estab_id.label("estab_id"),
@@ -96,8 +208,7 @@ async def get_estab(
         .limit(1)
         .subquery()
     )
-
-    row = (
+    return (
         await db.execute(
             select(
                 Estab.id,
@@ -116,12 +227,9 @@ async def get_estab(
         )
     ).one_or_none()
 
-    if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Estab not found: {estab_id}",
-        )
 
+def _row_to_response(row) -> EstabResponse:
+    """Build an EstabResponse from a joined query row."""
     return EstabResponse(
         id=row.id,
         caa=row.caa,
