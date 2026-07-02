@@ -96,12 +96,18 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 - `tests/integration/test_access_control_api.py` - Access level hierarchy, user access control, column visibility (19 tests)
 - `tests/integration/test_api.py` - Authentication, user management, role management (18 tests)
 - `tests/integration/test_attendance_api.py` - Attendance management, snapshots, constraints (40 tests)
+- `tests/integration/test_csv_upload_api.py` - CSV upload pipeline, hash dedup, mapping (9 tests)
+- `tests/integration/test_deferments_api.py` - Deferment CRUD, callup_status transitions, super_admin auth (15 tests)
 - `tests/integration/test_deployments_api.py` - Deployment lifecycle, CRUD operations (18 tests)
+- `tests/integration/test_deployment_exclusions_api.py` - Personnel exclusion management (9 tests)
+- `tests/integration/test_estabs_api.py` - Estab lifecycle (confirm/unconfirm/delete) (13 tests)
 - `tests/integration/test_personnel_api.py` - Personnel management, search, filtering (12 tests)
 - `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (10 tests)
-- `tests/integration/test_sessions_api.py` - Session management, opening, closing, finalization (8 tests)
+- `tests/integration/test_sessions_api.py` - Session management, open/close/finalize, reopen (8 tests)
+- `tests/integration/test_users_api.py` - User CRUD, role/status transitions (3 tests)
+- `tests/integration/test_audit_api.py` - Audit log filtering and pagination (10 tests)
 
-**Total:** 291 tests, 100% pass rate ✅ UPDATED
+**Total:** 292 tests, 100% pass rate ✅ UPDATED
 **Coverage:** Comprehensive integration test coverage across all major features
 **Performance:** ~23 seconds for full integration test suite
 
@@ -233,7 +239,7 @@ async def test_example(client, sample_users, sample_deployment):
 - **Endpoints:** 5 deferment endpoints under `/api/v1/deferments`
 - **Tests:** 15 behavioral tests
 
-**Total API Endpoints:** 32 fully implemented and tested endpoints ✨ UPDATED
+**Total API Endpoints:** 57 fully implemented and tested endpoints ✨ UPDATED
 
 ### 3.2 Next Phase: Personnel Detail View & Attendance History (🎯 NEXT)
 
@@ -544,52 +550,64 @@ ON personnel USING GIN (extra_fields);
 parade-state/
 ├── src/parade_state/
 │   ├── __init__.py
-│   ├── api/
-│   │   ├── __init__.py          # API router exports
-│   │   ├── auth.py              # Authentication endpoints (Google OAuth, login/logout)
-│   │   ├── users.py             # User management endpoints (CRUD, status changes)
-│   │   ├── deployments.py       # Deployment management endpoints
-│   │   ├── sessions.py          # Attendance session management endpoints
-│   │   └── attendance.py        # Attendance record management endpoints
-│   ├── db/
-│   │   └── __init__.py          # Database setup, Base class, session management
-│   ├── middleware/
-│   │   └── auth.py              # Authentication middleware for protected endpoints
-│   ├── models/
-│   │   ├── __init__.py          # Model exports
-│   │   ├── access.py            # User, AccessLevel, scopes
+│   ├── main.py                  # FastAPI app setup and router registration
+│   ├── config.py                # Configuration management
+│   ├── admin_routes.py          # Admin section Jinja2 routes (/admin/*)
+│   ├── api/                     # REST API endpoints (JSON)
+│   │   ├── __init__.py
+│   │   ├── access_control.py    # Deployment access grants + subunit scopes
+│   │   ├── attendance.py        # Attendance record CRUD + bulk ops
+│   │   ├── audit.py             # Audit log query
+│   │   ├── auth.py              # Google OAuth flow, login/logout
+│   │   ├── csv_upload.py        # CSV upload pipeline
+│   │   ├── deferments.py        # Deferment CRUD (super_admin only)
+│   │   ├── deployments.py       # Deployment lifecycle
+│   │   ├── estabs.py            # Estab list/get/confirm/delete
+│   │   ├── personnel.py         # Personnel listing + attendance history
+│   │   ├── sessions.py          # Session open/close/reopen/finalize
+│   │   └── users.py             # User CRUD + role/status transitions
+│   ├── auth/                    # Auth dependencies and OAuth helpers
+│   │   ├── admin_dependencies.py
+│   │   ├── dependencies.py
+│   │   ├── oauth.py
+│   │   └── session.py
+│   ├── db/                      # Database setup, Base class, session management
+│   │   └── __init__.py
+│   ├── migrations/              # Alembic migrations
+│   │   ├── env.py
+│   │   └── versions/
+│   ├── models/                  # SQLAlchemy ORM models
+│   │   ├── __init__.py
+│   │   ├── access.py            # User, AccessLevel, UserSubunitScope, DeploymentUserAccess
 │   │   ├── attendance.py        # Session, AttendanceRecord
 │   │   ├── audit.py             # AuditLog
-│   │   ├── csv_ingestion.py     # Estab, CsvUpload, ColumnMapping
-│   │   ├── deployment.py        # Deployment, overrides, notes
-│   │   ├── personnel.py         # Personnel
+│   │   ├── auth_session.py      # UserSession
+│   │   ├── csv_ingestion.py     # Estab, CsvUpload, ColumnMapping, ColumnMetadata
+│   │   ├── deferments.py        # Deferment
+│   │   ├── deployment.py        # Deployment, overrides, notes, exclusions
+│   │   ├── personnel.py         # Personnel (with callup_status)
 │   │   └── schemas.py           # Pydantic request/response schemas
-│   ├── utils/
-│   │   ├── __init__.py          # Utility module exports
-│   │   ├── utc_dt.py            # UTC datetime utilities with timezone handling
-│   │   ├── env.py               # Environment variable utilities and configuration
-│   │   └── ids.py               # ID generation utilities (UUID, validation, conversion)
-│   ├── config.py                # Configuration management
-│   ├── session.py               # Session management utilities
-│   └── main.py                  # FastAPI application setup and router registration
+│   ├── utils/                   # Shared utilities (see CODE_STYLE.md)
+│   │   ├── __init__.py
+│   │   ├── cookies.py
+│   │   ├── env.py
+│   │   ├── ids.py
+│   │   └── utc_dt.py
+│   └── web/                     # User-facing web routes (Jinja2)
+│       ├── attendance.py        # /attendance marking view
+│       ├── auth.py              # /auth login/logout redirects
+│       ├── deployment.py        # /deployment summary view
+│       └── estab.py             # /estab roster browser
 ├── tests/
-│   ├── conftest.py              # Pytest configuration and fixtures
-│   ├── test_access_control.py   # Access control tests (8 tests)
-│   ├── test_api.py              # General API tests (4 tests)
-│   ├── test_auth.py             # Authentication tests (6 tests)
-│   ├── test_attendance_api.py   # Attendance API tests (18 tests)
-│   ├── test_csv_personnel.py    # CSV and personnel tests (10 tests)
-│   ├── test_deployment_attendance.py  # Deployment tests (8 tests)
-│   ├── test_deployments_api.py  # Deployment API tests (18 tests)
-│   └── test_sessions_api.py     # Session API tests (21 tests)
-├── docs/
-│   ├── SPECIFICATION.md         # Complete technical specification
-│   ├── CODE_STYLE.md            # Code style guide and conventions
-│   ├── IMPLEMENTATION.md        # This file
-│   ├── ARCHITECTURE.md          # System architecture overview
-│   └── NEXT_PHASE.md            # Next phase planning and roadmap
-├── pyproject.toml               # Project dependencies and configuration
-└── uv.lock                      # Locked dependency versions
+│   ├── conftest.py              # Pytest fixtures (db, client, sample data)
+│   ├── test_utils.py
+│   ├── behavioral/              # Behavioral contract tests
+│   ├── integration/             # API integration tests (primary suite)
+│   └── unit/                    # Pure-function unit tests (ids, utc_dt)
+├── docs/                        # Architecture, spec, security, deployment, etc.
+├── alembic.ini
+├── pyproject.toml
+└── uv.lock
 ```
 
 ### 4.2 Model Organization
