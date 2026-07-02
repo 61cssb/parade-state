@@ -221,3 +221,6 @@ __marimo__/
 
 # Other project files
 /experiments
+
+# Playwright MCP debug artifacts (screenshots, console logs, snapshots)
+.playwright-mcp/

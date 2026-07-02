@@ -1,6 +1,6 @@
 # Next Implementation Phase
 
-**Last Updated:** 2026-07-01
+**Last Updated:** 2026-07-02 (Deferments MVP)
 **Status:** Production-Ready Backend with User-Facing Views
 
 ---
@@ -8,8 +8,8 @@
 ## Current System Status
 
 ### Production-Ready Metrics
-- 245 tests passing (100% pass rate)
-- 31+ API endpoints fully implemented and tested
+- 291 tests passing (100% pass rate)
+- 32+ API endpoints fully implemented and tested
 - Enterprise-grade security with multi-tenant access control
 - Comprehensive documentation (architecture, security, deployment, testing)
 - Database migrations initialized and production-ready
@@ -42,6 +42,7 @@
 - **Deployment date editing** (2026-07-01) — Admin UI supports editing valid_from/valid_until via inline form. API validates that no sessions fall outside the new date range (returns error if sessions would be orphaned).
 - **Admin deployments page enhancements** (2026-07-01) — Auto-expands active deployment on page load, per-session "Update" button linking to /attendance, autofill next session date/type for quick session creation.
 - **Attendance page enhancements** (2026-07-01) — Color-coded status dropdown (present=green, absent=red, excused=yellow), sub-unit 1 & 2 columns displayed, column filter and sort support.
+- **Deferments MVP** (2026-07-02) — Super-admin-only deferment CRUD at `/admin/deferments` and `/api/v1/deferments`. New `Personnel.callup_status` field (`Called Up` / `Not Called Up` / `Deferred`). Approving a deferment flips the linked personnel to `Deferred`; reverting from Approved returns to `Called Up` (except for neutral statuses `Not called up` / `Do not call up`). `rank_name` and `sub_unit` snapshotted at creation. Migration `e5f6a7b8c9d0`; existing demo DB backfilled to `Called Up`. User-type scoping deferred to a later phase.
 
 ### System Capabilities
 - Multi-tenant deployment isolation with access control
@@ -203,6 +204,40 @@ Defer until the diff-confirmation step (Phase 9C-2 deferred work) forces a concr
 
 ---
 
+### Phase 9G: UI Test Automation (Deferred — pending UI stabilization)
+
+**Trigger:** Implement once the UI flow is stable and we're no longer making frequent changes to templates/interactions. Adding earlier would mean rewriting tests on every UI iteration.
+
+**Why:** PRs #3 and #4 required extensive manual UI testing — clicking through modals, buttons, filters, and dropdowns to verify behavior that the existing API-level tests don't cover. The UI is server-rendered Jinja2 + inline `fetch()` calls, so most of this is cheaply automatable.
+
+#### Tier 1: Page-rendering + flow tests (pytest + TestClient) — LOW COST
+
+Expand the existing `client` fixture to test page routes end-to-end: GET page → assert rendered HTML → POST API → GET page → assert updated state. Lives in `tests/behavioral/`. Covers roughly 70% of the manual test load:
+
+- Session creation auto-populates `/attendance` with absent records
+- Deployment date edits → 400 (invalid) / 200 (valid) with updated page state
+- Excluded personnel absent from non-admin deployment view
+- Estab modal button rendered conditionally on confirmed status
+- Estab confirm/unconfirm/delete buttons → page re-renders correctly
+- Checkbox exclusion UI on `/admin/deployments/{id}/personnel` renders expected rows
+
+#### Tier 2: Client-side JS behavior (Playwright Python) — NEW DEPENDENCY
+
+For tests that need a real browser to execute JavaScript. Lives in `tests/e2e/`, gated behind `@pytest.mark.e2e` so default `uv run pytest` stays fast and CI can opt in:
+
+- Color-coded status dropdown updates on change
+- Filter and sort on attendance table
+- Autofill suggests next session by time of day
+- Modal open/close and form submission flows
+
+#### Tier 3: Visual regression (screenshot diffing) — INDEFINITELY DEFERRED
+
+Overkill until a real visual regression problem emerges.
+
+**Dependencies:** None blocking. Can be implemented at any point after the UI stabilizes. Source manual-test checklists live in PRs #3 and #4.
+
+---
+
 ## Deferred Phases
 
 ### **Phase 7: Reporting & Analytics** (DEFERRED)
@@ -270,4 +305,4 @@ git log --oneline --all
 
 **Next: Phase 9E — Mobile Optimization**
 
-Session auto-population, attendance enum simplification (removed "unknown"), deployment date editing with session validation, admin deployments page auto-expand and quick-session features, and attendance page color-coding/filter/sort complete (2026-07-01). These enhancements streamline the admin and user workflows for parade state management. Next: responsive design optimization for field use (tablets, mobile), or the diff-confirmation step (Phase 9C-2 deferred work) if CSV pipeline continuation is prioritized.
+Session auto-population, attendance enum simplification (removed "unknown"), deployment date editing with session validation, admin deployments page auto-expand and quick-session features, and attendance page color-coding/filter/sort complete (2026-07-01). These enhancements streamline the admin and user workflows for parade state management. Next: responsive design optimization for field use (tablets, mobile), the diff-confirmation step (Phase 9C-2 deferred work) if CSV pipeline continuation is prioritized, or Phase 9G (UI test automation) once the UI flow is stable.

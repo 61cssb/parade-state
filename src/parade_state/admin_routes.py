@@ -14,6 +14,7 @@ from parade_state.models import (
     AccessLevel,
     AuditLog,
     CsvUpload,
+    Deferment,
     Deployment,
     DeploymentPersonnelExclusion,
     Estab,
@@ -50,6 +51,32 @@ DEPLOYMENT_STATUSES = [
     "archived",
     "closed",
     "finalized",
+]
+
+# Deferment filter dropdown options (mirrors Deferment model enums)
+DEFERMENT_REASONS = [
+    "Honeymoon",
+    "Work",
+    "Full-time studies",
+    "Other",
+    "Medical Grounds",
+    "Examination",
+    "New employment",
+    "Special employment",
+    "Compassionate",
+    "Childbirth",
+    "Part-time studies",
+    "Newly Established Business (Local)",
+]
+DEFERMENT_STATUSES = [
+    "Pending action",
+    "Approved",
+    "Withdrawn",
+    "Rejected",
+    "To Resubmit",
+    "Time off arrangement",
+    "Not called up",
+    "Do not call up",
 ]
 
 # Global Jinja2 environment (singleton)
@@ -576,6 +603,103 @@ async def admin_estabs(
         estabs=estabs,
         status_filter=status_filter or "",
         estab_statuses=["draft", "confirmed", "archived"],
+    )
+
+    return HTMLResponse(content=html_content)
+
+
+@router.get("/admin/deferments", response_class=HTMLResponse)
+async def admin_deferments(
+    request: Request,
+    status_filter: str | None = None,
+    estab_id: str | None = None,
+):
+    """Render the deferments management page (super-admin only)."""
+    current_admin = await get_current_admin_user_optional(request)
+    if not current_admin:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    if current_admin.role != "super_admin":
+        return RedirectResponse(url="/admin", status_code=302)
+
+    session_maker = get_session_maker()
+    async with session_maker() as db:
+        # Estab list for the selector (most recent first).
+        estab_rows = (
+            await db.execute(
+                select(Estab.id, Estab.caa).order_by(Estab.caa.desc()).limit(50)
+            )
+        ).all()
+        estab_options = [
+            {
+                "id": str(row.id),
+                "caa": row.caa.isoformat() if row.caa is not None else str(row.id)[:8],
+            }
+            for row in estab_rows
+        ]
+
+        # Page always scopes to exactly one estab. If none given, default to the
+        # most recent estab (first in the dropdown).
+        resolved_estab_id = estab_id or (estab_options[0]["id"] if estab_options else None)
+
+        query = (
+            select(
+                Deferment,
+                Personnel.estab_id,
+                Estab.caa,
+            )
+            .join(Personnel, Deferment.personnel_id == Personnel.id)
+            .outerjoin(Estab, Personnel.estab_id == Estab.id)
+            .order_by(Deferment.created_at.desc())
+            .limit(200)
+        )
+        if status_filter:
+            query = query.where(Deferment.status == status_filter)
+        if resolved_estab_id:
+            query = query.where(Personnel.estab_id == resolved_estab_id)
+
+        rows = (await db.execute(query)).all()
+
+    deferments_data = [
+        {
+            "id": str(d.id),
+            "personnel_id": d.personnel_id,
+            "estab_id": eid,
+            "estab_caa": caa.isoformat() if caa else None,
+            "rank_name": d.rank_name,
+            "sub_unit": d.sub_unit or "—",
+            "reason": d.reason,
+            "status": d.status,
+            "remarks": d.remarks or "",
+            "oc_updates": d.oc_updates or "",
+            "created_at": d.created_at,
+            "updated_at": d.updated_at,
+        }
+        for d, eid, caa in rows
+    ]
+
+    env = get_templates(request)
+    template = env.get_template("admin/deferments.html")
+
+    active_estab_caa = next(
+        (e["caa"] for e in estab_options if e["id"] == resolved_estab_id), "—"
+    )
+
+    html_content = template.render(
+        request=request,
+        user={
+            "id": current_admin.id,
+            "name": current_admin.name,
+            "email": current_admin.email,
+            "role": current_admin.role,
+        },
+        active_page="deferments",
+        deferments=deferments_data,
+        estab_options=estab_options,
+        status_filter=status_filter or "",
+        estab_filter=resolved_estab_id or "",
+        active_estab_caa=active_estab_caa,
+        deferment_statuses=DEFERMENT_STATUSES,
+        deferment_reasons=DEFERMENT_REASONS,
     )
 
     return HTMLResponse(content=html_content)

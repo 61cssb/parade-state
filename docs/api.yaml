@@ -67,6 +67,8 @@ tags:
     description: Append-only audit trail (admin)
   - name: events
     description: Server-Sent Events for stale data detection
+  - name: deferments
+    description: Personnel deferments — super-admin only; drives callup_status
 
 # =============================================================================
 # PATHS
@@ -1425,6 +1427,203 @@ paths:
                 type: string
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  # ===========================================================================
+  # Deferments (super-admin only)
+  # ===========================================================================
+  /deferments:
+    get:
+      tags: [deferments]
+      summary: List deferments
+      description: |
+        Super-admin only. Returns deferments filtered by optional query params.
+        `estab_id` joins through the deferment's linked personnel record.
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string, enum: [super_admin, admin, user] }
+        - name: personnel_id
+          in: query
+          schema: { type: string }
+        - name: estab_id
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [Approved, Withdrawn, Rejected, To Resubmit, Time off arrangement,
+                   Pending action, 'Not called up', 'Do not call up']
+        - name: reason
+          in: query
+          schema:
+            type: string
+            enum: [Honeymoon, Work, Full-time studies, Other, Medical Grounds,
+                   Examination, 'New employment', 'Special employment', Compassionate,
+                   Childbirth, 'Part-time studies', 'Newly Established Business (Local)']
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: List of deferments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid }
+                    personnel_id: { type: string, format: uuid }
+                    estab_id: { type: string, format: uuid, nullable: true }
+                    rank_name: { type: string }
+                    sub_unit: { type: string, nullable: true }
+                    reason: { type: string }
+                    status: { type: string }
+                    remarks: { type: string, nullable: true }
+                    oc_updates: { type: string, nullable: true }
+                    created_at: { type: string, format: date-time }
+                    created_by: { type: string, format: uuid }
+                    updated_at: { type: string, format: date-time, nullable: true }
+                    updated_by: { type: string, format: uuid, nullable: true }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [deferments]
+      summary: Create a deferment
+      description: |
+        Super-admin only. Snapshots `rank_name` (`{rank} {full_name}`) and
+        `sub_unit` (first non-null of sub_unit_1/2/3) from the linked personnel
+        at creation time. New deferments start with `status="Pending action"`,
+        so callup_status is not affected.
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string, enum: [super_admin, admin, user] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [personnel_id, reason]
+              properties:
+                personnel_id: { type: string, format: uuid }
+                reason:
+                  type: string
+                  enum: [Honeymoon, Work, Full-time studies, Other, Medical Grounds,
+                         Examination, 'New employment', 'Special employment', Compassionate,
+                         Childbirth, 'Part-time studies', 'Newly Established Business (Local)']
+                remarks: { type: string, nullable: true }
+                oc_updates: { type: string, nullable: true }
+      responses:
+        '201':
+          description: Created
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /deferments/{defermentId}:
+    parameters:
+      - name: defermentId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [deferments]
+      summary: Fetch a single deferment
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string, enum: [super_admin, admin, user] }
+      responses:
+        '200': { description: The deferment }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [deferments]
+      summary: Update a deferment
+      description: |
+        Status changes drive the linked personnel's `callup_status`:
+        Approved → Deferred; Approved → non-neutral → Called Up;
+        `Not called up` / `Do not call up` are neutral (no change).
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string, enum: [super_admin, admin, user] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  nullable: true
+                  enum: [Honeymoon, Work, Full-time studies, Other, Medical Grounds,
+                         Examination, 'New employment', 'Special employment', Compassionate,
+                         Childbirth, 'Part-time studies', 'Newly Established Business (Local)']
+                status:
+                  type: string
+                  nullable: true
+                  enum: [Approved, Withdrawn, Rejected, To Resubmit, Time off arrangement,
+                         Pending action, 'Not called up', 'Do not call up']
+                remarks: { type: string, nullable: true }
+                oc_updates: { type: string, nullable: true }
+      responses:
+        '200': { description: Updated }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [deferments]
+      summary: Delete a deferment
+      description: |
+        If the deleted deferment was Approved, the linked personnel's
+        `callup_status` reverts to `Called Up`.
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string, enum: [super_admin, admin, user] }
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail: { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
 # =============================================================================
 # COMPONENTS

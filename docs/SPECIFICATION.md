@@ -131,9 +131,10 @@ Session
 ├── date: date
 ├── session_type: str ENUM ['AM', 'PM']
 ├── status: str ENUM ['open', 'closed', 'finalized']
-│   └── open: attendance can be recorded
-│   └── closed: no further edits (cascade from deployment.closed)
-│   └── finalized: permanent archive (cascade from deployment.finalized)
+│   └── open: attendance can be recorded; close metadata (closed_at/by) is null
+│   └── closed: attendance read-only; may be reopened → open or finalized
+│   └── finalized: permanent archive (terminal)
+│   Transitions: open ↔ closed → finalized (reopen clears closed_at/by)
 ├── created_at: datetime
 ├── created_by: UUID (FK User)
 ├── opened_at: datetime
@@ -239,6 +240,7 @@ Personnel
 ├── sub_unit_3: str
 ├── extra_fields: JSON (other CSV columns not mapped to canonical names; JSONB in PostgreSQL)
 ├── status: str ENUM ['active', 'archived']
+├── callup_status: str ENUM ['Called Up', 'Not Called Up', 'Deferred']  (default: 'Called Up')
 ├── created_at: datetime
 └── created_by: UUID (FK User; typically system)
 ```
@@ -255,7 +257,45 @@ Personnel
 - Notes, overrides, and attendance link to `Personnel.id` (the row PK). Cross-estab continuity
   (notes transfer, history) follows the person via `short_id`.
 
-### 3.3 Attendance Tracking
+### 3.3 Deferments
+
+#### 3.3.1 Deferment
+
+**A personnel's deferral request, linked to a single estab personnel record.**
+
+```
+Deferment
+├── id: UUID (PK)
+├── personnel_id: UUID (FK Personnel, on_delete=CASCADE)
+├── rank_name: str (snapshot of "{rank} {full_name}" at creation)
+├── sub_unit: str (nullable; snapshot of first non-null of sub_unit_1/2/3 at creation)
+├── reason: str ENUM [
+│     'Honeymoon', 'Work', 'Full-time studies', 'Other', 'Medical Grounds',
+│     'Examination', 'New employment', 'Special employment', 'Compassionate',
+│     'Childbirth', 'Part-time studies', 'Newly Established Business (Local)'
+│   ]
+├── status: str ENUM [
+│     'Approved', 'Withdrawn', 'Rejected', 'To Resubmit', 'Time off arrangement',
+│     'Pending action', 'Not called up', 'Do not call up'
+│   ]  (default: 'Pending action')
+├── remarks: text (nullable; long-text admin remarks)
+├── oc_updates: text (nullable; long-text OC updates, overwrite-on-edit)
+├── created_at: datetime
+├── created_by: UUID (FK User)
+├── updated_at: datetime (nullable)
+└── updated_by: UUID (FK User; nullable)
+```
+
+**Constraints:**
+- Linked to exactly one Personnel record (and implicitly that personnel's estab).
+- `rank_name` and `sub_unit` are **snapshotted at creation** — denormalized so the
+  deferment remains an accurate record even if the personnel row is later edited
+  or the estab is superseded by a new CAA.
+- Visible to **super_admin only** (admin role gets 403). UI and user-type
+  scoping to be tightened in a later phase.
+- See §4.6 for the callup_status transition rule driven by `status` changes.
+
+### 3.4 Attendance Tracking
 
 #### 3.3.1 AttendanceRecord
 
@@ -310,7 +350,8 @@ AttendanceRecord
 Deployment created (draft)
   ├─ valid_from, valid_until, optional scheduled_activation set
   ├─ Admin can edit overrides
-  └─ PersonnelOverrides populated (initially mirrored from Estab)
+  ├─ PersonnelOverrides populated (initially mirrored from Estab)
+  └─ Session creation BLOCKED — see §4.3
 
               At valid_from time (or scheduled_activation, or manual):
               ↓
@@ -331,7 +372,37 @@ Deployment created (draft)
         └─ finalized: permanent archive (all sessions finalized; immutable)
 ```
 
-### 4.3 Column Mapping Constraint
+### 4.3 Session Lifecycle & Attendance Editability
+
+**Session creation gate** — Sessions can only be created for **active** deployments.
+Draft, inactive, archived, closed, or finalized deployments all reject session
+creation with HTTP 400. The admin deployments page hides the "Create session"
+form until the deployment is activated.
+
+**Session status transitions**:
+
+```
+        ┌───────────┐         ┌───────────┐         ┌───────────┐
+        │   open    │ ──────► │  closed   │ ──────► │ finalized │
+        │           │ ◄────── │           │         │ (terminal)│
+        └───────────┘ reopen  └───────────┘         └───────────┘
+```
+
+- `open → closed`: sets `closed_at`/`closed_by`.
+- `closed → open` (reopen): **clears** `closed_at`/`closed_by`. Available via the
+  green "Open" button on closed sessions in the admin deployments page.
+- `closed → finalized`: terminal; sets `closed_at`/`closed_by` if not already.
+- `open → finalized` and `finalized → *` are rejected (HTTP 400).
+
+**Attendance editability** — Attendance records (status, remarks) can only be
+**created, updated, or deleted** when the linked session is `open`. All
+attendance endpoints enforce this via `verify_session_is_open`; closed and
+finalized sessions return HTTP 400 "Cannot modify attendance for {status}
+sessions". The user-facing attendance page additionally disables the status
+dropdown and remarks input client-side and shows a "Read-only — session is
+{status}." banner when the session is not open.
+
+### 4.4 Column Mapping Constraint
 
 **Global Constraint:** Each canonical column name maps from at most ONE raw CSV column name
 
@@ -359,7 +430,7 @@ Result: each canonical name receives from at most ONE raw column per CSV,
 identity. The cross-estab person key (`short_id`) is minted server-side and attached during
 ingest via name+rank matching (see §3.2.1).
 
-### 4.4 CSV Upload Pipeline
+### 4.5 CSV Upload Pipeline
 
 ```
 Upload File
@@ -387,12 +458,31 @@ Compute diff (current CSV vs prior confirmed CSV)
 [CsvUpload.status = 'diff_confirmed']
   ↓
 Populate Estab.status = 'confirmed'
-Populate Personnel records
+Populate Personnel records (callup_status defaults to 'Called Up')
 Auto-create initial Deployment (status=draft)
 Transfer notes from prior deployment (by Personnel.id match)
 ```
 
-### 4.5 Key Constraints Summary
+### 4.6 Deferment Callup-Status Transition
+
+When a Deferment's `status` changes, the linked Personnel's `callup_status`
+follows this rule:
+
+| Deferment new status                                 | Personnel.callup_status                |
+|------------------------------------------------------|----------------------------------------|
+| `Approved`                                           | → `Deferred`                           |
+| Any non-Approved status, **previous** was Approved   | → `Called Up` (revert)                 |
+| `Not called up` / `Do not call up` (any prior)       | **No change** (neutral; later phase)   |
+| Other transitions (no Approved involvement)          | **No change**                          |
+| Deferment deleted, previous status was Approved      | → `Called Up` (revert)                 |
+| Deferment deleted, previous status was not Approved  | **No change**                          |
+
+`Pending action` (the initial status) is never Approved, so creating a new
+deferment does not affect `callup_status`. `Not called up` and `Do not call up`
+belong to a later workflow phase and are explicitly excluded from driving
+callup transitions.
+
+### 4.7 Key Constraints Summary
 
 | Table | Unique | Index | Purpose |
 |-------|--------|-------|---------|
@@ -405,6 +495,8 @@ Transfer notes from prior deployment (by Personnel.id match)
 | UserSubunitScope | (user_id, deployment_id, unit, sub_unit_1-3) | (user_id, deployment_id) | Scope lookup |
 | Session | (deployment_id, date) | (deployment_id, date) | Session lookup |
 | AttendanceRecord | (session_id, personnel_id) | (deployment_id, personnel_id) | Attendance lookup |
+| Personnel | — | (callup_status) | Callup status filter |
+| Deferment | — | (personnel_id), (status), (updated_at) | Deferment lookup |
 
 ---
 

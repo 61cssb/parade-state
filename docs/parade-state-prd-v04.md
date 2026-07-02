@@ -2,8 +2,9 @@
 
 **Version:** 0.4 (draft)  
 **Status:** For review  
-**Last updated:** 2026-05-06  
-**Changelog v0.4:** Tech stack pinned (FastAPI + NiceGUI + SQLAlchemy + APScheduler + Railway); deployment section updated for Railway; APScheduler job store model specified; mobile attendance UI confirmed as static HTML/JS for MVP; Vue SFC refactor deferred; Flask removed.
+**Last updated:** 2026-07-02  
+**Changelog v0.4:** Tech stack pinned (FastAPI + NiceGUI + SQLAlchemy + APScheduler + Railway); deployment section updated for Railway; APScheduler job store model specified; mobile attendance UI confirmed as static HTML/JS for MVP; Vue SFC refactor deferred; Flask removed.  
+**Amended 2026-07-02:** §8 Session — session creation restricted to `active` deployments (was: draft or active); session status lifecycle rewritten to reflect individual close/reopen (was: cascade-only via deployment). §9.1 — `excused` added to status enum; closed/finalized session read-only rule noted. See [SPECIFICATION.md](SPECIFICATION.md) for the authoritative current behavior.
 
 > ⚠️ **SUPERSEDED — personnel identity sections.** This is a historical document.
 > References to `pers_no` as an imported/used identifier are **obsolete**. `pers_no` is no
@@ -147,16 +148,16 @@ Admin-only. Two-step: compute diff between source estab and target estab → pre
 
 ## 8. Session
 
-Admin-explicitly opened. Defined by deployment + date + session type (AM/PM). **At most one session per (deployment, date) pair across both AM and PM.** May be created in advance for draft or active deployments. On creation: all non-archived personnel pre-populated as `absent` with `notes_snapshot` from current `deployment_notes`. No retroactive session creation on inactive deployments.
+Admin-explicitly opened. Defined by deployment + date + session type (AM/PM). **At most one session per (deployment, date) pair across both AM and PM.** May be created only for **active** deployments (draft deployments must be activated first; inactive/archived/closed/finalized are rejected). On creation: all active personnel (minus deployment exclusions) pre-populated as `absent` with `notes_snapshot` from current `deployment_notes`. No retroactive session creation on inactive deployments.
 
-**Session closure:** Deployment closure/finalization applies to all child sessions (closed/finalized simultaneously). No individual session-level closure override.
+**Session status lifecycle:** individual sessions move through `open → closed → finalized`, with admins able to transition each session independently. `closed → open` (reopen) is allowed and clears `closed_at`/`closed_by`. `finalized` is terminal. Deployment-level closure/finalization still cascades to child sessions, but individual session-level close/reopen is also supported. See [SPECIFICATION.md §4.3](SPECIFICATION.md) for the authoritative state machine and editability rules.
 
 ---
 
 ## 9. Attendance
 
 ### 9.1 Record
-Fields: `personnel_id`, `session_id`, `deployment_id`, `status` (`present` | `absent`), `remarks` (session-scoped), `notes_snapshot`, four unit+subunit snapshot fields, `updated_at`, `updated_by`.
+Fields: `personnel_id`, `session_id`, `deployment_id`, `status` (`present` | `absent` | `excused`), `remarks` (session-scoped), `notes_snapshot`, four unit+subunit snapshot fields, `updated_at`, `updated_by`. Records can only be created/updated/deleted while the linked session is `open`; closed and finalized sessions are read-only (HTTP 400).
 
 ### 9.2 Unit+Subunit Snapshot Rule
 On any attendance write:

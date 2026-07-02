@@ -125,12 +125,14 @@
                         </td>
                         <td style="padding: 0.4rem;">
                             <div style="display: flex; gap: 0.25rem;">
+                                {% if s.status == 'open' %}
                                 <a class="btn" style="background: #6b7280; color: white; font-size: 0.7rem; padding: 0.15rem 0.4rem; text-decoration: none;"
                                    href="/attendance?deployment_id={{ d.id }}&session_id={{ s.id }}">Update</a>
-                                {% if s.status == 'open' %}
                                 <button class="btn" style="background: #3b82f6; color: white; font-size: 0.7rem; padding: 0.15rem 0.4rem;"
                                         onclick="transitionSession('{{ s.id }}', 'closed')">Close</button>
                                 {% elif s.status == 'closed' %}
+                                <button class="btn" style="background: #10b981; color: white; font-size: 0.7rem; padding: 0.15rem 0.4rem;"
+                                        onclick="transitionSession('{{ s.id }}', 'open')">Open</button>
                                 <button class="btn" style="background: #8b5cf6; color: white; font-size: 0.7rem; padding: 0.15rem 0.4rem;"
                                         onclick="transitionSession('{{ s.id }}', 'finalized')">Finalize</button>
                                 {% endif %}
@@ -148,7 +150,7 @@
             <p style="color: #6b7280; font-size: 0.85rem; margin-bottom: 0.75rem;">No attendance sessions yet.</p>
             {% endif %}
 
-            {% if d.status in ['draft', 'active'] %}
+            {% if d.status == 'active' %}
             {% set hint = next_session_hints.get(d.id, {}) %}
             <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
                 <input type="date" id="new-session-date-{{ d.id }}"
@@ -161,6 +163,8 @@
                 <button class="btn btn-success" style="font-size: 0.75rem; padding: 0.3rem 0.6rem;"
                         onclick="createSession('{{ d.id }}')">+ Create session</button>
             </div>
+            {% elif d.status == 'draft' %}
+            <p style="color: #6b7280; font-size: 0.8rem; font-style: italic;">Activate the deployment to create attendance sessions.</p>
             {% endif %}
         </div>
     </div>

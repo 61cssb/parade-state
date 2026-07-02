@@ -12,6 +12,7 @@ from ..db import Base
 if TYPE_CHECKING:
     from .attendance import AttendanceRecord
     from .csv_ingestion import Estab
+    from .deferments import Deferment
     from .deployment import DeploymentNotes, DeploymentPersonnelOverride
 
 
@@ -42,6 +43,11 @@ class Personnel(Base):
         default="active",
         index=True,
     )
+    callup_status: Mapped[str] = mapped_column(
+        Enum("Called Up", "Not Called Up", "Deferred", name="personnel_callup_status"),
+        default="Called Up",
+        index=True,
+    )
     created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     updated_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True, index=True)
@@ -58,6 +64,9 @@ class Personnel(Base):
         back_populates="personnel", cascade="all, delete-orphan"
     )
     attendance_records: Mapped[list["AttendanceRecord"]] = relationship(
+        back_populates="personnel", cascade="all, delete-orphan"
+    )
+    deferments: Mapped[list["Deferment"]] = relationship(
         back_populates="personnel", cascade="all, delete-orphan"
     )
 
