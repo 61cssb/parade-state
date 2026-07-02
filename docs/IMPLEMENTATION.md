@@ -101,9 +101,9 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 - `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (10 tests)
 - `tests/integration/test_sessions_api.py` - Session management, opening, closing, finalization (8 tests)
 
-**Total:** 270 tests, 100% pass rate ✅ UPDATED
+**Total:** 291 tests, 100% pass rate ✅ UPDATED
 **Coverage:** Comprehensive integration test coverage across all major features
-**Performance:** ~9 seconds for full integration test suite
+**Performance:** ~23 seconds for full integration test suite
 
 ### 2.3 Writing New Tests
 
@@ -219,7 +219,21 @@ async def test_example(client, sample_users, sample_deployment):
 - **Endpoints:** 3 personnel management endpoints
 - **Tests:** 23 comprehensive tests
 
-**Total API Endpoints:** 27 fully implemented and tested endpoints ✨ UPDATED
+**Deferments (✅ Super-admin MVP)**
+- Personnel deferment CRUD linked to a single estab personnel record
+- `rank_name` and `sub_unit` snapshotted at creation from the linked personnel
+- Reason enum (12 values) and status enum (8 values)
+- Personnel `callup_status` field (`Called Up` / `Not Called Up` / `Deferred`):
+  - Approved deferment → `Deferred`
+  - Reverting from Approved to a non-neutral status → `Called Up`
+  - `Not called up` / `Do not call up` deferment statuses are neutral (no callup change)
+  - Deleting an Approved deferment reverts to `Called Up`
+- Super-admin-only: API and admin UI enforce `role == "super_admin"`
+- Admin UI under `/admin/deferments` (nav link gated by super_admin role)
+- **Endpoints:** 5 deferment endpoints under `/api/v1/deferments`
+- **Tests:** 15 behavioral tests
+
+**Total API Endpoints:** 32 fully implemented and tested endpoints ✨ UPDATED
 
 ### 3.2 Next Phase: Personnel Detail View & Attendance History (🎯 NEXT)
 
