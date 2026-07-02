@@ -108,10 +108,10 @@ async def validate_session_status_transition(
     new_status: str,
 ) -> bool:
     """Validate session status transition is allowed."""
-    # Enforce sequential transitions: open → closed → finalized
+    # Sequential transitions with reopen path: open ↔ closed → finalized
     valid_transitions = {
-        "open": ["closed"],  # Can only go to closed, not directly to finalized
-        "closed": ["finalized"],  # Can only go to finalized
+        "open": ["closed"],
+        "closed": ["open", "finalized"],  # May reopen or finalize
         "finalized": [],  # Finalized is terminal
     }
 
@@ -158,7 +158,7 @@ async def create_session(
     """Create a new attendance session.
 
     Requires admin or super_admin role.
-    Sessions can only be created for active deployments.
+    Sessions can only be created for active deployments (not draft).
     Only one session per type (AM/PM) per deployment per day.
     """
     # Verify user has permission
@@ -173,10 +173,13 @@ async def create_session(
         session_data.deployment_id, user_id, user_role, db
     )
 
-    if deployment.status not in ["draft", "active"]:
+    if deployment.status != "active":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Sessions can only be created for draft or active deployments",
+            detail=(
+                f"Sessions can only be created for active deployments "
+                f"(current status: '{deployment.status}')"
+            ),
         )
 
     # Check session uniqueness (deployment + date + session_type)
@@ -429,6 +432,11 @@ async def update_session(
         if new_status == "closed" and current_status == "open":
             session.closed_at = utc_dt.utcnow()
             session.closed_by = user_id
+
+        # Handle reopening a previously-closed session
+        if new_status == "open" and current_status == "closed":
+            session.closed_at = None
+            session.closed_by = None
 
         # Handle finalizing session
         if new_status == "finalized":
