@@ -101,13 +101,13 @@ async def test_create_session_for_inactive_deployment_forbidden(
 
     assert response.status_code == 400
     assert (
-        "Sessions can only be created for draft or active deployments"
+        "Sessions can only be created for active deployments"
         in response.json()["detail"]
     )
 
 
 @pytest.mark.asyncio
-async def test_create_session_for_draft_deployment_allowed(
+async def test_create_session_for_draft_deployment_forbidden(
     client: TestClient,
     admin_token_headers: dict[str, str],
     admin_id: str,
@@ -115,7 +115,7 @@ async def test_create_session_for_draft_deployment_allowed(
     sample_estab,
     sample_users,
 ):
-    """Test that sessions can be created for draft deployments (PRD §8)."""
+    """Sessions cannot be created for draft deployments — only active ones."""
     deployment = Deployment(
         name="Draft Deployment",
         estab_id=str(sample_estab.id),
@@ -139,10 +139,9 @@ async def test_create_session_for_draft_deployment_allowed(
     db_session.add(admin_access)
     await db_session.commit()
 
-    session_date = date.today()
     session_data = {
         "deployment_id": str(deployment.id),
-        "date": session_date.isoformat(),
+        "date": date.today().isoformat(),
         "session_type": "AM",
     }
 
@@ -153,11 +152,8 @@ async def test_create_session_for_draft_deployment_allowed(
         params={"user_id": admin_id, "user_role": "admin"},
     )
 
-    assert response.status_code == 201
-    data = response.json()
-    assert data["deployment_id"] == str(deployment.id)
-    assert data["session_type"] == "AM"
-    assert data["status"] == "open"
+    assert response.status_code == 400
+    assert "active deployments" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -543,6 +539,42 @@ async def test_update_session_status_to_finalized(
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "finalized"
+
+
+@pytest.mark.asyncio
+async def test_reopen_closed_session_to_open(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    db_session,
+    admin_id: str,
+    sample_deployment: Deployment,
+):
+    """Closed sessions can be reopened (closed → open); close metadata is cleared."""
+    session = Session(
+        deployment_id=str(sample_deployment.id),
+        date=date.today(),
+        session_type="AM",
+        status="closed",
+        created_by=admin_id,
+        opened_at=utc_dt.utcnow(),
+        closed_at=utc_dt.utcnow(),
+        closed_by=admin_id,
+    )
+    db_session.add(session)
+    await db_session.commit()
+
+    response = client.patch(
+        f"/api/v1/sessions/{session.id}",
+        json={"status": "open"},
+        headers=admin_token_headers,
+        params={"user_id": admin_id, "user_role": "admin"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "open"
+    assert data["closed_at"] is None
+    assert data["closed_by"] is None
 
 
 @pytest.mark.asyncio
