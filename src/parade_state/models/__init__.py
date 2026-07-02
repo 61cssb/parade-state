@@ -10,6 +10,7 @@ from .csv_ingestion import (
     CsvUpload,
     Estab,
 )
+from .deferments import Deferment
 from .deployment import (
     Deployment,
     DeploymentNotes,
@@ -31,6 +32,7 @@ __all__ = [
     "ColumnMetadata",
     "CsvUpload",
     "Estab",
+    "Deferment",
     "Deployment",
     "DeploymentNotes",
     "DeploymentPersonnelExclusion",

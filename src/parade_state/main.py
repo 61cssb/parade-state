@@ -22,6 +22,7 @@ from parade_state.api import (
     audit,
     auth,
     csv_upload,
+    deferments,
     deployments,
     estabs,
     personnel,
@@ -120,3 +121,6 @@ app.include_router(
 app.include_router(csv_upload.router, prefix="/api/v1/csv", tags=["csv-upload"])
 app.include_router(estabs.router, prefix="/api/v1/estabs", tags=["estabs"])
 app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
+app.include_router(
+    deferments.router, prefix="/api/v1/deferments", tags=["deferments"]
+)

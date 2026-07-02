@@ -502,6 +502,12 @@
                class="{% if active_page == 'deployments' %}active{% endif %}">
                 <span class="icon">🎖️</span><span>Deployments</span>
             </a>
+            {% if user.role == 'super_admin' %}
+            <a href="/admin/deferments" title="Deferments"
+               class="{% if active_page == 'deferments' %}active{% endif %}">
+                <span class="icon">🕓</span><span>Deferments</span>
+            </a>
+            {% endif %}
             <a href="/admin/users" title="Users"
                class="{% if active_page == 'users' %}active{% endif %}">
                 <span class="icon">👥</span><span>Users</span>

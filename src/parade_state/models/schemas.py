@@ -623,3 +623,77 @@ class AuditLogListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# ============================================================================
+# Deferment Schemas
+# ============================================================================
+
+DefermentReasonLiteral = Literal[
+    "Honeymoon",
+    "Work",
+    "Full-time studies",
+    "Other",
+    "Medical Grounds",
+    "Examination",
+    "New employment",
+    "Special employment",
+    "Compassionate",
+    "Childbirth",
+    "Part-time studies",
+    "Newly Established Business (Local)",
+]
+
+DefermentStatusLiteral = Literal[
+    "Approved",
+    "Withdrawn",
+    "Rejected",
+    "To Resubmit",
+    "Time off arrangement",
+    "Pending action",
+    "Not called up",
+    "Do not call up",
+]
+
+
+class DefermentCreate(BaseModel):
+    """Schema for creating a deferment.
+
+    ``rank_name`` and ``sub_unit`` are snapshotted server-side from the linked
+    personnel record; clients only send ``personnel_id`` plus the request fields.
+    """
+
+    personnel_id: str = Field(..., min_length=1)
+    reason: DefermentReasonLiteral
+    remarks: str | None = None
+    oc_updates: str | None = None
+
+
+class DefermentUpdate(BaseModel):
+    """Schema for updating a deferment."""
+
+    reason: DefermentReasonLiteral | None = None
+    status: DefermentStatusLiteral | None = None
+    remarks: str | None = None
+    oc_updates: str | None = None
+
+
+class DefermentResponse(BaseModel):
+    """Schema for deferment API responses."""
+
+    id: str
+    personnel_id: str
+    estab_id: str | None = None
+    rank_name: str
+    sub_unit: str | None = None
+    reason: str
+    status: str
+    remarks: str | None = None
+    oc_updates: str | None = None
+    created_at: utc_dt.datetime
+    created_by: str
+    updated_at: utc_dt.datetime | None = None
+    updated_by: str | None = None
+
+    class Config:
+        from_attributes = True
