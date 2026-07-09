@@ -26,6 +26,7 @@
         <thead>
             <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
                 <th style="padding: 0.5rem;">CAA Date</th>
+                <th style="padding: 0.5rem;">Label</th>
                 <th style="padding: 0.5rem;">Source File</th>
                 <th style="padding: 0.5rem;">Personnel</th>
                 <th style="padding: 0.5rem;">Status</th>
@@ -38,6 +39,7 @@
             {% for estab in estabs %}
             <tr style="border-bottom: 1px solid #e5e7eb;">
                 <td style="padding: 0.5rem;">{{ estab.caa }}</td>
+                <td style="padding: 0.5rem;">{{ estab.label or '—' }}</td>
                 <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ estab.original_filename }}</td>
                 <td style="padding: 0.5rem;">{{ estab.personnel_count }}</td>
                 <td style="padding: 0.5rem;">
