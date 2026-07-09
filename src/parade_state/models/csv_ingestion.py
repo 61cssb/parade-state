@@ -44,6 +44,9 @@ class Estab(Base):
     )
     created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    label: Mapped[str | None] = mapped_column(
+        String(100), unique=True, nullable=True, index=True
+    )
 
     # Relationships
     csv_uploads: Mapped[list["CsvUpload"]] = relationship(
@@ -60,7 +63,7 @@ class Estab(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Estab(caa={self.caa!r}, status={self.status!r})>"
+        return f"<Estab(caa={self.caa!r}, status={self.status!r}, label={self.label!r})>"
 
 
 class CsvUpload(Base):

@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
@@ -47,6 +48,7 @@ async def list_estabs(
             Estab.uploaded_at,
             Estab.uploaded_by,
             Estab.csv_hash,
+            Estab.label,
             latest_upload.c.original_filename,
         )
         .outerjoin(latest_upload, latest_upload.c.estab_id == Estab.id)
@@ -69,6 +71,7 @@ async def list_estabs(
             uploaded_by=row.uploaded_by,
             csv_hash=row.csv_hash,
             original_filename=row.original_filename,
+            label=row.label,
         )
         for row in rows
     ]
@@ -105,7 +108,7 @@ async def update_estab(
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ) -> EstabResponse:
-    """Update an estab (currently only draft → confirmed transition).
+    """Update an estab (status transitions, notes, and label).
 
     Requires admin or super_admin role.
     """
@@ -148,7 +151,17 @@ async def update_estab(
     if update_data.notes is not None:
         estab.notes = update_data.notes
 
-    await db.commit()
+    if update_data.label is not None:
+        estab.label = update_data.label
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Label already in use by another estab.",
+        ) from None
 
     row = await _load_estab_with_filename(db, estab_id)
     return _row_to_response(row)
@@ -218,6 +231,7 @@ async def _load_estab_with_filename(db: AsyncSession, estab_id: str):
                 Estab.uploaded_at,
                 Estab.uploaded_by,
                 Estab.csv_hash,
+                Estab.label,
                 Estab.notes,
                 Estab.confirmed_at,
                 Estab.confirmed_by,
@@ -239,6 +253,7 @@ def _row_to_response(row) -> EstabResponse:
         uploaded_by=row.uploaded_by,
         csv_hash=row.csv_hash,
         original_filename=row.original_filename,
+        label=row.label,
         notes=row.notes,
         confirmed_at=row.confirmed_at,
         confirmed_by=row.confirmed_by,
