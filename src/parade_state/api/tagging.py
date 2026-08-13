@@ -424,9 +424,49 @@ async def delete_tagging(
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Delete a tagging. Cascades to entries. Does not mutate the NR."""
+    """Delete a tagging. Cascades to entries. Does not mutate the NR.
+
+    Refuses (409) if the tagging is linked to any attendance rows or is the
+    active attendance scope for its NR — callers must clone + re-activate
+    instead (per issue #4 Q5).
+    """
     _require_super_admin(user_role)
     tagging = await _load_tagging_or_404(db, tagging_id, with_entries=False)
+
+    from parade_state.models import Attendance, AttendanceScope
+
+    linked_attendance = (
+        await db.execute(
+            select(func.count())
+            .select_from(Attendance)
+            .where(Attendance.tagging_id == tagging_id)
+        )
+    ).scalar_one()
+    if linked_attendance:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                f"Tagging is linked to {linked_attendance} attendance row(s). "
+                "Remove the linkage or clone the tagging instead."
+            ),
+        )
+
+    linked_scope = (
+        await db.execute(
+            select(func.count())
+            .select_from(AttendanceScope)
+            .where(AttendanceScope.tagging_id == tagging_id)
+        )
+    ).scalar_one()
+    if linked_scope:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                "Tagging is the active attendance scope for its nominal roll. "
+                "Re-activate a different scope before deleting."
+            ),
+        )
+
     await db.delete(tagging)
     await db.commit()
     return {"detail": f"Tagging {tagging_id} deleted"}

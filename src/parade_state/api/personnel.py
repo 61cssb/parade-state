@@ -8,14 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from parade_state.db import get_db_session
 from parade_state.models import (
     PRESENT_LIKE_STATUSES,
-    AttendanceRecord,
+    Attendance,
     Deployment,
     DeploymentNotes,
     DeploymentPersonnelExclusion,
     DeploymentPersonnelOverride,
     DeploymentUserAccess,
     Personnel,
-    Session,
 )
 from parade_state.models.schemas import (
     PersonnelAttendanceHistoryItem,
@@ -649,7 +648,9 @@ async def update_personnel(
 )
 async def get_personnel_attendance_history(
     personnel_id: str,
-    deployment_id: str = Query(..., description="Deployment ID for context"),
+    nominal_roll_id: str | None = Query(
+        None, description="Optional NR scope (must match the personnel's NR)"
+    ),
     date_from: utc_dt.date | None = Query(
         None, description="Filter attendance from this date"
     ),
@@ -662,100 +663,87 @@ async def get_personnel_attendance_history(
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Get attendance history for a personnel member within a deployment.
+    """Get attendance history for a personnel member.
 
-    Returns attendance records with summary statistics including:
-    - Total sessions attended
-    - Present-like / absent-like counts (present and late count as present)
-    - Attendance rate (present-like / total)
-
-    Supports date range filtering and pagination.
+    Returns per-day AM/PM attendance with summary statistics. AM and PM slots
+    are counted independently toward totals. Supports date range filtering and
+    pagination.
     """
-    # Verify deployment access and personnel belongs to deployment
-    _, _, _ = await get_personnel_by_id_with_deployment_context(
-        personnel_id, deployment_id, user_id, user_role, db
+    # Resolve personnel (and its NR).
+    personnel_result = await db.execute(
+        select(Personnel).where(Personnel.id == personnel_id)
     )
-
-    # Build attendance query with session join
-    query = (
-        select(AttendanceRecord, Session)
-        .join(Session, AttendanceRecord.session_id == Session.id)
-        .where(
-            and_(
-                AttendanceRecord.personnel_id == personnel_id,
-                Session.deployment_id == deployment_id,
-            )
+    personnel = personnel_result.scalar_one_or_none()
+    if not personnel:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Personnel not found",
         )
-    )
 
-    # Apply date range filters
+    resolved_nr = personnel.nominal_roll_id
+    if nominal_roll_id and nominal_roll_id != resolved_nr:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Personnel does not belong to this nominal roll",
+        )
+
+    # Build attendance query (NR/Tagging-scoped, no sessions).
+    query = select(Attendance).where(Attendance.personnel_id == personnel_id)
     if date_from:
-        query = query.where(Session.date >= date_from)
+        query = query.where(Attendance.date >= date_from)
     if date_to:
-        query = query.where(Session.date <= date_to)
+        query = query.where(Attendance.date <= date_to)
 
-    # Get total count
+    # Total count (before pagination).
     count_subquery = query.subquery()
     count_query = select(func.count()).select_from(count_subquery)
-    total_result = await db.execute(count_query)
-    total_count = total_result.scalar() or 0
+    total_count = (await db.execute(count_query)).scalar() or 0
 
-    # Apply pagination
-    query = query.offset(offset).limit(limit)
+    query = query.offset(offset).limit(limit).order_by(Attendance.date.desc())
 
-    # Order by session date descending (most recent first)
-    query = query.order_by(Session.date.desc(), Session.session_type.desc())
-
-    # Execute query
     result = await db.execute(query)
-    records = result.all()
+    records = list(result.scalars().all())
 
-    # Build attendance history items
+    # Build items + stats (AM and PM each count as one slot).
     attendance_items = []
     present_count = 0
     absent_count = 0
 
-    for record, session in records:
-        # Bucket by present-like vs absent-like
-        if record.status in PRESENT_LIKE_STATUSES:
-            present_count += 1
-        else:
-            absent_count += 1
+    for record in records:
+        for slot_value in (record.status_am, record.status_pm):
+            if slot_value in PRESENT_LIKE_STATUSES:
+                present_count += 1
+            else:
+                absent_count += 1
 
         attendance_items.append(
             PersonnelAttendanceHistoryItem(
                 id=record.id,
-                session_id=record.session_id,
-                session_date=session.date,
-                session_type=session.session_type,
-                session_status=session.status,
-                status=record.status,
-                remarks=record.remarks,
+                nominal_roll_id=record.nominal_roll_id,
+                tagging_id=record.tagging_id,
+                date=record.date,
+                status_am=record.status_am,
+                remarks_am=record.remarks_am,
+                status_pm=record.status_pm,
+                remarks_pm=record.remarks_pm,
                 created_at=record.created_at,
                 updated_at=record.updated_at,
             )
         )
 
-    # Calculate attendance rate
-    # Attendance rate = present-like / total_sessions
-    total_sessions = present_count + absent_count
-    if total_sessions > 0:
-        attendance_rate = (present_count / total_sessions) * 100
-    else:
-        attendance_rate = 0.0
+    total_slots = present_count + absent_count
+    attendance_rate = (present_count / total_slots * 100) if total_slots else 0.0
 
-    # Build statistics
     stats = PersonnelAttendanceHistoryStats(
-        total_sessions=total_sessions,
+        total_slots=total_slots,
         present_count=present_count,
         absent_count=absent_count,
         attendance_rate=round(attendance_rate, 2),
     )
 
-    # Build response
     return PersonnelAttendanceHistoryResponse(
         personnel_id=personnel_id,
-        deployment_id=deployment_id,
+        nominal_roll_id=resolved_nr,
         date_from=date_from,
         date_to=date_to,
         stats=stats,
