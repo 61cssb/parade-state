@@ -73,6 +73,7 @@ async def test_upsert_creates_then_updates(
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
+    admin_subunit_assignment,
     admin_id,
 ):
     """Upsert creates a row, then a second upsert updates it in place."""
@@ -134,11 +135,15 @@ async def test_upsert_rejects_personnel_not_on_nr(
     sample_attendance_scope,
     admin_id,
 ):
-    """Upsert rejects a personnel_id that is not on the NR."""
+    """Upsert rejects a personnel_id that is not on the NR.
+
+    Run as super_admin so the request reaches personnel validation rather than
+    being short-circuited by the Subunit-1 access check.
+    """
     today = date.today().isoformat()
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
+        params={"user_id": admin_id, "user_role": "super_admin"},
         json={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "records": [
@@ -172,6 +177,7 @@ async def test_activate_scope_then_upsert_succeeds(
     client: TestClient,
     sample_nominal_roll,
     sample_personnel,
+    admin_subunit_assignment,
     admin_id,
 ):
     """Activating the NR scope unblocks attendance upsert."""
@@ -211,6 +217,7 @@ async def test_copy_remarks_is_well_formed(
     sample_nominal_roll,
     sample_attendance_scope,
     sample_attendance,
+    admin_subunit_assignment,
     admin_id,
 ):
     """copy-remarks returns the documented shape with slot/updated/skipped."""

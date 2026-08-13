@@ -67,7 +67,13 @@ tags:
     description: >
       NR/Tagging-scoped attendance with hardcoded AM/PM slots (issue #4).
       Active-scope gating, bulk upsert, and copy-remarks. One Attendance row
-      per (personnel, date).
+      per (personnel, date). Writes are gated by Subunit-1 assignment (403;
+      super_admin bypasses; tagging-aware effective sub_unit_1).
+  - name: subunit-assignments
+    description: >
+      NR-scoped Subunit-1 attendance access (issue #4 PR 2). Super-admin-only
+      CRUD granting users attendance-update rights per sub_unit_1 on an NR.
+      Managed under /api/v1/access-control/...
   - name: app-settings
     description: Runtime application settings (admin)
   - name: audit-log

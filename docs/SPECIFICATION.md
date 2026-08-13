@@ -469,10 +469,21 @@ shown at the top of the attendance view. There is exactly one active scope per
 NR.
 
 **Attendance editability** — Once the scope is activated, attendance rows can
-be created and updated freely (upsert semantics on `(personnel_id, date)`).
+be created and updated (upsert semantics on `(personnel_id, date)`).
 Retroactive edits (target date in the past) set `is_retroactive_edit = true`.
-The Subunit-1 access check (issue #4 PR 2, forthcoming) will additionally
-restrict which rows a user may update.
+
+**Subunit-1 access (issue #4 PR 2)** — Attendance writes are gated per NR by
+the caller's `UserSubunitAssignment` rows. A user may only upsert attendance
+for personnel whose **effective** `sub_unit_1` matches one of their
+assignments on that NR. The effective `sub_unit_1` is the active Tagging
+overlay's `to_sub_unit_1` when a tagging is the active scope (taggings are
+"remappings already in use"), falling back to the personnel's canonical
+`sub_unit_1`. `super_admin` bypasses entirely. **Deny-by-default**: a user
+with no assignments on an NR has no attendance-write access there (HTTP 403,
+listing the offending sub_unit_1s). `copy-remarks` only affects personnel in
+assigned subunits and 403s if the caller has no assignments on the NR.
+Assignments are managed by super-admin via
+`/api/v1/access-control/{nominal-rolls/{nr_id}/..., users/{user_id}/...}/subunit-assignments`.
 
 ### 4.4 Column Mapping Constraint
 
@@ -567,6 +578,7 @@ callup transitions.
 | UserSubunitScope | (user_id, deployment_id, unit, sub_unit_1-3) | (user_id, deployment_id) | Scope lookup |
 | AttendanceScope | (nominal_roll_id) | (nominal_roll_id) | One active scope per NR |
 | Attendance | (personnel_id, date) | (personnel_id, date) | One row per person per day |
+| UserSubunitAssignment | (user_id, nominal_roll_id, sub_unit_1) | (user_id, nominal_roll_id, sub_unit_1) | One grant per user/NR/subunit |
 | Personnel | — | (callup_status) | Callup status filter |
 | Deferment | — | (personnel_id), (status), (updated_at) | Deferment lookup |
 

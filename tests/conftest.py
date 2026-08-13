@@ -331,6 +331,33 @@ async def sample_attendance_scope(
 
 
 @pytest.fixture
+async def admin_subunit_assignment(
+    db_session: AsyncSession, sample_nominal_roll, sample_personnel, sample_users
+):
+    """Grant the admin user Subunit-1 assignments covering the sample roster.
+
+    Sample personnel span Platoon 1 (personnel 0, 1) and Platoon 2 (personnel 2).
+    This lets attendance-mechanics tests exercise the happy path under the
+    PR 2 deny-by-default gate without each test re-granting access.
+    """
+    from parade_state.models import UserSubunitAssignment
+
+    admin_id = str(sample_users["admin"].id)
+    nr_id = str(sample_nominal_roll.id)
+    for sub1 in {"Platoon 1", "Platoon 2"}:
+        db_session.add(
+            UserSubunitAssignment(
+                user_id=admin_id,
+                nominal_roll_id=nr_id,
+                sub_unit_1=sub1,
+                created_by=admin_id,
+            )
+        )
+    await db_session.commit()
+    return admin_id
+
+
+@pytest.fixture
 async def sample_attendance(
     db_session: AsyncSession,
     sample_personnel,

@@ -12,6 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
 from parade_state.models import Attendance, AttendanceScope, Personnel
+from parade_state.api.subunit_access import (
+    assert_can_update_attendance,
+    get_assigned_subunit_1s,
+    resolve_effective_subunit_1_map,
+)
 from parade_state.models.attendance import ATTENDANCE_STATUSES, PRESENT_LIKE_STATUSES
 from parade_state.models.schemas import (
     AttendanceBulkUpsert,
@@ -195,11 +200,24 @@ async def bulk_upsert_attendance(
 ):
     """Bulk upsert attendance rows for an NR's roster.
 
-    Enforces that the NR's attendance scope is active. Each entry is keyed on
+    Enforces that the NR's attendance scope is active AND that the caller has
+    Subunit-1 assignment for each target personnel's effective sub_unit_1
+    (403 otherwise; super_admin bypasses). Each entry is keyed on
     (personnel_id, date); existing rows are updated, new rows are created with
     snapshot data from Personnel.
     """
     scope = await require_active_scope(payload.nominal_roll_id, db)
+
+    # Subunit-1 access enforcement (issue #4 PR 2).
+    personnel_ids = [r.personnel_id for r in payload.records]
+    await assert_can_update_attendance(
+        db,
+        payload.nominal_roll_id,
+        user_id,
+        user_role,
+        personnel_ids,
+        scope.tagging_id,
+    )
 
     # Index existing rows for this NR + date set.
     dates = {r.date for r in payload.records}
@@ -216,7 +234,6 @@ async def bulk_upsert_attendance(
     }
 
     # Preload personnel snapshots for any new rows.
-    personnel_ids = {r.personnel_id for r in payload.records}
     personnel_result = await db.execute(
         select(Personnel).where(Personnel.id.in_(personnel_ids))
     )
@@ -312,10 +329,13 @@ async def copy_remarks(
       ``remarks_am`` for each personnel row.
     - After 12pm: copy today's ``remarks_am`` into today's ``remarks_pm``.
 
-    Rows with an empty source remark are skipped. Returns counts.
+    Rows with an empty source remark are skipped. Only personnel whose
+    effective sub_unit_1 the caller is assigned to are affected (super_admin
+    bypasses; deny-by-default: no assignments → 403). Returns counts.
     """
-    await require_active_scope(nominal_roll_id, db)
+    scope = await require_active_scope(nominal_roll_id, db)
 
+    # Resolve accessible personnel set (Subunit-1 enforcement).
     now = utc_dt.utcnow()
     slot: str = "am" if now.hour < 12 else "pm"
 
@@ -333,12 +353,18 @@ async def copy_remarks(
             (r.personnel_id, r.date): r for r in rows.scalars().all()
         }
 
+        all_pids = {k[0] for k in by_key.keys()}
+        accessible_pids = await _accessible_pids(
+            db, nominal_roll_id, user_id, user_role, scope.tagging_id, all_pids
+        )
+
         updated = 0
         skipped = 0
         now_naive = utc_dt.ensure_naive(utc_dt.utcnow())
         # Iterate personnel that have a today row OR a prior-day row.
-        personnel_ids = {k[0] for k in by_key.keys()}
-        for pid in personnel_ids:
+        for pid in all_pids:
+            if pid not in accessible_pids:
+                continue  # not assigned to this person's subunit_1
             source = by_key.get((pid, source_date))
             target = by_key.get((pid, date))
             source_remark = source.remarks_pm if source else None
@@ -398,10 +424,18 @@ async def copy_remarks(
             )
         )
     )
+    all_rows = list(rows.scalars().all())
+    all_pids = {r.personnel_id for r in all_rows}
+    accessible_pids = await _accessible_pids(
+        db, nominal_roll_id, user_id, user_role, scope.tagging_id, all_pids
+    )
+
     now_naive = utc_dt.ensure_naive(utc_dt.utcnow())
     updated = 0
     skipped = 0
-    for target in rows.scalars().all():
+    for target in all_rows:
+        if target.personnel_id not in accessible_pids:
+            continue  # not assigned to this person's subunit_1
         if not target.remarks_am:
             skipped += 1
             continue
@@ -420,6 +454,40 @@ async def copy_remarks(
         updated=updated,
         skipped=skipped,
     )
+
+
+async def _accessible_pids(
+    db: AsyncSession,
+    nominal_roll_id: str,
+    user_id: str,
+    user_role: str,
+    active_tagging_id: str | None,
+    all_pids: set[str],
+) -> set[str]:
+    """Resolve which of ``all_pids`` the user may write to (Subunit-1 rule).
+
+    super_admin → all of them. Otherwise, require at least one assignment on
+    the NR (deny-by-default: 403 if none) and return the subset whose
+    effective sub_unit_1 is assigned.
+    """
+    if user_role == "super_admin":
+        return set(all_pids)
+
+    allowed = await get_assigned_subunit_1s(db, user_id, nominal_roll_id)
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "No Subunit-1 assignments on this nominal roll. "
+                "Ask a super-admin to grant access."
+            ),
+        )
+    if not all_pids:
+        return set()
+    eff_map = await resolve_effective_subunit_1_map(
+        db, list(all_pids), active_tagging_id
+    )
+    return {pid for pid in all_pids if eff_map.get(pid) in allowed}
 
 
 # ============================================================================

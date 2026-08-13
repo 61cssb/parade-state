@@ -10,7 +10,7 @@ from ..utils import utc_dt
 
 if TYPE_CHECKING:
     from .auth_session import UserSession
-    from .csv_ingestion import ColumnMetadata
+    from .csv_ingestion import ColumnMetadata, NominalRoll
     from .deployment import Deployment
 
 
@@ -92,6 +92,11 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
         foreign_keys="DeploymentUserAccess.user_id",
+    )
+    subunit_assignments: Mapped[list["UserSubunitAssignment"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="UserSubunitAssignment.user_id",
     )
 
     def __repr__(self) -> str:
@@ -180,4 +185,57 @@ class DeploymentUserAccess(Base):
         return (
             f"<DeploymentUserAccess(user_id={self.user_id!r}, "
             f"deployment_id={self.deployment_id!r})>"
+        )
+
+
+class UserSubunitAssignment(Base):
+    """Grants a user attendance-update rights for one sub_unit_1 on an NR.
+
+    NR-scoped (issue #4): attendance access is no longer deployment-scoped.
+    A user may only upsert attendance for personnel whose effective
+    ``sub_unit_1`` (canonical, or remapped under the active Tagging scope)
+    matches one of their assignments on that NR. ``super_admin`` bypasses
+    entirely. Deny-by-default: a user with no assignments on an NR has no
+    attendance-write access there.
+    """
+
+    __tablename__ = "user_subunit_assignments"
+
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    nominal_roll_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("nominal_rolls.id", ondelete="CASCADE"), index=True
+    )
+    sub_unit_1: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
+    updated_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
+
+    # Relationships
+    user: Mapped[User] = relationship(
+        back_populates="subunit_assignments", foreign_keys=[user_id]
+    )
+    nominal_roll: Mapped["NominalRoll"] = relationship(
+        back_populates="subunit_assignments"
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "nominal_roll_id",
+            "sub_unit_1",
+            name="uq_user_subunit_assignment",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<UserSubunitAssignment(user_id={self.user_id!r}, "
+            f"nominal_roll_id={self.nominal_roll_id!r}, "
+            f"sub_unit_1={self.sub_unit_1!r})>"
         )
