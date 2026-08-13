@@ -220,6 +220,7 @@ async def nominal_roll_view(
             "sub_unit_1": p.sub_unit_1,
             "sub_unit_2": p.sub_unit_2,
             "sub_unit_3": p.sub_unit_3,
+            "remarks": (p.extra_fields or {}).get("remarks"),
         }
         for p in personnel
     ]

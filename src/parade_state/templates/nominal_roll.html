@@ -91,6 +91,7 @@
                 <th style="padding: 0.5rem;">Rank</th>
                 <th style="padding: 0.5rem;">Full Name</th>
                 <th style="padding: 0.5rem;">ID</th>
+                <th style="padding: 0.5rem;">Remarks</th>
             </tr>
         </thead>
         <tbody>
@@ -105,6 +106,7 @@
                 <td style="padding: 0.5rem; white-space: nowrap;">{{ p.rank }}</td>
                 <td style="padding: 0.5rem;">{{ p.full_name }}</td>
                 <td style="padding: 0.5rem; font-family: monospace; font-size: 0.85rem;">{{ p.short_id }}</td>
+                <td style="padding: 0.5rem; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ p.remarks or '' }}">{{ p.remarks or '—' }}</td>
             </tr>
             {% endfor %}
         </tbody>
