@@ -1173,7 +1173,7 @@ paths:
         Admins receive all columns and all rows.
 
         Optional `subunit` filter narrows rows to a specific subunit within scope.
-        Optional `status` filter shows only present/absent/excused.
+        Optional `status` filter narrows by one of the nine attendance statuses.
 
         This is the primary attendance-taking and parade state view endpoint.
       parameters:
@@ -1186,7 +1186,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [present, absent, excused]
+            enum: [present, absent, time_off, mc, yet_to_inpro, outpro, reporting_sick, late, att_out]
         - name: sortBy
           in: query
           schema:
@@ -1263,7 +1263,7 @@ paths:
               properties:
                 status:
                   type: string
-                  enum: [present, absent, excused]
+                  enum: [present, absent, time_off, mc, yet_to_inpro, outpro, reporting_sick, late, att_out]
                 persNos:
                   type: array
                   items:
@@ -2522,8 +2522,6 @@ components:
               type: integer
             absentCount:
               type: integer
-            excusedCount:
-              type: integer
 
     ColumnManifestEntry:
       type: object
@@ -2554,7 +2552,7 @@ components:
           type: string
         status:
           type: string
-          enum: [present, absent, excused]
+          enum: [present, absent, time_off, mc, yet_to_inpro, outpro, reporting_sick, late, att_out]
           default: absent
         remarks:
           type: string
@@ -2591,7 +2589,7 @@ components:
           type: string
         status:
           type: string
-          enum: [present, absent, excused]
+          enum: [present, absent, time_off, mc, yet_to_inpro, outpro, reporting_sick, late, att_out]
           default: absent
         remarks:
           type: string
@@ -2627,7 +2625,7 @@ components:
       properties:
         status:
           type: string
-          enum: [present, absent, excused]
+          enum: [present, absent, time_off, mc, yet_to_inpro, outpro, reporting_sick, late, att_out]
         remarks:
           type: string
           maxLength: 500
