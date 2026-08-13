@@ -235,6 +235,10 @@ Personnel
 │       via match-then-generate with collision retry). Human-facing identifier.
 ├── nominal_roll_id: UUID (FK Nominal Roll, on_delete=CASCADE)
 ├── rank: str
+├── category: str ENUM ['Officer', 'WOSE']  ← inferred from rank at ingest; never manually set
+│   └── Officer ranks: 2LT LTA CPT MAJ LTC SLTC COL (and ME4+)
+│       WOSE ranks: REC PTE LCP CPL CFC 3SG 2SG 1SG SSG MSG 3WO 2WO 1WO MWO (and ME1-ME3)
+│       Derived via `parade_state.utils.ranks.category_for_rank()`.
 ├── full_name: str
 ├── unit: str
 ├── sub_unit_1: str
