@@ -20,6 +20,7 @@ from ..db import Base
 
 if TYPE_CHECKING:
     from .access import AccessLevel
+    from .attendance import AttendanceScope
     from .deployment import Deployment
     from .personnel import Personnel
     from .tagging import Tagging
@@ -65,6 +66,9 @@ class NominalRoll(Base):
     )
     taggings: Mapped[list["Tagging"]] = relationship(
         back_populates="nominal_roll", cascade="all, delete-orphan"
+    )
+    attendance_scope: Mapped["AttendanceScope | None"] = relationship(
+        back_populates="nominal_roll", cascade="all, delete-orphan", uselist=False
     )
 
     def __repr__(self) -> str:

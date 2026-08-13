@@ -22,15 +22,16 @@
 
 {% if selected_deployment %}
 <p style="color: #6b7280; margin-bottom: 1rem;">
-    Showing sessions for {{ today }}.
+    Showing attendance for {{ today }}.
 </p>
 
-<!-- Session summary cards -->
-{% if sessions %}
+<!-- AM/PM summary cards -->
+{% if counts %}
 <div class="stats">
-    {% for s in sessions %}
+    {% for slot, label in [('am', 'AM'), ('pm', 'PM')] %}
+    {% set s = counts[slot] %}
     <div class="stat-card">
-        <div class="stat-label">{{ s.session_type }} Session ({{ s.status }})</div>
+        <div class="stat-label">{{ label }}</div>
         <div style="display: flex; gap: 1.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
             <div>
                 <span style="font-size: 0.75rem; color: #6b7280;">Present</span>
@@ -50,7 +51,7 @@
 </div>
 {% else %}
 <div class="card">
-    <p style="color: #6b7280;">No sessions scheduled for today.</p>
+    <p style="color: #6b7280;">No attendance recorded for today.</p>
 </div>
 {% endif %}
 

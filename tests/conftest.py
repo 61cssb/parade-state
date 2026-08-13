@@ -23,7 +23,8 @@ from parade_state.db import Base, get_session_maker, init_database
 from parade_state.main import app
 from parade_state.models import (
     AccessLevel,
-    AttendanceRecord,
+    Attendance,
+    AttendanceScope,
     AuditLog,
     ColumnMapping,
     ColumnMetadata,
@@ -35,7 +36,6 @@ from parade_state.models import (
     DeploymentUserAccess,
     NominalRoll,
     Personnel,
-    Session,
     User,
     UserSession,
     UserSubunitScope,
@@ -315,118 +315,76 @@ def super_admin_token_headers() -> dict[str, str]:
 
 
 @pytest.fixture
-async def sample_session(
-    db_session: AsyncSession, sample_deployment: Deployment, sample_users
+async def sample_attendance_scope(
+    db_session: AsyncSession, sample_nominal_roll, sample_users
 ):
-    """Create a sample session for testing."""
+    """Activate the attendance scope (NR itself) for the sample NR."""
     admin_id = str(sample_users["admin"].id)
-
-    session = Session(
-        deployment_id=str(sample_deployment.id),
-        date=date.today(),
-        session_type="AM",
-        status="open",
-        created_by=admin_id,
-        opened_at=utc_dt.utcnow(),
+    scope = AttendanceScope(
+        nominal_roll_id=str(sample_nominal_roll.id),
+        tagging_id=None,
+        activated_by=admin_id,
     )
-
-    db_session.add(session)
+    db_session.add(scope)
     await db_session.commit()
-
-    return session
+    return scope
 
 
 @pytest.fixture
-async def sample_sessions(
-    db_session: AsyncSession, sample_deployment: Deployment, sample_users
-):
-    """Create multiple sample sessions for testing."""
-    admin_id = str(sample_users["admin"].id)
-
-    sessions = [
-        Session(
-            deployment_id=str(sample_deployment.id),
-            date=date.today(),
-            session_type="AM",
-            status="closed",
-            created_by=admin_id,
-            opened_at=utc_dt.utcnow() - timedelta(hours=4),
-            closed_at=utc_dt.utcnow() - timedelta(hours=2),
-            closed_by=admin_id,
-        ),
-        Session(
-            deployment_id=str(sample_deployment.id),
-            date=date.today(),
-            session_type="PM",
-            status="open",
-            created_by=admin_id,
-            opened_at=utc_dt.utcnow(),
-        ),
-        Session(
-            deployment_id=str(sample_deployment.id),
-            date=date.today() - timedelta(days=1),
-            session_type="AM",
-            status="finalized",
-            created_by=admin_id,
-            opened_at=utc_dt.utcnow() - timedelta(days=1, hours=4),
-            closed_at=utc_dt.utcnow() - timedelta(days=1, hours=2),
-            closed_by=admin_id,
-        ),
-    ]
-
-    for session in sessions:
-        db_session.add(session)
-    await db_session.commit()
-
-    return sessions
-
-
-@pytest.fixture
-async def sample_attendance_records(
+async def sample_attendance(
     db_session: AsyncSession,
-    sample_sessions,
     sample_personnel,
-    sample_deployment: Deployment,
+    sample_nominal_roll,
     sample_users,
 ):
-    """Create sample attendance records for testing."""
-    admin_id = str(sample_users["admin"].id)
+    """Create sample attendance rows (AM/PM) for testing.
 
-    # Create attendance records for the first personnel
-    attendance_records = [
-        # Today AM - present
-        AttendanceRecord(
-            session_id=str(sample_sessions[0].id),
+    Builds two days of history for the first personnel member:
+    - Today: AM present, PM absent (remarks)
+    - Yesterday: AM late (remarks), PM absent
+    """
+    admin_id = str(sample_users["admin"].id)
+    nominal_roll_id = str(sample_nominal_roll.id)
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+
+    rows = [
+        Attendance(
             personnel_id=str(sample_personnel[0].id),
-            deployment_id=str(sample_deployment.id),
-            status="present",
+            nominal_roll_id=nominal_roll_id,
+            tagging_id=None,
+            date=today,
+            status_am="present",
+            status_pm="absent",
+            remarks_pm="Sick leave",
             created_by=admin_id,
             updated_by=admin_id,
         ),
-        # Today PM - absent
-        AttendanceRecord(
-            session_id=str(sample_sessions[1].id),
+        Attendance(
             personnel_id=str(sample_personnel[0].id),
-            deployment_id=str(sample_deployment.id),
-            status="absent",
-            remarks="Sick leave",
+            nominal_roll_id=nominal_roll_id,
+            tagging_id=None,
+            date=yesterday,
+            status_am="late",
+            remarks_am="Official duty",
+            status_pm="absent",
             created_by=admin_id,
             updated_by=admin_id,
         ),
-        # Yesterday AM - late (present-like)
-        AttendanceRecord(
-            session_id=str(sample_sessions[2].id),
-            personnel_id=str(sample_personnel[0].id),
-            deployment_id=str(sample_deployment.id),
-            status="late",
-            remarks="Official duty",
+        Attendance(
+            personnel_id=str(sample_personnel[1].id),
+            nominal_roll_id=nominal_roll_id,
+            tagging_id=None,
+            date=today,
+            status_am="present",
+            status_pm="present",
             created_by=admin_id,
             updated_by=admin_id,
         ),
     ]
 
-    for record in attendance_records:
-        db_session.add(record)
+    for row in rows:
+        db_session.add(row)
     await db_session.commit()
 
-    return attendance_records
+    return rows

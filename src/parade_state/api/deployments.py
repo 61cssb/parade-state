@@ -8,11 +8,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
-from parade_state.models.attendance import (
-    PRESENT_LIKE_STATUSES,
-    AttendanceRecord,
-    Session,
-)
+from parade_state.models.attendance import PRESENT_LIKE_STATUSES, Attendance
 from parade_state.models.csv_ingestion import NominalRoll
 from parade_state.models.deployment import (
     Deployment,
@@ -261,43 +257,6 @@ async def update_deployment(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="valid_until must be after valid_from",
-            )
-
-    # Check no sessions fall outside the new date range
-    if update_data.valid_from is not None or update_data.valid_until is not None:
-        new_valid_from = (
-            update_data.valid_from
-            if update_data.valid_from is not None
-            else deployment.valid_from
-        )
-        new_valid_until = (
-            update_data.valid_until
-            if update_data.valid_until is not None
-            else deployment.valid_until
-        )
-
-        out_of_range_result = await db.execute(
-            select(Session).where(
-                and_(
-                    Session.deployment_id == deployment_id,
-                    or_(
-                        Session.date < new_valid_from.date(),
-                        Session.date > new_valid_until.date(),
-                    ),
-                ),
-            )
-        )
-        out_of_range = out_of_range_result.scalars().all()
-        if out_of_range:
-            dates = ", ".join(
-                s.date.strftime("%Y-%m-%d") + " " + s.session_type for s in out_of_range
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"Cannot change dates: {len(out_of_range)} session(s) fall "
-                    f"outside the new range ({dates}). Delete those sessions first."
-                ),
             )
 
     # Update fields
@@ -900,7 +859,7 @@ async def get_deployment_status(
 
     Returns current snapshot including:
     - Deployment info
-    - Today's AM/PM session status
+    - Today's AM/PM attendance status
     - Personnel counts by attendance status
     - Unit-level breakdown
 
@@ -913,91 +872,48 @@ async def get_deployment_status(
     if status_date is None:
         status_date = utc_dt.utcnow().date()
 
-    # Get sessions for the date
-    sessions_result = await db.execute(
-        select(Session).where(
+    # Fetch attendance rows for the deployment's NR on the date.
+    attendance_result = await db.execute(
+        select(Attendance).where(
             and_(
-                Session.deployment_id == deployment_id,
-                Session.date == status_date,
+                Attendance.nominal_roll_id == deployment.nominal_roll_id,
+                Attendance.date == status_date,
             )
         )
     )
-    sessions = sessions_result.scalars().all()
+    rows = list(attendance_result.scalars().all())
 
-    # Initialize session info
-    am_session_info = None
-    pm_session_info = None
-
-    # Process sessions
-    for session in sessions:
-        # Get attendance records for this session
-        attendance_result = await db.execute(
-            select(
-                AttendanceRecord.status,
-                func.count(AttendanceRecord.id).label("count"),
-            )
-            .where(
-                and_(
-                    AttendanceRecord.session_id == session.id,
-                    AttendanceRecord.deployment_id == deployment_id,
-                )
-            )
-            .group_by(AttendanceRecord.status)
-        )
-        attendance_counts = attendance_result.all()
-
-        # Build status counts — bucket into present-like vs absent-like
-        present_count = 0
+    # Build AM/PM present/absent/total counts.
+    def _slot_stats(slot: str) -> DeploymentStatusSessionInfo | None:
+        if not rows:
+            return None
+        present = 0
         total = 0
-        for status_val, count in attendance_counts:
-            total += count
-            if status_val in PRESENT_LIKE_STATUSES:
-                present_count += count
-
-        # Create session info
-        session_info = DeploymentStatusSessionInfo(
-            status=session.status,  # type: ignore[assignment]
-            present=present_count,
-            absent=total - present_count,
+        for row in rows:
+            value = row.status_am if slot == "am" else row.status_pm
+            total += 1
+            if value in PRESENT_LIKE_STATUSES:
+                present += 1
+        return DeploymentStatusSessionInfo(
+            status="open",  # AM/PM are hardcoded; "open" keeps the schema happy
+            present=present,
+            absent=total - present,
             total=total,
         )
 
-        if session.session_type == "AM":
-            am_session_info = session_info
-        else:  # PM
-            pm_session_info = session_info
+    am_session_info = _slot_stats("am")
+    pm_session_info = _slot_stats("pm")
 
-    # Get unit-level breakdown
-    # Get all attendance records for the date with unit snapshots
-    unit_breakdown_result = await db.execute(
-        select(
-            AttendanceRecord.unit_snapshot,
-            AttendanceRecord.status,
-            func.count(AttendanceRecord.id).label("count"),
-        )
-        .where(
-            and_(
-                AttendanceRecord.deployment_id == deployment_id,
-                AttendanceRecord.session_id.in_([s.id for s in sessions]),
-            )
-        )
-        .group_by(AttendanceRecord.unit_snapshot, AttendanceRecord.status)
-    )
-    unit_records = unit_breakdown_result.all()
+    # Unit-level breakdown — aggregate both slots per unit.
+    unit_stats: dict[str, dict[str, int]] = {}
+    for row in rows:
+        unit_name = row.unit_snapshot or "—"
+        stats = unit_stats.setdefault(unit_name, {"total": 0, "present": 0})
+        for value in (row.status_am, row.status_pm):
+            stats["total"] += 1
+            if value in PRESENT_LIKE_STATUSES:
+                stats["present"] += 1
 
-    # Aggregate by unit — bucket statuses into present-like vs absent-like
-    unit_stats = {}
-    for unit_name, status_val, count in unit_records:
-        if unit_name not in unit_stats:
-            unit_stats[unit_name] = {
-                "total": 0,
-                "present": 0,
-            }
-        if status_val in PRESENT_LIKE_STATUSES:
-            unit_stats[unit_name]["present"] += count
-        unit_stats[unit_name]["total"] += count
-
-    # Create unit breakdown list
     units = [
         DeploymentStatusUnitBreakdown(
             name=unit_name,
@@ -1035,8 +951,7 @@ async def export_deployment_csv(
 
     Returns a CSV file containing:
     - Personnel records with deployment-specific assignments
-    - Attendance records
-    - Session information
+    - Attendance rows (AM/PM status + remarks per date)
     - Deployment notes
 
     Access-controlled by deployment scope.
@@ -1072,21 +987,20 @@ async def export_deployment_csv(
     # Create a mapping of personnel_id to notes
     notes_map = {note.personnel_id: note.notes for note in notes}
 
-    # Get sessions for this deployment
-    sessions_result = await db.execute(
-        select(Session).where(Session.deployment_id == deployment_id)
-    )
-    sessions = sessions_result.scalars().all()
-
-    # Get attendance records
+    # Get attendance rows for this deployment's NR.
     attendance_result = await db.execute(
-        select(AttendanceRecord).where(AttendanceRecord.deployment_id == deployment_id)
+        select(Attendance).where(
+            Attendance.nominal_roll_id == deployment.nominal_roll_id
+        )
     )
     attendance_records = attendance_result.scalars().all()
 
-    # Create a mapping of (session_id, personnel_id) to attendance record
+    # Distinct dates (sorted ascending) for column headers.
+    dates = sorted({record.date for record in attendance_records})
+
+    # Map (personnel_id, date) -> attendance row.
     attendance_map = {
-        (record.session_id, record.personnel_id): record
+        (record.personnel_id, record.date): record
         for record in attendance_records
     }
 
@@ -1113,12 +1027,20 @@ async def export_deployment_csv(
             "Deployment Notes",
         ]
         + [
-            f"Session {s.date.strftime('%Y-%m-%d')} {s.session_type} Status"
-            for s in sessions
+            f"{d.strftime('%Y-%m-%d')} AM Status"
+            for d in dates
         ]
         + [
-            f"Session {s.date.strftime('%Y-%m-%d')} {s.session_type} Remarks"
-            for s in sessions
+            f"{d.strftime('%Y-%m-%d')} AM Remarks"
+            for d in dates
+        ]
+        + [
+            f"{d.strftime('%Y-%m-%d')} PM Status"
+            for d in dates
+        ]
+        + [
+            f"{d.strftime('%Y-%m-%d')} PM Remarks"
+            for d in dates
         ]
     )
 
@@ -1144,15 +1066,15 @@ async def export_deployment_csv(
             person_notes,
         ]
 
-        # Add attendance data for each session
-        for session in sessions:
-            attendance = attendance_map.get((session.id, person.id))
-            if attendance:
-                row.append(attendance.status)
-                row.append(attendance.remarks or "")
-            else:
-                row.append("")  # No status
-                row.append("")  # No remarks
+        # Add attendance data for each date (AM status/remarks, then PM).
+        for d in dates:
+            record = attendance_map.get((person.id, d))
+            row.append(record.status_am if record else "")
+            row.append(record.remarks_am or "" if record else "")
+        for d in dates:
+            record = attendance_map.get((person.id, d))
+            row.append(record.status_pm if record else "")
+            row.append(record.remarks_pm or "" if record else "")
 
         writer.writerow(row)
 

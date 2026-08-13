@@ -1,22 +1,24 @@
 """User-facing deployment summary view.
 
-Shows deployment-level attendance summary with AM/PM session counts
-and unit breakdown for the current day.
+Shows deployment-level attendance summary with AM/PM counts and a unit
+breakdown for the current day, drawn from the NR/Tagging-scoped attendance
+model.
 """
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from parade_state.api.access_control import (
     get_user_accessible_deployments,
     verify_deployment_access_or_admin,
 )
+from parade_state.api.attendance import attendance_counts_for_date
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
-from parade_state.models import PRESENT_LIKE_STATUSES, AttendanceRecord
-from parade_state.models import Session as SessionModel
+from parade_state.models import Attendance, Personnel
+from parade_state.models.attendance import PRESENT_LIKE_STATUSES
 from parade_state.utils import utc_dt
 
 router = APIRouter()
@@ -29,7 +31,7 @@ async def deployment_view(
 ):
     """Render the deployment summary page for non-admin users.
 
-    Shows today's AM/PM session attendance counts and unit breakdown.
+    Shows today's AM/PM attendance counts and a unit breakdown.
     """
     current_user = await get_current_user_optional(request)
     if not current_user:
@@ -52,7 +54,7 @@ async def deployment_view(
                     active_page="deployment",
                     deployments=[],
                     selected_deployment=None,
-                    sessions=[],
+                    counts=None,
                     unit_breakdown=[],
                 )
             )
@@ -66,93 +68,49 @@ async def deployment_view(
                     break
 
         if not selected:
-            # Default to most recent active deployment
             active_deps = [d for d in accessible if d.status == "active"]
             if active_deps:
                 selected = active_deps[0]
             else:
                 selected = accessible[0]
 
-        # Verify access (redundant but consistent with plan)
+        # Verify access (redundant but consistent)
         _, has_access = await verify_deployment_access_or_admin(
             str(selected.id), str(current_user.id), current_user.role, db
         )
         if not has_access:
             return RedirectResponse(url="/auth/login", status_code=302)
 
-        # Query today's sessions for this deployment
         today = utc_dt.utcnow().date()
-        sessions_result = await db.execute(
-            select(SessionModel)
-            .where(
-                SessionModel.deployment_id == str(selected.id),
-                SessionModel.date == today,
-            )
-            .order_by(SessionModel.session_type)
+
+        counts = await attendance_counts_for_date(
+            selected.nominal_roll_id, today, db
         )
-        sessions = sessions_result.scalars().all()
 
-        # For each session, get attendance counts by status
-        sessions_data = []
-        for s in sessions:
-            counts_result = await db.execute(
-                select(
-                    AttendanceRecord.status,
-                    func.count(AttendanceRecord.id),
-                )
-                .where(AttendanceRecord.session_id == str(s.id))
-                .group_by(AttendanceRecord.status)
+        # Unit breakdown from today's attendance rows.
+        unit_result = await db.execute(
+            select(Attendance).where(
+                Attendance.nominal_roll_id == selected.nominal_roll_id,
+                Attendance.date == today,
             )
-            counts = {row[0]: row[1] for row in counts_result.all()}
-            total = sum(counts.values())
-            present = sum(
-                cnt for st, cnt in counts.items() if st in PRESENT_LIKE_STATUSES
-            )
-            sessions_data.append(
-                {
-                    "id": str(s.id),
-                    "session_type": s.session_type,
-                    "status": s.status,
-                    "present": present,
-                    "absent": total - present,
-                    "total": total,
-                }
-            )
-
-        # Unit breakdown: group attendance by unit_snapshot for today's sessions
-        session_ids = [s["id"] for s in sessions_data]
-        unit_rows = []
-        if session_ids:
-            unit_result = await db.execute(
-                select(
-                    AttendanceRecord.unit_snapshot,
-                    AttendanceRecord.status,
-                    func.count(AttendanceRecord.id),
-                )
-                .where(AttendanceRecord.session_id.in_(session_ids))
-                .group_by(
-                    AttendanceRecord.unit_snapshot,
-                    AttendanceRecord.status,
-                )
-                .order_by(AttendanceRecord.unit_snapshot)
-            )
-            # Aggregate into per-unit dict — bucket statuses
-            unit_map: dict[str, dict] = {}
-            for unit, status_val, count_val in unit_result.all():
-                key = unit or "—"
-                if key not in unit_map:
-                    unit_map[key] = {
-                        "unit": key,
-                        "present": 0,
-                        "total": 0,
-                    }
-                if status_val in PRESENT_LIKE_STATUSES:
-                    unit_map[key]["present"] += count_val
-                unit_map[key]["total"] += count_val
-            # Derive absent from total - present for template compatibility
-            for stats in unit_map.values():
-                stats["absent"] = stats["total"] - stats["present"]
-            unit_rows = list(unit_map.values())
+        )
+        unit_map: dict[str, dict[str, int]] = {}
+        for row in unit_result.scalars().all():
+            unit = row.unit_snapshot or "—"
+            stats = unit_map.setdefault(unit, {"present": 0, "total": 0})
+            for value in (row.status_am, row.status_pm):
+                stats["total"] += 1
+                if value in PRESENT_LIKE_STATUSES:
+                    stats["present"] += 1
+        unit_rows = [
+            {
+                "unit": unit,
+                "present": s["present"],
+                "absent": s["total"] - s["present"],
+                "total": s["total"],
+            }
+            for unit, s in sorted(unit_map.items())
+        ]
 
     env = _get_templates(request)
     template = env.get_template("deployment.html")
@@ -169,7 +127,7 @@ async def deployment_view(
             "name": selected.name,
             "status": selected.status,
         },
-        sessions=sessions_data,
+        counts=counts,
         unit_breakdown=unit_rows,
         today=today,
     )

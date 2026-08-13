@@ -11,7 +11,6 @@ from ..db import Base
 
 if TYPE_CHECKING:
     from .access import DeploymentUserAccess, UserSubunitScope
-    from .attendance import AttendanceRecord, Session
     from .csv_ingestion import NominalRoll
     from .personnel import Personnel
 
@@ -55,17 +54,11 @@ class Deployment(Base):
     notes_records: Mapped[list["DeploymentNotes"]] = relationship(
         back_populates="deployment", cascade="all, delete-orphan"
     )
-    sessions: Mapped[list["Session"]] = relationship(
-        back_populates="deployment", cascade="all, delete-orphan"
-    )
     user_accesses: Mapped[list["DeploymentUserAccess"]] = relationship(
         back_populates="deployment", cascade="all, delete-orphan"
     )
     user_scopes: Mapped[list["UserSubunitScope"]] = relationship(
         back_populates="deployment", cascade="all, delete-orphan"
-    )
-    attendance_records: Mapped[list["AttendanceRecord"]] = relationship(
-        back_populates="deployment"
     )
     personnel_exclusions: Mapped[list["DeploymentPersonnelExclusion"]] = relationship(
         back_populates="deployment", cascade="all, delete-orphan"

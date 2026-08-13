@@ -4,8 +4,8 @@ from .access import AccessLevel, DeploymentUserAccess, User, UserSubunitScope
 from .attendance import (
     ATTENDANCE_STATUSES,
     PRESENT_LIKE_STATUSES,
-    AttendanceRecord,
-    Session,
+    Attendance,
+    AttendanceScope,
 )
 from .audit import AuditLog
 from .auth_session import UserSession
@@ -32,8 +32,8 @@ __all__ = [
     "UserSubunitScope",
     "ATTENDANCE_STATUSES",
     "PRESENT_LIKE_STATUSES",
-    "AttendanceRecord",
-    "Session",
+    "Attendance",
+    "AttendanceScope",
     "AuditLog",
     "UserSession",
     "ColumnMapping",

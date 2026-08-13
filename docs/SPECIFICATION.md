@@ -28,27 +28,30 @@ The personnel branch currently manages battalion parade state through a manual m
 
 ```
 Nominal Roll (CAA-pinned, CSV-sourced, immutable)
- └── Deployment (remaps personnel unit+subunit; has date+time validity range)
-      └── Session (AM or PM, admin-opened, linked to a deployment)
-           └── Attendance Record (per-personnel per-session; notes write-back to deployment)
+ ├── Tagging (named overlay of person → subunit remaps; never mutates the NR)
+ └── Attendance Scope (1:1 with NR; the active NR-or-Tagging scope)
+      └── Attendance (one row per personnel/day; carries AM and PM status + remarks)
+
+Deployment (remaps personnel unit+subunit; has date+time validity range) —
+  retained for overrides/exclusions/notes but is no longer the attendance anchor.
 ```
 
 **Key Concepts:**
 - **Nominal Roll**: Base source of truth, uploaded from CSV, pinned by CAA date, immutable after confirmation
-- **Deployment**: Based on specific nominal roll, remaps personnel assignments, valid for date+time range, only one active at a time
-- **Session**: AM/PM attendance window, admin-opened, associated with specific deployment; auto-populates AttendanceRecord entries for all active personnel (minus exclusions) on creation
-- **Attendance Record**: Per-personnel per-session with status (one of nine operational reporting categories), remarks, and snapshots
+- **Tagging**: A named overlay of person → subunit remaps on a single NR; never mutates the NR; consumed by attendance to render a remapped structure
+- **Attendance Scope**: 1:1 with an NR; the active scope (NR itself or a Tagging) that attendance is taken against. A super-admin must activate a scope before attendance can be recorded.
+- **Attendance**: One row per `(personnel, date)`, carrying `status_am`/`remarks_am` and `status_pm`/`remarks_pm` (statuses from the nine-value operational enum). AM and PM are hardcoded — there is no longer a user-managed Session model.
+- **Deployment**: Based on a nominal roll, remaps personnel assignments, valid for date+time range. Retained for overrides/exclusions/notes but no longer anchors attendance.
 
 ### 1.3 Scope
 
 **In Scope (v1):**
 - CSV ingestion with CAA versioning, column mapping, diff detection
 - Deployment management: create, clone (same-roll), migrate (cross-roll), scheduled activation
-- Session management: admin-opens, advance creation, notes auto-snapshot on open
-- Attendance taking: AM/PM, nine-status operational reporting enum, Notes (deployment-scoped), Remarks (session-scoped)
+- Attendance taking: AM/PM (hardcoded), nine-status operational reporting enum, NR/Tagging-scoped, active-scope gating
 - Row access control (access level + subunit scope) and column sensitivity control
 - Parade state table view scoped to user access with inline editing
-- Admin UI (NiceGUI): enums, users, column sensitivity, column mapping, deployment/session management
+- Admin UI: enums, users, column sensitivity, column mapping, deployment/tagging/attendance management
 - Mobile-friendly static HTML/JS attendance frontend
 - Service worker + IndexedDB read-only cache (24hr TTL, stale indicator)
 - SSE stale-detection signal on attendance view
@@ -120,34 +123,41 @@ Deployment
 **Constraints:**
 - Only one deployment can have status = 'active' (enforced at application layer)
 - Validity range overlaps with existing draft/active deployment → hard reject
-- Closure/finalization cascades to all child sessions
 
-### 2.3 Session
+### 2.3 Attendance Scope & Attendance (AM/PM hardcoded)
 
-**AM or PM attendance window, explicitly created by admin, linked to deployment.**
+**AM and PM are hardcoded; there is no longer a user-managed Session model.**
+Attendance attaches to a Nominal Roll / Tagging scope (see issue #4).
 
 ```
-Session
+AttendanceScope (1:1 with NR)
 ├── id: UUID (PK)
-├── deployment_id: UUID (FK Deployment, on_delete=CASCADE)
+├── nominal_roll_id: UUID (FK NominalRoll, UNIQUE — one row per NR)
+├── tagging_id: UUID (FK Tagging, nullable; null → the NR itself is the scope)
+├── activated_at: datetime
+└── activated_by: UUID (FK User)
+
+Attendance (one row per personnel/day)
+├── id: UUID (PK)
+├── personnel_id: UUID (FK Personnel, on_delete=CASCADE)
+├── nominal_roll_id: UUID (FK NominalRoll, on_delete=CASCADE)
+├── tagging_id: UUID (FK Tagging, nullable; snapshots the active scope at creation)
 ├── date: date
-├── session_type: str ENUM ['AM', 'PM']
-├── status: str ENUM ['open', 'closed', 'finalized']
-│   └── open: attendance can be recorded; close metadata (closed_at/by) is null
-│   └── closed: attendance read-only; may be reopened → open or finalized
-│   └── finalized: permanent archive (terminal)
-│   Transitions: open ↔ closed → finalized (reopen clears closed_at/by)
-├── created_at: datetime
-├── created_by: UUID (FK User)
-├── opened_at: datetime
-├── closed_at: datetime (nullable; when marked closed)
-└── closed_by: UUID (FK User, nullable)
+├── status_am / remarks_am: attendance_status enum + text
+├── status_pm / remarks_pm: attendance_status enum + text
+├── notes_snapshot, unit_snapshot, sub_unit_{1,2,3}_snapshot: text
+└── audit: created_at/by, updated_at/by, last_edit_at/by, is_retroactive_edit
 ```
 
 **Constraints:**
-- UNIQUE(deployment_id, date) - prevents duplicate sessions for same day (max one AM+PM per day)
-- No retroactive session creation on inactive/closed deployments
-- Closure/finalization cascades from parent deployment
+- UNIQUE(personnel_id, date) — one attendance row per person per day
+- Attendance writes are refused (400) until the NR's scope is activated
+- A Tagging linked to any attendance row, or set as an NR's active scope, cannot be deleted (409)
+
+**"Copy Remarks" semantics (issue #4 Q3):**
+- Before 12pm: copy previous day's `remarks_pm` → today's `remarks_am`
+- After 12pm: copy today's `remarks_am` → today's `remarks_pm`
+- On the NR's first day (no prior-day rows) the AM copy is a no-op
 
 ---
 
@@ -375,35 +385,32 @@ TaggingEntry
 
 ### 3.5 Attendance Tracking
 
-#### 3.3.1 AttendanceRecord
+#### 3.5.1 Attendance (NR/Tagging-scoped, AM/PM)
 
-**Per-personnel per-session attendance status, remarks, and snapshots.**
+**Per-personnel per-day attendance with hardcoded AM and PM slots.**
 
 ```
-AttendanceRecord
+Attendance
 ├── id: UUID (PK)
-├── session_id: UUID (FK Session, on_delete=CASCADE)
 ├── personnel_id: UUID (FK Personnel, on_delete=CASCADE)
-├── deployment_id: UUID (FK Deployment, on_delete=CASCADE)
-├── status: str ENUM ['present', 'absent', 'time_off', 'mc', 'yet_to_inpro', 'outpro', 'reporting_sick', 'late', 'att_out']  (default: 'absent')
-├── remarks: str (session-scoped; e.g., "on leave", "TDY")
-├── notes_snapshot: str (snapshot of deployment_notes at session open)
-├── unit_snapshot: str (personnel's effective unit at time of write)
-├── sub_unit_1_snapshot: str
-├── sub_unit_2_snapshot: str
-├── sub_unit_3_snapshot: str
-├── created_at: datetime
-├── created_by: UUID (FK User; typically system)
-├── updated_at: datetime (last *any* change to record)
-├── updated_by: UUID (FK User; last editor for any field)
-├── last_edit_at: datetime (last edit to status/remarks/notes_snapshot)
-└── last_edit_by: UUID (FK User; editor of status/remarks/notes_snapshot)
+├── nominal_roll_id: UUID (FK NominalRoll, on_delete=CASCADE)
+├── tagging_id: UUID (FK Tagging, nullable; snapshots the active scope)
+├── date: date
+├── status_am / remarks_am: attendance_status enum + text (default 'absent')
+├── status_pm / remarks_pm: attendance_status enum + text (default 'absent')
+├── notes_snapshot: str (snapshot of deployment notes at row creation)
+├── unit_snapshot, sub_unit_{1,2,3}_snapshot: str (personnel's effective hierarchy)
+├── created_at/by, updated_at/by, last_edit_at/by, is_retroactive_edit: audit
 ```
+
+**Status enum** (`attendance_status`): `present`, `absent`, `time_off`, `mc`,
+`yet_to_inpro`, `outpro`, `reporting_sick`, `late`, `att_out`.
+`present` and `late` count as "present-like" when aggregating.
 
 **Constraints:**
-- UNIQUE(session_id, personnel_id)
-- Auto-populated for all active personnel in the deployment's nominal roll (minus exclusions) on session creation, with status='absent'
-- Snapshot rule applies (see Business Rules)
+- UNIQUE(personnel_id, date) — one row per person per day
+- Writes are refused (400) until the NR's `AttendanceScope` is activated
+- AM/PM slots are counted independently toward attendance-rate totals
 
 ---
 
@@ -441,44 +448,31 @@ Deployment created (draft)
               At valid_until time:
               ↓
         status → inactive (auto)
-        ├─ No new sessions (existing sessions still open)
+        ├─ No new attendance activation
         └─ Admin can manually transition → archived or closed or finalized
 
         [Manual admin actions at any status:]
         ├─ archived: retain for history, hide from active lists
-        ├─ closed: no further edits allowed (deployment + all sessions locked)
-        └─ finalized: permanent archive (all sessions finalized; immutable)
+        ├─ closed: no further edits allowed (deployment locked)
+        └─ finalized: permanent archive (immutable)
 ```
 
-### 4.3 Session Lifecycle & Attendance Editability
+### 4.3 Attendance Activation & Editability
 
-**Session creation gate** — Sessions can only be created for **active** deployments.
-Draft, inactive, archived, closed, or finalized deployments all reject session
-creation with HTTP 400. The admin deployments page hides the "Create session"
-form until the deployment is activated.
+> **Removed in issue #4:** the user-managed Session model (open/closed/finalized).
+> AM and PM are now hardcoded. The `/api/v1/sessions/*` routes return 410 Gone.
 
-**Session status transitions**:
+**Activation gate** — Attendance writes are refused (HTTP 400) until a
+super-admin activates the NR's `AttendanceScope`. The scope is either the NR
+itself (`tagging_id = null`) or a Tagging overlay on it. The active scope is
+shown at the top of the attendance view. There is exactly one active scope per
+NR.
 
-```
-        ┌───────────┐         ┌───────────┐         ┌───────────┐
-        │   open    │ ──────► │  closed   │ ──────► │ finalized │
-        │           │ ◄────── │           │         │ (terminal)│
-        └───────────┘ reopen  └───────────┘         └───────────┘
-```
-
-- `open → closed`: sets `closed_at`/`closed_by`.
-- `closed → open` (reopen): **clears** `closed_at`/`closed_by`. Available via the
-  green "Open" button on closed sessions in the admin deployments page.
-- `closed → finalized`: terminal; sets `closed_at`/`closed_by` if not already.
-- `open → finalized` and `finalized → *` are rejected (HTTP 400).
-
-**Attendance editability** — Attendance records (status, remarks) can only be
-**created, updated, or deleted** when the linked session is `open`. All
-attendance endpoints enforce this via `verify_session_is_open`; closed and
-finalized sessions return HTTP 400 "Cannot modify attendance for {status}
-sessions". The user-facing attendance page additionally disables the status
-dropdown and remarks input client-side and shows a "Read-only — session is
-{status}." banner when the session is not open.
+**Attendance editability** — Once the scope is activated, attendance rows can
+be created and updated freely (upsert semantics on `(personnel_id, date)`).
+Retroactive edits (target date in the past) set `is_retroactive_edit = true`.
+The Subunit-1 access check (issue #4 PR 2, forthcoming) will additionally
+restrict which rows a user may update.
 
 ### 4.4 Column Mapping Constraint
 
@@ -571,8 +565,8 @@ callup transitions.
 | ColumnMapping | (canonical_name) among non-deprecated | (canonical_name) | Mapping uniqueness |
 | Deployment | Application-level: only one active | (status) | Active deployment enforcement |
 | UserSubunitScope | (user_id, deployment_id, unit, sub_unit_1-3) | (user_id, deployment_id) | Scope lookup |
-| Session | (deployment_id, date) | (deployment_id, date) | Session lookup |
-| AttendanceRecord | (session_id, personnel_id) | (deployment_id, personnel_id) | Attendance lookup |
+| AttendanceScope | (nominal_roll_id) | (nominal_roll_id) | One active scope per NR |
+| Attendance | (personnel_id, date) | (personnel_id, date) | One row per person per day |
 | Personnel | — | (callup_status) | Callup status filter |
 | Deferment | — | (personnel_id), (status), (updated_at) | Deferment lookup |
 
