@@ -23,6 +23,7 @@ from .deployment import (
     DeploymentPersonnelOverride,
 )
 from .personnel import Personnel
+from .tagging import Tagging, TaggingEntry
 
 __all__ = [
     "AccessLevel",
@@ -45,4 +46,6 @@ __all__ = [
     "DeploymentPersonnelExclusion",
     "DeploymentPersonnelOverride",
     "Personnel",
+    "Tagging",
+    "TaggingEntry",
 ]
