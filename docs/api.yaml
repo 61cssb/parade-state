@@ -58,9 +58,16 @@ tags:
   - name: deployment-notes
     description: Deployment-scoped persistent notes per personnel
   - name: sessions
-    description: AM/PM attendance session management
+    description: >
+      DEPRECATED (issue #4). Sessions were removed — AM/PM are now hardcoded
+      slots on NR/Tagging-scoped Attendance rows. All /api/v1/sessions/* routes
+      return 410 Gone. Retained here as a signpost; detailed paths below are
+      stale and will be pruned in a follow-up.
   - name: attendance
-    description: Attendance records — parade state view and inline editing
+    description: >
+      NR/Tagging-scoped attendance with hardcoded AM/PM slots (issue #4).
+      Active-scope gating, bulk upsert, and copy-remarks. One Attendance row
+      per (personnel, date).
   - name: app-settings
     description: Runtime application settings (admin)
   - name: audit-log

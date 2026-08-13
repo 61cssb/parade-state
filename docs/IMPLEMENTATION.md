@@ -102,8 +102,8 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 - `tests/integration/test_deployment_exclusions_api.py` - Personnel exclusion management (9 tests)
 - `tests/integration/test_nominal_rolls_api.py` - Nominal Roll lifecycle (confirm/unconfirm/delete, label updates) (18 tests)
 - `tests/integration/test_personnel_api.py` - Personnel management, search, filtering (12 tests)
-- `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (10 tests)
-- `tests/integration/test_sessions_api.py` - Session management, open/close/finalize, reopen (8 tests)
+- `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (NR/Tagging-scoped, AM/PM slots)
+- `tests/integration/test_sessions_410.py` - Sessions endpoints return 410 Gone (sessions removed in issue #4)
 - `tests/integration/test_users_api.py` - User CRUD, role/status transitions (3 tests)
 - `tests/integration/test_audit_api.py` - Audit log filtering and pagination (10 tests)
 
@@ -194,24 +194,27 @@ async def test_example(client, sample_users, sample_deployment):
 - **Admin deployments page:** Auto-expands active deployment on page load; per-session "Update" button linking to /attendance; autofills next session date/type
 - **Endpoints:** 7 deployment management endpoints
 
-**Attendance Session Management (✅ Complete)**
-- AM/PM session creation and management
-- Sequential status transitions (open → closed → finalized)
-- Session uniqueness constraints (one per type per deployment per day)
-- Proper validation and error handling
-- **Auto-population:** Creating a session automatically generates AttendanceRecord entries for all active personnel in the deployment's nominal roll (minus exclusions), with status='absent'
-- **Endpoints:** 5 session management endpoints
+**Attendance Session Management (🗑 Removed in issue #4)**
+- The user-managed `Session` model (open/closed/finalized) has been removed.
+- AM and PM are now hardcoded slots on a single `Attendance` row per person/day.
+- `/api/v1/sessions/*` routes return 410 Gone as signposts.
+- Historical reporting views that depended on sessions are broken (see issue #4
+  "Out of scope") and need separate consideration.
 
-**Attendance Management (✅ Complete)**
-- Individual attendance recording (Create/Read/Update/Delete)
-- Bulk attendance operations (create and update)
-- Automatic snapshot functionality (deployment notes + personnel assignments)
-- Retroactive edit detection and tracking
-- Complete audit trail (created/updated/last_edit timestamps)
-- Session status validation (open/closed/finalized)
-- Attendance status enum: present, absent, time_off, mc, yet_to_inpro, outpro, reporting_sick, late, att_out (default: absent)
-- **Attendance page UI enhancements:** Color-coded status dropdown (9 operational reporting categories), sub-unit 1 & 2 columns displayed, column filter and sort support
-- **Endpoints:** 8 attendance management endpoints
+**Attendance Management (✅ Reworked in issue #4 PR 1)**
+- NR/Tagging-scoped attendance: one `Attendance` row per `(personnel, date)`
+  carrying `status_am`/`remarks_am` and `status_pm`/`remarks_pm`.
+- Active-scope gating: a super-admin activates an `AttendanceScope` per NR
+  (NR itself or a Tagging) before attendance can be recorded.
+- Bulk upsert endpoint (`PUT /api/v1/attendance/upsert`) with snapshot capture.
+- "Copy Remarks" endpoint (`POST /api/v1/attendance/copy-remarks`): before 12pm
+  copies previous day's `remarks_pm` → today's `remarks_am`; after 12pm copies
+  today's `remarks_am` → `remarks_pm`.
+- Tagging delete guarded (409) when linked to attendance or set as active scope.
+- Attendance status enum: present, absent, time_off, mc, yet_to_inpro, outpro,
+  reporting_sick, late, att_out (default: absent).
+- **Forthcoming (PR 2/3):** Subunit-1 server-enforced access (403); admin
+  attendance page with scope-activation UI and Copy Remarks button.
 
 **Personnel Management (✅ Session 1 Complete)**
 - Deployment-based personnel listing with filtering
