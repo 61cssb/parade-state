@@ -110,11 +110,27 @@
 
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 1rem 0;">
 
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-            <h4 style="margin: 0; font-size: 0.95rem;">Per-person remaps</h4>
-            <button type="button" class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;" onclick="addRemapRow()">+ Add</button>
+        <h4 style="margin: 0 0 0.5rem; font-size: 0.95rem;">Per-person remaps</h4>
+
+        {# Personnel picker: search by name + cascading unit/subunit filters scoped to this NR #}
+        <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0.375rem; padding: 0.6rem; margin-bottom: 0.75rem;">
+            <p style="font-size: 0.75rem; color: #6b7280; margin: 0 0 0.4rem;">Find personnel to add as remap rows. Personnel already in the table are hidden from the list.</p>
+            <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 0.4rem; margin-bottom: 0.4rem;">
+                <input type="text" id="picker-search" placeholder="Search by name…" oninput="updatePickerList()" style="padding: 0.35rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
+                <select id="picker-unit" onchange="onPickerUnitChange()" style="padding: 0.35rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
+                    <option value="">All units</option>
+                </select>
+                <select id="picker-subunit" onchange="updatePickerList()" style="padding: 0.35rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
+                    <option value="">All sub-units</option>
+                </select>
+            </div>
+            <div style="display: flex; gap: 0.4rem; align-items: stretch;">
+                <select id="picker-list" size="5" style="flex: 1; padding: 0.35rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
+                    <option value="">— Loading personnel —</option>
+                </select>
+                <button type="button" class="btn btn-primary" onclick="addSelectedFromPicker()" style="font-size: 0.75rem; padding: 0.35rem 0.6rem;">+ Add to remap</button>
+            </div>
         </div>
-        <p style="font-size: 0.8rem; color: #6b7280; margin: 0 0 0.5rem;">Each row remaps one person to a new subunit. 'From' is auto-snapshotted from the personnel record when left blank.</p>
 
         <table id="remap-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
             <thead>
@@ -236,7 +252,7 @@
     }
 
     // ----- Edit modal -----
-    let personnelCache = [];   // [{id, short_id, rank, name, unit, sub1, sub2, sub3}]
+    let personnelCache = [];   // [{id, short_id, rank, name, unit, sub_unit_1, ...}]
     let entryCache = [];        // [{personnel_id, to_unit, to_sub_unit_1..3}]
 
     async function loadPersonnel() {
@@ -251,30 +267,127 @@
         return res.json();
     }
 
-    function personnelOption(p, selectedId) {
-        const sub = p.sub_unit_1 || p.sub_unit_2 || p.sub_unit_3 || '';
-        const label = [p.rank, p.name, sub ? '(' + sub + ')' : ''].filter(Boolean).join(' ');
-        const sel = p.id === selectedId ? ' selected' : '';
-        return '<option value="' + escapeHtml(p.id) + '"' + sel + '>' + escapeHtml(label) + '</option>';
-    }
-
     function addRemapRow(entry) {
         entry = entry || {};
         const body = document.getElementById('remap-body');
         const tr = document.createElement('tr');
         tr.style.borderTop = '1px solid #f3f4f6';
-        const options = ['<option value="">— Select personnel —</option>']
-            .concat(personnelCache.map(function(p) { return personnelOption(p, entry.personnel_id); }))
-            .join('');
+        // Personnel shown read-only (the picker chooses them); id carried in a hidden input.
+        const labelHtml = entry.personnel_label
+            ? '<strong>' + escapeHtml(entry.personnel_label) + '</strong>'
+            : '<strong style="color:#ef4444;">Unknown personnel</strong>';
+        const fromLine = entry.from_unit
+            ? '<br><span style="font-size: 0.7rem; color: #6b7280;">from: '
+                + escapeHtml(entry.from_unit)
+                + (entry.from_sub_unit_1 ? ' / ' + escapeHtml(entry.from_sub_unit_1) : '')
+                + '</span>'
+            : '';
         tr.innerHTML = [
-            '<td style="padding: 0.35rem;"><select class="remap-person" required style="width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">' + options + '</select></td>',
+            '<td style="padding: 0.35rem;">'
+                + '<input type="hidden" class="remap-person-id" value="' + escapeHtml(entry.personnel_id || '') + '">'
+                + labelHtml + fromLine
+                + '</td>',
             '<td style="padding: 0.35rem;"><input class="remap-unit" required style="width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" value="' + escapeHtml(entry.to_unit || '') + '"></td>',
             '<td style="padding: 0.35rem;"><input class="remap-s1" style="width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" value="' + escapeHtml(entry.to_sub_unit_1 || '') + '"></td>',
             '<td style="padding: 0.35rem;"><input class="remap-s2" style="width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" value="' + escapeHtml(entry.to_sub_unit_2 || '') + '"></td>',
             '<td style="padding: 0.35rem;"><input class="remap-s3" style="width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" value="' + escapeHtml(entry.to_sub_unit_3 || '') + '"></td>',
-            '<td style="padding: 0.35rem;"><button type="button" class="btn" style="background: #ef4444; color: white; font-size: 0.7rem; padding: 0.2rem 0.4rem;" onclick="this.closest(\'tr\').remove()">Remove</button></td>',
+            '<td style="padding: 0.35rem;"><button type="button" class="btn" style="background: #ef4444; color: white; font-size: 0.7rem; padding: 0.2rem 0.4rem;" onclick="this.closest(\'tr\').remove(); updatePickerList();">Remove</button></td>',
         ].join('');
         body.appendChild(tr);
+    }
+
+    // ----- Personnel picker (search + cascading unit/subunit filters) -----
+    function personnelInRemapRows() {
+        return new Set(
+            Array.from(document.querySelectorAll('#remap-body input.remap-person-id'))
+                .map(function(i) { return i.value; })
+        );
+    }
+
+    function buildPickerOptions() {
+        // Distinct units and sub-units derived from the cached NR personnel.
+        const units = [];
+        const seen = new Set();
+        for (const p of personnelCache) {
+            if (p.unit && !seen.has(p.unit)) { seen.add(p.unit); units.push(p.unit); }
+        }
+        units.sort();
+        document.getElementById('picker-unit').innerHTML =
+            '<option value="">All units</option>' +
+            units.map(function(u) {
+                return '<option value="' + escapeHtml(u) + '">' + escapeHtml(u) + '</option>';
+            }).join('');
+        rebuildPickerSubunits();
+    }
+
+    function rebuildPickerSubunits() {
+        const selectedUnit = document.getElementById('picker-unit').value;
+        const filtered = selectedUnit
+            ? personnelCache.filter(function(p) { return p.unit === selectedUnit; })
+            : personnelCache;
+        const subunits = [];
+        const seen = new Set();
+        for (const p of filtered) {
+            if (p.sub_unit_1 && !seen.has(p.sub_unit_1)) { seen.add(p.sub_unit_1); subunits.push(p.sub_unit_1); }
+        }
+        subunits.sort();
+        document.getElementById('picker-subunit').innerHTML =
+            '<option value="">All sub-units</option>' +
+            subunits.map(function(s) {
+                return '<option value="' + escapeHtml(s) + '">' + escapeHtml(s) + '</option>';
+            }).join('');
+    }
+
+    function onPickerUnitChange() {
+        rebuildPickerSubunits();
+        updatePickerList();
+    }
+
+    function updatePickerList() {
+        const search = document.getElementById('picker-search').value.toLowerCase().trim();
+        const unit = document.getElementById('picker-unit').value;
+        const subunit = document.getElementById('picker-subunit').value;
+        const alreadyInRows = personnelInRemapRows();
+
+        let filtered = personnelCache.filter(function(p) { return !alreadyInRows.has(p.id); });
+        if (search) {
+            filtered = filtered.filter(function(p) {
+                return (p.name || '').toLowerCase().indexOf(search) !== -1;
+            });
+        }
+        if (unit) filtered = filtered.filter(function(p) { return p.unit === unit; });
+        if (subunit) filtered = filtered.filter(function(p) { return p.sub_unit_1 === subunit; });
+
+        const list = document.getElementById('picker-list');
+        if (filtered.length === 0) {
+            list.innerHTML = '<option value="">— No matching personnel —</option>';
+        } else {
+            list.innerHTML = filtered.map(function(p) {
+                const label = [p.rank, p.name, '(' + p.unit + (p.sub_unit_1 ? ' / ' + p.sub_unit_1 : '') + ')']
+                    .filter(Boolean).join(' ');
+                return '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(label) + '</option>';
+            }).join('');
+        }
+    }
+
+    function addSelectedFromPicker() {
+        const list = document.getElementById('picker-list');
+        const personId = list.value;
+        if (!personId) {
+            showMsg('edit-status-msg', 'Select a person from the list first.', 'error');
+            return;
+        }
+        const person = personnelCache.find(function(p) { return p.id === personId; });
+        if (!person) return;
+        addRemapRow({
+            personnel_id: person.id,
+            personnel_label: (person.rank + ' ' + person.name + ' (' + person.short_id + ')').trim(),
+            from_unit: person.unit,
+            from_sub_unit_1: person.sub_unit_1,
+        });
+        // Refresh picker to drop the just-added person and reset selection.
+        list.value = '';
+        updatePickerList();
     }
 
     async function openEditModal(id) {
@@ -296,13 +409,29 @@
 
             const body = document.getElementById('remap-body');
             body.innerHTML = '';
-            entryCache.forEach(function(e) { addRemapRow({
-                personnel_id: e.personnel_id,
-                to_unit: e.to_unit,
-                to_sub_unit_1: e.to_sub_unit_1,
-                to_sub_unit_2: e.to_sub_unit_2,
-                to_sub_unit_3: e.to_sub_unit_3,
-            }); });
+            entryCache.forEach(function(e) {
+                // Find the personnel in cache for friendly display.
+                const p = personnelCache.find(function(pp) { return pp.id === e.personnel_id; });
+                addRemapRow({
+                    personnel_id: e.personnel_id,
+                    personnel_label: p
+                        ? (p.rank + ' ' + p.name + ' (' + p.short_id + ')').trim()
+                        : (e.personnel_label || e.personnel_id),
+                    from_unit: p ? p.unit : (e.from_unit || null),
+                    from_sub_unit_1: p ? p.sub_unit_1 : (e.from_sub_unit_1 || null),
+                    to_unit: e.to_unit,
+                    to_sub_unit_1: e.to_sub_unit_1,
+                    to_sub_unit_2: e.to_sub_unit_2,
+                    to_sub_unit_3: e.to_sub_unit_3,
+                });
+            });
+
+            // Reset and build the picker.
+            document.getElementById('picker-search').value = '';
+            document.getElementById('picker-unit').value = '';
+            document.getElementById('picker-subunit').value = '';
+            buildPickerOptions();
+            updatePickerList();
 
             document.getElementById('edit-backdrop').style.display = 'block';
             document.getElementById('edit-modal').style.display = 'block';
@@ -327,12 +456,12 @@
         const entries = [];
         const seenPersons = new Set();
         for (const tr of rows) {
-            const personnel_id = tr.querySelector('.remap-person').value;
+            const personnel_id = tr.querySelector('input.remap-person-id').value;
             const to_unit = tr.querySelector('.remap-unit').value.trim();
             const to_sub_unit_1 = tr.querySelector('.remap-s1').value.trim() || null;
             const to_sub_unit_2 = tr.querySelector('.remap-s2').value.trim() || null;
             const to_sub_unit_3 = tr.querySelector('.remap-s3').value.trim() || null;
-            if (!personnel_id) { showMsg('edit-status-msg', 'Select personnel in every row.', 'error'); return; }
+            if (!personnel_id) { showMsg('edit-status-msg', 'Each row needs a person — use the picker to add one.', 'error'); return; }
             if (!to_unit) { showMsg('edit-status-msg', 'To unit is required in every row.', 'error'); return; }
             if (seenPersons.has(personnel_id)) {
                 showMsg('edit-status-msg', 'Duplicate personnel in remap list.', 'error');
