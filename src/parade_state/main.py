@@ -27,6 +27,7 @@ from parade_state.api import (
     nominal_rolls,
     personnel,
     sessions,
+    tagging,
     users,
 )
 from parade_state.admin_routes import router as admin_router
@@ -125,4 +126,7 @@ app.include_router(
 app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
 app.include_router(
     deferments.router, prefix="/api/v1/deferments", tags=["deferments"]
+)
+app.include_router(
+    tagging.router, prefix="/api/v1/taggings", tags=["taggings"]
 )
