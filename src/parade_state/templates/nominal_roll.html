@@ -26,7 +26,7 @@
 <div class="card">
     <form method="get" action="/nominal-roll" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
         <input type="hidden" name="nominal_roll_id" value="{{ selected_nominal_roll.id }}">
-        <input type="text" name="search" value="{{ search }}" placeholder="Search name, rank, pers no..."
+        <input type="text" name="search" value="{{ search }}" placeholder="Search name, pers no..."
                style="flex: 1; min-width: 200px; max-width: 300px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
         <select name="unit" onchange="this.form.submit()"
                 style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
@@ -55,8 +55,15 @@
             <option value="Officer" {% if category == 'Officer' %}selected{% endif %}>Officer</option>
             <option value="WOSE" {% if category == 'WOSE' %}selected{% endif %}>WOSE</option>
         </select>
+        <select name="rank" onchange="this.form.submit()"
+                style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            <option value="" {% if not rank %}selected{% endif %}>All ranks</option>
+            {% for r in rank_options %}
+            <option value="{{ r }}" {% if rank == r %}selected{% endif %}>{{ r }}</option>
+            {% endfor %}
+        </select>
         <button type="submit" class="btn btn-primary">Filter</button>
-        {% if search or unit or sub_unit_1 or sub_unit_2 or category %}
+        {% if search or unit or sub_unit_1 or sub_unit_2 or category or rank %}
         <a href="/nominal-roll?nominal_roll_id={{ selected_nominal_roll.id }}" class="btn" style="background: #e5e7eb; color: #374151; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.25rem; font-size: 0.875rem;">Clear</a>
         {% endif %}
     </form>

@@ -30,10 +30,11 @@ def _search_condition(search: str | None) -> ColumnElement[bool] | None:
     if not search:
         return None
     pattern = f"%{search}%"
+    # Search matches name and pers no (short_id) only — never rank, unit,
+    # sub-unit, or category (those have their own dedicated filters).
     return or_(
         Personnel.full_name.ilike(pattern),
         Personnel.short_id.ilike(pattern),
-        Personnel.rank.ilike(pattern),
     )
 
 
@@ -44,6 +45,7 @@ def _optional_conditions(
     sub_unit_1: str | None,
     sub_unit_2: str | None,
     category: str | None,
+    rank: str | None,
 ) -> list[ColumnElement[bool]]:
     """User-supplied filters applied to both list and count queries."""
     conds: list[ColumnElement[bool]] = []
@@ -58,6 +60,34 @@ def _optional_conditions(
         conds.append(Personnel.sub_unit_2 == sub_unit_2)
     if category:
         conds.append(Personnel.category == category)
+    if rank:
+        conds.append(Personnel.rank == rank)
+    return conds
+
+
+_SCOPE_COLUMNS: dict[str, ColumnElement] = {
+    "unit": Personnel.unit,
+    "sub_unit_1": Personnel.sub_unit_1,
+    "sub_unit_2": Personnel.sub_unit_2,
+    "category": Personnel.category,
+    "rank": Personnel.rank,
+}
+
+
+def _scoped_conditions(
+    base: list[ColumnElement[bool]],
+    **selections: str | None,
+) -> list[ColumnElement[bool]]:
+    """Base conditions plus an equality filter for each non-empty selection.
+
+    Used to scope dropdown option queries: e.g. the sub-unit 1 dropdown is
+    scoped by the selected unit, and the rank dropdown by unit/sub-unit/
+    category so it only lists ranks present in the filtered population.
+    """
+    conds = list(base)
+    for key, value in selections.items():
+        if value:
+            conds.append(_SCOPE_COLUMNS[key] == value)
     return conds
 
 
@@ -85,13 +115,15 @@ async def nominal_roll_view(
     sub_unit_1: str | None = None,
     sub_unit_2: str | None = None,
     category: str | None = None,
+    rank: str | None = None,
 ):
     """Render the nominal roll browser page.
 
     Shows a nominal roll selector and a table of personnel for the selected
-    roll. Filters: text search (rank/name/short_id), unit, sub-unit 1,
-    sub-unit 2, and category (Officer / WOSE). Sub-unit dropdowns cascade off
-    the selected unit / sub-unit above them.
+    roll. Filters: text search (name/pers no), unit, sub-unit 1, sub-unit 2,
+    category (Officer / WOSE), and rank. Sub-unit and rank dropdowns cascade
+    off the filters above them so they only list values present in the
+    currently-filtered population.
     """
     current_user = await get_current_user_optional(request)
     if not current_user:
@@ -110,9 +142,11 @@ async def nominal_roll_view(
                 request, current_user,
                 rolls=[], selected=None,
                 units=[], sub_unit_1_options=[], sub_unit_2_options=[],
+                rank_options=[],
                 personnel=[], search=search or "",
                 unit=unit or "", sub_unit_1=sub_unit_1 or "",
                 sub_unit_2=sub_unit_2 or "", category=category or "",
+                rank=rank or "",
                 total_count=0,
             )
 
@@ -133,7 +167,7 @@ async def nominal_roll_view(
         base = _base_conditions(str(selected.id))
         filters = _optional_conditions(
             search=search, unit=unit, sub_unit_1=sub_unit_1,
-            sub_unit_2=sub_unit_2, category=category,
+            sub_unit_2=sub_unit_2, category=category, rank=rank,
         )
 
         # Total matching rows (before limit) for display
@@ -157,18 +191,23 @@ async def nominal_roll_view(
         personnel_result = await db.execute(query)
         personnel = personnel_result.scalars().all()
 
-        # Filter dropdowns. Units are unscoped; sub-unit 1 scopes to the
-        # selected unit; sub-unit 2 scopes to unit + sub-unit 1 (cascading).
+        # Cascading dropdowns: each lists values present under the selections
+        # above it. Units are unscoped; sub-unit 1 scopes to unit; sub-unit 2
+        # scopes to unit + sub-unit 1; rank scopes to all of those + category.
         units = await _distinct_values(db, Personnel.unit, base)
-        su1_conds = base + ([Personnel.unit == unit] if unit else [])
         sub_unit_1_options = await _distinct_values(
-            db, Personnel.sub_unit_1, su1_conds
-        )
-        su2_conds = su1_conds + (
-            [Personnel.sub_unit_1 == sub_unit_1] if sub_unit_1 else []
+            db, Personnel.sub_unit_1, _scoped_conditions(base, unit=unit)
         )
         sub_unit_2_options = await _distinct_values(
-            db, Personnel.sub_unit_2, su2_conds
+            db, Personnel.sub_unit_2,
+            _scoped_conditions(base, unit=unit, sub_unit_1=sub_unit_1),
+        )
+        rank_options = await _distinct_values(
+            db, Personnel.rank,
+            _scoped_conditions(
+                base, unit=unit, sub_unit_1=sub_unit_1,
+                sub_unit_2=sub_unit_2, category=category,
+            ),
         )
 
     personnel_data = [
@@ -205,12 +244,14 @@ async def nominal_roll_view(
         units=units,
         sub_unit_1_options=sub_unit_1_options,
         sub_unit_2_options=sub_unit_2_options,
+        rank_options=rank_options,
         personnel=personnel_data,
         search=search or "",
         unit=unit or "",
         sub_unit_1=sub_unit_1 or "",
         sub_unit_2=sub_unit_2 or "",
         category=category or "",
+        rank=rank or "",
         total_count=total_count,
     )
 
@@ -224,12 +265,14 @@ def _render(
     units: list,
     sub_unit_1_options: list,
     sub_unit_2_options: list,
+    rank_options: list,
     personnel: list,
     search: str,
     unit: str,
     sub_unit_1: str,
     sub_unit_2: str,
     category: str,
+    rank: str,
     total_count: int,
 ) -> HTMLResponse:
     templates_dir = request.app.state.templates_dir
@@ -253,12 +296,14 @@ def _render(
         units=units,
         sub_unit_1_options=sub_unit_1_options,
         sub_unit_2_options=sub_unit_2_options,
+        rank_options=rank_options,
         personnel=personnel,
         search=search,
         unit=unit,
         sub_unit_1=sub_unit_1,
         sub_unit_2=sub_unit_2,
         category=category,
+        rank=rank,
         total_count=total_count,
     )
     return HTMLResponse(content=html)
