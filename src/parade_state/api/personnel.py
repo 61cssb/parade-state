@@ -25,7 +25,7 @@ from parade_state.models.schemas import (
     PersonnelResponseWithDeployment,
     PersonnelUpdate,
 )
-from parade_state.utils import utc_dt
+from parade_state.utils import ranks, utc_dt
 
 router = APIRouter()
 
@@ -109,6 +109,10 @@ def apply_personnel_filters(query, params: PersonnelListParams):
 
     if params.sub_unit_3:
         query = query.where(Personnel.sub_unit_3 == params.sub_unit_3)
+
+    # Filter by category (Officer / WOSE)
+    if params.category:
+        query = query.where(Personnel.category == params.category)
 
     # Search across name and short_id
     if params.search:
@@ -237,6 +241,7 @@ async def get_deployment_personnel_with_overrides(
             nominal_roll_id=personnel.nominal_roll_id,
             short_id=personnel.short_id,
             rank=personnel.rank,
+            category=personnel.category,
             name=personnel.full_name,
             unit=personnel.unit,
             sub_unit_1=personnel.sub_unit_1,
@@ -328,6 +333,9 @@ async def list_personnel(
     sub_unit_2: str | None = Query(None, description="Filter by sub-unit 2"),
     sub_unit_3: str | None = Query(None, description="Filter by sub-unit 3"),
     status: str | None = Query(None, description="Filter by personnel status"),
+    category: str | None = Query(
+        None, description="Filter by category (Officer, WOSE)"
+    ),
     search: str | None = Query(None, description="Search by name or service number"),
     sort_by: str | None = Query(
         None,
@@ -365,6 +373,7 @@ async def list_personnel(
         sub_unit_2=sub_unit_2,
         sub_unit_3=sub_unit_3,
         status=status,
+        category=category,
         search=search,
         sort_by=sort_by,
         sort_order=sort_order,
@@ -408,6 +417,7 @@ async def list_personnel(
             nominal_roll_id=p.nominal_roll_id,
             short_id=p.short_id,
             rank=p.rank,
+            category=p.category,
             name=p.full_name,
             unit=p.unit,
             sub_unit_1=p.sub_unit_1,
@@ -452,6 +462,7 @@ async def get_personnel(
             nominal_roll_id=personnel.nominal_roll_id,
             short_id=personnel.short_id,
             rank=personnel.rank,
+            category=personnel.category,
             name=personnel.full_name,
             unit=personnel.unit,
             sub_unit_1=personnel.sub_unit_1,
@@ -488,6 +499,7 @@ async def get_personnel(
             nominal_roll_id=personnel.nominal_roll_id,
             short_id=personnel.short_id,
             rank=personnel.rank,
+            category=personnel.category,
             name=personnel.full_name,
             unit=personnel.unit,
             sub_unit_1=personnel.sub_unit_1,
@@ -538,6 +550,16 @@ async def update_personnel(
             if hasattr(personnel, field):
                 setattr(personnel, field, value)
 
+        # Category is always inferred from rank; recompute if rank changed.
+        if "rank" in update_data:
+            try:
+                personnel.category = ranks.category_for_rank(personnel.rank)
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid rank {personnel.rank!r}: cannot infer category",
+                ) from e
+
         # Set audit trail fields
         personnel.updated_at = utc_dt.utcnow()
         personnel.updated_by = user_id
@@ -550,6 +572,7 @@ async def update_personnel(
             nominal_roll_id=personnel.nominal_roll_id,
             short_id=personnel.short_id,
             rank=personnel.rank,
+            category=personnel.category,
             name=personnel.full_name,
             unit=personnel.unit,
             sub_unit_1=personnel.sub_unit_1,
@@ -581,6 +604,16 @@ async def update_personnel(
             if hasattr(personnel, field):
                 setattr(personnel, field, value)
 
+        # Category is always inferred from rank; recompute if rank changed.
+        if "rank" in update_data:
+            try:
+                personnel.category = ranks.category_for_rank(personnel.rank)
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid rank {personnel.rank!r}: cannot infer category",
+                ) from e
+
         # Set audit trail fields
         personnel.updated_at = utc_dt.utcnow()
         personnel.updated_by = user_id
@@ -593,6 +626,7 @@ async def update_personnel(
             nominal_roll_id=personnel.nominal_roll_id,
             short_id=personnel.short_id,
             rank=personnel.rank,
+            category=personnel.category,
             name=personnel.full_name,
             unit=personnel.unit,
             sub_unit_1=personnel.sub_unit_1,

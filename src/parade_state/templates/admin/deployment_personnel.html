@@ -25,6 +25,12 @@
 
 <input type="text" id="search-input" placeholder="Search by name or short ID…" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 100%; max-width: 300px; margin-bottom: 1rem; box-sizing: border-box;">
 
+<select id="category-filter" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; max-width: 160px; margin-bottom: 1rem; margin-left: 0.5rem; box-sizing: border-box;">
+    <option value="">All categories</option>
+    <option value="Officer">Officer</option>
+    <option value="WOSE">WOSE</option>
+</select>
+
 {% if is_draft %}
 <p style="color: #374151; font-size: 0.875rem; margin-bottom: 0.75rem;">
     Select personnel to include in this deployment. Checked rows will be included; unchecked rows will be excluded.
@@ -41,6 +47,7 @@
                     {% endif %}
                 </th>
                 <th style="padding: 0.5rem;">Rank</th>
+                <th style="padding: 0.5rem;">Category</th>
                 <th style="padding: 0.5rem;">Name</th>
                 <th style="padding: 0.5rem;">Unit</th>
                 <th style="padding: 0.5rem;">Sub-Unit</th>
@@ -52,6 +59,7 @@
             <tr id="row-{{ p.id }}"
                 data-personnel-id="{{ p.id }}"
                 data-initial-included="{{ 'false' if p.is_excluded else 'true' }}"
+                data-category="{{ p.category }}"
                 data-searchable="{{ p.full_name|lower }} {{ p.short_id|lower }}"
                 style="border-bottom: 1px solid #f3f4f6; {% if p.is_excluded %}background: #fafafa;{% endif %}">
                 <td style="padding: 0.5rem;">
@@ -65,6 +73,7 @@
                     {% endif %}
                 </td>
                 <td style="padding: 0.5rem;">{{ p.rank }}</td>
+                <td style="padding: 0.5rem; white-space: nowrap;">{{ p.category }}</td>
                 <td style="padding: 0.5rem;">{{ p.full_name }}</td>
                 <td style="padding: 0.5rem;">{{ p.unit }}</td>
                 <td style="padding: 0.5rem;">{{ p.sub_unit_1 or '—' }}</td>
@@ -167,12 +176,16 @@
         });
     }
 
-    // --- Client-side search ---
-    document.getElementById('search-input').addEventListener('input', function(e) {
-        const query = e.target.value.toLowerCase().trim();
+    // --- Client-side filtering (text search + category dropdown) ---
+    function applyFilters() {
+        const query = document.getElementById('search-input').value.toLowerCase().trim();
+        const category = document.getElementById('category-filter').value;
         document.querySelectorAll('#personnel-table tbody tr').forEach(function(row) {
             const text = row.dataset.searchable || '';
-            row.style.display = text.includes(query) ? '' : 'none';
+            const rowCategory = row.dataset.category || '';
+            const textMatch = text.includes(query);
+            const categoryMatch = !category || rowCategory === category;
+            row.style.display = (textMatch && categoryMatch) ? '' : 'none';
         });
         // Update select-all checkbox based on visible rows
         const visibleCheckboxes = Array.from(document.querySelectorAll('#personnel-table tbody tr'))
@@ -180,6 +193,7 @@
             .map(r => r.querySelector('.row-checkbox'))
             .filter(c => c && !c.disabled);
         const selectAll = document.getElementById('select-all');
+        if (!selectAll) return;
         if (visibleCheckboxes.length === 0) {
             selectAll.checked = false;
             selectAll.indeterminate = false;
@@ -193,7 +207,9 @@
             selectAll.checked = false;
             selectAll.indeterminate = false;
         }
-    });
+    }
+    document.getElementById('search-input').addEventListener('input', applyFilters);
+    document.getElementById('category-filter').addEventListener('change', applyFilters);
 
     // --- Reset ---
     function resetChanges() {

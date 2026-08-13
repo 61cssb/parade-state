@@ -360,6 +360,7 @@ async def admin_deployment_personnel(
             "id": str(p.id),
             "short_id": p.short_id,
             "rank": p.rank,
+            "category": p.category,
             "full_name": p.full_name,
             "unit": p.unit,
             "sub_unit_1": p.sub_unit_1,

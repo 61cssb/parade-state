@@ -333,6 +333,9 @@ class PersonnelBase(BaseModel):
 
     short_id: str = Field(..., min_length=1)
     rank: str = Field(..., min_length=1)
+    category: Literal["Officer", "WOSE"] = Field(
+        ..., description="Operational corps, inferred from rank"
+    )
     name: str = Field(..., min_length=1)
     unit: str = Field(..., min_length=1)
     sub_unit_1: str | None = None
@@ -387,6 +390,7 @@ class PersonnelListParams(BaseModel):
     sub_unit_2: str | None = None
     sub_unit_3: str | None = None
     status: str | None = None
+    category: Literal["Officer", "WOSE"] | None = None
     search: str | None = None
     sort_by: str | None = Field(
         None,

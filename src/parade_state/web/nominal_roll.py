@@ -24,11 +24,13 @@ async def nominal_roll_view(
     nominal_roll_id: str | None = None,
     search: str | None = None,
     unit: str | None = None,
+    category: str | None = None,
 ):
     """Render the nominal roll browser page.
 
     Shows a nominal roll selector and a table of personnel for the selected
-    roll. Optional filters: text search (rank/name/short_id) and unit filter.
+    roll. Optional filters: text search (rank/name/short_id), unit filter,
+    and category filter (Officer / WOSE).
     """
     current_user = await get_current_user_optional(request)
     if not current_user:
@@ -47,7 +49,7 @@ async def nominal_roll_view(
                 request, current_user,
                 rolls=[], selected=None, units=[],
                 personnel=[], search=search or "", unit=unit or "",
-                total_count=0,
+                category=category or "", total_count=0,
             )
 
         # Resolve selected nominal roll (default to most recent)
@@ -88,6 +90,10 @@ async def nominal_roll_view(
         if unit:
             query = query.where(Personnel.unit == unit)
 
+        # Optional category filter (Officer / WOSE)
+        if category:
+            query = query.where(Personnel.category == category)
+
         # Total matching rows (before limit) for display
         count_query = (
             select(func.count())
@@ -108,6 +114,8 @@ async def nominal_roll_view(
             )
         if unit:
             count_query = count_query.where(Personnel.unit == unit)
+        if category:
+            count_query = count_query.where(Personnel.category == category)
         total_count = (await db.execute(count_query)).scalar_one()
 
         # Fetch personnel ordered by unit, then rank, then name
@@ -133,6 +141,7 @@ async def nominal_roll_view(
     personnel_data = [
         {
             "rank": p.rank,
+            "category": p.category,
             "full_name": p.full_name,
             "short_id": p.short_id,
             "unit": p.unit,
@@ -164,6 +173,7 @@ async def nominal_roll_view(
         personnel=personnel_data,
         search=search or "",
         unit=unit or "",
+        category=category or "",
         total_count=total_count,
     )
 
@@ -178,6 +188,7 @@ def _render(
     personnel: list,
     search: str,
     unit: str,
+    category: str,
     total_count: int,
 ) -> HTMLResponse:
     templates_dir = request.app.state.templates_dir
@@ -202,6 +213,7 @@ def _render(
         personnel=personnel,
         search=search,
         unit=unit,
+        category=category,
         total_count=total_count,
     )
     return HTMLResponse(content=html)
