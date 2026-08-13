@@ -6,6 +6,18 @@ from pydantic import BaseModel, Field, field_validator
 
 from parade_state.utils import utc_dt
 
+AttendanceStatus = Literal[
+    "present",
+    "absent",
+    "time_off",
+    "mc",
+    "yet_to_inpro",
+    "outpro",
+    "reporting_sick",
+    "late",
+    "att_out",
+]
+
 # ============================================================================
 # Deployment Schemas
 # ============================================================================
@@ -79,7 +91,6 @@ class DeploymentStatusSessionInfo(BaseModel):
     status: Literal["open", "closed", "finalized"]
     present: int = 0
     absent: int = 0
-    excused: int = 0
     total: int = 0
 
 
@@ -90,7 +101,6 @@ class DeploymentStatusUnitBreakdown(BaseModel):
     total: int
     present: int
     absent: int
-    excused: int
 
 
 class DeploymentStatusResponse(BaseModel):
@@ -236,14 +246,14 @@ class AttendanceRecordCreate(BaseModel):
 
     session_id: str
     personnel_id: str
-    status: Literal["present", "absent", "excused"] = "absent"
+    status: AttendanceStatus = "absent"
     remarks: str | None = None
 
 
 class AttendanceRecordUpdate(BaseModel):
     """Schema for updating an attendance record."""
 
-    status: Literal["present", "absent", "excused"] | None = None
+    status: AttendanceStatus | None = None
     remarks: str | None = None
 
 
@@ -278,7 +288,7 @@ class AttendanceRecordBulkCreateItem(BaseModel):
 
     session_id: str
     personnel_id: str
-    status: Literal["present", "absent", "excused"] = "absent"
+    status: AttendanceStatus = "absent"
     remarks: str | None = None
 
 
@@ -292,7 +302,7 @@ class AttendanceRecordBulkUpdateItem(BaseModel):
     """Schema for a single attendance record in bulk update operation."""
 
     id: str
-    status: Literal["present", "absent", "excused"] | None = None
+    status: AttendanceStatus | None = None
     remarks: str | None = None
 
 
@@ -308,7 +318,7 @@ class AttendanceListParams(BaseModel):
     session_id: str | None = None
     deployment_id: str | None = None
     personnel_id: str | None = None
-    status: str | None = None
+    status: AttendanceStatus | None = None
     limit: int = Field(100, ge=1, le=1000)
     offset: int = Field(0, ge=0)
 
@@ -417,7 +427,7 @@ class PersonnelAttendanceHistoryItem(BaseModel):
     session_date: utc_dt.datetime
     session_type: Literal["AM", "PM"]
     session_status: Literal["open", "closed", "finalized"]
-    status: Literal["present", "absent", "excused"]
+    status: AttendanceStatus
     remarks: str | None
     created_at: utc_dt.datetime
     updated_at: utc_dt.datetime
@@ -432,8 +442,7 @@ class PersonnelAttendanceHistoryStats(BaseModel):
     total_sessions: int
     present_count: int
     absent_count: int
-    excused_count: int
-    attendance_rate: float  # Percentage of present + excused vs total
+    attendance_rate: float  # Percentage of present-like statuses vs total
 
 
 class PersonnelAttendanceHistoryResponse(BaseModel):

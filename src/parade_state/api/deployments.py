@@ -8,7 +8,11 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
-from parade_state.models.attendance import AttendanceRecord, Session
+from parade_state.models.attendance import (
+    PRESENT_LIKE_STATUSES,
+    AttendanceRecord,
+    Session,
+)
 from parade_state.models.csv_ingestion import NominalRoll
 from parade_state.models.deployment import (
     Deployment,
@@ -942,19 +946,19 @@ async def get_deployment_status(
         )
         attendance_counts = attendance_result.all()
 
-        # Build status counts
-        counts = {"present": 0, "absent": 0, "excused": 0}
+        # Build status counts — bucket into present-like vs absent-like
+        present_count = 0
         total = 0
         for status_val, count in attendance_counts:
-            counts[status_val] = count
             total += count
+            if status_val in PRESENT_LIKE_STATUSES:
+                present_count += count
 
         # Create session info
         session_info = DeploymentStatusSessionInfo(
             status=session.status,  # type: ignore[assignment]
-            present=counts["present"],
-            absent=counts["absent"],
-            excused=counts["excused"],
+            present=present_count,
+            absent=total - present_count,
             total=total,
         )
 
@@ -981,17 +985,16 @@ async def get_deployment_status(
     )
     unit_records = unit_breakdown_result.all()
 
-    # Aggregate by unit
+    # Aggregate by unit — bucket statuses into present-like vs absent-like
     unit_stats = {}
     for unit_name, status_val, count in unit_records:
         if unit_name not in unit_stats:
             unit_stats[unit_name] = {
                 "total": 0,
                 "present": 0,
-                "absent": 0,
-                "excused": 0,
             }
-        unit_stats[unit_name][status_val] = count
+        if status_val in PRESENT_LIKE_STATUSES:
+            unit_stats[unit_name]["present"] += count
         unit_stats[unit_name]["total"] += count
 
     # Create unit breakdown list
@@ -1000,8 +1003,7 @@ async def get_deployment_status(
             name=unit_name,
             total=stats["total"],
             present=stats["present"],
-            absent=stats["absent"],
-            excused=stats["excused"],
+            absent=stats["total"] - stats["present"],
         )
         for unit_name, stats in sorted(unit_stats.items())
     ]

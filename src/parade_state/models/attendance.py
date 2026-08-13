@@ -13,6 +13,23 @@ if TYPE_CHECKING:
     from .deployment import Deployment
     from .personnel import Personnel
 
+# Canonical attendance status values (stored lowercase snake_case).
+ATTENDANCE_STATUSES: tuple[str, ...] = (
+    "present",
+    "absent",
+    "time_off",
+    "mc",
+    "yet_to_inpro",
+    "outpro",
+    "reporting_sick",
+    "late",
+    "att_out",
+)
+
+# Statuses counted as "present" when aggregating into present/absent buckets.
+# Everything not in this set counts as absent.
+PRESENT_LIKE_STATUSES: frozenset[str] = frozenset({"present", "late"})
+
 
 class Session(Base):
     """AM or PM attendance window, explicitly created by admin, linked to deployment."""
@@ -76,9 +93,7 @@ class AttendanceRecord(Base):
     )
     status: Mapped[str] = mapped_column(
         Enum(
-            "present",
-            "absent",
-            "excused",
+            *ATTENDANCE_STATUSES,
             name="attendance_status",
         ),
         default="absent",

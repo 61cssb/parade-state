@@ -1,7 +1,12 @@
 """Database models for Parade State Management System."""
 
 from .access import AccessLevel, DeploymentUserAccess, User, UserSubunitScope
-from .attendance import AttendanceRecord, Session
+from .attendance import (
+    ATTENDANCE_STATUSES,
+    PRESENT_LIKE_STATUSES,
+    AttendanceRecord,
+    Session,
+)
 from .audit import AuditLog
 from .auth_session import UserSession
 from .csv_ingestion import (
@@ -24,6 +29,8 @@ __all__ = [
     "DeploymentUserAccess",
     "User",
     "UserSubunitScope",
+    "ATTENDANCE_STATUSES",
+    "PRESENT_LIKE_STATUSES",
     "AttendanceRecord",
     "Session",
     "AuditLog",

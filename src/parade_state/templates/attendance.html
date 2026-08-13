@@ -112,7 +112,13 @@
                             style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-weight: 600;">
                         <option value="present" {% if r.status == 'present' %}selected{% endif %}>Present</option>
                         <option value="absent" {% if r.status == 'absent' %}selected{% endif %}>Absent</option>
-                        <option value="excused" {% if r.status == 'excused' %}selected{% endif %}>Excused</option>
+                        <option value="time_off" {% if r.status == 'time_off' %}selected{% endif %}>Time Off</option>
+                        <option value="mc" {% if r.status == 'mc' %}selected{% endif %}>MC</option>
+                        <option value="yet_to_inpro" {% if r.status == 'yet_to_inpro' %}selected{% endif %}>Yet to Inpro</option>
+                        <option value="outpro" {% if r.status == 'outpro' %}selected{% endif %}>Outpro</option>
+                        <option value="reporting_sick" {% if r.status == 'reporting_sick' %}selected{% endif %}>Reporting Sick</option>
+                        <option value="late" {% if r.status == 'late' %}selected{% endif %}>Late</option>
+                        <option value="att_out" {% if r.status == 'att_out' %}selected{% endif %}>Att Out</option>
                     </select>
                 </td>
                 <td style="padding: 0.5rem;">
@@ -244,9 +250,9 @@
         const rows = Array.from(tbody.querySelectorAll('tr'));
         rows.sort(function(a, b) {
             let va = a.dataset[col] || '', vb = b.dataset[col] || '';
-            // Status uses order: present < absent < excused
+            // Status uses operational reporting order (present-first, absent-last)
             if (col === 'status') {
-                const order = {present:0, absent:1, excused:2};
+                const order = {present:0, late:1, reporting_sick:2, yet_to_inpro:3, absent:4, time_off:5, mc:6, outpro:7, att_out:8};
                 va = order[va] ?? 9; vb = order[vb] ?? 9;
                 return sortAsc ? va - vb : vb - va;
             }
@@ -259,9 +265,15 @@
 
     function updateStatusColors() {
         const colors = {
-            present: { bg: '#d1fae5', fg: '#065f46' },
-            absent:  { bg: '#fee2e2', fg: '#991b1b' },
-            excused: { bg: '#fef3c7', fg: '#92400e' },
+            present:         { bg: '#d1fae5', fg: '#065f46' },
+            late:            { bg: '#ecfccb', fg: '#3f6212' },
+            reporting_sick:  { bg: '#ffedd5', fg: '#9a3412' },
+            yet_to_inpro:    { bg: '#e0e7ff', fg: '#3730a3' },
+            absent:          { bg: '#fee2e2', fg: '#991b1b' },
+            time_off:        { bg: '#dbeafe', fg: '#1e40af' },
+            mc:              { bg: '#ede9fe', fg: '#5b21b6' },
+            outpro:          { bg: '#fef3c7', fg: '#92400e' },
+            att_out:         { bg: '#fce7f3', fg: '#9d174d' },
         };
         document.querySelectorAll('.status-select').forEach(function(sel) {
             const c = colors[sel.value] || { bg: '#fff', fg: '#374151' };
