@@ -5,154 +5,136 @@
 {% block page_title %}Attendance Marking{% endblock %}
 
 {% block content %}
-<!-- Deployment + Session selectors -->
 <div class="card">
     <form method="get" action="/attendance" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
         <div style="display: flex; gap: 0.5rem; align-items: center;">
-            <label for="deployment_id" style="font-weight: bold;">Deployment:</label>
-            <select name="deployment_id" id="deployment_id" onchange="this.form.submit()"
-                    style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; min-width: 250px;">
-                {% for d in deployments %}
-                <option value="{{ d.id }}" {% if selected_deployment and d.id == selected_deployment.id %}selected{% endif %}>
-                    {{ d.name }} ({{ d.status }})
-                </option>
-                {% endfor %}
-            </select>
+            <label for="date" style="font-weight: bold;">Date:</label>
+            <input type="date" name="date" id="date" value="{{ target_date.strftime('%Y-%m-%d') }}"
+                   onchange="this.form.submit()"
+                   style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
         </div>
-        {% if selected_deployment %}
-        <div style="display: flex; gap: 0.5rem; align-items: center;">
-            <label for="session_id" style="font-weight: bold;">Session:</label>
-            <select name="session_id" id="session_id" onchange="this.form.submit()"
-                    style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; min-width: 250px;">
-                {% for s in sessions %}
-                <option value="{{ s.id }}" {% if selected_session and s.id == selected_session.id %}selected{% endif %}>
-                    {{ s.date.strftime('%Y-%m-%d') }} {{ s.session_type }} ({{ s.status }})
-                </option>
-                {% endfor %}
-            </select>
-        </div>
-        {% endif %}
     </form>
 </div>
 
-{% if selected_deployment and selected_session %}
-{% set is_open = selected_session.status == 'open' %}
+{% if selected_nominal_roll_id %}
 <div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <h3>
-            {{ selected_session.date.strftime('%Y-%m-%d') }} {{ selected_session.session_type }}
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+        <h3 style="margin: 0;">
+            {{ target_date.strftime('%Y-%m-%d') }}
             <span style="padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem;
-                {% if selected_session.status == 'open' %}background: #d1fae5; color: #065f46;
-                {% elif selected_session.status == 'closed' %}background: #dbeafe; color: #1e40af;
-                {% elif selected_session.status == 'finalized' %}background: #ede9fe; color: #5b21b6;
-                {% else %}background: #e5e7eb; color: #374151;{% endif %}">{{ selected_session.status }}</span>
+                {% if scope_activated %}background: #d1fae5; color: #065f46;
+                {% else %}background: #fee2e2; color: #991b1b;{% endif %}">
+                {% if scope_activated %}
+                    Scope: {% if scope_tagging_id %}Tagging{% else %}Nominal Roll{% endif %}
+                {% else %}
+                    Not activated
+                {% endif %}
+            </span>
         </h3>
-        {% if not is_open %}
-        <span style="font-size: 0.85rem; color: #6b7280;">Read-only — session is {{ selected_session.status }}.</span>
+        {% if counts %}
+        <div style="font-size: 0.85rem; color: #6b7280;">
+            AM: {{ counts.am.present }} present / {{ counts.am.total }} &middot;
+            PM: {{ counts.pm.present }} present / {{ counts.pm.total }}
+        </div>
         {% endif %}
     </div>
 
-    {% if attendance_records %}
-    <!-- Column filters -->
-    <div style="display: flex; gap: 0.75rem; margin-bottom: 0.75rem; flex-wrap: wrap; align-items: center;">
-        <span style="font-size: 0.8rem; color: #6b7280; font-weight: 600;">Filter:</span>
-        <select id="filter-unit" onchange="applyFilters()"
-                style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
-            <option value="">All Units</option>
-        </select>
-        <select id="filter-sub1" onchange="applyFilters()"
-                style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
-            <option value="">All Sub-unit 1</option>
-        </select>
-        <select id="filter-sub2" onchange="applyFilters()"
-                style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
-            <option value="">All Sub-unit 2</option>
-        </select>
-        <select id="filter-category" onchange="applyFilters()"
-                style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
-            <option value="">All Categories</option>
-        </select>
-        <select id="filter-rank" onchange="applyFilters()"
-                style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
-            <option value="">All Ranks</option>
-        </select>
-        <span id="filter-count" style="font-size: 0.8rem; color: #6b7280;"></span>
-    </div>
+    {% if not scope_activated %}
+    <p style="color: #991b1b; font-size: 0.9rem;">
+        Attendance is not activated for this nominal roll. A super-admin must
+        activate a scope before attendance can be recorded.
+    </p>
+    {% endif %}
 
+    {% if attendance_rows %}
     <table id="attendance-table" style="width: 100%; border-collapse: collapse;">
         <thead>
             <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
-                <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('unit')">
-                    Unit <span id="sort-unit"></span>
-                </th>
-                <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('sub1')">
-                    Sub-unit 1 <span id="sort-sub1"></span>
-                </th>
-                <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('sub2')">
-                    Sub-unit 2 <span id="sort-sub2"></span>
-                </th>
+                <th style="padding: 0.5rem;">Unit</th>
+                <th style="padding: 0.5rem;">Sub-unit 1</th>
                 <th style="padding: 0.5rem;">Category</th>
-                <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('rank')">
-                    Rank <span id="sort-rank"></span>
-                </th>
-                <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('name')">
-                    Name <span id="sort-name"></span>
-                </th>
-                <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('status')">
-                    Status <span id="sort-status"></span>
-                </th>
-                <th style="padding: 0.5rem;">Remarks</th>
+                <th style="padding: 0.5rem;">Rank</th>
+                <th style="padding: 0.5rem;">Name</th>
+                <th style="padding: 0.5rem;">AM Status</th>
+                <th style="padding: 0.5rem;">AM Remarks</th>
+                <th style="padding: 0.5rem;">PM Status</th>
+                <th style="padding: 0.5rem;">PM Remarks</th>
             </tr>
         </thead>
         <tbody id="attendance-body">
-            {% for r in attendance_records %}
-            <tr style="border-bottom: 1px solid #e5e7eb;" data-record-id="{{ r.id }}"
-                data-unit="{{ r.unit }}" data-sub1="{{ r.sub_unit_1 or '' }}" data-sub2="{{ r.sub_unit_2 or '' }}"
-                data-category="{{ r.category }}" data-rank="{{ r.rank }}" data-name="{{ r.full_name }}" data-status="{{ r.status }}">
+            {% for r in attendance_rows %}
+            <tr style="border-bottom: 1px solid #e5e7eb;" data-personnel-id="{{ r.personnel_id }}"
+                data-unit="{{ r.unit }}" data-sub1="{{ r.sub_unit_1 or '' }}"
+                data-category="{{ r.category }}" data-rank="{{ r.rank }}" data-name="{{ r.full_name }}">
                 <td style="padding: 0.5rem;">{{ r.unit }}</td>
                 <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_1 or '' }}</td>
-                <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_2 or '' }}</td>
                 <td style="padding: 0.5rem; white-space: nowrap;">{{ r.category }}</td>
                 <td style="padding: 0.5rem; white-space: nowrap;">{{ r.rank }}</td>
                 <td style="padding: 0.5rem;">{{ r.full_name }}</td>
                 <td style="padding: 0.5rem;">
-                    <select class="status-select" data-attendance-id="{{ r.id }}" data-field="status"
-                            {% if not is_open %}disabled{% endif %}
-                            onchange="updateAttendance('{{ r.id }}', 'status', this.value)"
+                    <select class="status-select" data-slot="am" data-pid="{{ r.personnel_id }}"
+                            {% if not scope_activated %}disabled{% endif %}
+                            onchange="markDirty(this)"
                             style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-weight: 600;">
-                        <option value="present" {% if r.status == 'present' %}selected{% endif %}>Present</option>
-                        <option value="absent" {% if r.status == 'absent' %}selected{% endif %}>Absent</option>
-                        <option value="time_off" {% if r.status == 'time_off' %}selected{% endif %}>Time Off</option>
-                        <option value="mc" {% if r.status == 'mc' %}selected{% endif %}>MC</option>
-                        <option value="yet_to_inpro" {% if r.status == 'yet_to_inpro' %}selected{% endif %}>Yet to Inpro</option>
-                        <option value="outpro" {% if r.status == 'outpro' %}selected{% endif %}>Outpro</option>
-                        <option value="reporting_sick" {% if r.status == 'reporting_sick' %}selected{% endif %}>Reporting Sick</option>
-                        <option value="late" {% if r.status == 'late' %}selected{% endif %}>Late</option>
-                        <option value="att_out" {% if r.status == 'att_out' %}selected{% endif %}>Att Out</option>
+                        <option value="present" {% if r.status_am == 'present' %}selected{% endif %}>Present</option>
+                        <option value="absent" {% if r.status_am == 'absent' %}selected{% endif %}>Absent</option>
+                        <option value="time_off" {% if r.status_am == 'time_off' %}selected{% endif %}>Time Off</option>
+                        <option value="mc" {% if r.status_am == 'mc' %}selected{% endif %}>MC</option>
+                        <option value="yet_to_inpro" {% if r.status_am == 'yet_to_inpro' %}selected{% endif %}>Yet to Inpro</option>
+                        <option value="outpro" {% if r.status_am == 'outpro' %}selected{% endif %}>Outpro</option>
+                        <option value="reporting_sick" {% if r.status_am == 'reporting_sick' %}selected{% endif %}>Reporting Sick</option>
+                        <option value="late" {% if r.status_am == 'late' %}selected{% endif %}>Late</option>
+                        <option value="att_out" {% if r.status_am == 'att_out' %}selected{% endif %}>Att Out</option>
                     </select>
                 </td>
                 <td style="padding: 0.5rem;">
-                    <input type="text" data-attendance-id="{{ r.id }}" data-field="remarks"
-                           value="{{ r.remarks }}"
-                           {% if not is_open %}disabled{% endif %}
-                           onchange="updateAttendance('{{ r.id }}', 'remarks', this.value)"
-                           style="width: 100%; min-width: 200px; padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                    <input type="text" data-slot="am" data-field="remarks" data-pid="{{ r.personnel_id }}"
+                           value="{{ r.remarks_am }}"
+                           {% if not scope_activated %}disabled{% endif %}
+                           onchange="markDirty(this)"
+                           style="width: 100%; min-width: 160px; padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                </td>
+                <td style="padding: 0.5rem;">
+                    <select class="status-select" data-slot="pm" data-pid="{{ r.personnel_id }}"
+                            {% if not scope_activated %}disabled{% endif %}
+                            onchange="markDirty(this)"
+                            style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-weight: 600;">
+                        <option value="present" {% if r.status_pm == 'present' %}selected{% endif %}>Present</option>
+                        <option value="absent" {% if r.status_pm == 'absent' %}selected{% endif %}>Absent</option>
+                        <option value="time_off" {% if r.status_pm == 'time_off' %}selected{% endif %}>Time Off</option>
+                        <option value="mc" {% if r.status_pm == 'mc' %}selected{% endif %}>MC</option>
+                        <option value="yet_to_inpro" {% if r.status_pm == 'yet_to_inpro' %}selected{% endif %}>Yet to Inpro</option>
+                        <option value="outpro" {% if r.status_pm == 'outpro' %}selected{% endif %}>Outpro</option>
+                        <option value="reporting_sick" {% if r.status_pm == 'reporting_sick' %}selected{% endif %}>Reporting Sick</option>
+                        <option value="late" {% if r.status_pm == 'late' %}selected{% endif %}>Late</option>
+                        <option value="att_out" {% if r.status_pm == 'att_out' %}selected{% endif %}>Att Out</option>
+                    </select>
+                </td>
+                <td style="padding: 0.5rem;">
+                    <input type="text" data-slot="pm" data-field="remarks" data-pid="{{ r.personnel_id }}"
+                           value="{{ r.remarks_pm }}"
+                           {% if not scope_activated %}disabled{% endif %}
+                           onchange="markDirty(this)"
+                           style="width: 100%; min-width: 160px; padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
                 </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
-    {% else %}
-    <p style="color: #6b7280;">No attendance records for this session.</p>
+
+    {% if scope_activated %}
+    <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+        <button class="btn btn-primary" onclick="saveAttendance()">Save Attendance</button>
+        <span id="dirty-count" style="font-size: 0.8rem; color: #6b7280;"></span>
+    </div>
     {% endif %}
-</div>
-{% elif selected_deployment %}
-<div class="card">
-    <p style="color: #6b7280;">No sessions available for this deployment.</p>
+    {% else %}
+    <p style="color: #6b7280;">No personnel on this nominal roll.</p>
+    {% endif %}
 </div>
 {% else %}
 <div class="card">
-    <p style="color: #6b7280;">No deployments available. Contact an administrator to get access.</p>
+    <p style="color: #6b7280;">No accessible deployments. Contact an administrator to get access.</p>
 </div>
 {% endif %}
 
@@ -163,123 +145,68 @@
 <script>
     const USER_ID = "{{ user.id }}";
     const USER_ROLE = "{{ user.role }}";
+    const NOMINAL_ROLL_ID = "{{ selected_nominal_roll_id }}";
+    const TARGET_DATE = "{{ target_date.strftime('%Y-%m-%d') }}";
+    const dirtyPids = new Set();
 
-    async function updateAttendance(attendanceId, field, value) {
-        const body = {};
-        body[field] = value;
+    function markDirty(el) {
+        dirtyPids.add(el.dataset.pid);
+        document.getElementById('dirty-count').textContent =
+            dirtyPids.size + ' row(s) pending save';
+        updateStatusColors();
+    }
+
+    async function saveAttendance() {
+        if (!dirtyPids.size) {
+            showStatus('Nothing to save.', 'info');
+            return;
+        }
+        const records = [];
+        dirtyPids.forEach(function(pid) {
+            const row = document.querySelector('tr[data-personnel-id="' + cssEscape(pid) + '"]');
+            if (!row) return;
+            const amStatus = row.querySelector('select.status-select[data-slot="am"]');
+            const amRemarks = row.querySelector('input[data-slot="am"][data-field="remarks"]');
+            const pmStatus = row.querySelector('select.status-select[data-slot="pm"]');
+            const pmRemarks = row.querySelector('input[data-slot="pm"][data-field="remarks"]');
+            records.push({
+                personnel_id: pid,
+                date: TARGET_DATE,
+                status_am: amStatus.value,
+                remarks_am: amRemarks.value,
+                status_pm: pmStatus.value,
+                remarks_pm: pmRemarks.value,
+            });
+        });
 
         try {
-            const response = await fetch('/api/v1/attendance/' + attendanceId + '?user_id=' + USER_ID + '&user_role=' + USER_ROLE, {
-                method: 'PATCH',
+            const response = await fetch('/api/v1/attendance/upsert?user_id=' + USER_ID + '&user_role=' + USER_ROLE, {
+                method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
+                body: JSON.stringify({ nominal_roll_id: NOMINAL_ROLL_ID, records: records }),
             });
-
             if (response.ok) {
-                showStatus(field.charAt(0).toUpperCase() + field.slice(1) + ' updated.', 'success');
-                if (field === 'status') updateStatusColors();
+                showStatus('Attendance saved (' + records.length + ' rows).', 'success');
+                dirtyPids.clear();
+                document.getElementById('dirty-count').textContent = '';
             } else {
                 const data = await response.json();
-                showStatus('Update failed: ' + (data.detail || 'Unknown error'), 'error');
-                location.reload();
+                showStatus('Save failed: ' + (data.detail || 'Unknown error'), 'error');
             }
         } catch (error) {
             showStatus('Network error: ' + error.message, 'error');
         }
     }
 
+    // CSS.escape shim for UUID strings (safe subset).
+    function cssEscape(s) { return s.replace(/[^a-zA-Z0-9_-]/g, function(c){ return '\\' + c; }); }
+
     function showStatus(message, type) {
         const div = document.getElementById('statusMessage');
-        const color = type === 'success' ? '#10b981' : '#ef4444';
+        const color = type === 'success' ? '#10b981' : (type === 'info' ? '#3b82f6' : '#ef4444');
         div.innerHTML = '<p style="color: ' + color + '; font-weight: bold;">' + message + '</p>';
-        setTimeout(function() {
-            div.innerHTML = '';
-        }, 3000);
+        setTimeout(function() { div.innerHTML = ''; }, 3000);
     }
-
-    // --- Column filtering ---
-
-    function populateFilters() {
-        const rows = document.querySelectorAll('#attendance-body tr');
-        const units = new Set(), sub1s = new Set(), sub2s = new Set(), cats = new Set(), ranks = new Set();
-        rows.forEach(function(row) {
-            if (row.dataset.unit) units.add(row.dataset.unit);
-            if (row.dataset.sub1) sub1s.add(row.dataset.sub1);
-            if (row.dataset.sub2) sub2s.add(row.dataset.sub2);
-            if (row.dataset.category) cats.add(row.dataset.category);
-            if (row.dataset.rank) ranks.add(row.dataset.rank);
-        });
-        addOptions('filter-unit', units);
-        addOptions('filter-sub1', sub1s);
-        addOptions('filter-sub2', sub2s);
-        addOptions('filter-category', cats);
-        addOptions('filter-rank', ranks);
-    }
-
-    function addOptions(selectId, values) {
-        const select = document.getElementById(selectId);
-        const current = select.value;
-        [...values].sort().forEach(function(v) {
-            const opt = document.createElement('option');
-            opt.value = v;
-            opt.textContent = v;
-            select.appendChild(opt);
-        });
-        select.value = current;
-    }
-
-    function applyFilters() {
-        const fu = document.getElementById('filter-unit').value;
-        const f1 = document.getElementById('filter-sub1').value;
-        const f2 = document.getElementById('filter-sub2').value;
-        const fc = document.getElementById('filter-category').value;
-        const fr = document.getElementById('filter-rank').value;
-        const rows = document.querySelectorAll('#attendance-body tr');
-        let visible = 0;
-        rows.forEach(function(row) {
-            const match = (!fu || row.dataset.unit === fu)
-                && (!f1 || row.dataset.sub1 === f1)
-                && (!f2 || row.dataset.sub2 === f2)
-                && (!fc || row.dataset.category === fc)
-                && (!fr || row.dataset.rank === fr);
-            row.style.display = match ? '' : 'none';
-            if (match) visible++;
-        });
-        document.getElementById('filter-count').textContent =
-            visible !== rows.length ? '(' + visible + ' of ' + rows.length + ')' : '';
-    }
-
-    // --- Column sorting ---
-
-    let sortCol = null, sortAsc = true;
-
-    function sortBy(col) {
-        if (sortCol === col) {
-            sortAsc = !sortAsc;
-        } else {
-            sortCol = col;
-            sortAsc = true;
-        }
-        // Update arrow indicators
-        ['rank','name','unit','sub1','sub2','status'].forEach(function(c) {
-            document.getElementById('sort-' + c).textContent = c === col ? (sortAsc ? '\u25B2' : '\u25BC') : '';
-        });
-        const tbody = document.getElementById('attendance-body');
-        const rows = Array.from(tbody.querySelectorAll('tr'));
-        rows.sort(function(a, b) {
-            let va = a.dataset[col] || '', vb = b.dataset[col] || '';
-            // Status uses operational reporting order (present-first, absent-last)
-            if (col === 'status') {
-                const order = {present:0, late:1, reporting_sick:2, yet_to_inpro:3, absent:4, time_off:5, mc:6, outpro:7, att_out:8};
-                va = order[va] ?? 9; vb = order[vb] ?? 9;
-                return sortAsc ? va - vb : vb - va;
-            }
-            return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
-        });
-        rows.forEach(function(r) { tbody.appendChild(r); });
-    }
-
-    // --- Status dropdown color coding ---
 
     function updateStatusColors() {
         const colors = {
@@ -300,9 +227,7 @@
         });
     }
 
-    // Initialize filters and colors on page load
     document.addEventListener('DOMContentLoaded', function() {
-        populateFilters();
         updateStatusColors();
     });
 </script>

@@ -12,6 +12,7 @@ from parade_state.auth.admin_dependencies import (
 from parade_state.db import get_session_maker
 from parade_state.models import (
     AccessLevel,
+    AttendanceScope,
     AuditLog,
     CsvUpload,
     Deferment,
@@ -22,9 +23,6 @@ from parade_state.models import (
     Tagging,
     TaggingEntry,
     User,
-)
-from parade_state.models import (
-    Session as SessionModel,
 )
 from parade_state.utils import utc_dt
 
@@ -118,9 +116,9 @@ async def admin_dashboard(
             )
         ).scalar_one()
 
-        open_sessions = (
+        active_scopes = (
             await db.execute(
-                select(func.count(SessionModel.id)).where(SessionModel.status == "open")
+                select(func.count(AttendanceScope.nominal_roll_id))
             )
         ).scalar_one()
 
@@ -169,7 +167,7 @@ async def admin_dashboard(
         },
         active_page="dashboard",
         active_deployments=active_deployments,
-        open_sessions=open_sessions,
+        active_scopes=active_scopes,
         total_personnel=total_personnel,
         active_users=active_users,
         recent_activity=recent_activity,
@@ -183,7 +181,12 @@ async def admin_deployments(
     request: Request,
     status_filter: str | None = None,
 ):
-    """Render the deployments management page with expandable session sub-views."""
+    """Render the deployments management page.
+
+    Sessions (AM/PM) are now hardcoded and no longer user-managed — the
+    expanded session sub-views and create-session form have been removed.
+    Attendance is managed from the (forthcoming) attendance admin page.
+    """
     current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
@@ -196,20 +199,6 @@ async def admin_deployments(
 
         deployments_result = await db.execute(query)
         deployments = deployments_result.scalars().all()
-
-        # Batch-load sessions for all deployments on the page
-        sessions_by_deployment: dict[str, list] = {}
-        if deployments:
-            deployment_ids = [str(d.id) for d in deployments]
-            sessions_result = await db.execute(
-                select(SessionModel)
-                .where(SessionModel.deployment_id.in_(deployment_ids))
-                .order_by(SessionModel.date.desc(), SessionModel.created_at.desc())
-            )
-            for session in sessions_result.scalars().all():
-                sessions_by_deployment.setdefault(
-                    str(session.deployment_id), []
-                ).append(session)
 
     deployments_data = [
         {
@@ -224,70 +213,6 @@ async def admin_deployments(
         for d in deployments
     ]
 
-    sessions_data = {
-        dep_id: [
-            {
-                "id": str(s.id),
-                "deployment_id": str(s.deployment_id),
-                "date": s.date,
-                "session_type": s.session_type,
-                "status": s.status,
-            }
-            for s in sessions
-        ]
-        for dep_id, sessions in sessions_by_deployment.items()
-    }
-
-    # Compute next-session hints for autofill in the session creation form
-    next_session_hints: dict[str, dict[str, str]] = {}
-    now = utc_dt.utcnow()
-    today = now.date()
-    for d in deployments:
-        dep_id = str(d.id)
-        sessions = sessions_by_deployment.get(dep_id, [])
-        if not sessions:
-            # No sessions — infer from current time and deployment start date
-            base_date = max(today, d.valid_from.date())
-            if base_date > today:
-                # Deployment starts in the future — first session is start date AM
-                next_session_hints[dep_id] = {
-                    "date": base_date.strftime("%Y-%m-%d"),
-                    "session_type": "AM",
-                }
-            elif now.hour < 12:
-                next_session_hints[dep_id] = {
-                    "date": today.strftime("%Y-%m-%d"),
-                    "session_type": "AM",
-                }
-            elif now.hour < 18:
-                next_session_hints[dep_id] = {
-                    "date": today.strftime("%Y-%m-%d"),
-                    "session_type": "PM",
-                }
-            else:
-                next_session_hints[dep_id] = {
-                    "date": (today + utc_dt.timedelta(days=1)).strftime("%Y-%m-%d"),
-                    "session_type": "AM",
-                }
-            continue
-
-        # sessions sorted by date desc, so [0] is the latest
-        latest_date = sessions[0].date
-        has_pm_on_latest = any(
-            s.date == latest_date and s.session_type == "PM" for s in sessions
-        )
-        if has_pm_on_latest:
-            next_date = latest_date + utc_dt.timedelta(days=1)
-            next_session_hints[dep_id] = {
-                "date": next_date.strftime("%Y-%m-%d"),
-                "session_type": "AM",
-            }
-        else:
-            next_session_hints[dep_id] = {
-                "date": latest_date.strftime("%Y-%m-%d"),
-                "session_type": "PM",
-            }
-
     env = get_templates(request)
     template = env.get_template("admin/deployments.html")
 
@@ -301,8 +226,6 @@ async def admin_deployments(
         },
         active_page="deployments",
         deployments=deployments_data,
-        sessions_by_deployment=sessions_data,
-        next_session_hints=next_session_hints,
         status_filter=status_filter or "",
         deployment_statuses=DEPLOYMENT_STATUSES,
     )

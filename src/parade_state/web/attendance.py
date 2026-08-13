@@ -1,21 +1,23 @@
 """User-facing attendance marking view.
 
-Shows an inline-editable attendance table for a selected deployment and session.
+Shows an inline-editable attendance table for the active scope (NR or a
+Tagging) on the current day, with AM/PM status + remarks columns.
 """
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
-from sqlalchemy import select
+from sqlalchemy import and_, select
 
 from parade_state.api.access_control import (
     get_user_accessible_deployments,
     verify_deployment_access_or_admin,
 )
+from parade_state.api.attendance import attendance_counts_for_date
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
-from parade_state.models import AttendanceRecord, Personnel
-from parade_state.models import Session as SessionModel
+from parade_state.models import Attendance, AttendanceScope, Personnel
+from parade_state.utils import utc_dt
 
 router = APIRouter()
 
@@ -23,105 +25,95 @@ router = APIRouter()
 @router.get("/attendance", response_class=HTMLResponse)
 async def attendance_view(
     request: Request,
-    deployment_id: str | None = None,
-    session_id: str | None = None,
+    nominal_roll_id: str | None = None,
+    date: utc_dt.date | None = None,
 ):
     """Render the attendance marking page for non-admin users.
 
-    Shows a table of personnel with inline status/remarks editing.
+    Lists the active roster joined to today's attendance rows (AM/PM columns).
+    Attendance scope must be activated for the NR before rows can be edited.
+    Full polish (Subunit-1 scoping, Copy Remarks button) lands in PR 3.
     """
     current_user = await get_current_user_optional(request)
     if not current_user:
         return RedirectResponse(url="/auth/login", status_code=302)
 
+    target_date = date or utc_dt.utcnow().date()
+
     session_maker = get_session_maker()
     async with session_maker() as db:
-        # Get deployments the user can access
+        # Resolve the NR via the user's accessible deployments if not given.
         accessible = await get_user_accessible_deployments(
             str(current_user.id), current_user.role, db
         )
 
-        if not accessible:
-            env = _get_templates(request)
-            template = env.get_template("attendance.html")
-            return HTMLResponse(
-                content=template.render(
-                    request=request,
-                    user=_user_dict(current_user),
-                    active_page="attendance",
-                    deployments=[],
-                    selected_deployment=None,
-                    sessions=[],
-                    selected_session=None,
-                    attendance_records=[],
+        selected_nr_id = nominal_roll_id
+        if not selected_nr_id and accessible:
+            selected_nr_id = accessible[0].nominal_roll_id
+
+        scope: AttendanceScope | None = None
+        if selected_nr_id:
+            scope_result = await db.execute(
+                select(AttendanceScope).where(
+                    AttendanceScope.nominal_roll_id == selected_nr_id
                 )
             )
+            scope = scope_result.scalar_one_or_none()
 
-        # Resolve selected deployment
-        selected = None
-        if deployment_id:
-            for d in accessible:
-                if str(d.id) == deployment_id:
-                    selected = d
-                    break
-
-        if not selected:
-            active_deps = [d for d in accessible if d.status == "active"]
-            selected = active_deps[0] if active_deps else accessible[0]
-
-        # Verify access
-        _, has_access = await verify_deployment_access_or_admin(
-            str(selected.id), str(current_user.id), current_user.role, db
-        )
-        if not has_access:
-            return RedirectResponse(url="/auth/login", status_code=302)
-
-        # Get sessions for this deployment
-        sessions_result = await db.execute(
-            select(SessionModel)
-            .where(SessionModel.deployment_id == str(selected.id))
-            .order_by(SessionModel.date.desc(), SessionModel.session_type)
-        )
-        all_sessions = sessions_result.scalars().all()
-
-        # Resolve selected session
-        selected_session = None
-        if session_id:
-            for s in all_sessions:
-                if str(s.id) == session_id:
-                    selected_session = s
-                    break
-
-        if not selected_session and all_sessions:
-            # Default to most recent open session
-            open_sessions = [s for s in all_sessions if s.status == "open"]
-            selected_session = open_sessions[0] if open_sessions else all_sessions[0]
-
-        # Query attendance records joined with Personnel
+        # Build roster + attendance rows.
         attendance_rows = []
-        if selected_session:
-            rows_result = await db.execute(
-                select(AttendanceRecord, Personnel)
-                .join(Personnel, AttendanceRecord.personnel_id == Personnel.id)
-                .where(AttendanceRecord.session_id == str(selected_session.id))
-                .order_by(Personnel.rank, Personnel.full_name)
+        if selected_nr_id:
+            roster_result = await db.execute(
+                select(Personnel).where(
+                    and_(
+                        Personnel.nominal_roll_id == selected_nr_id,
+                        Personnel.status == "active",
+                    )
+                ).order_by(
+                    Personnel.unit,
+                    Personnel.sub_unit_1,
+                    Personnel.rank,
+                    Personnel.full_name,
+                )
             )
-            for record, person in rows_result.all():
+            roster = roster_result.scalars().all()
+
+            att_result = await db.execute(
+                select(Attendance).where(
+                    and_(
+                        Attendance.nominal_roll_id == selected_nr_id,
+                        Attendance.date == target_date,
+                    )
+                )
+            )
+            att_by_person = {
+                a.personnel_id: a for a in att_result.scalars().all()
+            }
+
+            for person in roster:
+                record = att_by_person.get(str(person.id))
                 attendance_rows.append(
                     {
-                        "id": str(record.id),
+                        "id": str(record.id) if record else "",
+                        "personnel_id": str(person.id),
                         "rank": person.rank,
                         "category": person.category,
                         "full_name": person.full_name,
-                        "unit": record.unit_snapshot or person.unit,
-                        "sub_unit_1": record.sub_unit_1_snapshot
-                        or person.sub_unit_1,
-                        "sub_unit_2": record.sub_unit_2_snapshot
-                        or person.sub_unit_2,
-                        "status": record.status,
-                        "remarks": record.remarks or "",
+                        "unit": person.unit,
+                        "sub_unit_1": person.sub_unit_1,
+                        "status_am": record.status_am if record else "absent",
+                        "remarks_am": record.remarks_am if record else "",
+                        "status_pm": record.status_pm if record else "absent",
+                        "remarks_pm": record.remarks_pm if record else "",
                     }
                 )
+
+        counts = (
+            await attendance_counts_for_date(selected_nr_id, target_date, db)
+            if selected_nr_id
+            else {"am": {"present": 0, "absent": 0, "total": 0},
+                  "pm": {"present": 0, "absent": 0, "total": 0}}
+        )
 
     env = _get_templates(request)
     template = env.get_template("attendance.html")
@@ -131,33 +123,15 @@ async def attendance_view(
         user=_user_dict(current_user),
         active_page="attendance",
         deployments=[
-            {"id": str(d.id), "name": d.name, "status": d.status} for d in accessible
+            {"id": str(d.id), "name": d.name, "status": d.status}
+            for d in accessible
         ],
-        selected_deployment={
-            "id": str(selected.id),
-            "name": selected.name,
-            "status": selected.status,
-        },
-        sessions=[
-            {
-                "id": str(s.id),
-                "date": s.date,
-                "session_type": s.session_type,
-                "status": s.status,
-            }
-            for s in all_sessions
-        ],
-        selected_session=(
-            {
-                "id": str(selected_session.id),
-                "date": selected_session.date,
-                "session_type": selected_session.session_type,
-                "status": selected_session.status,
-            }
-            if selected_session
-            else None
-        ),
-        attendance_records=attendance_rows,
+        selected_nominal_roll_id=selected_nr_id or "",
+        scope_activated=scope is not None,
+        scope_tagging_id=(scope.tagging_id if scope else None),
+        target_date=target_date,
+        attendance_rows=attendance_rows,
+        counts=counts,
     )
 
     return HTMLResponse(content=html_content)

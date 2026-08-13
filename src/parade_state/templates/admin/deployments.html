@@ -33,8 +33,6 @@
         {% else %}#e5e7eb{% endif %};">
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
             <div style="display: flex; align-items: center; gap: 0.75rem;">
-                <button onclick="toggleSessions('{{ d.id }}')" id="toggle-{{ d.id }}"
-                        style="background: none; border: none; cursor: pointer; font-size: 1rem; padding: 0.25rem;">▸</button>
                 <strong>{{ d.name }}</strong>
                 <span style="padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem;
                     {% if d.status == 'active' %}background: #d1fae5; color: #065f46;
@@ -97,76 +95,6 @@
                     onclick="toggleEditDates('{{ d.id }}')">Cancel</button>
         </div>
         {% endif %}
-
-        <div id="sessions-{{ d.id }}" data-status="{{ d.status }}" style="display: none; margin-top: 1rem;">
-            <h4 style="margin-bottom: 0.5rem; font-size: 0.9rem;">Attendance Sessions</h4>
-            {% set sessions = sessions_by_deployment.get(d.id, []) %}
-            {% if sessions %}
-            <table style="width: 100%; border-collapse: collapse; margin-bottom: 0.75rem;">
-                <thead>
-                    <tr style="text-align: left; border-bottom: 1px solid #e5e7eb;">
-                        <th style="padding: 0.4rem; font-size: 0.8rem;">Date</th>
-                        <th style="padding: 0.4rem; font-size: 0.8rem;">Type</th>
-                        <th style="padding: 0.4rem; font-size: 0.8rem;">Status</th>
-                        <th style="padding: 0.4rem; font-size: 0.8rem;">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for s in sessions %}
-                    <tr style="border-bottom: 1px solid #f3f4f6;">
-                        <td style="padding: 0.4rem; font-size: 0.85rem;">{{ s.date.strftime('%Y-%m-%d') }}</td>
-                        <td style="padding: 0.4rem; font-size: 0.85rem;">{{ s.session_type }}</td>
-                        <td style="padding: 0.4rem;">
-                            <span style="padding: 0.1rem 0.4rem; border-radius: 0.2rem; font-size: 0.7rem;
-                                {% if s.status == 'open' %}background: #d1fae5; color: #065f46;
-                                {% elif s.status == 'closed' %}background: #dbeafe; color: #1e40af;
-                                {% elif s.status == 'finalized' %}background: #ede9fe; color: #5b21b6;
-                                {% else %}background: #e5e7eb; color: #374151;{% endif %}">{{ s.status }}</span>
-                        </td>
-                        <td style="padding: 0.4rem;">
-                            <div style="display: flex; gap: 0.25rem;">
-                                {% if s.status == 'open' %}
-                                <a class="btn" style="background: #6b7280; color: white; font-size: 0.7rem; padding: 0.15rem 0.4rem; text-decoration: none;"
-                                   href="/attendance?deployment_id={{ d.id }}&session_id={{ s.id }}">Update</a>
-                                <button class="btn" style="background: #3b82f6; color: white; font-size: 0.7rem; padding: 0.15rem 0.4rem;"
-                                        onclick="transitionSession('{{ s.id }}', 'closed')">Close</button>
-                                {% elif s.status == 'closed' %}
-                                <button class="btn" style="background: #10b981; color: white; font-size: 0.7rem; padding: 0.15rem 0.4rem;"
-                                        onclick="transitionSession('{{ s.id }}', 'open')">Open</button>
-                                <button class="btn" style="background: #8b5cf6; color: white; font-size: 0.7rem; padding: 0.15rem 0.4rem;"
-                                        onclick="transitionSession('{{ s.id }}', 'finalized')">Finalize</button>
-                                {% endif %}
-                                {% if user.role == 'super_admin' and s.status != 'finalized' %}
-                                <button class="btn" style="background: #ef4444; color: white; font-size: 0.7rem; padding: 0.15rem 0.4rem;"
-                                        onclick="deleteSession('{{ s.id }}')">Delete</button>
-                                {% endif %}
-                            </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <p style="color: #6b7280; font-size: 0.85rem; margin-bottom: 0.75rem;">No attendance sessions yet.</p>
-            {% endif %}
-
-            {% if d.status == 'active' %}
-            {% set hint = next_session_hints.get(d.id, {}) %}
-            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-                <input type="date" id="new-session-date-{{ d.id }}"
-                       value="{{ hint.get('date', '') }}"
-                       style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
-                <select id="new-session-type-{{ d.id }}" style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
-                    <option value="AM" {% if hint.get('session_type') == 'AM' %}selected{% endif %}>AM</option>
-                    <option value="PM" {% if hint.get('session_type') == 'PM' %}selected{% endif %}>PM</option>
-                </select>
-                <button class="btn btn-success" style="font-size: 0.75rem; padding: 0.3rem 0.6rem;"
-                        onclick="createSession('{{ d.id }}')">+ Create session</button>
-            </div>
-            {% elif d.status == 'draft' %}
-            <p style="color: #6b7280; font-size: 0.8rem; font-style: italic;">Activate the deployment to create attendance sessions.</p>
-            {% endif %}
-        </div>
     </div>
     {% endfor %}
     {% else %}
@@ -181,18 +109,6 @@
 <script>
     const ADMIN_USER_ID = "{{ user.id }}";
     const ADMIN_USER_ROLE = "{{ user.role }}";
-
-    function toggleSessions(deploymentId) {
-        const div = document.getElementById('sessions-' + deploymentId);
-        const btn = document.getElementById('toggle-' + deploymentId);
-        if (div.style.display === 'none') {
-            div.style.display = 'block';
-            btn.textContent = '▾';
-        } else {
-            div.style.display = 'none';
-            btn.textContent = '▸';
-        }
-    }
 
     function toggleEditDates(deploymentId) {
         const div = document.getElementById('edit-dates-' + deploymentId);
@@ -250,54 +166,6 @@
         }
     }
 
-    async function transitionSession(sessionId, newStatus) {
-        try {
-            const response = await fetch('/api/v1/sessions/' + sessionId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status: newStatus }),
-            });
-            if (response.ok) {
-                showStatus('Session transitioned to ' + newStatus + '.', 'success');
-                setTimeout(function() { location.reload(); }, 800);
-            } else {
-                const data = await response.json();
-                showStatus('Transition failed: ' + (data.detail || 'Unknown error'), 'error');
-            }
-        } catch (error) {
-            showStatus('Network error: ' + error.message, 'error');
-        }
-    }
-
-    async function createSession(deploymentId) {
-        const dateInput = document.getElementById('new-session-date-' + deploymentId);
-        const typeInput = document.getElementById('new-session-type-' + deploymentId);
-        if (!dateInput.value) {
-            showStatus('Please select a date.', 'error');
-            return;
-        }
-        try {
-            const response = await fetch('/api/v1/sessions/?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    deployment_id: deploymentId,
-                    date: dateInput.value,
-                    session_type: typeInput.value,
-                }),
-            });
-            if (response.ok) {
-                showStatus('Session created.', 'success');
-                setTimeout(function() { location.reload(); }, 800);
-            } else {
-                const data = await response.json();
-                showStatus('Create failed: ' + (data.detail || 'Unknown error'), 'error');
-            }
-        } catch (error) {
-            showStatus('Network error: ' + error.message, 'error');
-        }
-    }
-
     async function deleteDeployment(deploymentId, name) {
         if (!confirm('Delete deployment "' + name + '"? This cannot be undone.')) return;
         try {
@@ -316,40 +184,10 @@
         }
     }
 
-    async function deleteSession(sessionId) {
-        if (!confirm('Delete this session? This cannot be undone.')) return;
-        try {
-            const response = await fetch('/api/v1/sessions/' + sessionId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
-                method: 'DELETE',
-            });
-            if (response.ok) {
-                showStatus('Session deleted.', 'success');
-                setTimeout(function() { location.reload(); }, 800);
-            } else {
-                const data = await response.json();
-                showStatus('Delete failed: ' + (data.detail || 'Unknown error'), 'error');
-            }
-        } catch (error) {
-            showStatus('Network error: ' + error.message, 'error');
-        }
-    }
-
     function showStatus(message, type) {
         const div = document.getElementById('statusMessage');
         const color = type === 'success' ? '#10b981' : '#ef4444';
         div.innerHTML = '<p style="color: ' + color + '; font-weight: bold;">' + message + '</p>';
     }
-
-    // Auto-expand active deployment on page load
-    document.addEventListener('DOMContentLoaded', function() {
-        document.querySelectorAll('[id^="sessions-"]').forEach(function(div) {
-            if (div.dataset.status === 'active') {
-                div.style.display = 'block';
-                const id = div.id.replace('sessions-', '');
-                const btn = document.getElementById('toggle-' + id);
-                if (btn) btn.textContent = '▾';
-            }
-        });
-    });
 </script>
 {% endblock %}
