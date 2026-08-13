@@ -132,8 +132,8 @@ Once running, visit:
 ✅ **Production-Ready** with admin + user-facing interface:
 - 292 tests passing (100% pass rate)
 - 57 API endpoints fully implemented and tested
-- **Admin interface with Jinja2 templates** (9 pages: dashboard, estabs, deployments, deferments, users, CSV upload, settings, audit, plus deployment-personnel sub-view)
-- **User-facing views** (deployment summary, attendance marking, estab browser)
+- **Admin interface with Jinja2 templates** (9 pages: dashboard, nominal rolls, deployments, deferments, users, CSV upload, settings, audit, plus deployment-personnel sub-view)
+- **User-facing views** (deployment summary, attendance marking, nominal roll browser)
 - **Host-independent Google OAuth** (works with any domain)
 - Multi-tenant deployment access control
 - Comprehensive audit trails

@@ -1,4 +1,4 @@
-"""Deferment model — tracks personnel deferments linked to estab personnel records."""
+"""Deferment model - tracks personnel deferments linked to nominal roll personnel records."""
 
 from typing import TYPE_CHECKING
 
@@ -19,7 +19,7 @@ class Deferment(Base):
 
     ``rank_name`` and ``sub_unit`` are snapshotted from the linked personnel at
     creation time so the deferment remains an accurate record even if the
-    personnel row is later edited or the estab is superseded.
+    personnel row is later edited or the nominal roll is superseded.
     """
 
     __tablename__ = "deferments"

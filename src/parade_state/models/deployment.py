@@ -12,18 +12,18 @@ from ..db import Base
 if TYPE_CHECKING:
     from .access import DeploymentUserAccess, UserSubunitScope
     from .attendance import AttendanceRecord, Session
-    from .csv_ingestion import Estab
+    from .csv_ingestion import NominalRoll
     from .personnel import Personnel
 
 
 class Deployment(Base):
-    """Operational deployment based on an estab, with overrides and validity window."""
+    """Operational deployment based on a nominal roll, with overrides and validity window."""
 
     __tablename__ = "deployments"
 
     name: Mapped[str] = mapped_column(String(255))
-    estab_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("estabs.id", ondelete="RESTRICT")
+    nominal_roll_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("nominal_rolls.id", ondelete="RESTRICT")
     )
     status: Mapped[str] = mapped_column(
         Enum(
@@ -48,7 +48,7 @@ class Deployment(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
-    estab: Mapped["Estab"] = relationship(back_populates="deployments")
+    nominal_roll: Mapped["NominalRoll"] = relationship(back_populates="deployments")
     personnel_overrides: Mapped[list["DeploymentPersonnelOverride"]] = relationship(
         back_populates="deployment", cascade="all, delete-orphan"
     )
@@ -76,7 +76,7 @@ class Deployment(Base):
 
 
 class DeploymentPersonnelOverride(Base):
-    """Per-deployment personnel assignment remap (override estab hierarchy)."""
+    """Per-deployment personnel assignment remap (override nominal roll hierarchy)."""
 
     __tablename__ = "deployment_personnel_overrides"
 

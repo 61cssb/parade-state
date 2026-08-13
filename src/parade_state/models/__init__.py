@@ -8,7 +8,7 @@ from .csv_ingestion import (
     ColumnMapping,
     ColumnMetadata,
     CsvUpload,
-    Estab,
+    NominalRoll,
 )
 from .deferments import Deferment
 from .deployment import (
@@ -31,7 +31,7 @@ __all__ = [
     "ColumnMapping",
     "ColumnMetadata",
     "CsvUpload",
-    "Estab",
+    "NominalRoll",
     "Deferment",
     "Deployment",
     "DeploymentNotes",

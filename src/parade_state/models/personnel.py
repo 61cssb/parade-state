@@ -1,4 +1,4 @@
-"""Personnel and establishment models."""
+"""Personnel and nominal roll models."""
 
 from typing import TYPE_CHECKING
 
@@ -11,24 +11,24 @@ from ..db import Base
 
 if TYPE_CHECKING:
     from .attendance import AttendanceRecord
-    from .csv_ingestion import Estab
+    from .csv_ingestion import NominalRoll
     from .deferments import Deferment
     from .deployment import DeploymentNotes, DeploymentPersonnelOverride
 
 
 class Personnel(Base):
-    """Individual personnel record, sourced from CSV estab.
+    """Individual personnel record, sourced from a CSV nominal roll.
 
-    Identity: ``id`` is the row PK (one row per estab-person pairing). ``short_id``
-    is the cross-estab person identifier — an 8-char base62 string shared by every
-    row belonging to the same individual across estabs. Minted server-side; never
+    Identity: ``id`` is the row PK (one row per nominal-roll-person pairing). ``short_id``
+    is the cross-roll person identifier — an 8-char base62 string shared by every
+    row belonging to the same individual across rolls. Minted server-side; never
     sourced from the CSV (``pers_no`` is dropped on parse, never stored).
     """
 
     __tablename__ = "personnel"
 
-    estab_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("estabs.id", ondelete="CASCADE"), index=True
+    nominal_roll_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("nominal_rolls.id", ondelete="CASCADE"), index=True
     )
     short_id: Mapped[str] = mapped_column(String(8), default=ids.short_id, index=True)
     rank: Mapped[str] = mapped_column(String(50), index=True)
@@ -56,7 +56,7 @@ class Personnel(Base):
     )
 
     # Relationships
-    estab: Mapped["Estab"] = relationship(back_populates="personnel")
+    nominal_roll: Mapped["NominalRoll"] = relationship(back_populates="personnel")
     deployment_overrides: Mapped[list["DeploymentPersonnelOverride"]] = relationship(
         back_populates="personnel", cascade="all, delete-orphan"
     )
@@ -71,7 +71,7 @@ class Personnel(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("estab_id", "short_id", name="uq_personnel_estab_short_id"),
+        UniqueConstraint("nominal_roll_id", "short_id", name="uq_personnel_nominal_roll_short_id"),
         {"schema": None},  # Default schema
     )
 

@@ -100,7 +100,7 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 - `tests/integration/test_deferments_api.py` - Deferment CRUD, callup_status transitions, super_admin auth (15 tests)
 - `tests/integration/test_deployments_api.py` - Deployment lifecycle, CRUD operations (18 tests)
 - `tests/integration/test_deployment_exclusions_api.py` - Personnel exclusion management (9 tests)
-- `tests/integration/test_estabs_api.py` - Estab lifecycle (confirm/unconfirm/delete, label updates) (18 tests)
+- `tests/integration/test_nominal_rolls_api.py` - Nominal Roll lifecycle (confirm/unconfirm/delete, label updates) (18 tests)
 - `tests/integration/test_personnel_api.py` - Personnel management, search, filtering (12 tests)
 - `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (10 tests)
 - `tests/integration/test_sessions_api.py` - Session management, open/close/finalize, reopen (8 tests)
@@ -150,7 +150,7 @@ test_db          # Alias for session_maker (backward compatibility)
 # Sample data fixtures (automatically create fresh data)
 sample_access_levels    # Creates: unit, coy, platoon, section
 sample_users            # Creates: admin user, regular user
-sample_estab            # Creates: sample establishment
+sample_nominal_roll            # Creates: sample establishment
 sample_personnel        # Creates: 3 sample personnel records
 sample_deployment       # Creates: sample active deployment
 sample_sessions         # Creates: multiple session records
@@ -199,7 +199,7 @@ async def test_example(client, sample_users, sample_deployment):
 - Sequential status transitions (open → closed → finalized)
 - Session uniqueness constraints (one per type per deployment per day)
 - Proper validation and error handling
-- **Auto-population:** Creating a session automatically generates AttendanceRecord entries for all active personnel in the deployment's estab (minus exclusions), with status='absent'
+- **Auto-population:** Creating a session automatically generates AttendanceRecord entries for all active personnel in the deployment's nominal roll (minus exclusions), with status='absent'
 - **Endpoints:** 5 session management endpoints
 
 **Attendance Management (✅ Complete)**
@@ -226,7 +226,7 @@ async def test_example(client, sample_users, sample_deployment):
 - **Tests:** 23 comprehensive tests
 
 **Deferments (✅ Super-admin MVP)**
-- Personnel deferment CRUD linked to a single estab personnel record
+- Personnel deferment CRUD linked to a single nominal roll personnel record
 - `rank_name` and `sub_unit` snapshotted at creation from the linked personnel
 - Reason enum (12 values) and status enum (8 values)
 - Personnel `callup_status` field (`Called Up` / `Not Called Up` / `Deferred`):
@@ -303,7 +303,7 @@ async def verify_deployment_access(deployment_id, user_id, user_role, db):
 **3. Comprehensive Filtering:**
 ```python
 # Filter by unit hierarchy with override awareness
-query = select(Personnel).where(Personnel.estab_id == deployment.estab_id)
+query = select(Personnel).where(Personnel.nominal_roll_id == deployment.nominal_roll_id)
 
 # Apply filters to effective assignments (overrides take precedence)
 for personnel in personnel_list:
@@ -333,7 +333,7 @@ if search_term:
 **Testing Strategy:**
 - 23 comprehensive tests covering all functionality
 - Tests for override handling, filtering, search, and access control
-- Edge cases (invalid deployment_id, different estab, etc.)
+- Edge cases (invalid deployment_id, different nominal roll, etc.)
 - Role-based access control testing
 
 **Files Modified/Created:**
@@ -344,7 +344,7 @@ if search_term:
 
 **Key Features:**
 - **Deployment-Scoped Querying:** All personnel operations within deployment context
-- **Override Awareness:** Shows deployment-specific unit assignments (not base estab)
+- **Override Awareness:** Shows deployment-specific unit assignments (not base nominal roll)
 - **Filtering Capabilities:** By unit, subunit hierarchy, name, service number
 - **Access Control:** Users can only see personnel in deployments they have access to
 - **Attendance Integration:** Shows attendance history and current status
@@ -415,7 +415,7 @@ SELECT p.*, dop.unit as override_unit, dop.sub_unit_1 as override_sub_unit_1, ..
 FROM personnel p
 LEFT JOIN deployment_personnel_overrides dop
   ON dop.personnel_id = p.id AND dop.deployment_id = :deployment_id
-WHERE p.estab_id = (SELECT estab_id FROM deployments WHERE id = :deployment_id)
+WHERE p.nominal_roll_id = (SELECT nominal_roll_id FROM deployments WHERE id = :deployment_id)
   AND (p.unit = :filter_unit OR :filter_unit IS NULL)
   AND (p.full_name LIKE :search OR p.short_id LIKE :search OR :search IS NULL)
 
@@ -562,7 +562,7 @@ parade-state/
 │   │   ├── csv_upload.py        # CSV upload pipeline
 │   │   ├── deferments.py        # Deferment CRUD (super_admin only)
 │   │   ├── deployments.py       # Deployment lifecycle
-│   │   ├── estabs.py            # Estab list/get/update (status, notes, label)/delete
+│   │   ├── nominal_rolls.py            # Nominal Roll list/get/update (status, notes, label)/delete
 │   │   ├── personnel.py         # Personnel listing + attendance history
 │   │   ├── sessions.py          # Session open/close/reopen/finalize
 │   │   └── users.py             # User CRUD + role/status transitions
@@ -582,7 +582,7 @@ parade-state/
 │   │   ├── attendance.py        # Session, AttendanceRecord
 │   │   ├── audit.py             # AuditLog
 │   │   ├── auth_session.py      # UserSession
-│   │   ├── csv_ingestion.py     # Estab, CsvUpload, ColumnMapping, ColumnMetadata
+│   │   ├── csv_ingestion.py     # Nominal Roll, CsvUpload, ColumnMapping, ColumnMetadata
 │   │   ├── deferments.py        # Deferment
 │   │   ├── deployment.py        # Deployment, overrides, notes, exclusions
 │   │   ├── personnel.py         # Personnel (with callup_status)
@@ -597,7 +597,7 @@ parade-state/
 │       ├── attendance.py        # /attendance marking view
 │       ├── auth.py              # /auth login/logout redirects
 │       ├── deployment.py        # /deployment summary view
-│       └── estab.py             # /estab roster browser
+│       └── nominal roll.py             # /nominal-roll roster browser
 ├── tests/
 │   ├── conftest.py              # Pytest fixtures (db, client, sample data)
 │   ├── test_utils.py

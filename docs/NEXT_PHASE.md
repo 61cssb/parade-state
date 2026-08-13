@@ -29,15 +29,15 @@
 - **Combined deployment + session admin page** (master-detail with status transitions, session creation)
 - **Non-admin deployment summary view** (AM/PM session counts, unit breakdown)
 - **Non-admin attendance marking view** (inline status/remarks editing, role-aware nav)
-- **Estab admin view** (`/admin/estabs`) with CAA date, source filename, personnel count, status
+- **Nominal Roll admin view** (`/admin/nominal-rolls`) with CAA date, source filename, personnel count, status
 - **`CsvUpload.original_filename`** — upload-time filename now stored (was only in audit log)
-- **Estab API** (`GET /api/v1/estabs`, `GET /api/v1/estabs/{id}`) — list/detail with latest CsvUpload join
-- **Non-admin estab browser** (`/estab`) — roster table with estab selector, search, unit filter; row-numbered for easy counting
-- **`short_id` personnel identity** (2026-06-29) — `pers_no` dropped entirely (no longer imported or stored); replaced with server-minted 8-char base62 `short_id` as the cross-estab person identifier. Migration `c3d4e5f6a7b8` (batch-mode for SQLite). See [docs/SPECIFICATION.md](SPECIFICATION.md) §3.2.1.
-- **Deployment creation from estab** (2026-07-01) — GUI modal on `/admin/estabs` for confirmed estabs; API validates estab existence + confirmed status (400 on failure). UI uses military date/time format (YYYYMMDD HHMM) with hardcoded Singapore timezone (+08:00).
-- **Estab lifecycle management** (2026-07-01) — `PATCH /api/v1/estabs/{id}` for draft↔confirmed transitions (confirm/unconfirm); `DELETE /api/v1/estabs/{id}` for super_admin-only cascade deletion (draft/confirmed only). Migration `d4e5f6a7b8c9`.
+- **Nominal Roll API** (`GET /api/v1/nominal-rolls`, `GET /api/v1/nominal-rolls/{id}`) — list/detail with latest CsvUpload join
+- **Non-admin nominal roll browser** (`/nominal-roll`) — roster table with nominal roll selector, search, unit filter; row-numbered for easy counting
+- **`short_id` personnel identity** (2026-06-29) — `pers_no` dropped entirely (no longer imported or stored); replaced with server-minted 8-char base62 `short_id` as the cross-roll person identifier. Migration `c3d4e5f6a7b8` (batch-mode for SQLite). See [docs/SPECIFICATION.md](SPECIFICATION.md) §3.2.1.
+- **Deployment creation from nominal roll** (2026-07-01) — GUI modal on `/admin/nominal-rolls` for confirmed nominal rolls; API validates nominal roll existence + confirmed status (400 on failure). UI uses military date/time format (YYYYMMDD HHMM) with hardcoded Singapore timezone (+08:00).
+- **Nominal Roll lifecycle management** (2026-07-01) — `PATCH /api/v1/nominal-rolls/{id}` for draft↔confirmed transitions (confirm/unconfirm); `DELETE /api/v1/nominal-rolls/{id}` for super_admin-only cascade deletion (draft/confirmed only). Migration `d4e5f6a7b8c9`.
 - **Deployment personnel exclusion** (2026-07-01) — New `DeploymentPersonnelExclusion` model; `POST/DELETE /api/v1/deployments/{id}/exclusions` endpoints (draft-only); admin page at `/admin/deployments/{id}/personnel` with checkbox-based multi-row editing, client-side search, batch update, and change tracking. Excluded personnel filtered from all deployment views via shared listing function.
-- **Session auto-population** (2026-07-01) — Creating a session now automatically generates AttendanceRecord entries for all active personnel in the deployment's estab (minus exclusions), with status='absent'. Eliminates manual record creation.
+- **Session auto-population** (2026-07-01) — Creating a session now automatically generates AttendanceRecord entries for all active personnel in the deployment's nominal roll (minus exclusions), with status='absent'. Eliminates manual record creation.
 - **Attendance status enum simplified** (2026-07-01) — Removed "unknown" status; only "present", "absent", "excused" remain. Default is "absent".
 - **Deployment date editing** (2026-07-01) — Admin UI supports editing valid_from/valid_until via inline form. API validates that no sessions fall outside the new date range (returns error if sessions would be orphaned).
 - **Admin deployments page enhancements** (2026-07-01) — Auto-expands active deployment on page load, per-session "Update" button linking to /attendance, autofill next session date/type for quick session creation.
@@ -101,9 +101,9 @@
 
 #### Deferred CSV Pipeline Steps (Future Sessions)
 - **Step 2:** Column mapping UI (map raw CSV columns to canonical names)
-- **Step 3:** Diff confirmation (compare new upload vs current active Estab)
+- **Step 3:** Diff confirmation (compare new upload vs current active Nominal Roll)
 - ColumnMetadata record creation
-- Estab creation from CSV data
+- Nominal Roll creation from CSV data
 - Personnel record generation from mapped CSV rows
 
 ### Phase 9C-3: Deployment + Session Management — COMPLETED
@@ -159,7 +159,7 @@
 **Deferred items (await CSV Step 2):**
 - Column manifest pattern (configurable columns, sensitivity levels, display order)
 - Column mapping UI
-- Personnel browser (estab-scoped, not deployment-scoped)
+- Personnel browser (nominal roll-scoped, not deployment-scoped)
 
 ### Phase 9E: Mobile Optimization (Future)
 
@@ -167,36 +167,36 @@
 
 ---
 
-### Phase 9F: Estab Views — COMPLETED (2026-06-24)
+### Phase 9F: Nominal Roll Views — COMPLETED (2026-06-24)
 
-**Goal:** Surface estab data to both admins (management view) and regular users (roster browser).
+**Goal:** Surface nominal roll data to both admins (management view) and regular users (roster browser).
 
 **Completed features:**
 - [x] `CsvUpload.original_filename` column + Alembic migration `a1b2c3d4e5f6`
-- [x] `GET /api/v1/estabs` (list) and `GET /api/v1/estabs/{id}` (detail), admin-only, with latest-CsvUpload join for source filename
+- [x] `GET /api/v1/nominal-rolls` (list) and `GET /api/v1/nominal-rolls/{id}` (detail), admin-only, with latest-CsvUpload join for source filename
 - [x] `POST /api/v1/csv/upload` stores `original_filename`
-- [x] Admin estab management page at `/admin/estabs` (CAA date, source file, personnel count, status filter)
-- [x] Non-admin estab browser at `/estab` — roster table with row numbers, estab selector, search, unit filter
-- [x] Nav: "Estab" link in user sidebar (between Attendance and Admin section); "Estabs" link in admin sidebar
+- [x] Admin nominal roll management page at `/admin/nominal-rolls` (CAA date, source file, personnel count, status filter)
+- [x] Non-admin nominal roll browser at `/nominal-roll` — roster table with row numbers, nominal roll selector, search, unit filter
+- [x] Nav: "Nominal Roll" link in user sidebar (between Attendance and Admin section); "Nominal Rolls" link in admin sidebar
 - [x] 235 tests still passing (no regressions)
 
 **Design decisions:**
-- File reference stored on `CsvUpload` (normalized) and surfaced via join in estab views. Denormalization to `Estab` deferred — see Pending Decisions.
-- Estab browser is open to all authenticated users (org-wide reference data). Deployment-based subunit scoping is a possible future refinement.
+- File reference stored on `CsvUpload` (normalized) and surfaced via join in nominal roll views. Denormalization to `Nominal Roll` deferred — see Pending Decisions.
+- Nominal Roll browser is open to all authenticated users (org-wide reference data). Deployment-based subunit scoping is a possible future refinement.
 
 **Files added:**
-- `src/parade_state/api/estabs.py`
-- `src/parade_state/web/estab.py`
-- `src/parade_state/templates/admin/estabs.html`
-- `src/parade_state/templates/estab.html`
+- `src/parade_state/api/nominal_rolls.py`
+- `src/parade_state/web/nominal-roll.py`
+- `src/parade_state/templates/admin/nominal-rolls.html`
+- `src/parade_state/templates/nominal-roll.html`
 - `src/parade_state/migrations/versions/a1b2c3d4e5f6_add_original_filename_to_csv_uploads.py`
 
 ---
 
 ### Pending Decisions
 
-**Estab file-reference convention (2026-06-24).** Each Estab is currently associated with its source file via `CsvUpload.original_filename` (upload-time filename, joined via `estab.csv_uploads`). Open questions:
-- Should this be denormalized onto `Estab` directly (e.g., `Estab.source_filename`) for cheaper queries / independent renaming?
+**Nominal Roll file-reference convention (2026-06-24).** Each Nominal Roll is currently associated with its source file via `CsvUpload.original_filename` (upload-time filename, joined via `nominal roll.csv_uploads`). Open questions:
+- Should this be denormalized onto `Nominal Roll` directly (e.g., `NominalRoll.source_filename`) for cheaper queries / independent renaming?
 - Should the identifier be a filename, a content-addressed hash (`sha256_hash` already exists), or an opaque upload ID?
 - Naming: `original_filename` vs `source_filename` vs `source_file_ref`.
 
@@ -217,8 +217,8 @@ Expand the existing `client` fixture to test page routes end-to-end: GET page �
 - Session creation auto-populates `/attendance` with absent records
 - Deployment date edits → 400 (invalid) / 200 (valid) with updated page state
 - Excluded personnel absent from non-admin deployment view
-- Estab modal button rendered conditionally on confirmed status
-- Estab confirm/unconfirm/delete buttons → page re-renders correctly
+- Nominal Roll modal button rendered conditionally on confirmed status
+- Nominal Roll confirm/unconfirm/delete buttons → page re-renders correctly
 - Checkbox exclusion UI on `/admin/deployments/{id}/personnel` renders expected rows
 
 #### Tier 2: Client-side JS behavior (Playwright Python) — NEW DEPENDENCY
@@ -274,8 +274,8 @@ git log --oneline --all
 ```
 
 **Recent Major Completions:**
-- **short_id Refactor** (2026-06-29) - Replaced `Personnel.pers_no` (opaque, sensitive external key, no longer imported or stored) with `Personnel.short_id` — a server-minted 8-char base62 cross-estab person identifier. Added `ids.short_id()` and `ids.mint_unique_short_id()`. Migration `c3d4e5f6a7b8` (uses `batch_alter_table` for SQLite compatibility). Updated API, web/views, schemas, tests, and all docs. 245 tests passing.
-- **Phase 9F: Estab Views** (2026-06-24) - Admin estab management page (`/admin/estabs`), non-admin estab browser (`/estab`) with row-numbered roster table and search/unit filter, estab API endpoints, `CsvUpload.original_filename` column + migration `a1b2c3d4e5f6`. File-reference naming convention deferred (see Pending Decisions).
+- **short_id Refactor** (2026-06-29) - Replaced `Personnel.pers_no` (opaque, sensitive external key, no longer imported or stored) with `Personnel.short_id` — a server-minted 8-char base62 cross-roll person identifier. Added `ids.short_id()` and `ids.mint_unique_short_id()`. Migration `c3d4e5f6a7b8` (uses `batch_alter_table` for SQLite compatibility). Updated API, web/views, schemas, tests, and all docs. 245 tests passing.
+- **Phase 9F: Nominal Roll Views** (2026-06-24) - Admin nominal roll management page (`/admin/nominal-rolls`), non-admin nominal roll browser (`/nominal-roll`) with row-numbered roster table and search/unit filter, nominal roll API endpoints, `CsvUpload.original_filename` column + migration `a1b2c3d4e5f6`. File-reference naming convention deferred (see Pending Decisions).
 - **Phase 9D: Non-Admin Views** (2026-06-22) - Deployment summary view (`/deployment`) with AM/PM session counts and unit breakdown, attendance marking view (`/attendance`) with inline status/remarks editing, `get_current_user_optional()` auth function, role-aware nav, OAuth callback role-aware redirect
 - **Phase 9C-3: Deployment + Session Management** (2026-06-22) - Combined admin page with expandable session sub-views, status transitions, session creation, PRD §8 compliance fix, 1 new + 1 updated test
 - **Phase 9C-2: Audit Log API + Page** (2026-06-22) - Audit log API with filtering/pagination, admin page with colored action badges, 10 integration tests
@@ -290,9 +290,9 @@ git log --oneline --all
 
 **Priority Changes:**
 - **2026-07-01:** Session auto-population, attendance enum simplification, deployment date editing, and UI enhancements shipped. Session creation now auto-generates AttendanceRecord entries for all active personnel (minus exclusions) with status='absent'. Attendance status enum reduced to present/absent/excused (removed "unknown"; default "absent"). Admin deployments page auto-expands active deployment, adds per-session "Update" button linking to /attendance, and autofills next session date/type. Deployment date editing (valid_from/valid_until) via inline form with API validation that no sessions fall outside the new range. Attendance page gains color-coded status dropdown, sub-unit 1 & 2 columns, and column filter/sort.
-- **2026-07-01:** Deployment management enhancements complete. Three feature sets shipped: (1) Deployment creation from estab via GUI modal on `/admin/estabs` with API-level estab validation (must exist + be confirmed). (2) Estab lifecycle management — `PATCH` for draft↔confirmed transitions, `DELETE` for super_admin cascade deletion. (3) Deployment personnel exclusion — new `DeploymentPersonnelExclusion` model, draft-only API endpoints, admin page at `/admin/deployments/{id}/personnel` with checkbox-based multi-row editing. Personnel listing function updated to filter excluded personnel from all deployment views. Migration `d4e5f6a7b8c9`. 270 tests passing.
-- **2026-06-29:** `short_id` refactor complete. `Personnel.pers_no` dropped (never imported or stored); replaced with server-minted 8-char base62 `short_id` (cross-estab person identity). Migration `c3d4e5f6a7b8` (batch-mode for SQLite). 245 tests passing. Next: mobile optimization (Phase 9E) or diff-confirmation step.
-- **2026-06-24:** Phase 9F complete. Admin estab management page (`/admin/estabs`) and non-admin estab browser (`/estab`) shipped. Added `CsvUpload.original_filename` column (migration `a1b2c3d4e5f6`) and `GET /api/v1/estabs` endpoints. Estab browser shows row-numbered roster table with search/unit filter, open to all authenticated users. Next: mobile optimization (Phase 9E) or diff-confirmation step (Phase 9C-2 deferred work).
+- **2026-07-01:** Deployment management enhancements complete. Three feature sets shipped: (1) Deployment creation from nominal roll via GUI modal on `/admin/nominal-rolls` with API-level nominal roll validation (must exist + be confirmed). (2) Nominal Roll lifecycle management — `PATCH` for draft↔confirmed transitions, `DELETE` for super_admin cascade deletion. (3) Deployment personnel exclusion — new `DeploymentPersonnelExclusion` model, draft-only API endpoints, admin page at `/admin/deployments/{id}/personnel` with checkbox-based multi-row editing. Personnel listing function updated to filter excluded personnel from all deployment views. Migration `d4e5f6a7b8c9`. 270 tests passing.
+- **2026-06-29:** `short_id` refactor complete. `Personnel.pers_no` dropped (never imported or stored); replaced with server-minted 8-char base62 `short_id` (cross-roll person identity). Migration `c3d4e5f6a7b8` (batch-mode for SQLite). 245 tests passing. Next: mobile optimization (Phase 9E) or diff-confirmation step.
+- **2026-06-24:** Phase 9F complete. Admin nominal roll management page (`/admin/nominal-rolls`) and non-admin nominal roll browser (`/nominal-roll`) shipped. Added `CsvUpload.original_filename` column (migration `a1b2c3d4e5f6`) and `GET /api/v1/nominal-rolls` endpoints. Nominal Roll browser shows row-numbered roster table with search/unit filter, open to all authenticated users. Next: mobile optimization (Phase 9E) or diff-confirmation step (Phase 9C-2 deferred work).
 - **2026-06-22:** Phase 9D complete. Non-admin user-facing views implemented: deployment summary (`/deployment`) with AM/PM session counts and unit breakdown, attendance marking (`/attendance`) with inline status/remarks editing. Added `get_current_user_optional()` auth function. Role-aware nav in base.html. OAuth callback now redirects admins to `/admin` and regular users to `/deployment`. Next: mobile optimization (Phase 9E).
 - **2026-06-22:** Phase 9C-3 complete. Combined deployment + session admin page at `/admin/deployments` with expandable sub-views, status transitions, inline session creation. PRD §8 compliance fix (draft deployments can now create sessions). `/admin/sessions` redirects to `/admin/deployments`. Next: mobile optimization (Phase 9C-4) or settings page wiring.
 - **2026-06-22:** Phase 9C-2 complete. Audit log API + admin page implemented with filtering (entity_type, action, target_user_id), pagination, and colored action badges. Next: remaining admin pages (attendance marking, personnel browser, deployment management, session controls).

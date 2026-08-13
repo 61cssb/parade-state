@@ -669,18 +669,18 @@ async def test_update_personnel_invalid_id(
 
 
 @pytest.mark.asyncio
-async def test_list_personnel_from_different_estab_forbidden(
+async def test_list_personnel_from_different_nominal_roll_forbidden(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
     sample_deployment: Deployment,
-    sample_estab,
+    sample_nominal_roll,
 ):
-    """Test that personnel from different estab are not returned."""
-    # Create personnel for different estab
+    """Test that personnel from different nominal_roll are not returned."""
+    # Create personnel for different nominal_roll
     other_personnel = Personnel(
-        estab_id=str(sample_estab.id) + "different",  # Different estab
+        nominal_roll_id=str(sample_nominal_roll.id) + "different",  # Different nominal_roll
         rank="Private",
         full_name="Other Person",
         unit="Other Unit",
@@ -714,18 +714,18 @@ async def test_list_personnel_from_different_estab_forbidden(
 
 
 @pytest.mark.asyncio
-async def test_get_personnel_from_different_estab_forbidden(
+async def test_get_personnel_from_different_nominal_roll_forbidden(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
     sample_deployment: Deployment,
-    sample_estab,
+    sample_nominal_roll,
 ):
-    """Test that getting personnel from different estab returns error."""
-    # Create personnel for different estab
+    """Test that getting personnel from different nominal_roll returns error."""
+    # Create personnel for different nominal_roll
     other_personnel = Personnel(
-        estab_id=str(sample_estab.id) + "different",  # Different estab
+        nominal_roll_id=str(sample_nominal_roll.id) + "different",  # Different nominal_roll
         rank="Private",
         full_name="Other Person",
         unit="Other Unit",
@@ -747,7 +747,7 @@ async def test_get_personnel_from_different_estab_forbidden(
 
     assert response.status_code == 400
     assert (
-        "does not belong to this deployment's establishment"
+        "does not belong to this deployment's nominal roll"
         in response.json()["detail"]
     )
 

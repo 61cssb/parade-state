@@ -207,7 +207,7 @@ async def list_csv_uploads(
             CsvUpload.status,
             CsvUpload.uploaded_at,
             CsvUpload.uploaded_by,
-            CsvUpload.estab_id,
+            CsvUpload.nominal_roll_id,
             CsvUpload.mapping_confirmed_at,
             CsvUpload.diff_confirmed_at,
         )
@@ -228,7 +228,7 @@ async def list_csv_uploads(
             status=row.status,
             uploaded_at=row.uploaded_at,
             uploaded_by=row.uploaded_by,
-            estab_id=row.estab_id,
+            nominal_roll_id=row.nominal_roll_id,
             mapping_confirmed_at=row.mapping_confirmed_at,
             diff_confirmed_at=row.diff_confirmed_at,
         )

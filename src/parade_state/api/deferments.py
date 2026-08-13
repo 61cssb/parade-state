@@ -70,12 +70,14 @@ def _snapshot_sub_unit(personnel: Personnel) -> str | None:
     return None
 
 
-def _to_response(deferment: Deferment, estab_id: str | None = None) -> DefermentResponse:
+def _to_response(
+    deferment: Deferment, nominal_roll_id: str | None = None
+) -> DefermentResponse:
     """Build a DefermentResponse from a Deferment ORM instance."""
     return DefermentResponse(
         id=deferment.id,
         personnel_id=deferment.personnel_id,
-        estab_id=estab_id,
+        nominal_roll_id=nominal_roll_id,
         rank_name=deferment.rank_name,
         sub_unit=deferment.sub_unit,
         reason=deferment.reason,
@@ -99,22 +101,22 @@ async def list_deferments(
     user_id: str = Query(..., description="User ID making the request"),
     user_role: str = Query(..., description="User role for authorization"),
     personnel_id: str | None = Query(None),
-    estab_id: str | None = Query(None),
+    nominal_roll_id: str | None = Query(None),
     status_filter: str | None = Query(None, alias="status"),
     reason: str | None = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db_session),
 ) -> list[DefermentResponse]:
-    """List deferments, optionally filtered by personnel / estab / status / reason.
+    """List deferments, optionally filtered by personnel / nominal roll / status / reason.
 
-    Requires super_admin role. ``estab_id`` filters via the deferment's linked
-    personnel record.
+    Requires super_admin role. ``nominal_roll_id`` filters via the deferment's
+    linked personnel record.
     """
     _require_super_admin(user_role)
 
     query = (
-        select(Deferment, Personnel.estab_id)
+        select(Deferment, Personnel.nominal_roll_id)
         .join(Personnel, Deferment.personnel_id == Personnel.id)
         .order_by(Deferment.created_at.desc())
         .offset(offset)
@@ -122,15 +124,15 @@ async def list_deferments(
     )
     if personnel_id:
         query = query.where(Deferment.personnel_id == personnel_id)
-    if estab_id:
-        query = query.where(Personnel.estab_id == estab_id)
+    if nominal_roll_id:
+        query = query.where(Personnel.nominal_roll_id == nominal_roll_id)
     if status_filter:
         query = query.where(Deferment.status == status_filter)
     if reason:
         query = query.where(Deferment.reason == reason)
 
     rows = (await db.execute(query)).all()
-    return [_to_response(d, estab_id=eid) for d, eid in rows]
+    return [_to_response(d, nominal_roll_id=eid) for d, eid in rows]
 
 
 @router.post("", response_model=DefermentResponse, status_code=http_status.HTTP_201_CREATED)
@@ -180,7 +182,7 @@ async def create_deferment(
     await db.commit()
     await db.refresh(deferment)
 
-    return _to_response(deferment, estab_id=personnel.estab_id)
+    return _to_response(deferment, nominal_roll_id=personnel.nominal_roll_id)
 
 
 @router.get("/{deferment_id}", response_model=DefermentResponse)
@@ -195,7 +197,7 @@ async def get_deferment(
 
     row = (
         await db.execute(
-            select(Deferment, Personnel.estab_id)
+            select(Deferment, Personnel.nominal_roll_id)
             .join(Personnel, Deferment.personnel_id == Personnel.id)
             .where(Deferment.id == deferment_id)
         )
@@ -205,8 +207,8 @@ async def get_deferment(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Deferment not found: {deferment_id}",
         )
-    deferment, estab_id = row
-    return _to_response(deferment, estab_id=estab_id)
+    deferment, nominal_roll_id = row
+    return _to_response(deferment, nominal_roll_id=nominal_roll_id)
 
 
 @router.patch("/{deferment_id}", response_model=DefermentResponse)
@@ -262,16 +264,16 @@ async def update_deferment(
     await db.commit()
     await db.refresh(deferment)
 
-    # Reload with estab_id for response.
+    # Reload with nominal_roll_id for response.
     row = (
         await db.execute(
-            select(Deferment, Personnel.estab_id)
+            select(Deferment, Personnel.nominal_roll_id)
             .join(Personnel, Deferment.personnel_id == Personnel.id)
             .where(Deferment.id == deferment_id)
         )
     ).one()
-    deferment, estab_id = row
-    return _to_response(deferment, estab_id=estab_id)
+    deferment, nominal_roll_id = row
+    return _to_response(deferment, nominal_roll_id=nominal_roll_id)
 
 
 @router.delete("/{deferment_id}")

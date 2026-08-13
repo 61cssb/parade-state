@@ -7,7 +7,7 @@ from parade_state.api import (
     auth,
     csv_upload,
     deployments,
-    estabs,
+    nominal_rolls,
     personnel,
     sessions,
     users,
@@ -22,6 +22,6 @@ __all__ = [
     "personnel",
     "access_control",
     "csv_upload",
-    "estabs",
+    "nominal_rolls",
     "audit",
 ]

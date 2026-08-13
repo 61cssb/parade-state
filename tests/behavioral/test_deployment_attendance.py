@@ -19,7 +19,7 @@ class TestDeploymentLifecycle:
 
     @pytest.mark.asyncio
     async def test_only_one_active_deployment(
-        self, db_session, sample_estab, sample_users
+        self, db_session, sample_nominal_roll, sample_users
     ):
         """Test that only one deployment can be active at a time (application-level constraint)."""
         admin_id = sample_users["admin"].id
@@ -27,7 +27,7 @@ class TestDeploymentLifecycle:
         # Create first active deployment
         deployment1 = Deployment(
             name="Deployment 1",
-            estab_id=sample_estab.id,
+            nominal_roll_id=sample_nominal_roll.id,
             status="active",
             valid_from=utc_dt.utcnow() - timedelta(days=1),
             valid_until=utc_dt.utcnow() + timedelta(days=30),
@@ -40,7 +40,7 @@ class TestDeploymentLifecycle:
         # Try to create second active deployment
         deployment2 = Deployment(
             name="Deployment 2",
-            estab_id=sample_estab.id,
+            nominal_roll_id=sample_nominal_roll.id,
             status="active",  # This should be prevented by application logic
             valid_from=utc_dt.utcnow() - timedelta(days=1),
             valid_until=utc_dt.utcnow() + timedelta(days=30),
@@ -86,7 +86,7 @@ class TestDeploymentLifecycle:
 
     @pytest.mark.asyncio
     async def test_deployment_validity_range_constraints(
-        self, db_session, sample_estab, sample_users
+        self, db_session, sample_nominal_roll, sample_users
     ):
         """Test that overlapping validity ranges are rejected."""
         admin_id = sample_users["admin"].id
@@ -94,7 +94,7 @@ class TestDeploymentLifecycle:
         # Create first deployment
         deployment1 = Deployment(
             name="Deployment 1",
-            estab_id=sample_estab.id,
+            nominal_roll_id=sample_nominal_roll.id,
             status="draft",
             valid_from=datetime(2024, 1, 1),
             valid_until=datetime(2024, 1, 31),
@@ -107,7 +107,7 @@ class TestDeploymentLifecycle:
         # Try to create overlapping deployment
         deployment2 = Deployment(
             name="Deployment 2",
-            estab_id=sample_estab.id,
+            nominal_roll_id=sample_nominal_roll.id,
             status="draft",
             valid_from=datetime(2024, 1, 15),  # Overlaps with deployment1
             valid_until=datetime(2024, 2, 15),

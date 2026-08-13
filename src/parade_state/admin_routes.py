@@ -17,7 +17,7 @@ from parade_state.models import (
     Deferment,
     Deployment,
     DeploymentPersonnelExclusion,
-    Estab,
+    NominalRoll,
     Personnel,
     User,
 )
@@ -36,7 +36,7 @@ AUDIT_ENTITY_TYPES = [
     "session",
     "user",
     "csv_upload",
-    "estab",
+    "nominal_roll",
     "personnel",
     "access_level",
     "column_mapping",
@@ -328,10 +328,10 @@ async def admin_deployment_personnel(
         if not deployment:
             return RedirectResponse(url="/admin/deployments", status_code=302)
 
-        # Fetch all estab personnel
+        # Fetch all personnel from the deployment's nominal roll
         personnel_query = (
             select(Personnel)
-            .where(Personnel.estab_id == deployment.estab_id)
+            .where(Personnel.nominal_roll_id == deployment.nominal_roll_id)
             .order_by(Personnel.unit, Personnel.sub_unit_1, Personnel.rank, Personnel.full_name)
         )
         personnel_result = await db.execute(personnel_query)
@@ -493,7 +493,7 @@ async def admin_csv_upload(
                     CsvUpload.line_count,
                     CsvUpload.status,
                     CsvUpload.uploaded_at,
-                    CsvUpload.estab_id,
+                    CsvUpload.nominal_roll_id,
                 )
                 .order_by(CsvUpload.uploaded_at.desc())
                 .limit(20)
@@ -507,7 +507,7 @@ async def admin_csv_upload(
             "line_count": row.line_count,
             "status": row.status,
             "uploaded_at": row.uploaded_at,
-            "estab_id": row.estab_id,
+            "nominal_roll_id": row.nominal_roll_id,
         }
         for row in recent_uploads_rows
     ]
@@ -530,53 +530,54 @@ async def admin_csv_upload(
     return HTMLResponse(content=html_content)
 
 
-@router.get("/admin/estabs", response_class=HTMLResponse)
-async def admin_estabs(
+@router.get("/admin/nominal-rolls", response_class=HTMLResponse)
+async def admin_nominal_rolls(
     request: Request,
     status_filter: str | None = None,
 ):
-    """Render the estabs management page."""
+    """Render the nominal rolls management page."""
     current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
 
     session_maker = get_session_maker()
     async with session_maker() as db:
-        # Most recent CsvUpload per estab (provides original_filename).
+        # Most recent CsvUpload per nominal roll (provides original_filename).
         latest_upload_subq = (
             select(
-                CsvUpload.estab_id.label("estab_id"),
+                CsvUpload.nominal_roll_id.label("nominal_roll_id"),
                 CsvUpload.original_filename.label("original_filename"),
             )
-            .where(CsvUpload.estab_id.is_not(None))
-            .order_by(CsvUpload.estab_id, CsvUpload.uploaded_at.desc())
+            .where(CsvUpload.nominal_roll_id.is_not(None))
+            .order_by(CsvUpload.nominal_roll_id, CsvUpload.uploaded_at.desc())
             .subquery()
         )
 
         query = (
             select(
-                Estab.id,
-                Estab.caa,
-                Estab.status,
-                Estab.personnel_count,
-                Estab.uploaded_at,
-                Estab.csv_hash,
-                Estab.label,
+                NominalRoll.id,
+                NominalRoll.caa,
+                NominalRoll.status,
+                NominalRoll.personnel_count,
+                NominalRoll.uploaded_at,
+                NominalRoll.csv_hash,
+                NominalRoll.label,
+                NominalRoll.remarks,
                 latest_upload_subq.c.original_filename,
             )
             .outerjoin(
                 latest_upload_subq,
-                latest_upload_subq.c.estab_id == Estab.id,
+                latest_upload_subq.c.nominal_roll_id == NominalRoll.id,
             )
-            .order_by(Estab.uploaded_at.desc())
+            .order_by(NominalRoll.uploaded_at.desc())
             .limit(100)
         )
         if status_filter:
-            query = query.where(Estab.status == status_filter)
+            query = query.where(NominalRoll.status == status_filter)
 
         rows = (await db.execute(query)).all()
 
-    estabs = [
+    nominal_rolls = [
         {
             "id": str(row.id),
             "caa": row.caa,
@@ -586,12 +587,13 @@ async def admin_estabs(
             "csv_hash": row.csv_hash[:12] + "...",
             "original_filename": row.original_filename or "—",
             "label": row.label,
+            "remarks": row.remarks,
         }
         for row in rows
     ]
 
     env = get_templates(request)
-    template = env.get_template("admin/estabs.html")
+    template = env.get_template("admin/nominal_rolls.html")
 
     html_content = template.render(
         request=request,
@@ -601,10 +603,10 @@ async def admin_estabs(
             "email": current_admin.email,
             "role": current_admin.role,
         },
-        active_page="estabs",
-        estabs=estabs,
+        active_page="nominal-rolls",
+        nominal_rolls=nominal_rolls,
         status_filter=status_filter or "",
-        estab_statuses=["draft", "confirmed", "archived"],
+        nominal_roll_statuses=["draft", "confirmed", "archived"],
     )
 
     return HTMLResponse(content=html_content)
@@ -614,7 +616,7 @@ async def admin_estabs(
 async def admin_deferments(
     request: Request,
     status_filter: str | None = None,
-    estab_id: str | None = None,
+    nominal_roll_id: str | None = None,
 ):
     """Render the deferments management page (super-admin only)."""
     current_admin = await get_current_admin_user_optional(request)
@@ -625,39 +627,43 @@ async def admin_deferments(
 
     session_maker = get_session_maker()
     async with session_maker() as db:
-        # Estab list for the selector (most recent first).
-        estab_rows = (
+        # Nominal roll list for the selector (most recent first).
+        roll_rows = (
             await db.execute(
-                select(Estab.id, Estab.caa).order_by(Estab.caa.desc()).limit(50)
+                select(NominalRoll.id, NominalRoll.caa)
+                .order_by(NominalRoll.caa.desc())
+                .limit(50)
             )
         ).all()
-        estab_options = [
+        nominal_roll_options = [
             {
                 "id": str(row.id),
                 "caa": row.caa.isoformat() if row.caa is not None else str(row.id)[:8],
             }
-            for row in estab_rows
+            for row in roll_rows
         ]
 
-        # Page always scopes to exactly one estab. If none given, default to the
-        # most recent estab (first in the dropdown).
-        resolved_estab_id = estab_id or (estab_options[0]["id"] if estab_options else None)
+        # Page always scopes to exactly one nominal roll. If none given, default
+        # to the most recent roll (first in the dropdown).
+        resolved_nominal_roll_id = nominal_roll_id or (
+            nominal_roll_options[0]["id"] if nominal_roll_options else None
+        )
 
         query = (
             select(
                 Deferment,
-                Personnel.estab_id,
-                Estab.caa,
+                Personnel.nominal_roll_id,
+                NominalRoll.caa,
             )
             .join(Personnel, Deferment.personnel_id == Personnel.id)
-            .outerjoin(Estab, Personnel.estab_id == Estab.id)
+            .outerjoin(NominalRoll, Personnel.nominal_roll_id == NominalRoll.id)
             .order_by(Deferment.created_at.desc())
             .limit(200)
         )
         if status_filter:
             query = query.where(Deferment.status == status_filter)
-        if resolved_estab_id:
-            query = query.where(Personnel.estab_id == resolved_estab_id)
+        if resolved_nominal_roll_id:
+            query = query.where(Personnel.nominal_roll_id == resolved_nominal_roll_id)
 
         rows = (await db.execute(query)).all()
 
@@ -665,8 +671,8 @@ async def admin_deferments(
         {
             "id": str(d.id),
             "personnel_id": d.personnel_id,
-            "estab_id": eid,
-            "estab_caa": caa.isoformat() if caa else None,
+            "nominal_roll_id": eid,
+            "nominal_roll_caa": caa.isoformat() if caa else None,
             "rank_name": d.rank_name,
             "sub_unit": d.sub_unit or "—",
             "reason": d.reason,
@@ -682,8 +688,9 @@ async def admin_deferments(
     env = get_templates(request)
     template = env.get_template("admin/deferments.html")
 
-    active_estab_caa = next(
-        (e["caa"] for e in estab_options if e["id"] == resolved_estab_id), "—"
+    active_nominal_roll_caa = next(
+        (e["caa"] for e in nominal_roll_options if e["id"] == resolved_nominal_roll_id),
+        "—",
     )
 
     html_content = template.render(
@@ -696,10 +703,10 @@ async def admin_deferments(
         },
         active_page="deferments",
         deferments=deferments_data,
-        estab_options=estab_options,
+        nominal_roll_options=nominal_roll_options,
         status_filter=status_filter or "",
-        estab_filter=resolved_estab_id or "",
-        active_estab_caa=active_estab_caa,
+        nominal_roll_filter=resolved_nominal_roll_id or "",
+        active_nominal_roll_caa=active_nominal_roll_caa,
         deferment_statuses=DEFERMENT_STATUSES,
         deferment_reasons=DEFERMENT_REASONS,
     )

@@ -24,7 +24,7 @@ class AuditLog(Base):
             "session",
             "user",
             "csv_upload",
-            "estab",
+            "nominal_roll",
             "personnel",
             "access_level",
             "column_mapping",

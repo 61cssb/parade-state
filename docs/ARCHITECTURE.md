@@ -544,7 +544,7 @@ from parade_state.api.some_module import function  # Circular risk
                                                         │
                                                         v
                                                  ┌──────────────┐
-                                                 │    Estab     │
+                                                 │    Nominal Roll     │
                                                  │  Creation    │
                                                  └──────────────┘
 ```
@@ -575,7 +575,7 @@ from parade_state.api.some_module import function  # Circular risk
 ### 4.1 Core Entity Hierarchy
 
 ```
-Estab (CSV source of truth)
+Nominal Roll (CSV source of truth)
  │
  ├── Personnel (roster entries)
  │    ├── DeploymentPersonnelOverride (assignment changes)
@@ -624,9 +624,9 @@ Deployment
 - Deployment closed → all sessions marked closed
 - Deployment finalized → all sessions marked finalized
 
-**Estab cascades:**
-- Estab deleted → all personnel records deleted
-- Estab confirmed → creates initial draft deployment
+**Nominal Roll cascades:**
+- Nominal Roll deleted → all personnel records deleted
+- Nominal Roll confirmed → creates initial draft deployment
 
 **User cascades:**
 - User deleted → all scopes and access grants soft-deleted

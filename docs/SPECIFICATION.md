@@ -27,15 +27,15 @@ The personnel branch currently manages battalion parade state through a manual m
 ### 1.2 Core Entity Hierarchy
 
 ```
-Estab (CAA-pinned, CSV-sourced, immutable)
+Nominal Roll (CAA-pinned, CSV-sourced, immutable)
  └── Deployment (remaps personnel unit+subunit; has date+time validity range)
       └── Session (AM or PM, admin-opened, linked to a deployment)
            └── Attendance Record (per-personnel per-session; notes write-back to deployment)
 ```
 
 **Key Concepts:**
-- **Estab**: Base source of truth, uploaded from CSV, pinned by CAA date, immutable after confirmation
-- **Deployment**: Based on specific estab, remaps personnel assignments, valid for date+time range, only one active at a time
+- **Nominal Roll**: Base source of truth, uploaded from CSV, pinned by CAA date, immutable after confirmation
+- **Deployment**: Based on specific nominal roll, remaps personnel assignments, valid for date+time range, only one active at a time
 - **Session**: AM/PM attendance window, admin-opened, associated with specific deployment; auto-populates AttendanceRecord entries for all active personnel (minus exclusions) on creation
 - **Attendance Record**: Per-personnel per-session with status (present/absent/excused), remarks, and snapshots
 
@@ -43,7 +43,7 @@ Estab (CAA-pinned, CSV-sourced, immutable)
 
 **In Scope (v1):**
 - CSV ingestion with CAA versioning, column mapping, diff detection
-- Deployment management: create, clone (same-estab), migrate (cross-estab), scheduled activation
+- Deployment management: create, clone (same-roll), migrate (cross-roll), scheduled activation
 - Session management: admin-opens, advance creation, notes auto-snapshot on open
 - Attendance taking: AM/PM, present/absent/excused, Notes (deployment-scoped), Remarks (session-scoped)
 - Row access control (access level + subunit scope) and column sensitivity control
@@ -63,14 +63,14 @@ Estab (CAA-pinned, CSV-sourced, immutable)
 
 ## 2. Entity Hierarchy
 
-### 2.1 Estab (CSV Ingestion)
+### 2.1 Nominal Roll (CSV Ingestion)
 
 **Base personnel roster, sourced from CSV, pinned by CAA (Complement As At) date.**
 
 ```
-Estab
+Nominal Roll
 ├── id: UUID (PK)
-├── caa: date (Complement As At; must be unique among confirmed estabs)
+├── caa: date (Complement As At; must be unique among confirmed nominal rolls)
 ├── csv_hash: str (SHA-256 of raw CSV)
 ├── status: str ENUM ['draft', 'confirmed', 'archived']
 ├── personnel_count: int (snapshot at confirmation)
@@ -79,26 +79,26 @@ Estab
 ├── confirmed_at: datetime (nullable)
 ├── confirmed_by: UUID (FK User, nullable)
 ├── created_at: datetime
-├── notes: str (nullable; admin notes on this estab)
+├── notes: str (nullable; admin notes on this nominal roll)
 └── label: str (nullable; UNIQUE; human-readable name, max 100 chars)
 ```
 
 **Constraints:**
-- UNIQUE(caa) among non-archived estabs
-- UNIQUE(label) across all estabs (NULLs allowed; enforced on non-null values)
+- UNIQUE(caa) among non-archived nominal rolls
+- UNIQUE(label) across all nominal rolls (NULLs allowed; enforced on non-null values)
 - Status transition: draft → confirmed → archived (one-way)
 - Raw CSV stored immutably in csv_uploads (append-only; SHA-256 hash recorded)
 - Parsed personnel in personnel_snapshots: required columns as typed fields; all others in extra_fields JSON
 
 ### 2.2 Deployment
 
-**Operational deployment based on an estab, with overrides and validity window.**
+**Operational deployment based on an nominal roll, with overrides and validity window.**
 
 ```
 Deployment
 ├── id: UUID (PK)
 ├── name: str
-├── estab_id: UUID (FK Estab, on_delete=RESTRICT)
+├── nominal_roll_id: UUID (FK Nominal Roll, on_delete=RESTRICT)
 ├── status: str ENUM ['draft', 'active', 'inactive', 'archived', 'closed', 'finalized']
 │   └── draft: not yet active
 │   └── active: currently operational (only one per system, application-enforced)
@@ -224,16 +224,16 @@ UserSubunitScope
 
 #### 3.2.1 Personnel
 
-**Individual personnel record, sourced from CSV estab.**
+**Individual personnel record, sourced from CSV nominal roll.**
 
 ```
 Personnel
-├── id: UUID (PK) ← Row identity; one row per (estab, person)
-├── short_id: str (8-char base62) ← Cross-estab PERSON identity
-│   └── Shared by every row belonging to the same individual, across all estabs.
+├── id: UUID (PK) ← Row identity; one row per (nominal roll, person)
+├── short_id: str (8-char base62) ← Cross-roll PERSON identity
+│   └── Shared by every row belonging to the same individual, across all nominal rolls.
 │       Generated server-side; globally unique per person (application-enforced
 │       via match-then-generate with collision retry). Human-facing identifier.
-├── estab_id: UUID (FK Estab, on_delete=CASCADE)
+├── nominal_roll_id: UUID (FK Nominal Roll, on_delete=CASCADE)
 ├── rank: str
 ├── full_name: str
 ├── unit: str
@@ -248,22 +248,22 @@ Personnel
 ```
 
 **Constraints:**
-- UNIQUE(estab_id, short_id): at most one row per person per estab
+- UNIQUE(nominal_roll_id, short_id): at most one row per person per nominal roll
 - `short_id` is globally unique per *person* (application-enforced). All rows for the same
   individual share one `short_id`; no two distinct persons ever share one.
-- Cross-estab person recognition on ingest matches on `full_name` (rank disambiguates duplicate
+- Cross-roll person recognition on ingest matches on `full_name` (rank disambiguates duplicate
   names); matches are confirmed by the admin during CSV diff review.
 - `pers_no` is **never imported or stored**. It is an opaque, sensitive primary key from an
   external system. If present in an uploaded CSV/XLSX it is silently dropped during parsing —
   it is not mapped to a canonical column and is not written to `extra_fields`.
-- Notes, overrides, and attendance link to `Personnel.id` (the row PK). Cross-estab continuity
+- Notes, overrides, and attendance link to `Personnel.id` (the row PK). Cross-roll continuity
   (notes transfer, history) follows the person via `short_id`.
 
 ### 3.3 Deferments
 
 #### 3.3.1 Deferment
 
-**A personnel's deferral request, linked to a single estab personnel record.**
+**A personnel's deferral request, linked to a single nominal roll personnel record.**
 
 ```
 Deferment
@@ -289,10 +289,10 @@ Deferment
 ```
 
 **Constraints:**
-- Linked to exactly one Personnel record (and implicitly that personnel's estab).
+- Linked to exactly one Personnel record (and implicitly that personnel's nominal roll).
 - `rank_name` and `sub_unit` are **snapshotted at creation** — denormalized so the
   deferment remains an accurate record even if the personnel row is later edited
-  or the estab is superseded by a new CAA.
+  or the nominal roll is superseded by a new CAA.
 - Visible to **super_admin only** (admin role gets 403). UI and user-type
   scoping to be tightened in a later phase.
 - See §4.6 for the callup_status transition rule driven by `status` changes.
@@ -326,7 +326,7 @@ AttendanceRecord
 
 **Constraints:**
 - UNIQUE(session_id, personnel_id)
-- Auto-populated for all active personnel in the deployment's estab (minus exclusions) on session creation, with status='absent'
+- Auto-populated for all active personnel in the deployment's nominal roll (minus exclusions) on session creation, with status='absent'
 - Snapshot rule applies (see Business Rules)
 
 ---
@@ -336,7 +336,7 @@ AttendanceRecord
 ### 4.1 Attendance Snapshot Rule
 
 **Condition 1: Within deployment.valid_from to valid_until**
-- On write, resolve effective unit+subunit: override ?? estab
+- On write, resolve effective unit+subunit: override ?? nominal roll
 - Populate: unit_snapshot, sub_unit_1_snapshot, sub_unit_2_snapshot, sub_unit_3_snapshot
 - Populate: notes_snapshot from current DeploymentNotes
 - Update: last_edit_at, last_edit_by (for display purposes)
@@ -352,7 +352,7 @@ AttendanceRecord
 Deployment created (draft)
   ├─ valid_from, valid_until, optional scheduled_activation set
   ├─ Admin can edit overrides
-  ├─ PersonnelOverrides populated (initially mirrored from Estab)
+  ├─ PersonnelOverrides populated (initially mirrored from Nominal Roll)
   └─ Session creation BLOCKED — see §4.3
 
               At valid_from time (or scheduled_activation, or manual):
@@ -429,7 +429,7 @@ Result: each canonical name receives from at most ONE raw column per CSV,
 ```
 
 **Person identity is not sourced from the CSV.** There is no canonical column for personnel
-identity. The cross-estab person key (`short_id`) is minted server-side and attached during
+identity. The cross-roll person key (`short_id`) is minted server-side and attached during
 ingest via name+rank matching (see §3.2.1).
 
 ### 4.5 CSV Upload Pipeline
@@ -447,11 +447,11 @@ Auto-match headers against ColumnMapping
   ↓
 Check CAA uniqueness
   ├─ CAA new → proceed
-  └─ CAA exists (confirmed Estab) → prompt admin for replacement
+  └─ CAA exists (confirmed Nominal Roll) → prompt admin for replacement
       ├─ Admin rejects → stop
       └─ Admin confirms replacement
-          → Archive prior Estab+related entities
-          → Proceed with new Estab
+          → Archive prior Nominal Roll+related entities
+          → Proceed with new Nominal Roll
   ↓
 Compute diff (current CSV vs prior confirmed CSV)
   ↓
@@ -459,7 +459,7 @@ Compute diff (current CSV vs prior confirmed CSV)
   ↓
 [CsvUpload.status = 'diff_confirmed']
   ↓
-Populate Estab.status = 'confirmed'
+Populate NominalRoll.status = 'confirmed'
 Populate Personnel records (callup_status defaults to 'Called Up')
 Auto-create initial Deployment (status=draft)
 Transfer notes from prior deployment (by Personnel.id match)
@@ -491,7 +491,7 @@ callup transitions.
 | User | (email) | (email) | Login |
 | User | - | (access_level_id) | Access lookup |
 | AccessLevel | (name), (level_order) | - | Vocab uniqueness |
-| Estab | (caa) among non-archived | (caa) | CAA uniqueness |
+| Nominal Roll | (caa) among non-archived | (caa) | CAA uniqueness |
 | ColumnMapping | (canonical_name) among non-deprecated | (canonical_name) | Mapping uniqueness |
 | Deployment | Application-level: only one active | (status) | Active deployment enforcement |
 | UserSubunitScope | (user_id, deployment_id, unit, sub_unit_1-3) | (user_id, deployment_id) | Scope lookup |
@@ -572,24 +572,24 @@ Declared in app.config.json (deployment-time change, not admin UI):
 | sub_unit_1 | Subunit level 1 |
 | sub_unit_2 | Subunit level 2 |
 | sub_unit_3 | Subunit level 3 |
-| rank | Display; also used to disambiguate duplicate names during cross-estab matching |
-| full_name | Display; primary key for cross-estab person matching |
+| rank | Display; also used to disambiguate duplicate names during cross-roll matching |
+| full_name | Display; primary key for cross-roll person matching |
 
 **Note:** There is **no** `pers_no` canonical column. Personnel identity (`short_id`) is generated
 by the application, not imported from the CSV.
 
 ### 6.3 Deployment Operations
 
-**Clone (Same-Estab):**
+**Clone (Same-Nominal Roll):**
 - Admin-only
 - Copies overrides, prefixes name "Copy of …", resets validity range to blank
 - Admin chooses whether to transfer deployment notes
 
-**Migrate (Cross-Estab):**
+**Migrate (Cross-Nominal Roll):**
 - Admin-only
-- Two-step: compute diff between source estab and target estab
+- Two-step: compute diff between source nominal roll and target nominal roll
 - Present leavers (must be individually dismissed) and joiners (must each receive a unit+subunit assignment)
-- On confirm, create new draft deployment against target estab
+- On confirm, create new draft deployment against target nominal roll
 
 ---
 

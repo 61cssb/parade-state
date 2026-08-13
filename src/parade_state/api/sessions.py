@@ -235,10 +235,10 @@ async def _populate_session_roster(
     Uses batch queries to avoid N+1 when populating a large roster.
     Personnel default to 'absent' — admins/users mark them as present/excused later.
     """
-    # Batch-load roster (active personnel belonging to the deployment's estab)
+    # Batch-load roster (active personnel belonging to the deployment's nominal roll)
     roster_result = await db.execute(
         select(Personnel).where(
-            Personnel.estab_id == deployment.estab_id,
+            Personnel.nominal_roll_id == deployment.nominal_roll_id,
             Personnel.status == "active",
         )
     )
