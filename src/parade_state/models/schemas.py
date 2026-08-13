@@ -533,6 +533,27 @@ class UserSubunitScopeListParams(BaseModel):
     unit: str | None = None
 
 
+class UserSubunitAssignmentCreate(BaseModel):
+    """Schema for granting a user attendance rights on one NR sub_unit_1."""
+
+    sub_unit_1: str = Field(..., min_length=1)
+
+
+class UserSubunitAssignmentResponse(BaseModel):
+    """Schema for a user_subunit_assignment row."""
+
+    id: str
+    user_id: str
+    nominal_roll_id: str
+    sub_unit_1: str
+    created_at: utc_dt.datetime
+    created_by: str
+    updated_at: utc_dt.datetime
+
+    class Config:
+        from_attributes = True
+
+
 # ============================================================================
 # CSV Upload Schemas
 # ============================================================================

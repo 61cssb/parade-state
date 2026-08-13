@@ -19,7 +19,7 @@ from parade_state.utils import utc_dt
 from ..db import Base
 
 if TYPE_CHECKING:
-    from .access import AccessLevel
+    from .access import AccessLevel, UserSubunitAssignment
     from .attendance import AttendanceScope
     from .deployment import Deployment
     from .personnel import Personnel
@@ -69,6 +69,9 @@ class NominalRoll(Base):
     )
     attendance_scope: Mapped["AttendanceScope | None"] = relationship(
         back_populates="nominal_roll", cascade="all, delete-orphan", uselist=False
+    )
+    subunit_assignments: Mapped[list["UserSubunitAssignment"]] = relationship(
+        back_populates="nominal_roll", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:

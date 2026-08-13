@@ -1,6 +1,12 @@
 """Database models for Parade State Management System."""
 
-from .access import AccessLevel, DeploymentUserAccess, User, UserSubunitScope
+from .access import (
+    AccessLevel,
+    DeploymentUserAccess,
+    User,
+    UserSubunitAssignment,
+    UserSubunitScope,
+)
 from .attendance import (
     ATTENDANCE_STATUSES,
     PRESENT_LIKE_STATUSES,
@@ -29,6 +35,7 @@ __all__ = [
     "AccessLevel",
     "DeploymentUserAccess",
     "User",
+    "UserSubunitAssignment",
     "UserSubunitScope",
     "ATTENDANCE_STATUSES",
     "PRESENT_LIKE_STATUSES",
