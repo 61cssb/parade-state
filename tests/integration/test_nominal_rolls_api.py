@@ -286,7 +286,7 @@ async def test_delete_non_existent_nominal_roll(
 @pytest.mark.asyncio
 async def test_delete_nominal_roll_cascades(
     client: TestClient, super_admin_token_headers: dict[str, str],
-    sample_nominal_roll, sample_deployment, sample_attendance_records,
+    sample_nominal_roll, sample_deployment, sample_attendance,
 ):
     """Deleting an nominal_roll cascade-deletes dependent data (verified via API)."""
     nominal_roll_id = str(sample_nominal_roll.id)

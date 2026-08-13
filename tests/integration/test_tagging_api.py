@@ -478,6 +478,92 @@ async def test_delete_cascades_entries(
     assert remaining_entries == []
 
 
+@pytest.mark.asyncio
+async def test_delete_refuses_when_attendance_linked(
+    client: TestClient, super_admin_token_headers, sample_personnel,
+    sample_nominal_roll, db_session: AsyncSession,
+):
+    """A tagging linked to attendance rows cannot be deleted (409)."""
+    from parade_state.models import Attendance
+
+    create = client.post(
+        "/api/v1/taggings",
+        headers=super_admin_token_headers,
+        params=SUPER_ADMIN_PARAMS,
+        json={
+            "label": "linked",
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "entries": [
+                {"personnel_id": str(sample_personnel[0].id), "to_unit": "Coy B"}
+            ],
+        },
+    )
+    tagging_id = create.json()["id"]
+
+    # Link an attendance row to the tagging.
+    db_session.add(
+        Attendance(
+            personnel_id=str(sample_personnel[0].id),
+            nominal_roll_id=str(sample_nominal_roll.id),
+            tagging_id=tagging_id,
+            date=date.today(),
+            status_am="present",
+            status_pm="absent",
+            created_by="super-admin-test-id",
+            updated_by="super-admin-test-id",
+        )
+    )
+    await db_session.commit()
+
+    response = client.delete(
+        f"/api/v1/taggings/{tagging_id}",
+        headers=super_admin_token_headers,
+        params=SUPER_ADMIN_PARAMS,
+    )
+    assert response.status_code == 409
+    assert "attendance" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_delete_refuses_when_scope_active(
+    client: TestClient, super_admin_token_headers, sample_personnel,
+    sample_nominal_roll, db_session: AsyncSession,
+):
+    """A tagging that is the active attendance scope cannot be deleted (409)."""
+    from parade_state.models import AttendanceScope
+
+    create = client.post(
+        "/api/v1/taggings",
+        headers=super_admin_token_headers,
+        params=SUPER_ADMIN_PARAMS,
+        json={
+            "label": "active-scope",
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "entries": [
+                {"personnel_id": str(sample_personnel[0].id), "to_unit": "Coy B"}
+            ],
+        },
+    )
+    tagging_id = create.json()["id"]
+
+    db_session.add(
+        AttendanceScope(
+            nominal_roll_id=str(sample_nominal_roll.id),
+            tagging_id=tagging_id,
+            activated_by="super-admin-test-id",
+        )
+    )
+    await db_session.commit()
+
+    response = client.delete(
+        f"/api/v1/taggings/{tagging_id}",
+        headers=super_admin_token_headers,
+        params=SUPER_ADMIN_PARAMS,
+    )
+    assert response.status_code == 409
+    assert "scope" in response.json()["detail"].lower()
+
+
 # ============================================================================
 # Overlay semantics
 # ============================================================================

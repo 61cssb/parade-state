@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from parade_state.models.attendance import AttendanceRecord, Session
+from parade_state.models.attendance import Attendance
 from parade_state.models.csv_ingestion import NominalRoll
 from parade_state.models.deployment import (
     Deployment,
@@ -739,38 +739,28 @@ async def test_get_deployment_status_with_sessions(
     db_session.add_all([personnel1, personnel2])
     await db_session.commit()
 
-    # Create session
-    from parade_state.models.attendance import Session
-
+    # Create attendance rows for today (AM/PM model).
     today = utc_dt.utcnow().date()
-    session = Session(
-        deployment_id=str(deployment.id),
-        date=today,
-        session_type="AM",
-        status="open",
-        created_by="admin-user-id",
-    )
-
-    db_session.add(session)
-    await db_session.commit()
-
-    # Create attendance records
-    attendance1 = AttendanceRecord(
-        session_id=str(session.id),
+    attendance1 = Attendance(
         personnel_id=str(personnel1.id),
-        deployment_id=str(deployment.id),
-        status="present",
+        nominal_roll_id="nominal_roll-1",
+        tagging_id=None,
+        date=today,
+        status_am="present",
+        status_pm="present",
         unit_snapshot="Coy A",
         sub_unit_1_snapshot="Platoon 1",
         created_by="admin-user-id",
         updated_by="admin-user-id",
     )
 
-    attendance2 = AttendanceRecord(
-        session_id=str(session.id),
+    attendance2 = Attendance(
         personnel_id=str(personnel2.id),
-        deployment_id=str(deployment.id),
-        status="absent",
+        nominal_roll_id="nominal_roll-1",
+        tagging_id=None,
+        date=today,
+        status_am="absent",
+        status_pm="absent",
         unit_snapshot="Coy B",
         sub_unit_1_snapshot="Platoon 2",
         created_by="admin-user-id",
@@ -791,7 +781,6 @@ async def test_get_deployment_status_with_sessions(
     assert data["deployment_id"] == deployment.id
     assert data["deployment_name"] == "Test Deployment"
     assert data["am_session"] is not None
-    assert data["am_session"]["status"] == "open"
     assert data["am_session"]["present"] == 1
     assert data["am_session"]["absent"] == 1
     assert len(data["units"]) == 2
@@ -916,64 +905,13 @@ async def test_export_deployment_csv_unauthorized(
 
 
 @pytest.mark.asyncio
-async def test_update_deployment_dates_rejects_sessions_outside_range(
+async def test_update_deployment_dates_widens_range(
     client: TestClient,
     admin_token_headers: dict[str, str],
     admin_id: str,
-    db_session,
-    sample_deployment: Deployment,
-    sample_users,
-):
-    """Updating dates that exclude existing sessions should return 400."""
-    # Create a session on a specific date within the current range
-    session = Session(
-        deployment_id=str(sample_deployment.id),
-        date=date.today(),
-        session_type="AM",
-        status="open",
-        created_by=admin_id,
-        opened_at=utc_dt.utcnow(),
-    )
-    db_session.add(session)
-    await db_session.commit()
-
-    # Try to narrow valid_until to before the session date
-    response = client.patch(
-        f"/api/v1/deployments/{sample_deployment.id}",
-        json={
-            "valid_until": (date.today() - timedelta(days=1)).isoformat()
-            + "T23:59:59",
-        },
-        headers=admin_token_headers,
-        params={"user_id": admin_id, "user_role": "admin"},
-    )
-
-    assert response.status_code == 400
-    assert "fall outside" in response.json()["detail"]
-
-
-@pytest.mark.asyncio
-async def test_update_deployment_dates_succeeds_when_sessions_in_range(
-    client: TestClient,
-    admin_token_headers: dict[str, str],
-    admin_id: str,
-    db_session,
     sample_deployment: Deployment,
 ):
-    """Updating dates that keep all sessions within range should succeed."""
-    # Create a session today
-    session = Session(
-        deployment_id=str(sample_deployment.id),
-        date=date.today(),
-        session_type="AM",
-        status="open",
-        created_by=admin_id,
-        opened_at=utc_dt.utcnow(),
-    )
-    db_session.add(session)
-    await db_session.commit()
-
-    # Widen the range — should succeed
+    """Widening the valid date range succeeds (sessions check removed)."""
     new_valid_from = (date.today() - timedelta(days=10)).isoformat() + "T00:00:00"
     new_valid_until = (date.today() + timedelta(days=60)).isoformat() + "T23:59:59"
 
@@ -997,7 +935,7 @@ async def test_update_deployment_dates_no_sessions_succeeds(
     admin_id: str,
     sample_deployment: Deployment,
 ):
-    """Updating dates on a deployment with no sessions should always succeed."""
+    """Updating dates on a deployment always succeeds now (no session check)."""
     new_valid_from = (date.today() - timedelta(days=5)).isoformat() + "T00:00:00"
 
     response = client.patch(
