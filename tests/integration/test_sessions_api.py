@@ -56,14 +56,14 @@ async def test_create_session_for_inactive_deployment_forbidden(
     admin_token_headers: dict[str, str],
     admin_id: str,
     db_session,
-    sample_estab,
+    sample_nominal_roll,
     sample_users,
 ):
     """Test that sessions cannot be created for inactive deployments."""
     # Create an inactive deployment
     deployment = Deployment(
         name="Inactive Deployment",
-        estab_id=str(sample_estab.id),
+        nominal_roll_id=str(sample_nominal_roll.id),
         status="inactive",
         valid_from=utc_dt.utcnow() - timedelta(days=1),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
@@ -112,13 +112,13 @@ async def test_create_session_for_draft_deployment_forbidden(
     admin_token_headers: dict[str, str],
     admin_id: str,
     db_session,
-    sample_estab,
+    sample_nominal_roll,
     sample_users,
 ):
     """Sessions cannot be created for draft deployments — only active ones."""
     deployment = Deployment(
         name="Draft Deployment",
-        estab_id=str(sample_estab.id),
+        nominal_roll_id=str(sample_nominal_roll.id),
         status="draft",
         valid_from=utc_dt.utcnow() - timedelta(days=1),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
@@ -301,7 +301,7 @@ async def test_list_sessions_with_deployment_filter(
     db_session,
     admin_id: str,
     sample_deployment: Deployment,
-    sample_estab,
+    sample_nominal_roll,
     sample_users,
 ):
     """Test listing sessions filtered by deployment."""
@@ -310,7 +310,7 @@ async def test_list_sessions_with_deployment_filter(
     # Create another deployment
     deployment2 = Deployment(
         name="Deployment 2",
-        estab_id=str(sample_estab.id),
+        nominal_roll_id=str(sample_nominal_roll.id),
         status="active",
         valid_from=utc_dt.utcnow() - timedelta(days=1),
         valid_until=utc_dt.utcnow() + timedelta(days=30),

@@ -32,7 +32,7 @@ from parade_state.models import (
     DeploymentPersonnelExclusion,
     DeploymentPersonnelOverride,
     DeploymentUserAccess,
-    Estab,
+    NominalRoll,
     Personnel,
     Session,
     User,
@@ -163,9 +163,9 @@ async def sample_users(db_session: AsyncSession, sample_access_levels):
 
 
 @pytest.fixture
-async def sample_estab(db_session: AsyncSession, sample_users):
-    """Create a sample establishment for testing."""
-    estab = Estab(
+async def sample_nominal_roll(db_session: AsyncSession, sample_users):
+    """Create a sample nominal roll for testing."""
+    nominal_roll = NominalRoll(
         caa=date(2024, 1, 1),
         csv_hash="dummy_hash",
         status="confirmed",
@@ -175,21 +175,21 @@ async def sample_estab(db_session: AsyncSession, sample_users):
         confirmed_at=utc_dt.utcnow(),
     )
 
-    db_session.add(estab)
+    db_session.add(nominal_roll)
     await db_session.commit()
 
-    return estab
+    return nominal_roll
 
 
 @pytest.fixture
-async def sample_personnel(db_session: AsyncSession, sample_estab, sample_users):
+async def sample_personnel(db_session: AsyncSession, sample_nominal_roll, sample_users):
     """Create sample personnel for testing."""
     admin_id = str(sample_users["admin"].id)
-    estab_id = str(sample_estab.id)
+    nominal_roll_id = str(sample_nominal_roll.id)
 
     personnel = [
         Personnel(
-            estab_id=estab_id,
+            nominal_roll_id=nominal_roll_id,
             rank="PTE",
             full_name="John Doe",
             unit="Coy A",
@@ -198,7 +198,7 @@ async def sample_personnel(db_session: AsyncSession, sample_estab, sample_users)
             created_by=admin_id,
         ),
         Personnel(
-            estab_id=estab_id,
+            nominal_roll_id=nominal_roll_id,
             rank="CPL",
             full_name="Jane Smith",
             unit="Coy A",
@@ -207,7 +207,7 @@ async def sample_personnel(db_session: AsyncSession, sample_estab, sample_users)
             created_by=admin_id,
         ),
         Personnel(
-            estab_id=estab_id,
+            nominal_roll_id=nominal_roll_id,
             rank="SGT",
             full_name="Bob Johnson",
             unit="Coy A",
@@ -225,14 +225,14 @@ async def sample_personnel(db_session: AsyncSession, sample_estab, sample_users)
 
 
 @pytest.fixture
-async def sample_deployment(db_session: AsyncSession, sample_estab, sample_users):
+async def sample_deployment(db_session: AsyncSession, sample_nominal_roll, sample_users):
     """Create a sample deployment for testing."""
     admin_id = str(sample_users["admin"].id)
-    estab_id = str(sample_estab.id)
+    nominal_roll_id = str(sample_nominal_roll.id)
 
     deployment = Deployment(
         name="Test Deployment",
-        estab_id=estab_id,
+        nominal_roll_id=nominal_roll_id,
         status="active",
         valid_from=utc_dt.utcnow() - timedelta(days=1),
         valid_until=utc_dt.utcnow() + timedelta(days=30),

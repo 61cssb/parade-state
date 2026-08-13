@@ -238,7 +238,7 @@ class TestDomainBehavior:
 - **`sample_deployment`** - Sample deployment entity
 - **`sample_personnel`** - Sample personnel entities
 - **`sample_users`** - Sample user entities
-- **`sample_estab`** - Sample establishment entity
+- **`sample_nominal_roll`** - Sample nominal_rolllishment entity
 
 ### Testing Approach
 

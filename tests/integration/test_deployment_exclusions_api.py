@@ -10,11 +10,11 @@ from parade_state.models import Deployment, DeploymentUserAccess
 from parade_state.utils import utc_dt
 
 
-async def _make_draft_deployment(db_session: AsyncSession, estab_id: str, admin_id: str) -> Deployment:
+async def _make_draft_deployment(db_session: AsyncSession, nominal_roll_id: str, admin_id: str) -> Deployment:
     """Helper: create a draft deployment + admin access grant."""
     deployment = Deployment(
         name="Draft Test Deployment",
-        estab_id=estab_id,
+        nominal_roll_id=nominal_roll_id,
         status="draft",
         valid_from=utc_dt.utcnow() + timedelta(days=1),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
@@ -42,11 +42,11 @@ async def _make_draft_deployment(db_session: AsyncSession, estab_id: str, admin_
 @pytest.mark.asyncio
 async def test_exclude_personnel(
     client: TestClient, admin_token_headers: dict[str, str], db_session: AsyncSession,
-    sample_estab, sample_personnel, sample_users,
+    sample_nominal_roll, sample_personnel, sample_users,
 ):
     """Admin can exclude a personnel from a draft deployment."""
     admin_id = str(sample_users["admin"].id)
-    deployment = await _make_draft_deployment(db_session, str(sample_estab.id), admin_id)
+    deployment = await _make_draft_deployment(db_session, str(sample_nominal_roll.id), admin_id)
     personnel_id = str(sample_personnel[0].id)
 
     response = client.post(
@@ -77,11 +77,11 @@ async def test_exclude_personnel(
 @pytest.mark.asyncio
 async def test_exclude_personnel_idempotent(
     client: TestClient, admin_token_headers: dict[str, str], db_session: AsyncSession,
-    sample_estab, sample_personnel, sample_users,
+    sample_nominal_roll, sample_personnel, sample_users,
 ):
     """Excluding an already-excluded personnel is idempotent."""
     admin_id = str(sample_users["admin"].id)
-    deployment = await _make_draft_deployment(db_session, str(sample_estab.id), admin_id)
+    deployment = await _make_draft_deployment(db_session, str(sample_nominal_roll.id), admin_id)
     personnel_id = str(sample_personnel[0].id)
 
     response1 = client.post(
@@ -105,11 +105,11 @@ async def test_exclude_personnel_idempotent(
 @pytest.mark.asyncio
 async def test_exclude_personnel_as_regular_user_forbidden(
     client: TestClient, user_token_headers: dict[str, str], db_session: AsyncSession,
-    sample_estab, sample_personnel, sample_users,
+    sample_nominal_roll, sample_personnel, sample_users,
 ):
     """Regular users cannot exclude personnel from a deployment."""
     admin_id = str(sample_users["admin"].id)
-    deployment = await _make_draft_deployment(db_session, str(sample_estab.id), admin_id)
+    deployment = await _make_draft_deployment(db_session, str(sample_nominal_roll.id), admin_id)
 
     response = client.post(
         f"/api/v1/deployments/{deployment.id}/exclusions",
@@ -122,13 +122,13 @@ async def test_exclude_personnel_as_regular_user_forbidden(
 
 
 @pytest.mark.asyncio
-async def test_exclude_personnel_not_in_estab(
+async def test_exclude_personnel_not_in_nominal_roll(
     client: TestClient, admin_token_headers: dict[str, str], db_session: AsyncSession,
-    sample_estab, sample_users,
+    sample_nominal_roll, sample_users,
 ):
-    """Cannot exclude a personnel that doesn't belong to the deployment's estab."""
+    """Cannot exclude a personnel that doesn't belong to the deployment's nominal_roll."""
     admin_id = str(sample_users["admin"].id)
-    deployment = await _make_draft_deployment(db_session, str(sample_estab.id), admin_id)
+    deployment = await _make_draft_deployment(db_session, str(sample_nominal_roll.id), admin_id)
 
     response = client.post(
         f"/api/v1/deployments/{deployment.id}/exclusions",
@@ -168,11 +168,11 @@ async def test_exclude_personnel_non_draft_deployment(
 @pytest.mark.asyncio
 async def test_include_personnel(
     client: TestClient, admin_token_headers: dict[str, str], db_session: AsyncSession,
-    sample_estab, sample_personnel, sample_users,
+    sample_nominal_roll, sample_personnel, sample_users,
 ):
     """Admin can re-include a previously excluded personnel."""
     admin_id = str(sample_users["admin"].id)
-    deployment = await _make_draft_deployment(db_session, str(sample_estab.id), admin_id)
+    deployment = await _make_draft_deployment(db_session, str(sample_nominal_roll.id), admin_id)
     personnel_id = str(sample_personnel[0].id)
 
     # Exclude first
@@ -210,11 +210,11 @@ async def test_include_personnel(
 @pytest.mark.asyncio
 async def test_include_personnel_not_excluded(
     client: TestClient, admin_token_headers: dict[str, str], db_session: AsyncSession,
-    sample_estab, sample_personnel, sample_users,
+    sample_nominal_roll, sample_personnel, sample_users,
 ):
     """404 when trying to re-include a personnel that isn't excluded."""
     admin_id = str(sample_users["admin"].id)
-    deployment = await _make_draft_deployment(db_session, str(sample_estab.id), admin_id)
+    deployment = await _make_draft_deployment(db_session, str(sample_nominal_roll.id), admin_id)
 
     response = client.delete(
         f"/api/v1/deployments/{deployment.id}/exclusions/{sample_personnel[0].id}",
@@ -252,11 +252,11 @@ async def test_include_personnel_non_draft_deployment(
 @pytest.mark.asyncio
 async def test_excluded_personnel_not_in_listing(
     client: TestClient, admin_token_headers: dict[str, str], db_session: AsyncSession,
-    sample_estab, sample_personnel, sample_users,
+    sample_nominal_roll, sample_personnel, sample_users,
 ):
     """Comprehensive: exclude one person, verify listing count drops and person absent."""
     admin_id = str(sample_users["admin"].id)
-    deployment = await _make_draft_deployment(db_session, str(sample_estab.id), admin_id)
+    deployment = await _make_draft_deployment(db_session, str(sample_nominal_roll.id), admin_id)
 
     # Baseline: all 3 personnel listed
     baseline = client.get(

@@ -200,7 +200,7 @@ async def test_get_personnel_attendance_history_invalid_personnel(
 
 
 @pytest.mark.asyncio
-async def test_get_personnel_attendance_history_wrong_estab(
+async def test_get_personnel_attendance_history_wrong_nominal_roll(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
@@ -208,9 +208,9 @@ async def test_get_personnel_attendance_history_wrong_estab(
     sample_personnel,
     db_session,
 ):
-    """Test that personnel from different estab cannot be queried."""
+    """Test that personnel from different nominal_roll cannot be queried."""
     from parade_state.models import Deployment as DeploymentModel
-    from parade_state.models import Estab
+    from parade_state.models import NominalRoll
 
     personnel_id = str(sample_personnel[0].id)
 
