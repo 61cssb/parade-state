@@ -719,6 +719,7 @@ async def test_get_deployment_status_with_sessions(
     personnel1 = Personnel(
         nominal_roll_id="nominal_roll-1",
         rank="PTE",
+        category="WOSE",
         full_name="John Doe",
         unit="Coy A",
         sub_unit_1="Platoon 1",
@@ -728,6 +729,7 @@ async def test_get_deployment_status_with_sessions(
     personnel2 = Personnel(
         nominal_roll_id="nominal_roll-1",
         rank="PTE",
+        category="WOSE",
         full_name="Jane Smith",
         unit="Coy B",
         sub_unit_1="Platoon 2",
@@ -822,6 +824,7 @@ async def test_export_deployment_csv(
     personnel = Personnel(
         nominal_roll_id="nominal_roll-1",
         rank="PTE",
+        category="WOSE",
         full_name="John Doe",
         unit="Coy A",
         sub_unit_1="Platoon 1",

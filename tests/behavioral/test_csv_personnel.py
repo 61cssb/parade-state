@@ -26,6 +26,7 @@ class TestPersonnelIdentity:
         person = Personnel(
             nominal_roll_id=sample_nominal_roll.id,
             rank="PTE",
+            category="WOSE",
             full_name="John Doe",
             unit="Coy A",
             created_by=admin_id,
@@ -51,6 +52,7 @@ class TestPersonnelIdentity:
         person1 = Personnel(
             nominal_roll_id=sample_nominal_roll.id,
             rank="PTE",
+            category="WOSE",
             full_name="John Doe",
             unit="Coy A",
             created_by=admin_id,
@@ -58,6 +60,7 @@ class TestPersonnelIdentity:
         person2 = Personnel(
             nominal_roll_id=sample_nominal_roll.id,
             rank="PTE",
+            category="WOSE",
             full_name="John Doe Jr",
             unit="Coy B",
             created_by=admin_id,
@@ -100,6 +103,7 @@ class TestPersonnelIdentity:
             nominal_roll_id=nominal_roll1.id,
             short_id=shared_short_id,
             rank="PTE",
+            category="WOSE",
             full_name="John Doe",
             unit="Coy A",
             created_by=admin_id,
@@ -108,6 +112,7 @@ class TestPersonnelIdentity:
             nominal_roll_id=nominal_roll2.id,
             short_id=shared_short_id,  # same person, different nominal_roll
             rank="PTE",
+            category="WOSE",
             full_name="John Doe",
             unit="Coy A",
             created_by=admin_id,
@@ -133,6 +138,7 @@ class TestPersonnelIdentity:
             nominal_roll_id=sample_nominal_roll.id,
             short_id=clashing_short_id,
             rank="PTE",
+            category="WOSE",
             full_name="John Doe",
             unit="Coy A",
             created_by=admin_id,
@@ -141,6 +147,7 @@ class TestPersonnelIdentity:
             nominal_roll_id=sample_nominal_roll.id,  # same nominal_roll
             short_id=clashing_short_id,  # same short_id in same nominal_roll
             rank="CPL",
+            category="WOSE",
             full_name="Jane Doe",
             unit="Coy A",
             created_by=admin_id,
@@ -178,6 +185,7 @@ class TestPersonnelIdentity:
         person1 = Personnel(
             nominal_roll_id=nominal_roll1.id,
             rank="PTE",
+            category="WOSE",
             full_name="John Doe",
             unit="Coy A",
             created_by=admin_id,
@@ -185,6 +193,7 @@ class TestPersonnelIdentity:
         person2 = Personnel(
             nominal_roll_id=nominal_roll2.id,
             rank="PTE",
+            category="WOSE",
             full_name="Jane Smith",  # a different person
             unit="Coy A",
             created_by=admin_id,

@@ -191,6 +191,7 @@ async def sample_personnel(db_session: AsyncSession, sample_nominal_roll, sample
         Personnel(
             nominal_roll_id=nominal_roll_id,
             rank="PTE",
+            category="WOSE",
             full_name="John Doe",
             unit="Coy A",
             sub_unit_1="Platoon 1",
@@ -200,6 +201,7 @@ async def sample_personnel(db_session: AsyncSession, sample_nominal_roll, sample
         Personnel(
             nominal_roll_id=nominal_roll_id,
             rank="CPL",
+            category="WOSE",
             full_name="Jane Smith",
             unit="Coy A",
             sub_unit_1="Platoon 1",
@@ -208,7 +210,8 @@ async def sample_personnel(db_session: AsyncSession, sample_nominal_roll, sample
         ),
         Personnel(
             nominal_roll_id=nominal_roll_id,
-            rank="SGT",
+            rank="CPT",
+            category="Officer",
             full_name="Bob Johnson",
             unit="Coy A",
             sub_unit_1="Platoon 2",

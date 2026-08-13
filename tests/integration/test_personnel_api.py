@@ -481,7 +481,7 @@ async def test_update_personnel_as_admin(
 ):
     """Test updating personnel as admin."""
     update_data = {
-        "rank": "Updated Rank",
+        "rank": "CPL",
     }
 
     response = client.patch(
@@ -498,7 +498,7 @@ async def test_update_personnel_as_admin(
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == str(sample_personnel[0].id)
-    assert data["rank"] == "Updated Rank"
+    assert data["rank"] == "CPL"
 
 
 async def test_update_personnel_as_user_forbidden(
@@ -587,6 +587,118 @@ async def test_list_personnel_with_status_filter(
     # All returned personnel should have archived status
     for personnel in data:
         assert personnel["status"] == "archived"
+
+
+@pytest.mark.asyncio
+async def test_list_personnel_with_category_filter(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_deployment: Deployment,
+    sample_personnel,
+):
+    """Test listing personnel filtered by category (Officer / WOSE).
+
+    The shared fixture has one Officer (CPT) and two WOSEs (PTE, CPL).
+    """
+    # Officer filter -> only the CPT
+    officer_resp = client.get(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params={
+            "deployment_id": str(sample_deployment.id),
+            "category": "Officer",
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "admin",
+        },
+    )
+    assert officer_resp.status_code == 200
+    officer_data = officer_resp.json()
+    assert len(officer_data) >= 1
+    for personnel in officer_data:
+        assert personnel["category"] == "Officer"
+
+    # WOSE filter -> only PTE and CPL
+    wose_resp = client.get(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params={
+            "deployment_id": str(sample_deployment.id),
+            "category": "WOSE",
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "admin",
+        },
+    )
+    assert wose_resp.status_code == 200
+    wose_data = wose_resp.json()
+    assert len(wose_data) >= 1
+    for personnel in wose_data:
+        assert personnel["category"] == "WOSE"
+
+    # No filter returns both categories
+    all_resp = client.get(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params={
+            "deployment_id": str(sample_deployment.id),
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "admin",
+        },
+    )
+    assert all_resp.status_code == 200
+    categories = {p["category"] for p in all_resp.json()}
+    assert categories == {"Officer", "WOSE"}
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_recomputes_category(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    db_session,
+    sample_deployment: Deployment,
+    sample_personnel,
+):
+    """Changing rank across corps recomputes the inferred category."""
+    # sample_personnel[0] is PTE (WOSE); promote to CPT (Officer)
+    response = client.patch(
+        f"/api/v1/personnel/{sample_personnel[0].id}",
+        headers=admin_token_headers,
+        params={
+            "deployment_id": str(sample_deployment.id),
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "admin",
+        },
+        json={"rank": "CPT"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["rank"] == "CPT"
+    assert data["category"] == "Officer"
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_invalid_rank_rejected(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_deployment: Deployment,
+    sample_personnel,
+):
+    """Patching to an unrecognized rank is rejected with 400."""
+    response = client.patch(
+        f"/api/v1/personnel/{sample_personnel[0].id}",
+        headers=admin_token_headers,
+        params={
+            "deployment_id": str(sample_deployment.id),
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "admin",
+        },
+        json={"rank": "SGT"},  # not a recognized SAF rank
+    )
+
+    assert response.status_code == 400
 
 
 async def test_list_personnel_with_pagination(
@@ -682,6 +794,7 @@ async def test_list_personnel_from_different_nominal_roll_forbidden(
     other_personnel = Personnel(
         nominal_roll_id=str(sample_nominal_roll.id) + "different",  # Different nominal_roll
         rank="Private",
+        category="WOSE",
         full_name="Other Person",
         unit="Other Unit",
         created_by="admin-user-id",
@@ -727,6 +840,7 @@ async def test_get_personnel_from_different_nominal_roll_forbidden(
     other_personnel = Personnel(
         nominal_roll_id=str(sample_nominal_roll.id) + "different",  # Different nominal_roll
         rank="Private",
+        category="WOSE",
         full_name="Other Person",
         unit="Other Unit",
         created_by="admin-user-id",
@@ -789,7 +903,7 @@ async def test_update_personnel_sets_audit_trail(
 
     # Update personnel
     update_data = {
-        "rank": "Updated Rank",
+        "rank": "CPL",
     }
 
     response = client.patch(
@@ -806,7 +920,7 @@ async def test_update_personnel_sets_audit_trail(
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == str(sample_personnel[0].id)
-    assert data["rank"] == "Updated Rank"
+    assert data["rank"] == "CPL"
     assert data["updated_at"] is not None
     assert data["updated_by"] == str(sample_users["admin"].id)
 

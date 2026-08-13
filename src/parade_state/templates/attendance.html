@@ -68,18 +68,20 @@
                 style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
             <option value="">All Sub-unit 2</option>
         </select>
+        <select id="filter-category" onchange="applyFilters()"
+                style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
+            <option value="">All Categories</option>
+        </select>
+        <select id="filter-rank" onchange="applyFilters()"
+                style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
+            <option value="">All Ranks</option>
+        </select>
         <span id="filter-count" style="font-size: 0.8rem; color: #6b7280;"></span>
     </div>
 
     <table id="attendance-table" style="width: 100%; border-collapse: collapse;">
         <thead>
             <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
-                <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('rank')">
-                    Rank <span id="sort-rank"></span>
-                </th>
-                <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('name')">
-                    Name <span id="sort-name"></span>
-                </th>
                 <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('unit')">
                     Unit <span id="sort-unit"></span>
                 </th>
@@ -88,6 +90,13 @@
                 </th>
                 <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('sub2')">
                     Sub-unit 2 <span id="sort-sub2"></span>
+                </th>
+                <th style="padding: 0.5rem;">Category</th>
+                <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('rank')">
+                    Rank <span id="sort-rank"></span>
+                </th>
+                <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('name')">
+                    Name <span id="sort-name"></span>
                 </th>
                 <th style="padding: 0.5rem; cursor: pointer; user-select: none;" onclick="sortBy('status')">
                     Status <span id="sort-status"></span>
@@ -99,12 +108,13 @@
             {% for r in attendance_records %}
             <tr style="border-bottom: 1px solid #e5e7eb;" data-record-id="{{ r.id }}"
                 data-unit="{{ r.unit }}" data-sub1="{{ r.sub_unit_1 or '' }}" data-sub2="{{ r.sub_unit_2 or '' }}"
-                data-rank="{{ r.rank }}" data-name="{{ r.full_name }}" data-status="{{ r.status }}">
-                <td style="padding: 0.5rem;">{{ r.rank }}</td>
-                <td style="padding: 0.5rem;">{{ r.full_name }}</td>
+                data-category="{{ r.category }}" data-rank="{{ r.rank }}" data-name="{{ r.full_name }}" data-status="{{ r.status }}">
                 <td style="padding: 0.5rem;">{{ r.unit }}</td>
                 <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_1 or '' }}</td>
                 <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_2 or '' }}</td>
+                <td style="padding: 0.5rem; white-space: nowrap;">{{ r.category }}</td>
+                <td style="padding: 0.5rem; white-space: nowrap;">{{ r.rank }}</td>
+                <td style="padding: 0.5rem;">{{ r.full_name }}</td>
                 <td style="padding: 0.5rem;">
                     <select class="status-select" data-attendance-id="{{ r.id }}" data-field="status"
                             {% if not is_open %}disabled{% endif %}
@@ -191,15 +201,19 @@
 
     function populateFilters() {
         const rows = document.querySelectorAll('#attendance-body tr');
-        const units = new Set(), sub1s = new Set(), sub2s = new Set();
+        const units = new Set(), sub1s = new Set(), sub2s = new Set(), cats = new Set(), ranks = new Set();
         rows.forEach(function(row) {
             if (row.dataset.unit) units.add(row.dataset.unit);
             if (row.dataset.sub1) sub1s.add(row.dataset.sub1);
             if (row.dataset.sub2) sub2s.add(row.dataset.sub2);
+            if (row.dataset.category) cats.add(row.dataset.category);
+            if (row.dataset.rank) ranks.add(row.dataset.rank);
         });
         addOptions('filter-unit', units);
         addOptions('filter-sub1', sub1s);
         addOptions('filter-sub2', sub2s);
+        addOptions('filter-category', cats);
+        addOptions('filter-rank', ranks);
     }
 
     function addOptions(selectId, values) {
@@ -218,12 +232,16 @@
         const fu = document.getElementById('filter-unit').value;
         const f1 = document.getElementById('filter-sub1').value;
         const f2 = document.getElementById('filter-sub2').value;
+        const fc = document.getElementById('filter-category').value;
+        const fr = document.getElementById('filter-rank').value;
         const rows = document.querySelectorAll('#attendance-body tr');
         let visible = 0;
         rows.forEach(function(row) {
             const match = (!fu || row.dataset.unit === fu)
                 && (!f1 || row.dataset.sub1 === f1)
-                && (!f2 || row.dataset.sub2 === f2);
+                && (!f2 || row.dataset.sub2 === f2)
+                && (!fc || row.dataset.category === fc)
+                && (!fr || row.dataset.rank === fr);
             row.style.display = match ? '' : 'none';
             if (match) visible++;
         });

@@ -111,6 +111,7 @@ async def attendance_view(
                     {
                         "id": str(record.id),
                         "rank": person.rank,
+                        "category": person.category,
                         "full_name": person.full_name,
                         "unit": record.unit_snapshot or person.unit,
                         "sub_unit_1": record.sub_unit_1_snapshot

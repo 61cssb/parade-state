@@ -32,6 +32,10 @@ class Personnel(Base):
     )
     short_id: Mapped[str] = mapped_column(String(8), default=ids.short_id, index=True)
     rank: Mapped[str] = mapped_column(String(50), index=True)
+    category: Mapped[str] = mapped_column(
+        Enum("Officer", "WOSE", name="personnel_category"),
+        index=True,
+    )
     full_name: Mapped[str] = mapped_column(String(255), index=True)
     unit: Mapped[str] = mapped_column(String(255), index=True)
     sub_unit_1: Mapped[str | None] = mapped_column(String(255), nullable=True)
