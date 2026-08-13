@@ -24,7 +24,7 @@ This document clarifies the different types of endpoints in the Parade State app
 - `GET /admin/deployments/{id}/personnel` - Deployment personnel management (checkbox-based include/exclude, draft-only editing)
 - `GET /admin/users` - Users management page
 - `GET /admin/csv-upload` - CSV upload page
-- `GET /admin/estabs` - Estab management page (CAA date, source file, personnel count, status filter, confirm/unconfirm/delete actions)
+- `GET /admin/estabs` - Estab management page (CAA date, label, source file, personnel count, status filter, confirm/unconfirm/delete actions)
 - `GET /admin/settings` - Settings page
 - `GET /admin/audit` - Audit log page
 

@@ -561,6 +561,7 @@ async def admin_estabs(
                 Estab.personnel_count,
                 Estab.uploaded_at,
                 Estab.csv_hash,
+                Estab.label,
                 latest_upload_subq.c.original_filename,
             )
             .outerjoin(
@@ -584,6 +585,7 @@ async def admin_estabs(
             "uploaded_at": row.uploaded_at,
             "csv_hash": row.csv_hash[:12] + "...",
             "original_filename": row.original_filename or "—",
+            "label": row.label,
         }
         for row in rows
     ]

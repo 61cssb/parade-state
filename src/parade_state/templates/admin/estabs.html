@@ -5,6 +5,25 @@
 {% block page_title %}Estabs{% endblock %}
 
 {% block content %}
+<style>
+    .label-editable {
+        display: inline-block;
+        padding: 0.15rem 0.4rem;
+        border-radius: 0.25rem;
+        border: 1px dashed #d1d5db;
+        cursor: pointer;
+        transition: background-color 0.1s, border-color 0.1s;
+    }
+    .label-editable:hover {
+        background-color: #f3f4f6;
+        border-color: #2563eb;
+    }
+    .label-editable:hover::after {
+        content: " ✎";
+        color: #2563eb;
+        font-size: 0.75rem;
+    }
+</style>
 <p style="color: #6b7280; margin-bottom: 1.5rem;">
     Base personnel rosters pinned by CAA date. Each estab is associated with its source CSV upload.
 </p>
@@ -26,6 +45,7 @@
         <thead>
             <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
                 <th style="padding: 0.5rem;">CAA Date</th>
+                <th style="padding: 0.5rem;">Label</th>
                 <th style="padding: 0.5rem;">Source File</th>
                 <th style="padding: 0.5rem;">Personnel</th>
                 <th style="padding: 0.5rem;">Status</th>
@@ -38,6 +58,17 @@
             {% for estab in estabs %}
             <tr style="border-bottom: 1px solid #e5e7eb;">
                 <td style="padding: 0.5rem;">{{ estab.caa }}</td>
+                <td style="padding: 0.5rem;" id="label-cell-{{ estab.id }}">
+                    {% if estab.status == 'draft' %}
+                    <span id="label-display-{{ estab.id }}"
+                          class="label-editable"
+                          data-value="{{ estab.label or '' }}"
+                          onclick="editLabel('{{ estab.id }}')"
+                          title="Click to edit label">{{ estab.label or '—' }}</span>
+                    {% else %}
+                    {{ estab.label or '—' }}
+                    {% endif %}
+                </td>
                 <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ estab.original_filename }}</td>
                 <td style="padding: 0.5rem;">{{ estab.personnel_count }}</td>
                 <td style="padding: 0.5rem;">
@@ -364,6 +395,88 @@
         } catch (error) {
             showStatus('Network error: ' + error.message, 'error');
         }
+    }
+
+    // --- Inline label editing (draft estabs only) ---
+    function editLabel(estabId) {
+        const cell = document.getElementById('label-cell-' + estabId);
+        const display = document.getElementById('label-display-' + estabId);
+        if (!display) return;  // not editable
+        const current = display.getAttribute('data-value') || '';
+
+        const wrap = document.createElement('span');
+        wrap.style.display = 'inline-flex';
+        wrap.style.gap = '0.25rem';
+        wrap.style.alignItems = 'center';
+        wrap.innerHTML =
+            '<input type="text" maxlength="100" id="label-input-' + estabId + '" value="' + escapeAttr(current) + '" ' +
+            '    style="padding: 0.25rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.875rem; max-width: 12rem;">' +
+            '<button type="button" class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;" onclick="saveLabel(\'' + estabId + '\')">Save</button>' +
+            '<button type="button" class="btn" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; border: 1px solid #d1d5db;" onclick="cancelEdit(\'' + estabId + '\')">Cancel</button>' +
+            '<span id="label-error-' + estabId + '" style="color: #ef4444; font-size: 0.75rem;"></span>';
+        display.style.display = 'none';
+        display.insertAdjacentElement('afterend', wrap);
+
+        const input = document.getElementById('label-input-' + estabId);
+        input.focus();
+        input.select();
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); saveLabel(estabId); }
+            else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(estabId); }
+        });
+    }
+
+    async function saveLabel(estabId) {
+        const input = document.getElementById('label-input-' + estabId);
+        const errSpan = document.getElementById('label-error-' + estabId);
+        if (!input) return;
+        const value = input.value.trim();
+        errSpan.textContent = '';
+
+        try {
+            const response = await fetch(
+                '/api/v1/estabs/' + estabId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ label: value }),
+                }
+            );
+            if (response.ok) {
+                const data = await response.json();
+                const newLabel = data.label || '';
+                const display = document.getElementById('label-display-' + estabId);
+                display.setAttribute('data-value', newLabel);
+                display.textContent = newLabel || '—';
+                cancelEdit(estabId);
+                showPageStatus('Label updated.', 'success');
+            } else if (response.status === 409) {
+                errSpan.textContent = 'Label already in use.';
+                input.focus();
+            } else if (response.status === 422) {
+                errSpan.textContent = 'Label must not be empty.';
+                input.focus();
+            } else {
+                const data = await response.json();
+                showPageStatus('Label update failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showPageStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    function cancelEdit(estabId) {
+        const display = document.getElementById('label-display-' + estabId);
+        const input = document.getElementById('label-input-' + estabId);
+        if (!display) return;
+        const wrap = input ? input.parentElement : null;
+        if (wrap) wrap.remove();
+        display.style.display = '';
+    }
+
+    function escapeAttr(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 </script>
 {% endblock %}

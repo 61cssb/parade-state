@@ -1,4 +1,4 @@
-"""Tests for estab API endpoints (PATCH confirm + DELETE)."""
+"""Tests for estab API endpoints (PATCH confirm, label, DELETE)."""
 
 from datetime import date
 
@@ -314,3 +314,160 @@ async def test_delete_estab_cascades(
         params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
     assert dep_response.status_code == 404
+
+
+# ============================================================================
+# PATCH /api/v1/estabs/{id} — label
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_update_estab_label(
+    client: TestClient, admin_token_headers: dict[str, str],
+    db_session: AsyncSession, sample_users,
+):
+    """Admin can set a label on an estab; response and GET reflect it."""
+    draft_estab = Estab(
+        caa=date(2024, 9, 1),
+        csv_hash="label-hash-set",
+        status="draft",
+        uploaded_by=str(sample_users["admin"].id),
+    )
+    db_session.add(draft_estab)
+    await db_session.commit()
+
+    response = client.patch(
+        f"/api/v1/estabs/{draft_estab.id}",
+        json={"label": "Q1 Roster"},
+        headers=admin_token_headers,
+        params={"user_id": "admin-user-id", "user_role": "admin"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["label"] == "Q1 Roster"
+
+    # GET reflects the change
+    get_resp = client.get(
+        f"/api/v1/estabs/{draft_estab.id}",
+        headers=admin_token_headers,
+        params={"user_id": "admin-user-id", "user_role": "admin"},
+    )
+    assert get_resp.status_code == 200
+    assert get_resp.json()["label"] == "Q1 Roster"
+
+
+@pytest.mark.asyncio
+async def test_update_estab_label_strips_whitespace(
+    client: TestClient, admin_token_headers: dict[str, str],
+    db_session: AsyncSession, sample_users,
+):
+    """Label is stripped before storage."""
+    draft_estab = Estab(
+        caa=date(2024, 10, 1),
+        csv_hash="label-hash-strip",
+        status="draft",
+        uploaded_by=str(sample_users["admin"].id),
+    )
+    db_session.add(draft_estab)
+    await db_session.commit()
+
+    response = client.patch(
+        f"/api/v1/estabs/{draft_estab.id}",
+        json={"label": "  Padded  "},
+        headers=admin_token_headers,
+        params={"user_id": "admin-user-id", "user_role": "admin"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["label"] == "Padded"
+
+
+@pytest.mark.asyncio
+async def test_update_estab_label_duplicate_rejected(
+    client: TestClient, admin_token_headers: dict[str, str],
+    db_session: AsyncSession, sample_users,
+):
+    """Setting a label that's already in use returns 409."""
+    estab_a = Estab(
+        caa=date(2024, 11, 1),
+        csv_hash="label-hash-dup-a",
+        status="draft",
+        uploaded_by=str(sample_users["admin"].id),
+        label="Shared Label",
+    )
+    estab_b = Estab(
+        caa=date(2024, 12, 1),
+        csv_hash="label-hash-dup-b",
+        status="draft",
+        uploaded_by=str(sample_users["admin"].id),
+    )
+    db_session.add_all([estab_a, estab_b])
+    await db_session.commit()
+
+    response = client.patch(
+        f"/api/v1/estabs/{estab_b.id}",
+        json={"label": "Shared Label"},
+        headers=admin_token_headers,
+        params={"user_id": "admin-user-id", "user_role": "admin"},
+    )
+
+    assert response.status_code == 409
+    assert "already in use" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_update_estab_label_empty_rejected(
+    client: TestClient, admin_token_headers: dict[str, str],
+    db_session: AsyncSession, sample_users,
+):
+    """Empty/whitespace label fails schema validation (422)."""
+    draft_estab = Estab(
+        caa=date(2025, 1, 1),
+        csv_hash="label-hash-empty",
+        status="draft",
+        uploaded_by=str(sample_users["admin"].id),
+    )
+    db_session.add(draft_estab)
+    await db_session.commit()
+
+    response = client.patch(
+        f"/api/v1/estabs/{draft_estab.id}",
+        json={"label": "   "},
+        headers=admin_token_headers,
+        params={"user_id": "admin-user-id", "user_role": "admin"},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_list_estabs_includes_label(
+    client: TestClient, admin_token_headers: dict[str, str],
+    db_session: AsyncSession, sample_users,
+):
+    """List endpoint returns the label field (null when unset)."""
+    labeled = Estab(
+        caa=date(2025, 2, 1),
+        csv_hash="label-hash-list-a",
+        status="draft",
+        uploaded_by=str(sample_users["admin"].id),
+        label="Visible",
+    )
+    unlabeled = Estab(
+        caa=date(2025, 3, 1),
+        csv_hash="label-hash-list-b",
+        status="draft",
+        uploaded_by=str(sample_users["admin"].id),
+    )
+    db_session.add_all([labeled, unlabeled])
+    await db_session.commit()
+
+    response = client.get(
+        "/api/v1/estabs",
+        headers=admin_token_headers,
+        params={"user_id": "admin-user-id", "user_role": "admin"},
+    )
+    assert response.status_code == 200
+    items = {item["id"]: item for item in response.json()}
+    assert items[labeled.id]["label"] == "Visible"
+    assert items[unlabeled.id]["label"] is None

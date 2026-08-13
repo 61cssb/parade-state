@@ -79,11 +79,13 @@ Estab
 ├── confirmed_at: datetime (nullable)
 ├── confirmed_by: UUID (FK User, nullable)
 ├── created_at: datetime
-└── notes: str (nullable; admin notes on this estab)
+├── notes: str (nullable; admin notes on this estab)
+└── label: str (nullable; UNIQUE; human-readable name, max 100 chars)
 ```
 
 **Constraints:**
 - UNIQUE(caa) among non-archived estabs
+- UNIQUE(label) across all estabs (NULLs allowed; enforced on non-null values)
 - Status transition: draft → confirmed → archived (one-way)
 - Raw CSV stored immutably in csv_uploads (append-only; SHA-256 hash recorded)
 - Parsed personnel in personnel_snapshots: required columns as typed fields; all others in extra_fields JSON

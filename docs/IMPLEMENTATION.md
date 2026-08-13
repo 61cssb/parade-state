@@ -100,7 +100,7 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 - `tests/integration/test_deferments_api.py` - Deferment CRUD, callup_status transitions, super_admin auth (15 tests)
 - `tests/integration/test_deployments_api.py` - Deployment lifecycle, CRUD operations (18 tests)
 - `tests/integration/test_deployment_exclusions_api.py` - Personnel exclusion management (9 tests)
-- `tests/integration/test_estabs_api.py` - Estab lifecycle (confirm/unconfirm/delete) (13 tests)
+- `tests/integration/test_estabs_api.py` - Estab lifecycle (confirm/unconfirm/delete, label updates) (18 tests)
 - `tests/integration/test_personnel_api.py` - Personnel management, search, filtering (12 tests)
 - `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (10 tests)
 - `tests/integration/test_sessions_api.py` - Session management, open/close/finalize, reopen (8 tests)
@@ -562,7 +562,7 @@ parade-state/
 │   │   ├── csv_upload.py        # CSV upload pipeline
 │   │   ├── deferments.py        # Deferment CRUD (super_admin only)
 │   │   ├── deployments.py       # Deployment lifecycle
-│   │   ├── estabs.py            # Estab list/get/confirm/delete
+│   │   ├── estabs.py            # Estab list/get/update (status, notes, label)/delete
 │   │   ├── personnel.py         # Personnel listing + attendance history
 │   │   ├── sessions.py          # Session open/close/reopen/finalize
 │   │   └── users.py             # User CRUD + role/status transitions

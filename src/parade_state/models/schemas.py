@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from parade_state.utils import utc_dt
 
@@ -571,6 +571,7 @@ class EstabListItem(BaseModel):
     csv_hash: str
     # From the most recent linked CsvUpload (null until an upload is linked).
     original_filename: str | None = None
+    label: str | None = None
 
     class Config:
         from_attributes = True
@@ -586,10 +587,21 @@ class EstabResponse(EstabListItem):
 
 
 class EstabUpdate(BaseModel):
-    """Schema for updating an estab (status transitions + notes)."""
+    """Schema for updating an estab (status transitions, notes, label)."""
 
     status: Literal["confirmed", "draft"] | None = None
     notes: str | None = None
+    label: str | None = Field(None, max_length=100)
+
+    @field_validator("label")
+    @classmethod
+    def _label_must_be_nonempty(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("label must not be empty or whitespace")
+        return stripped
 
 
 # ============================================================================
