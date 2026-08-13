@@ -9,7 +9,7 @@ possible future refinement.
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
-from sqlalchemy import func, or_, select
+from sqlalchemy import ColumnElement, func, or_, select
 
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
@@ -18,19 +18,80 @@ from parade_state.models import NominalRoll, Personnel
 router = APIRouter()
 
 
+def _base_conditions(nominal_roll_id: str) -> list[ColumnElement[bool]]:
+    """Always-on conditions scoping a query to one roll's active personnel."""
+    return [
+        Personnel.nominal_roll_id == nominal_roll_id,
+        Personnel.status == "active",
+    ]
+
+
+def _search_condition(search: str | None) -> ColumnElement[bool] | None:
+    if not search:
+        return None
+    pattern = f"%{search}%"
+    return or_(
+        Personnel.full_name.ilike(pattern),
+        Personnel.short_id.ilike(pattern),
+        Personnel.rank.ilike(pattern),
+    )
+
+
+def _optional_conditions(
+    *,
+    search: str | None,
+    unit: str | None,
+    sub_unit_1: str | None,
+    sub_unit_2: str | None,
+    category: str | None,
+) -> list[ColumnElement[bool]]:
+    """User-supplied filters applied to both list and count queries."""
+    conds: list[ColumnElement[bool]] = []
+    sc = _search_condition(search)
+    if sc is not None:
+        conds.append(sc)
+    if unit:
+        conds.append(Personnel.unit == unit)
+    if sub_unit_1:
+        conds.append(Personnel.sub_unit_1 == sub_unit_1)
+    if sub_unit_2:
+        conds.append(Personnel.sub_unit_2 == sub_unit_2)
+    if category:
+        conds.append(Personnel.category == category)
+    return conds
+
+
+async def _distinct_values(
+    db,
+    column,
+    conditions: list[ColumnElement[bool]],
+) -> list[str]:
+    """Return sorted distinct non-null values for a column under conditions."""
+    result = await db.execute(
+        select(column)
+        .where(*conditions, column.is_not(None))
+        .distinct()
+        .order_by(column)
+    )
+    return [r[0] for r in result.all() if r[0]]
+
+
 @router.get("/nominal-roll", response_class=HTMLResponse)
 async def nominal_roll_view(
     request: Request,
     nominal_roll_id: str | None = None,
     search: str | None = None,
     unit: str | None = None,
+    sub_unit_1: str | None = None,
+    sub_unit_2: str | None = None,
     category: str | None = None,
 ):
     """Render the nominal roll browser page.
 
     Shows a nominal roll selector and a table of personnel for the selected
-    roll. Optional filters: text search (rank/name/short_id), unit filter,
-    and category filter (Officer / WOSE).
+    roll. Filters: text search (rank/name/short_id), unit, sub-unit 1,
+    sub-unit 2, and category (Officer / WOSE). Sub-unit dropdowns cascade off
+    the selected unit / sub-unit above them.
     """
     current_user = await get_current_user_optional(request)
     if not current_user:
@@ -47,9 +108,12 @@ async def nominal_roll_view(
         if not all_rolls:
             return _render(
                 request, current_user,
-                rolls=[], selected=None, units=[],
-                personnel=[], search=search or "", unit=unit or "",
-                category=category or "", total_count=0,
+                rolls=[], selected=None,
+                units=[], sub_unit_1_options=[], sub_unit_2_options=[],
+                personnel=[], search=search or "",
+                unit=unit or "", sub_unit_1=sub_unit_1 or "",
+                sub_unit_2=sub_unit_2 or "", category=category or "",
+                total_count=0,
             )
 
         # Resolve selected nominal roll (default to most recent)
@@ -66,77 +130,46 @@ async def nominal_roll_view(
             confirmed = [r for r in pool if r.status == "confirmed"]
             selected = confirmed[0] if confirmed else pool[0]
 
-        # Personnel query for selected nominal roll
-        query = (
-            select(Personnel)
-            .where(
-                Personnel.nominal_roll_id == str(selected.id),
-                Personnel.status == "active",
-            )
+        base = _base_conditions(str(selected.id))
+        filters = _optional_conditions(
+            search=search, unit=unit, sub_unit_1=sub_unit_1,
+            sub_unit_2=sub_unit_2, category=category,
         )
-
-        # Optional search filter
-        if search:
-            pattern = f"%{search}%"
-            query = query.where(
-                or_(
-                    Personnel.full_name.ilike(pattern),
-                    Personnel.short_id.ilike(pattern),
-                    Personnel.rank.ilike(pattern),
-                )
-            )
-
-        # Optional unit filter
-        if unit:
-            query = query.where(Personnel.unit == unit)
-
-        # Optional category filter (Officer / WOSE)
-        if category:
-            query = query.where(Personnel.category == category)
 
         # Total matching rows (before limit) for display
         count_query = (
             select(func.count())
             .select_from(Personnel)
-            .where(
-                Personnel.nominal_roll_id == str(selected.id),
-                Personnel.status == "active",
-            )
+            .where(*base, *filters)
         )
-        if search:
-            pattern = f"%{search}%"
-            count_query = count_query.where(
-                or_(
-                    Personnel.full_name.ilike(pattern),
-                    Personnel.short_id.ilike(pattern),
-                    Personnel.rank.ilike(pattern),
-                )
-            )
-        if unit:
-            count_query = count_query.where(Personnel.unit == unit)
-        if category:
-            count_query = count_query.where(Personnel.category == category)
         total_count = (await db.execute(count_query)).scalar_one()
 
-        # Fetch personnel ordered by unit, then rank, then name
-        query = query.order_by(
-            Personnel.unit, Personnel.sub_unit_1, Personnel.rank, Personnel.full_name
-        ).limit(1000)
+        # Fetch personnel ordered by unit, then sub-unit, then rank, then name
+        query = (
+            select(Personnel)
+            .where(*base, *filters)
+            .order_by(
+                Personnel.unit, Personnel.sub_unit_1, Personnel.sub_unit_2,
+                Personnel.rank, Personnel.full_name,
+            )
+            .limit(1000)
+        )
         personnel_result = await db.execute(query)
         personnel = personnel_result.scalars().all()
 
-        # Distinct units for the filter dropdown
-        units_result = await db.execute(
-            select(Personnel.unit)
-            .where(
-                Personnel.nominal_roll_id == str(selected.id),
-                Personnel.status == "active",
-                Personnel.unit.is_not(None),
-            )
-            .distinct()
-            .order_by(Personnel.unit)
+        # Filter dropdowns. Units are unscoped; sub-unit 1 scopes to the
+        # selected unit; sub-unit 2 scopes to unit + sub-unit 1 (cascading).
+        units = await _distinct_values(db, Personnel.unit, base)
+        su1_conds = base + ([Personnel.unit == unit] if unit else [])
+        sub_unit_1_options = await _distinct_values(
+            db, Personnel.sub_unit_1, su1_conds
         )
-        units = [r[0] for r in units_result.all() if r[0]]
+        su2_conds = su1_conds + (
+            [Personnel.sub_unit_1 == sub_unit_1] if sub_unit_1 else []
+        )
+        sub_unit_2_options = await _distinct_values(
+            db, Personnel.sub_unit_2, su2_conds
+        )
 
     personnel_data = [
         {
@@ -170,9 +203,13 @@ async def nominal_roll_view(
             "personnel_count": selected.personnel_count,
         },
         units=units,
+        sub_unit_1_options=sub_unit_1_options,
+        sub_unit_2_options=sub_unit_2_options,
         personnel=personnel_data,
         search=search or "",
         unit=unit or "",
+        sub_unit_1=sub_unit_1 or "",
+        sub_unit_2=sub_unit_2 or "",
         category=category or "",
         total_count=total_count,
     )
@@ -185,9 +222,13 @@ def _render(
     rolls: list,
     selected,
     units: list,
+    sub_unit_1_options: list,
+    sub_unit_2_options: list,
     personnel: list,
     search: str,
     unit: str,
+    sub_unit_1: str,
+    sub_unit_2: str,
     category: str,
     total_count: int,
 ) -> HTMLResponse:
@@ -210,9 +251,13 @@ def _render(
         nominal_rolls=rolls,
         selected_nominal_roll=selected,
         units=units,
+        sub_unit_1_options=sub_unit_1_options,
+        sub_unit_2_options=sub_unit_2_options,
         personnel=personnel,
         search=search,
         unit=unit,
+        sub_unit_1=sub_unit_1,
+        sub_unit_2=sub_unit_2,
         category=category,
         total_count=total_count,
     )

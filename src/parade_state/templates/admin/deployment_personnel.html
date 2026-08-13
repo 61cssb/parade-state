@@ -46,8 +46,8 @@
                     <input type="checkbox" id="select-all" onchange="onSelectAll(this.checked)">
                     {% endif %}
                 </th>
-                <th style="padding: 0.5rem;">Rank</th>
                 <th style="padding: 0.5rem;">Category</th>
+                <th style="padding: 0.5rem;">Rank</th>
                 <th style="padding: 0.5rem;">Name</th>
                 <th style="padding: 0.5rem;">Unit</th>
                 <th style="padding: 0.5rem;">Sub-Unit</th>
@@ -72,8 +72,8 @@
                     <input type="checkbox" disabled {% if not p.is_excluded %}checked{% endif %}>
                     {% endif %}
                 </td>
-                <td style="padding: 0.5rem;">{{ p.rank }}</td>
                 <td style="padding: 0.5rem; white-space: nowrap;">{{ p.category }}</td>
+                <td style="padding: 0.5rem;">{{ p.rank }}</td>
                 <td style="padding: 0.5rem;">{{ p.full_name }}</td>
                 <td style="padding: 0.5rem;">{{ p.unit }}</td>
                 <td style="padding: 0.5rem;">{{ p.sub_unit_1 or '—' }}</td>
