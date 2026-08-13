@@ -237,35 +237,37 @@ class SessionListParams(BaseModel):
 
 
 # ============================================================================
-# Attendance Record Schemas
+# Attendance Schemas
 # ============================================================================
+#
+# Attendance is NR/Tagging-scoped with hardcoded AM/PM slots. One record per
+# (personnel, date) carries status + remarks for both AM and PM.
+# Sessions are no longer user-managed (see /api/v1/sessions 410 stub).
 
 
-class AttendanceRecordCreate(BaseModel):
-    """Schema for creating an attendance record."""
+class AttendanceUpsert(BaseModel):
+    """Schema for a single per-person AM/PM attendance entry in a bulk upsert."""
 
-    session_id: str
     personnel_id: str
-    status: AttendanceStatus = "absent"
-    remarks: str | None = None
+    date: utc_dt.date
+    status_am: AttendanceStatus = "absent"
+    remarks_am: str | None = None
+    status_pm: AttendanceStatus = "absent"
+    remarks_pm: str | None = None
 
 
-class AttendanceRecordUpdate(BaseModel):
-    """Schema for updating an attendance record."""
-
-    status: AttendanceStatus | None = None
-    remarks: str | None = None
-
-
-class AttendanceRecordResponse(BaseModel):
-    """Schema for attendance record response."""
+class AttendanceResponse(BaseModel):
+    """Schema for an attendance row response."""
 
     id: str
-    session_id: str
     personnel_id: str
-    deployment_id: str
-    status: str
-    remarks: str | None
+    nominal_roll_id: str
+    tagging_id: str | None
+    date: utc_dt.date
+    status_am: str
+    remarks_am: str | None
+    status_pm: str
+    remarks_pm: str | None
     notes_snapshot: str | None
     unit_snapshot: str | None
     sub_unit_1_snapshot: str | None
@@ -283,44 +285,43 @@ class AttendanceRecordResponse(BaseModel):
         from_attributes = True
 
 
-class AttendanceRecordBulkCreateItem(BaseModel):
-    """Schema for a single attendance record in bulk create operation."""
+class AttendanceBulkUpsert(BaseModel):
+    """Schema for bulk upserting attendance rows for a roster."""
 
-    session_id: str
-    personnel_id: str
-    status: AttendanceStatus = "absent"
-    remarks: str | None = None
+    nominal_roll_id: str
+    records: list[AttendanceUpsert]
 
 
-class AttendanceRecordBulkCreate(BaseModel):
-    """Schema for bulk creating attendance records."""
+class AttendanceScopeResponse(BaseModel):
+    """Schema for the active attendance scope of a nominal roll."""
 
-    attendance_records: list[AttendanceRecordBulkCreateItem]
+    nominal_roll_id: str
+    tagging_id: str | None
+    activated_at: utc_dt.datetime
+    activated_by: str
 
-
-class AttendanceRecordBulkUpdateItem(BaseModel):
-    """Schema for a single attendance record in bulk update operation."""
-
-    id: str
-    status: AttendanceStatus | None = None
-    remarks: str | None = None
+    class Config:
+        from_attributes = True
 
 
-class AttendanceRecordBulkUpdate(BaseModel):
-    """Schema for bulk updating attendance records."""
+class AttendanceScopeActivate(BaseModel):
+    """Schema for activating an attendance scope on a nominal roll.
 
-    attendance_records: list[AttendanceRecordBulkUpdateItem]
+    ``tagging_id`` omitted/None → the NR itself is the scope.
+    """
+
+    tagging_id: str | None = None
 
 
-class AttendanceListParams(BaseModel):
-    """Schema for attendance list query parameters."""
+class CopyRemarksResponse(BaseModel):
+    """Schema for the copy-remarks endpoint result."""
 
-    session_id: str | None = None
-    deployment_id: str | None = None
-    personnel_id: str | None = None
-    status: AttendanceStatus | None = None
-    limit: int = Field(100, ge=1, le=1000)
-    offset: int = Field(0, ge=0)
+    nominal_roll_id: str
+    date: utc_dt.date
+    slot: Literal["am", "pm"]
+    updated: int
+    skipped: int
+
 
 
 # ============================================================================
@@ -424,15 +425,16 @@ class PersonnelResponseWithDeployment(PersonnelBase):
 
 
 class PersonnelAttendanceHistoryItem(BaseModel):
-    """Schema for a single attendance record in personnel history."""
+    """Schema for a single attendance row in personnel history."""
 
     id: str
-    session_id: str
-    session_date: utc_dt.datetime
-    session_type: Literal["AM", "PM"]
-    session_status: Literal["open", "closed", "finalized"]
-    status: AttendanceStatus
-    remarks: str | None
+    nominal_roll_id: str
+    tagging_id: str | None
+    date: utc_dt.date
+    status_am: str
+    remarks_am: str | None
+    status_pm: str
+    remarks_pm: str | None
     created_at: utc_dt.datetime
     updated_at: utc_dt.datetime
 
@@ -441,19 +443,23 @@ class PersonnelAttendanceHistoryItem(BaseModel):
 
 
 class PersonnelAttendanceHistoryStats(BaseModel):
-    """Schema for attendance history statistics."""
+    """Schema for attendance history statistics.
 
-    total_sessions: int
+    AM and PM slots are counted independently toward totals (so one day with
+    both slots present contributes 2 to ``total_slots``).
+    """
+
+    total_slots: int
     present_count: int
     absent_count: int
-    attendance_rate: float  # Percentage of present-like statuses vs total
+    attendance_rate: float  # Percentage of present-like slots vs total
 
 
 class PersonnelAttendanceHistoryResponse(BaseModel):
     """Schema for personnel attendance history response."""
 
     personnel_id: str
-    deployment_id: str
+    nominal_roll_id: str | None
     date_from: utc_dt.date | None
     date_to: utc_dt.date | None
     stats: PersonnelAttendanceHistoryStats

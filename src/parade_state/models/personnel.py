@@ -10,7 +10,7 @@ from parade_state.utils import ids, utc_dt
 from ..db import Base
 
 if TYPE_CHECKING:
-    from .attendance import AttendanceRecord
+    from .attendance import Attendance
     from .csv_ingestion import NominalRoll
     from .deferments import Deferment
     from .deployment import DeploymentNotes, DeploymentPersonnelOverride
@@ -67,7 +67,7 @@ class Personnel(Base):
     deployment_notes: Mapped[list["DeploymentNotes"]] = relationship(
         back_populates="personnel", cascade="all, delete-orphan"
     )
-    attendance_records: Mapped[list["AttendanceRecord"]] = relationship(
+    attendance: Mapped[list["Attendance"]] = relationship(
         back_populates="personnel", cascade="all, delete-orphan"
     )
     deferments: Mapped[list["Deferment"]] = relationship(
