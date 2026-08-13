@@ -213,8 +213,24 @@ async def test_example(client, sample_users, sample_deployment):
 - Tagging delete guarded (409) when linked to attendance or set as active scope.
 - Attendance status enum: present, absent, time_off, mc, yet_to_inpro, outpro,
   reporting_sick, late, att_out (default: absent).
-- **Forthcoming (PR 2/3):** Subunit-1 server-enforced access (403); admin
-  attendance page with scope-activation UI and Copy Remarks button.
+- **Forthcoming (PR 3):** admin attendance page with scope-activation UI and
+  Copy Remarks button.
+
+**Subunit-1 Attendance Access (✅ Reworked in issue #4 PR 2)**
+- New `UserSubunitAssignment(user_id, nominal_roll_id, sub_unit_1)` model —
+  grants a user attendance-update rights for one sub_unit_1 on one NR.
+- Server-enforced 403 on `PUT /api/v1/attendance/upsert` and
+  `POST /api/v1/attendance/copy-remarks` when the caller lacks an assignment
+  for a target personnel's effective sub_unit_1. Effective sub_unit_1 follows
+  the active Tagging overlay's `to_sub_unit_1` (tagging-aware), falling back
+  to the personnel's canonical `sub_unit_1`.
+- `super_admin` bypasses entirely; **deny-by-default** (no assignments = 403).
+- Super-admin CRUD API:
+  `POST /api/v1/access-control/nominal-rolls/{nr_id}/users/{user_id}/subunit-assignments`,
+  `DELETE .../subunit-assignments/{assignment_id}`,
+  `GET .../nominal-rolls/{nr_id}/subunit-assignments`,
+  `GET .../users/{user_id}/subunit-assignments`.
+- Migration `k1f2a3b4c5d6`. 332 tests passing.
 
 **Personnel Management (✅ Session 1 Complete)**
 - Deployment-based personnel listing with filtering
