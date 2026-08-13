@@ -69,6 +69,8 @@ tags:
     description: Server-Sent Events for stale data detection
   - name: deferments
     description: Personnel deferments — super-admin only; drives callup_status
+  - name: taggings
+    description: Tagging overlays — super-admin only; person→subunit remappings on a Nominal Roll
 
 # =============================================================================
 # PATHS
@@ -1625,6 +1627,250 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  # ===========================================================================
+  # Taggings (super-admin only) — overlay of person→subunit remappings on an NR
+  # ===========================================================================
+  /taggings:
+    get:
+      tags: [taggings]
+      summary: List taggings
+      description: |
+        Super-admin only. Returns tagging summaries (no entries). Entry counts
+        are computed via a correlated subquery.
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string, enum: [super_admin, admin, user] }
+        - name: nominal_roll_id
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: List of tagging summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid }
+                    label: { type: string }
+                    nominal_roll_id: { type: string, format: uuid }
+                    remarks: { type: string, nullable: true }
+                    entry_count: { type: integer }
+                    created_at: { type: string, format: date-time }
+                    created_by: { type: string, format: uuid }
+                    updated_at: { type: string, format: date-time, nullable: true }
+                    updated_by: { type: string, format: uuid, nullable: true }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [taggings]
+      summary: Create a tagging
+      description: |
+        Super-admin only. Creates a tagging with optional initial entries. For
+        each entry, if `from_*` is omitted, the server snapshots the linked
+        personnel's canonical subunit. Duplicate label → 409. Personnel must
+        belong to the tagging's nominal roll (400 otherwise).
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string, enum: [super_admin, admin, user] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label, nominal_roll_id]
+              properties:
+                label: { type: string, maxLength: 100 }
+                nominal_roll_id: { type: string, format: uuid }
+                remarks: { type: string }
+                entries:
+                  type: array
+                  default: []
+                  items: { $ref: '#/components/schemas/TaggingEntryInput' }
+      responses:
+        '201':
+          description: Tagging created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaggingResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: A tagging with this label already exists }
+
+  /taggings/{taggingId}:
+    get:
+      tags: [taggings]
+      summary: Get a tagging (with entries)
+      parameters:
+        - name: taggingId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string, enum: [super_admin, admin, user] }
+      responses:
+        '200':
+          description: Tagging detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaggingResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [taggings]
+      summary: Update a tagging
+      description: |
+        Updates label/remarks. If `entries` is provided, the tagging's entries
+        are full-replaced (existing entries deleted, new ones inserted).
+        Omit `entries` to leave them untouched.
+      parameters:
+        - name: taggingId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string, enum: [super_admin, admin, user] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string, minLength: 1, maxLength: 100 }
+                remarks: { type: string, nullable: true }
+                entries:
+                  type: array
+                  nullable: true
+                  items: { $ref: '#/components/schemas/TaggingEntryInput' }
+      responses:
+        '200':
+          description: Updated tagging
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaggingResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: A tagging with this label already exists }
+    delete:
+      tags: [taggings]
+      summary: Delete a tagging
+      description: Cascades to entries. Does not mutate the underlying NR.
+      parameters:
+        - name: taggingId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string, enum: [super_admin, admin, user] }
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail: { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /taggings/{taggingId}/clone:
+    post:
+      tags: [taggings]
+      summary: Clone a tagging to another nominal roll
+      description: |
+        Super-admin only. For each source entry, look up the target-NR
+        Personnel row by `short_id` (the cross-roll person identifier).
+        Matched personnel get a new entry on the target NR (with `from_*`
+        re-snapshotted from the target personnel); unmatched source personnel
+        are surfaced in the response. Target NR must differ from source.
+      parameters:
+        - name: taggingId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string, enum: [super_admin, admin, user] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_nominal_roll_id, label]
+              properties:
+                target_nominal_roll_id: { type: string, format: uuid }
+                label: { type: string, maxLength: 100 }
+      responses:
+        '200':
+          description: Clone result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tagging: { $ref: '#/components/schemas/TaggingResponse' }
+                  source_count: { type: integer }
+                  matched_count: { type: integer }
+                  unmatched:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        short_id: { type: string }
+                        name: { type: string, nullable: true }
+        '400': { description: Target NR same as source, or invalid }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: A tagging with this label already exists }
+
 # =============================================================================
 # COMPONENTS
 # =============================================================================
@@ -1732,6 +1978,52 @@ components:
         details:
           type: object
           additionalProperties: true
+
+    # --- Tagging (super-admin overlay) ---
+
+    TaggingEntryInput:
+      type: object
+      required: [personnel_id, to_unit]
+      properties:
+        personnel_id: { type: string, format: uuid }
+        from_unit: { type: string, nullable: true }
+        from_sub_unit_1: { type: string, nullable: true }
+        from_sub_unit_2: { type: string, nullable: true }
+        from_sub_unit_3: { type: string, nullable: true }
+        to_unit: { type: string, minLength: 1 }
+        to_sub_unit_1: { type: string, nullable: true }
+        to_sub_unit_2: { type: string, nullable: true }
+        to_sub_unit_3: { type: string, nullable: true }
+
+    TaggingResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        label: { type: string }
+        nominal_roll_id: { type: string, format: uuid }
+        remarks: { type: string, nullable: true }
+        entries:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              tagging_id: { type: string, format: uuid }
+              personnel_id: { type: string, format: uuid }
+              personnel_short_id: { type: string, nullable: true }
+              personnel_label: { type: string, nullable: true }
+              from_unit: { type: string, nullable: true }
+              from_sub_unit_1: { type: string, nullable: true }
+              from_sub_unit_2: { type: string, nullable: true }
+              from_sub_unit_3: { type: string, nullable: true }
+              to_unit: { type: string }
+              to_sub_unit_1: { type: string, nullable: true }
+              to_sub_unit_2: { type: string, nullable: true }
+              to_sub_unit_3: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string, format: uuid }
+        updated_at: { type: string, format: date-time, nullable: true }
+        updated_by: { type: string, format: uuid, nullable: true }
 
     # --- Auth ---
 

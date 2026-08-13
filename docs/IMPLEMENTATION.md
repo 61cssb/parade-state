@@ -239,7 +239,28 @@ async def test_example(client, sample_users, sample_deployment):
 - **Endpoints:** 5 deferment endpoints under `/api/v1/deferments`
 - **Tests:** 15 behavioral tests
 
-**Total API Endpoints:** 57 fully implemented and tested endpoints ✨ UPDATED
+**Taggings (✅ Super-admin MVP)**
+- Tagging overlay CRUD: a named overlay of person → subunit remappings on a
+  single Nominal Roll. Taggings never mutate the underlying NR's personnel
+  or subunit data — downstream views (attendance / groupings, issues #4/#5)
+  consume the remapped structure from here.
+- Two entities: `Tagging` (globally-unique label, NR FK CASCADE, audit fields)
+  and `TaggingEntry` (one remap per person per tagging; 4-string `from_*` /
+  `to_*` subunit tuple mirroring `DeploymentPersonnelOverride`).
+- `from_*` auto-snapshotted from the linked personnel when omitted at
+  create/edit time.
+- Clone-to-NR: `POST /api/v1/taggings/{id}/clone` matches source personnel
+  to target-NR rows by `Personnel.short_id` (the cross-roll person
+  identifier); unmatched source personnel are surfaced in the response.
+- Label uniqueness is server-enforced (409 on duplicate). Personnel must
+  belong to the parent tagging's NR (400 on cross-NR contamination).
+- Super-admin-only: API and admin UI enforce `role == "super_admin"`.
+- Admin UI under `/admin/taggings` (nav link gated by super_admin role) with
+  create/edit (per-person remap picker) and clone modals.
+- **Endpoints:** 6 tagging endpoints under `/api/v1/taggings`
+- **Tests:** 20 behavioral tests
+
+**Total API Endpoints:** 63 fully implemented and tested endpoints ✨ UPDATED
 
 ### 3.2 Next Phase: Personnel Detail View & Attendance History (🎯 NEXT)
 

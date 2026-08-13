@@ -301,7 +301,79 @@ Deferment
   scoping to be tightened in a later phase.
 - See §4.6 for the callup_status transition rule driven by `status` changes.
 
-### 3.4 Attendance Tracking
+### 3.4 Tagging Overlay
+
+#### 3.4.1 Tagging
+
+**A named overlay of person → subunit remappings on a single nominal roll.**
+
+```
+Tagging
+├── id: UUID (PK)
+├── label: str (globally unique; user-specified)
+├── nominal_roll_id: UUID (FK NominalRoll, on_delete=CASCADE)
+├── remarks: text (nullable)
+├── created_at: datetime
+├── created_by: UUID (FK User)
+├── updated_at: datetime (nullable)
+└── updated_by: UUID (FK User; nullable)
+```
+
+**Constraints:**
+- `label` is **globally unique** (server-enforced — 409 on duplicate).
+- Linked to exactly one NominalRoll; deleting the NR cascades to its taggings.
+- Visible to **super_admin only** (admin role gets 403).
+- **Overlay semantics:** creating, editing, or deleting a Tagging must not
+  mutate the underlying NR's personnel or their canonical subunit. Downstream
+  consumers (attendance / groupings, issues #4/#5) read the remapped structure
+  from the tagging without modifying the NR.
+
+#### 3.4.2 TaggingEntry
+
+**A single person → subunit remap within a Tagging.**
+
+```
+TaggingEntry
+├── id: UUID (PK)
+├── tagging_id: UUID (FK Tagging, on_delete=CASCADE)
+├── personnel_id: UUID (FK Personnel, on_delete=CASCADE)
+├── from_unit: str (nullable; snapshot of personnel.unit at entry creation)
+├── from_sub_unit_1: str (nullable; snapshot)
+├── from_sub_unit_2: str (nullable; snapshot)
+├── from_sub_unit_3: str (nullable; snapshot)
+├── to_unit: str (the remap target; required)
+├── to_sub_unit_1: str (nullable)
+├── to_sub_unit_2: str (nullable)
+├── to_sub_unit_3: str (nullable)
+└── created_at: datetime
+```
+
+**Constraints:**
+- UNIQUE(tagging_id, personnel_id) — one remap per person per tagging.
+- `personnel_id` must belong to the parent Tagging's `nominal_roll_id`
+  (server-enforced — 400 on cross-NR contamination).
+- `from_*` is optional. When omitted at create/edit time, the server
+  snapshots the linked personnel's canonical subunit (mirrors Deferment's
+  `rank_name`/`sub_unit` snapshot pattern).
+- On clone, `from_*` is re-snapshotted from the **target NR** personnel (the
+  source NR's subunit layout may differ).
+
+#### 3.4.3 Clone Semantics
+
+`POST /api/v1/taggings/{id}/clone` clones a tagging to a different NR:
+
+- For each source TaggingEntry, look up the target-NR Personnel row by
+  `Personnel.short_id` (the cross-roll person identifier — `Personnel.id` is
+  per-roll and will not match across NRs).
+- Matched: a new TaggingEntry is created on the target NR pointing at the
+  target-NR personnel row, preserving the source's `to_*` and re-snapshotting
+  `from_*` from the target personnel.
+- Unmatched (source `short_id` not present on target NR): skipped and
+  surfaced in the response as `{short_id, name}`.
+- Target NR must differ from the source NR (400 otherwise).
+- Always creates a new tagging; up to the user to delete the old one.
+
+### 3.5 Attendance Tracking
 
 #### 3.3.1 AttendanceRecord
 
