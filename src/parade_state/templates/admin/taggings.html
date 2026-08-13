@@ -267,6 +267,70 @@
         return res.json();
     }
 
+    // ----- "To" subunit dropdown option builders (cascading per row) -----
+    // Options are derived from the active NR's personnel so users can't typo values.
+    function buildOptionList(values, selected, optional) {
+        let html = optional ? '<option value="">—</option>' : '';
+        // Preserve an existing value that isn't in the distinct list (e.g. an
+        // older remap pointing at a since-renamed unit) so it doesn't vanish.
+        if (selected && values.indexOf(selected) === -1) {
+            html += '<option value="' + escapeHtml(selected) + '" selected>' + escapeHtml(selected) + '</option>';
+        }
+        for (const v of values) {
+            html += '<option value="' + escapeHtml(v) + '"' + (v === selected ? ' selected' : '') + '>'
+                + escapeHtml(v) + '</option>';
+        }
+        return html;
+    }
+
+    function buildToUnitOptions(selected) {
+        const values = [];
+        const seen = new Set();
+        for (const p of personnelCache) {
+            if (p.unit && !seen.has(p.unit)) { seen.add(p.unit); values.push(p.unit); }
+        }
+        values.sort();
+        return buildOptionList(values, selected, false);
+    }
+
+    function buildToSubOptions(field, parents, selected) {
+        let filtered = personnelCache;
+        if (parents.unit) filtered = filtered.filter(function(p) { return p.unit === parents.unit; });
+        if (parents.sub_unit_1) filtered = filtered.filter(function(p) { return p.sub_unit_1 === parents.sub_unit_1; });
+        if (parents.sub_unit_2) filtered = filtered.filter(function(p) { return p.sub_unit_2 === parents.sub_unit_2; });
+        const values = [];
+        const seen = new Set();
+        for (const p of filtered) {
+            if (p[field] && !seen.has(p[field])) { seen.add(p[field]); values.push(p[field]); }
+        }
+        values.sort();
+        return buildOptionList(values, selected, true);
+    }
+
+    function onToUnitChange(sel) {
+        const tr = sel.closest('tr');
+        const unit = sel.value;
+        tr.querySelector('.remap-s1').innerHTML = buildToSubOptions('sub_unit_1', {unit: unit}, null);
+        tr.querySelector('.remap-s2').innerHTML = buildToSubOptions('sub_unit_2', {unit: unit}, null);
+        tr.querySelector('.remap-s3').innerHTML = buildToSubOptions('sub_unit_3', {unit: unit}, null);
+    }
+
+    function onToS1Change(sel) {
+        const tr = sel.closest('tr');
+        const unit = tr.querySelector('.remap-unit').value;
+        const s1 = sel.value;
+        tr.querySelector('.remap-s2').innerHTML = buildToSubOptions('sub_unit_2', {unit: unit, sub_unit_1: s1}, null);
+        tr.querySelector('.remap-s3').innerHTML = buildToSubOptions('sub_unit_3', {unit: unit, sub_unit_1: s1}, null);
+    }
+
+    function onToS2Change(sel) {
+        const tr = sel.closest('tr');
+        const unit = tr.querySelector('.remap-unit').value;
+        const s1 = tr.querySelector('.remap-s1').value;
+        const s2 = sel.value;
+        tr.querySelector('.remap-s3').innerHTML = buildToSubOptions('sub_unit_3', {unit: unit, sub_unit_1: s1, sub_unit_2: s2}, null);
+    }
+
     function addRemapRow(entry) {
         entry = entry || {};
         const body = document.getElementById('remap-body');
@@ -282,15 +346,20 @@
                 + (entry.from_sub_unit_1 ? ' / ' + escapeHtml(entry.from_sub_unit_1) : '')
                 + '</span>'
             : '';
+        const selectStyle = 'width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;';
         tr.innerHTML = [
             '<td style="padding: 0.35rem;">'
                 + '<input type="hidden" class="remap-person-id" value="' + escapeHtml(entry.personnel_id || '') + '">'
                 + labelHtml + fromLine
                 + '</td>',
-            '<td style="padding: 0.35rem;"><input class="remap-unit" required style="width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" value="' + escapeHtml(entry.to_unit || '') + '"></td>',
-            '<td style="padding: 0.35rem;"><input class="remap-s1" style="width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" value="' + escapeHtml(entry.to_sub_unit_1 || '') + '"></td>',
-            '<td style="padding: 0.35rem;"><input class="remap-s2" style="width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" value="' + escapeHtml(entry.to_sub_unit_2 || '') + '"></td>',
-            '<td style="padding: 0.35rem;"><input class="remap-s3" style="width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" value="' + escapeHtml(entry.to_sub_unit_3 || '') + '"></td>',
+            '<td style="padding: 0.35rem;"><select class="remap-unit" required onchange="onToUnitChange(this)" style="' + selectStyle + '">'
+                + buildToUnitOptions(entry.to_unit) + '</select></td>',
+            '<td style="padding: 0.35rem;"><select class="remap-s1" onchange="onToS1Change(this)" style="' + selectStyle + '">'
+                + buildToSubOptions('sub_unit_1', {unit: entry.to_unit}, entry.to_sub_unit_1) + '</select></td>',
+            '<td style="padding: 0.35rem;"><select class="remap-s2" onchange="onToS2Change(this)" style="' + selectStyle + '">'
+                + buildToSubOptions('sub_unit_2', {unit: entry.to_unit, sub_unit_1: entry.to_sub_unit_1}, entry.to_sub_unit_2) + '</select></td>',
+            '<td style="padding: 0.35rem;"><select class="remap-s3" style="' + selectStyle + '">'
+                + buildToSubOptions('sub_unit_3', {unit: entry.to_unit, sub_unit_1: entry.to_sub_unit_1, sub_unit_2: entry.to_sub_unit_2}, entry.to_sub_unit_3) + '</select></td>',
             '<td style="padding: 0.35rem;"><button type="button" class="btn" style="background: #ef4444; color: white; font-size: 0.7rem; padding: 0.2rem 0.4rem;" onclick="this.closest(\'tr\').remove(); updatePickerList();">Remove</button></td>',
         ].join('');
         body.appendChild(tr);
