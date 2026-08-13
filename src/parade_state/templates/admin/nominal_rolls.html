@@ -6,7 +6,7 @@
 
 {% block content %}
 <style>
-    .label-editable {
+    .inline-edit-chip {
         display: inline-block;
         padding: 0.15rem 0.4rem;
         border-radius: 0.25rem;
@@ -14,11 +14,11 @@
         cursor: pointer;
         transition: background-color 0.1s, border-color 0.1s;
     }
-    .label-editable:hover {
+    .inline-edit-chip:hover {
         background-color: #f3f4f6;
         border-color: #2563eb;
     }
-    .label-editable:hover::after {
+    .inline-edit-chip:hover::after {
         content: " ✎";
         color: #2563eb;
         font-size: 0.75rem;
@@ -46,6 +46,7 @@
             <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
                 <th style="padding: 0.5rem;">CAA Date</th>
                 <th style="padding: 0.5rem;">Label</th>
+                <th style="padding: 0.5rem;">Remarks</th>
                 <th style="padding: 0.5rem;">Source File</th>
                 <th style="padding: 0.5rem;">Personnel</th>
                 <th style="padding: 0.5rem;">Status</th>
@@ -61,13 +62,21 @@
                 <td style="padding: 0.5rem;" id="label-cell-{{ nr.id }}">
                     {% if nr.status == 'draft' %}
                     <span id="label-display-{{ nr.id }}"
-                          class="label-editable"
+                          class="inline-edit-chip"
                           data-value="{{ nr.label or '' }}"
                           onclick="editLabel('{{ nr.id }}')"
                           title="Click to edit label">{{ nr.label or '—' }}</span>
                     {% else %}
                     {{ nr.label or '—' }}
                     {% endif %}
+                </td>
+                <td style="padding: 0.5rem; max-width: 18rem;" id="remarks-cell-{{ nr.id }}">
+                    <span id="remarks-display-{{ nr.id }}"
+                          class="inline-edit-chip"
+                          data-value="{{ nr.remarks or '' }}"
+                          onclick="editRemarks('{{ nr.id }}')"
+                          title="Click to edit remarks"
+                          style="max-width: 17rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;">{{ nr.remarks or '—' }}</span>
                 </td>
                 <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ nr.original_filename }}</td>
                 <td style="padding: 0.5rem;">{{ nr.personnel_count }}</td>
@@ -474,9 +483,97 @@
         display.style.display = '';
     }
 
+    // --- Inline remarks editing (always editable; no status gate) ---
+    function editRemarks(nominalRollId) {
+        const cell = document.getElementById('remarks-cell-' + nominalRollId);
+        const display = document.getElementById('remarks-display-' + nominalRollId);
+        if (!display) return;
+        const current = display.getAttribute('data-value') || '';
+
+        const wrap = document.createElement('span');
+        wrap.style.display = 'inline-flex';
+        wrap.style.flexDirection = 'column';
+        wrap.style.gap = '0.25rem';
+        wrap.style.alignItems = 'stretch';
+        wrap.style.maxWidth = '20rem';
+        wrap.innerHTML =
+            '<textarea id="remarks-input-' + nominalRollId + '" rows="2" ' +
+            '    style="padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.875rem; font-family: inherit; resize: vertical; min-width: 14rem;">' +
+            escapeHtml(current) + '</textarea>' +
+            '<span style="display: flex; gap: 0.25rem; align-items: center;">' +
+            '  <button type="button" class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;" onclick="saveRemarks(\'' + nominalRollId + '\')">Save</button>' +
+            '  <button type="button" class="btn" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; border: 1px solid #d1d5db;" onclick="cancelRemarksEdit(\'' + nominalRollId + '\')">Cancel</button>' +
+            '  <span style="font-size: 0.7rem; color: #9ca3af;">Ctrl+Enter to save</span>' +
+            '  <span id="remarks-error-' + nominalRollId + '" style="color: #ef4444; font-size: 0.75rem; margin-left: auto;"></span>' +
+            '</span>';
+        display.style.display = 'none';
+        display.insertAdjacentElement('afterend', wrap);
+
+        const textarea = document.getElementById('remarks-input-' + nominalRollId);
+        textarea.focus();
+        // Place cursor at end
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        textarea.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                saveRemarks(nominalRollId);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelRemarksEdit(nominalRollId);
+            }
+        });
+    }
+
+    async function saveRemarks(nominalRollId) {
+        const textarea = document.getElementById('remarks-input-' + nominalRollId);
+        const errSpan = document.getElementById('remarks-error-' + nominalRollId);
+        if (!textarea) return;
+        const value = textarea.value;
+        errSpan.textContent = '';
+
+        try {
+            const response = await fetch(
+                '/api/v1/nominal-rolls/' + nominalRollId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ remarks: value }),
+                }
+            );
+            if (response.ok) {
+                const data = await response.json();
+                const newRemarks = data.remarks || '';
+                const display = document.getElementById('remarks-display-' + nominalRollId);
+                display.setAttribute('data-value', newRemarks);
+                display.textContent = newRemarks || '—';
+                cancelRemarksEdit(nominalRollId);
+                showPageStatus('Remarks updated.', 'success');
+            } else {
+                const data = await response.json();
+                errSpan.textContent = data.detail || 'Update failed.';
+            }
+        } catch (error) {
+            showPageStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    function cancelRemarksEdit(nominalRollId) {
+        const display = document.getElementById('remarks-display-' + nominalRollId);
+        const textarea = document.getElementById('remarks-input-' + nominalRollId);
+        if (!display) return;
+        const wrap = textarea ? textarea.parentElement : null;
+        if (wrap) wrap.remove();
+        display.style.display = '';
+    }
+
     function escapeAttr(s) {
         return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
             .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function escapeHtml(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 </script>
 {% endblock %}
