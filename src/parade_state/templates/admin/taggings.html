@@ -1,0 +1,446 @@
+{% extends "base.html" %}
+
+{% block title %}Taggings - Parade State Admin{% endblock %}
+
+{% block page_title %}Taggings{% endblock %}
+
+{% block content %}
+<p style="color: #6b7280; margin-bottom: 1.5rem;">
+    Taggings are overlays of person &rarr; subunit remappings applied on top of a Nominal Roll. They never mutate the NR — downstream views (attendance / groupings) read the remapped structure from here.
+</p>
+
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">Taggings</h3>
+        <button class="btn btn-primary" onclick="openCreateModal()">+ New Tagging</button>
+    </div>
+
+    <form method="get" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
+        <label style="font-size: 0.875rem; color: #374151;">Nominal Roll:</label>
+        <select name="nominal_roll_id" onchange="this.form.submit()" style="padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            {% for e in nominal_roll_options %}
+            <option value="{{ e.id }}" {% if nominal_roll_filter == e.id %}selected{% endif %}>CAA {{ e.caa }}</option>
+            {% endfor %}
+        </select>
+    </form>
+
+    {% if taggings %}
+    <table style="width: 100%; border-collapse: collapse; margin-top: 0.5rem;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                <th style="padding: 0.5rem;">Label</th>
+                <th style="padding: 0.5rem;">Nominal Roll</th>
+                <th style="padding: 0.5rem;">Entries</th>
+                <th style="padding: 0.5rem;">Remarks</th>
+                <th style="padding: 0.5rem;">Updated</th>
+                <th style="padding: 0.5rem;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in taggings %}
+            <tr style="border-bottom: 1px solid #e5e7eb;">
+                <td style="padding: 0.5rem;"><strong>{{ t.label }}</strong></td>
+                <td style="padding: 0.5rem; font-size: 0.8rem; color: #6b7280;">{% if t.nominal_roll_caa %}CAA {{ t.nominal_roll_caa }}{% else %}—{% endif %}</td>
+                <td style="padding: 0.5rem;">{{ t.entry_count }}</td>
+                <td style="padding: 0.5rem; font-size: 0.85rem; max-width: 18rem; white-space: pre-wrap; overflow: hidden; text-overflow: ellipsis;">{{ t.remarks or '—' }}</td>
+                <td style="padding: 0.5rem; font-size: 0.8rem; color: #6b7280;">{% if t.updated_at %}{{ t.updated_at.strftime('%Y-%m-%d %H:%M') }}{% else %}{{ t.created_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}</td>
+                <td style="padding: 0.5rem; white-space: nowrap;">
+                    <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                            onclick="openEditModal('{{ t.id }}')">Edit</button>
+                    <button class="btn" style="background: #2563eb; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
+                            onclick="openCloneModal('{{ t.id }}', '{{ t.label }}')">Clone</button>
+                    <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
+                            onclick="deleteTagging('{{ t.id }}', '{{ t.label }}')">Delete</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: #6b7280; margin-top: 1rem;">No taggings on this nominal roll. Click "New Tagging" to create one.</p>
+    {% endif %}
+</div>
+
+{# Create modal #}
+<div id="create-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeCreateModal()"></div>
+<div id="create-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 560px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">New Tagging</h3>
+        <button type="button" onclick="closeCreateModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
+    </div>
+
+    <div style="background: #f9fafb; border-radius: 0.375rem; padding: 0.6rem 0.75rem; margin-bottom: 1rem; font-size: 0.875rem; color: #374151;">
+        Creating tagging on <strong>CAA {{ active_nominal_roll_caa }}</strong>
+    </div>
+
+    <form id="create-tagging-form" onsubmit="event.preventDefault(); submitCreate();">
+        <div style="margin-bottom: 0.75rem;">
+            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Label <span style="color: #ef4444;">*</span></label>
+            <input type="text" id="create-label" required maxlength="100" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" placeholder="Globally unique label (e.g. 'ICT-15 cross-attach')">
+        </div>
+        <div style="margin-bottom: 0.75rem;">
+            <label for="create-remarks" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Remarks</label>
+            <textarea id="create-remarks" rows="2" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-family: inherit;" placeholder="Optional"></textarea>
+        </div>
+        <div id="create-status" style="margin-bottom: 0.75rem;"></div>
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+            <button type="button" onclick="closeCreateModal()" style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: white; cursor: pointer;">Cancel</button>
+            <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1rem;">Create</button>
+        </div>
+    </form>
+</div>
+
+{# Edit modal #}
+<div id="edit-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeEditModal()"></div>
+<div id="edit-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 900px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">Edit Tagging</h3>
+        <button type="button" onclick="closeEditModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
+    </div>
+
+    <form id="edit-tagging-form" onsubmit="event.preventDefault(); submitEdit();">
+        <div style="margin-bottom: 0.75rem;">
+            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Label <span style="color: #ef4444;">*</span></label>
+            <input type="text" id="edit-label" required maxlength="100" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+        </div>
+        <div style="margin-bottom: 0.75rem;">
+            <label for="edit-remarks" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Remarks</label>
+            <textarea id="edit-remarks" rows="2" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-family: inherit;"></textarea>
+        </div>
+
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 1rem 0;">
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <h4 style="margin: 0; font-size: 0.95rem;">Per-person remaps</h4>
+            <button type="button" class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;" onclick="addRemapRow()">+ Add</button>
+        </div>
+        <p style="font-size: 0.8rem; color: #6b7280; margin: 0 0 0.5rem;">Each row remaps one person to a new subunit. 'From' is auto-snapshotted from the personnel record when left blank.</p>
+
+        <table id="remap-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 1px solid #e5e7eb;">
+                    <th style="padding: 0.35rem;">Personnel</th>
+                    <th style="padding: 0.35rem;">To unit *</th>
+                    <th style="padding: 0.35rem;">To sub 1</th>
+                    <th style="padding: 0.35rem;">To sub 2</th>
+                    <th style="padding: 0.35rem;">To sub 3</th>
+                    <th style="padding: 0.35rem;"></th>
+                </tr>
+            </thead>
+            <tbody id="remap-body"></tbody>
+        </table>
+
+        <div id="edit-status-msg" style="margin-top: 1rem;"></div>
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem;">
+            <button type="button" onclick="closeEditModal()" style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: white; cursor: pointer;">Cancel</button>
+            <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1rem;">Save</button>
+        </div>
+    </form>
+</div>
+
+{# Clone modal #}
+<div id="clone-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeCloneModal()"></div>
+<div id="clone-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 480px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">Clone Tagging</h3>
+        <button type="button" onclick="closeCloneModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
+    </div>
+    <p style="font-size: 0.85rem; color: #374151; margin-bottom: 1rem;">
+        Cloning <strong id="clone-source-label"></strong> to a different nominal roll. Personnel are matched by their cross-roll <em>short_id</em>; unmatched personnel are skipped and surfaced in the result.
+    </p>
+    <form id="clone-tagging-form" onsubmit="event.preventDefault(); submitClone();">
+        <div style="margin-bottom: 0.75rem;">
+            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Target nominal roll <span style="color: #ef4444;">*</span></label>
+            <select id="clone-target" required style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                {% for e in nominal_roll_options %}
+                <option value="{{ e.id }}">CAA {{ e.caa }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="margin-bottom: 0.75rem;">
+            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">New label <span style="color: #ef4444;">*</span></label>
+            <input type="text" id="clone-label" required maxlength="100" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+        </div>
+        <div id="clone-status-msg" style="margin-bottom: 0.75rem;"></div>
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+            <button type="button" onclick="closeCloneModal()" style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: white; cursor: pointer;">Cancel</button>
+            <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1rem;">Clone</button>
+        </div>
+    </form>
+</div>
+
+<div id="pageStatus" style="margin-top: 1rem;"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const ADMIN_USER_ID = "{{ user.id }}";
+    const ADMIN_USER_ROLE = "{{ user.role }}";
+    const ACTIVE_NOMINAL_ROLL_ID = "{{ nominal_roll_filter }}";
+    let editId = null;
+
+    function showMsg(elId, msg, type) {
+        const div = document.getElementById(elId);
+        const color = type === 'success' ? '#10b981' : '#ef4444';
+        div.innerHTML = '<p style="color: ' + color + '; font-size: 0.875rem; margin: 0;">' + msg + '</p>';
+    }
+
+    function showPage(msg, type) {
+        const div = document.getElementById('pageStatus');
+        const color = type === 'success' ? '#10b981' : '#ef4444';
+        div.innerHTML = '<p style="color: ' + color + '; font-weight: bold;">' + msg + '</p>';
+    }
+
+    function escapeHtml(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+            return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+        });
+    }
+
+    // ----- Create modal -----
+    function openCreateModal() {
+        document.getElementById('create-tagging-form').reset();
+        document.getElementById('create-status').innerHTML = '';
+        document.getElementById('create-backdrop').style.display = 'block';
+        document.getElementById('create-modal').style.display = 'block';
+        document.getElementById('create-label').focus();
+    }
+
+    function closeCreateModal() {
+        document.getElementById('create-backdrop').style.display = 'none';
+        document.getElementById('create-modal').style.display = 'none';
+    }
+
+    async function submitCreate() {
+        const label = document.getElementById('create-label').value.trim();
+        const remarks = document.getElementById('create-remarks').value.trim();
+        if (!label) { showMsg('create-status', 'Label is required.', 'error'); return; }
+        const payload = { label: label, nominal_roll_id: ACTIVE_NOMINAL_ROLL_ID, entries: [] };
+        if (remarks) payload.remarks = remarks;
+        try {
+            const res = await fetch(
+                '/api/v1/taggings?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) }
+            );
+            if (res.ok) {
+                const data = await res.json();
+                showMsg('create-status', 'Tagging created. Opening editor…', 'success');
+                setTimeout(function() { closeCreateModal(); openEditModal(data.id); }, 500);
+            } else {
+                const data = await res.json();
+                showMsg('create-status', 'Create failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (err) {
+            showMsg('create-status', 'Network error: ' + err.message, 'error');
+        }
+    }
+
+    // ----- Edit modal -----
+    let personnelCache = [];   // [{id, short_id, rank, name, unit, sub1, sub2, sub3}]
+    let entryCache = [];        // [{personnel_id, to_unit, to_sub_unit_1..3}]
+
+    async function loadPersonnel() {
+        const params = new URLSearchParams({
+            nominal_roll_id: ACTIVE_NOMINAL_ROLL_ID,
+            user_id: ADMIN_USER_ID,
+            user_role: ADMIN_USER_ROLE,
+            limit: '500',
+        });
+        const res = await fetch('/api/v1/personnel?' + params.toString());
+        if (!res.ok) throw new Error('Failed to load personnel');
+        return res.json();
+    }
+
+    function personnelOption(p, selectedId) {
+        const sub = p.sub_unit_1 || p.sub_unit_2 || p.sub_unit_3 || '';
+        const label = [p.rank, p.name, sub ? '(' + sub + ')' : ''].filter(Boolean).join(' ');
+        const sel = p.id === selectedId ? ' selected' : '';
+        return '<option value="' + escapeHtml(p.id) + '"' + sel + '>' + escapeHtml(label) + '</option>';
+    }
+
+    function addRemapRow(entry) {
+        entry = entry || {};
+        const body = document.getElementById('remap-body');
+        const tr = document.createElement('tr');
+        tr.style.borderTop = '1px solid #f3f4f6';
+        const options = ['<option value="">— Select personnel —</option>']
+            .concat(personnelCache.map(function(p) { return personnelOption(p, entry.personnel_id); }))
+            .join('');
+        tr.innerHTML = [
+            '<td style="padding: 0.35rem;"><select class="remap-person" required style="width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">' + options + '</select></td>',
+            '<td style="padding: 0.35rem;"><input class="remap-unit" required style="width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" value="' + escapeHtml(entry.to_unit || '') + '"></td>',
+            '<td style="padding: 0.35rem;"><input class="remap-s1" style="width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" value="' + escapeHtml(entry.to_sub_unit_1 || '') + '"></td>',
+            '<td style="padding: 0.35rem;"><input class="remap-s2" style="width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" value="' + escapeHtml(entry.to_sub_unit_2 || '') + '"></td>',
+            '<td style="padding: 0.35rem;"><input class="remap-s3" style="width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" value="' + escapeHtml(entry.to_sub_unit_3 || '') + '"></td>',
+            '<td style="padding: 0.35rem;"><button type="button" class="btn" style="background: #ef4444; color: white; font-size: 0.7rem; padding: 0.2rem 0.4rem;" onclick="this.closest(\'tr\').remove()">Remove</button></td>',
+        ].join('');
+        body.appendChild(tr);
+    }
+
+    async function openEditModal(id) {
+        editId = id;
+        document.getElementById('edit-status-msg').innerHTML = '';
+        try {
+            // Load personnel and tagging in parallel.
+            const [personnel, taggingRes] = await Promise.all([
+                loadPersonnel(),
+                fetch('/api/v1/taggings/' + id + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE),
+            ]);
+            if (!taggingRes.ok) throw new Error('Failed to load tagging');
+            const tagging = await taggingRes.json();
+            personnelCache = personnel;
+            entryCache = tagging.entries || [];
+
+            document.getElementById('edit-label').value = tagging.label;
+            document.getElementById('edit-remarks').value = tagging.remarks || '';
+
+            const body = document.getElementById('remap-body');
+            body.innerHTML = '';
+            entryCache.forEach(function(e) { addRemapRow({
+                personnel_id: e.personnel_id,
+                to_unit: e.to_unit,
+                to_sub_unit_1: e.to_sub_unit_1,
+                to_sub_unit_2: e.to_sub_unit_2,
+                to_sub_unit_3: e.to_sub_unit_3,
+            }); });
+
+            document.getElementById('edit-backdrop').style.display = 'block';
+            document.getElementById('edit-modal').style.display = 'block';
+        } catch (err) {
+            showPage('Edit failed: ' + err.message, 'error');
+        }
+    }
+
+    function closeEditModal() {
+        document.getElementById('edit-backdrop').style.display = 'none';
+        document.getElementById('edit-modal').style.display = 'none';
+        editId = null;
+    }
+
+    async function submitEdit() {
+        if (!editId) return;
+        const label = document.getElementById('edit-label').value.trim();
+        const remarks = document.getElementById('edit-remarks').value.trim();
+        if (!label) { showMsg('edit-status-msg', 'Label is required.', 'error'); return; }
+
+        const rows = document.querySelectorAll('#remap-body tr');
+        const entries = [];
+        const seenPersons = new Set();
+        for (const tr of rows) {
+            const personnel_id = tr.querySelector('.remap-person').value;
+            const to_unit = tr.querySelector('.remap-unit').value.trim();
+            const to_sub_unit_1 = tr.querySelector('.remap-s1').value.trim() || null;
+            const to_sub_unit_2 = tr.querySelector('.remap-s2').value.trim() || null;
+            const to_sub_unit_3 = tr.querySelector('.remap-s3').value.trim() || null;
+            if (!personnel_id) { showMsg('edit-status-msg', 'Select personnel in every row.', 'error'); return; }
+            if (!to_unit) { showMsg('edit-status-msg', 'To unit is required in every row.', 'error'); return; }
+            if (seenPersons.has(personnel_id)) {
+                showMsg('edit-status-msg', 'Duplicate personnel in remap list.', 'error');
+                return;
+            }
+            seenPersons.add(personnel_id);
+            entries.push({
+                personnel_id: personnel_id,
+                to_unit: to_unit,
+                to_sub_unit_1: to_sub_unit_1,
+                to_sub_unit_2: to_sub_unit_2,
+                to_sub_unit_3: to_sub_unit_3,
+            });
+        }
+
+        const payload = { label: label, entries: entries };
+        if (remarks) payload.remarks = remarks; else payload.remarks = null;
+
+        try {
+            const res = await fetch(
+                '/api/v1/taggings/' + editId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                { method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) }
+            );
+            if (res.ok) {
+                showMsg('edit-status-msg', 'Saved.', 'success');
+                setTimeout(function() { location.reload(); }, 700);
+            } else {
+                const data = await res.json();
+                showMsg('edit-status-msg', 'Save failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (err) {
+            showMsg('edit-status-msg', 'Network error: ' + err.message, 'error');
+        }
+    }
+
+    // ----- Clone modal -----
+    function openCloneModal(id, label) {
+        cloneId = id;
+        document.getElementById('clone-source-label').textContent = label;
+        document.getElementById('clone-status-msg').innerHTML = '';
+        // Default the new label to "<source> (clone)".
+        document.getElementById('clone-label').value = label + ' (clone)';
+        // Pre-select first non-active target.
+        const select = document.getElementById('clone-target');
+        for (const opt of select.options) {
+            if (opt.value !== ACTIVE_NOMINAL_ROLL_ID) { opt.selected = true; break; }
+        }
+        document.getElementById('clone-backdrop').style.display = 'block';
+        document.getElementById('clone-modal').style.display = 'block';
+    }
+
+    function closeCloneModal() {
+        document.getElementById('clone-backdrop').style.display = 'none';
+        document.getElementById('clone-modal').style.display = 'none';
+        cloneId = null;
+    }
+
+    let cloneId = null;
+
+    async function submitClone() {
+        if (!cloneId) return;
+        const target = document.getElementById('clone-target').value;
+        const label = document.getElementById('clone-label').value.trim();
+        if (!target) { showMsg('clone-status-msg', 'Select a target nominal roll.', 'error'); return; }
+        if (!label) { showMsg('clone-status-msg', 'New label is required.', 'error'); return; }
+        try {
+            const res = await fetch(
+                '/api/v1/taggings/' + cloneId + '/clone?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ target_nominal_roll_id: target, label: label }) }
+            );
+            if (res.ok) {
+                const data = await res.json();
+                const summary = 'Cloned: ' + data.matched_count + ' matched, ' + data.unmatched.length + ' unmatched (of ' + data.source_count + ' source entries).';
+                showMsg('clone-status-msg', summary, 'success');
+                setTimeout(function() { location.reload(); }, 1500);
+            } else {
+                const data = await res.json();
+                showMsg('clone-status-msg', 'Clone failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (err) {
+            showMsg('clone-status-msg', 'Network error: ' + err.message, 'error');
+        }
+    }
+
+    async function deleteTagging(id, label) {
+        if (!confirm('Delete tagging "' + label + '"? Entries are removed. The nominal roll is not affected.')) return;
+        try {
+            const res = await fetch(
+                '/api/v1/taggings/' + id + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                { method: 'DELETE' }
+            );
+            if (res.ok) {
+                showPage('Tagging deleted.', 'success');
+                setTimeout(function() { location.reload(); }, 700);
+            } else {
+                const data = await res.json();
+                showPage('Delete failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (err) {
+            showPage('Network error: ' + err.message, 'error');
+        }
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key !== 'Escape') return;
+        if (document.getElementById('create-modal').style.display === 'block') closeCreateModal();
+        else if (document.getElementById('edit-modal').style.display === 'block') closeEditModal();
+        else if (document.getElementById('clone-modal').style.display === 'block') closeCloneModal();
+    });
+</script>
+{% endblock %}

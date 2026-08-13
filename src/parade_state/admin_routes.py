@@ -19,6 +19,8 @@ from parade_state.models import (
     DeploymentPersonnelExclusion,
     NominalRoll,
     Personnel,
+    Tagging,
+    TaggingEntry,
     User,
 )
 from parade_state.models import (
@@ -710,6 +712,100 @@ async def admin_deferments(
         active_nominal_roll_caa=active_nominal_roll_caa,
         deferment_statuses=DEFERMENT_STATUSES,
         deferment_reasons=DEFERMENT_REASONS,
+    )
+
+    return HTMLResponse(content=html_content)
+
+
+@router.get("/admin/taggings", response_class=HTMLResponse)
+async def admin_taggings(
+    request: Request,
+    nominal_roll_id: str | None = None,
+):
+    """Render the tagging overlay management page (super-admin only)."""
+    current_admin = await get_current_admin_user_optional(request)
+    if not current_admin:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    if current_admin.role != "super_admin":
+        return RedirectResponse(url="/admin", status_code=302)
+
+    session_maker = get_session_maker()
+    async with session_maker() as db:
+        # Nominal roll list for the selector (most recent first).
+        roll_rows = (
+            await db.execute(
+                select(NominalRoll.id, NominalRoll.caa)
+                .order_by(NominalRoll.caa.desc())
+                .limit(50)
+            )
+        ).all()
+        nominal_roll_options = [
+            {
+                "id": str(row.id),
+                "caa": row.caa.isoformat() if row.caa is not None else str(row.id)[:8],
+            }
+            for row in roll_rows
+        ]
+
+        # Page always scopes to exactly one nominal roll. Default to most recent.
+        resolved_nominal_roll_id = nominal_roll_id or (
+            nominal_roll_options[0]["id"] if nominal_roll_options else None
+        )
+
+        # Taggings for the selected NR with entry counts (correlated subquery).
+        entry_count = (
+            select(func.count())
+            .select_from(TaggingEntry)
+            .where(TaggingEntry.tagging_id == Tagging.id)
+            .correlate(Tagging)
+            .scalar_subquery()
+        )
+        query = (
+            select(Tagging, entry_count, NominalRoll.caa)
+            .outerjoin(NominalRoll, Tagging.nominal_roll_id == NominalRoll.id)
+            .order_by(Tagging.created_at.desc())
+            .limit(200)
+        )
+        if resolved_nominal_roll_id:
+            query = query.where(Tagging.nominal_roll_id == resolved_nominal_roll_id)
+
+        rows = (await db.execute(query)).all()
+
+    taggings_data = [
+        {
+            "id": str(t.id),
+            "label": t.label,
+            "nominal_roll_id": t.nominal_roll_id,
+            "nominal_roll_caa": caa.isoformat() if caa else None,
+            "remarks": t.remarks or "",
+            "entry_count": count or 0,
+            "created_at": t.created_at,
+            "updated_at": t.updated_at,
+        }
+        for t, count, caa in rows
+    ]
+
+    env = get_templates(request)
+    template = env.get_template("admin/taggings.html")
+
+    active_nominal_roll_caa = next(
+        (e["caa"] for e in nominal_roll_options if e["id"] == resolved_nominal_roll_id),
+        "—",
+    )
+
+    html_content = template.render(
+        request=request,
+        user={
+            "id": current_admin.id,
+            "name": current_admin.name,
+            "email": current_admin.email,
+            "role": current_admin.role,
+        },
+        active_page="taggings",
+        taggings=taggings_data,
+        nominal_roll_options=nominal_roll_options,
+        nominal_roll_filter=resolved_nominal_roll_id or "",
+        active_nominal_roll_caa=active_nominal_roll_caa,
     )
 
     return HTMLResponse(content=html_content)
