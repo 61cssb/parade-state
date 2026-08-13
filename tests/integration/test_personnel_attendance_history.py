@@ -47,15 +47,14 @@ async def test_get_personnel_attendance_history_basic(
     assert "total_sessions" in stats
     assert "present_count" in stats
     assert "absent_count" in stats
-    assert "excused_count" in stats
     assert "attendance_rate" in stats
 
-    # Verify statistics match the sample data
+    # Verify statistics match the sample data.
+    # Fixture: 1 present, 1 absent, 1 late (present-like bucket).
     assert stats["total_sessions"] == 3
-    assert stats["present_count"] == 1
+    assert stats["present_count"] == 2
     assert stats["absent_count"] == 1
-    assert stats["excused_count"] == 1
-    # Attendance rate = (1 + 1) / 3 = 66.67%
+    # Attendance rate = 2 / 3 = 66.67%
     assert abs(stats["attendance_rate"] - 66.67) < 0.1
 
     # Check attendance records
@@ -263,7 +262,6 @@ async def test_get_personnel_attendance_history_no_records(
     assert data["stats"]["total_sessions"] == 0
     assert data["stats"]["present_count"] == 0
     assert data["stats"]["absent_count"] == 0
-    assert data["stats"]["excused_count"] == 0
     assert data["stats"]["attendance_rate"] == 0.0
 
 
@@ -321,13 +319,13 @@ async def test_get_personnel_attendance_history_various_statuses(
     assert response.status_code == 200
     data = response.json()
 
-    # Should now have 4 records (2 absent, 1 present, 1 excused)
+    # Should now have 4 records: fixture (1 present, 1 absent, 1 late) + 1 extra absent.
+    # Bucketed: present_count=2 (present+late), absent_count=2.
     assert data["total_count"] == 4
     stats = data["stats"]
-    assert stats["present_count"] == 1
+    assert stats["present_count"] == 2
     assert stats["absent_count"] == 2
-    assert stats["excused_count"] == 1
-    # Attendance rate = (1 + 1) / 4 = 50%
+    # Attendance rate = 2 / 4 = 50%
     assert abs(stats["attendance_rate"] - 50.0) < 0.1
 
 

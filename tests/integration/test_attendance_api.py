@@ -154,7 +154,7 @@ async def test_create_attendance_record_with_deployment_notes_snapshot(
     attendance_data = {
         "session_id": str(session.id),
         "personnel_id": str(sample_personnel[0].id),
-        "status": "excused",
+        "status": "time_off",
     }
 
     response = client.post(
@@ -708,7 +708,7 @@ async def test_bulk_create_attendance_records(
             {
                 "session_id": str(session.id),
                 "personnel_id": str(sample_personnel[2].id),
-                "status": "excused",
+                "status": "mc",
                 "remarks": "Medical leave",
             },
         ]
@@ -850,7 +850,7 @@ async def test_bulk_update_attendance_records(
             },
             {
                 "id": str(attendance2.id),
-                "status": "excused",
+                "status": "late",
                 "remarks": "Medical leave",
             },
         ]
@@ -869,7 +869,7 @@ async def test_bulk_update_attendance_records(
     data = response.json()
     assert len(data) == 2
     assert any(a["status"] == "present" for a in data)
-    assert any(a["status"] == "excused" for a in data)
+    assert any(a["status"] == "late" for a in data)
 
 
 @pytest.mark.asyncio
