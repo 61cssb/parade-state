@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from .access import AccessLevel
     from .deployment import Deployment
     from .personnel import Personnel
+    from .tagging import Tagging
 
 
 class NominalRoll(Base):
@@ -60,6 +61,9 @@ class NominalRoll(Base):
         back_populates="nominal_roll", cascade="all, delete-orphan"
     )
     deployments: Mapped[list["Deployment"]] = relationship(
+        back_populates="nominal_roll", cascade="all, delete-orphan"
+    )
+    taggings: Mapped[list["Tagging"]] = relationship(
         back_populates="nominal_roll", cascade="all, delete-orphan"
     )
 

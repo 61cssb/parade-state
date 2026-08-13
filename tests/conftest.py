@@ -18,6 +18,7 @@ import parade_state.models.csv_ingestion  # noqa: F401
 import parade_state.models.deferments  # noqa: F401
 import parade_state.models.deployment  # noqa: F401
 import parade_state.models.personnel  # noqa: F401
+import parade_state.models.tagging  # noqa: F401
 from parade_state.db import Base, get_session_maker, init_database
 from parade_state.main import app
 from parade_state.models import (

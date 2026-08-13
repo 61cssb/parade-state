@@ -724,3 +724,128 @@ class DefermentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ============================================================================
+# Tagging Schemas
+# ============================================================================
+
+
+class TaggingEntryInput(BaseModel):
+    """Client-supplied person → subunit remap.
+
+    ``personnel_id`` must belong to the parent tagging's nominal roll
+    (server-enforced). ``from_*`` is optional — if omitted, the server
+    snapshots the linked personnel's canonical subunit at create time.
+    At least ``to_unit`` must be supplied.
+    """
+
+    personnel_id: str = Field(..., min_length=1)
+    from_unit: str | None = Field(None, max_length=255)
+    from_sub_unit_1: str | None = Field(None, max_length=255)
+    from_sub_unit_2: str | None = Field(None, max_length=255)
+    from_sub_unit_3: str | None = Field(None, max_length=255)
+    to_unit: str = Field(..., min_length=1, max_length=255)
+    to_sub_unit_1: str | None = Field(None, max_length=255)
+    to_sub_unit_2: str | None = Field(None, max_length=255)
+    to_sub_unit_3: str | None = Field(None, max_length=255)
+
+
+class TaggingEntryResponse(BaseModel):
+    """Schema for tagging entry responses."""
+
+    id: str
+    tagging_id: str
+    personnel_id: str
+    personnel_short_id: str | None = None
+    personnel_label: str | None = None
+    from_unit: str | None
+    from_sub_unit_1: str | None
+    from_sub_unit_2: str | None
+    from_sub_unit_3: str | None
+    to_unit: str
+    to_sub_unit_1: str | None
+    to_sub_unit_2: str | None
+    to_sub_unit_3: str | None
+
+    class Config:
+        from_attributes = True
+
+
+class TaggingCreate(BaseModel):
+    """Schema for creating a tagging."""
+
+    label: str = Field(..., min_length=1, max_length=100)
+    nominal_roll_id: str = Field(..., min_length=1)
+    remarks: str | None = None
+    entries: list[TaggingEntryInput] = Field(default_factory=list)
+
+
+class TaggingUpdate(BaseModel):
+    """Schema for updating a tagging.
+
+    If ``entries`` is provided, the tagging's entries are full-replaced.
+    Omit ``entries`` to leave the existing entries untouched while updating
+    label/remarks.
+    """
+
+    label: str | None = Field(None, min_length=1, max_length=100)
+    remarks: str | None = None
+    entries: list[TaggingEntryInput] | None = None
+
+
+class TaggingListItem(BaseModel):
+    """Schema for a tagging summary in list responses (no entries)."""
+
+    id: str
+    label: str
+    nominal_roll_id: str
+    remarks: str | None = None
+    entry_count: int = 0
+    created_at: utc_dt.datetime
+    created_by: str
+    updated_at: utc_dt.datetime | None = None
+    updated_by: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class TaggingResponse(BaseModel):
+    """Schema for a single tagging detail response (with entries)."""
+
+    id: str
+    label: str
+    nominal_roll_id: str
+    remarks: str | None = None
+    entries: list[TaggingEntryResponse] = []
+    created_at: utc_dt.datetime
+    created_by: str
+    updated_at: utc_dt.datetime | None = None
+    updated_by: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class TaggingCloneCreate(BaseModel):
+    """Schema for cloning a tagging to another nominal roll."""
+
+    target_nominal_roll_id: str = Field(..., min_length=1)
+    label: str = Field(..., min_length=1, max_length=100)
+
+
+class TaggingCloneUnmatchedItem(BaseModel):
+    """Schema for an unmatched personnel row surfaced by clone."""
+
+    short_id: str
+    name: str | None = None
+
+
+class TaggingCloneResponse(BaseModel):
+    """Schema for clone response — new tagging plus clone diagnostics."""
+
+    tagging: TaggingResponse
+    source_count: int
+    matched_count: int
+    unmatched: list[TaggingCloneUnmatchedItem]
