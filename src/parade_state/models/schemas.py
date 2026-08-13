@@ -15,7 +15,7 @@ class DeploymentBase(BaseModel):
     """Base deployment schema."""
 
     name: str = Field(..., min_length=1, max_length=255)
-    estab_id: str = Field(..., min_length=1)
+    nominal_roll_id: str = Field(..., min_length=1)
     valid_from: utc_dt.datetime
     valid_until: utc_dt.datetime
     notes: str | None = None
@@ -67,7 +67,7 @@ class DeploymentListParams(BaseModel):
     """Schema for deployment list query parameters."""
 
     status: str | None = None
-    estab_id: str | None = None
+    nominal_roll_id: str | None = None
     search: str | None = None
     limit: int = Field(100, ge=1, le=1000)
     offset: int = Field(0, ge=0)
@@ -334,7 +334,7 @@ class PersonnelResponse(PersonnelBase):
     """Schema for personnel response."""
 
     id: str
-    estab_id: str
+    nominal_roll_id: str
     status: str
     created_at: utc_dt.datetime
     updated_at: utc_dt.datetime | None
@@ -370,7 +370,7 @@ class PersonnelUpdate(BaseModel):
 class PersonnelListParams(BaseModel):
     """Schema for personnel list query parameters."""
 
-    estab_id: str | None = None
+    nominal_roll_id: str | None = None
     deployment_id: str | None = None
     unit: str | None = None
     sub_unit_1: str | None = None
@@ -394,7 +394,7 @@ class PersonnelResponseWithDeployment(PersonnelBase):
     """Schema for personnel response with deployment-specific assignments."""
 
     id: str
-    estab_id: str
+    nominal_roll_id: str
     status: str
     created_at: utc_dt.datetime
     updated_at: utc_dt.datetime | None
@@ -546,7 +546,7 @@ class CsvUploadListItem(BaseModel):
     status: str
     uploaded_at: utc_dt.datetime
     uploaded_by: str
-    estab_id: str | None = None
+    nominal_roll_id: str | None = None
     mapping_confirmed_at: utc_dt.datetime | None = None
     diff_confirmed_at: utc_dt.datetime | None = None
 
@@ -555,12 +555,12 @@ class CsvUploadListItem(BaseModel):
 
 
 # ============================================================================
-# Estab Schemas
+# Nominal Roll Schemas
 # ============================================================================
 
 
-class EstabListItem(BaseModel):
-    """Schema for an Estab list item (summary view)."""
+class NominalRollListItem(BaseModel):
+    """Schema for a Nominal Roll list item (summary view)."""
 
     id: str
     caa: utc_dt.date
@@ -572,13 +572,14 @@ class EstabListItem(BaseModel):
     # From the most recent linked CsvUpload (null until an upload is linked).
     original_filename: str | None = None
     label: str | None = None
+    remarks: str | None = None
 
     class Config:
         from_attributes = True
 
 
-class EstabResponse(EstabListItem):
-    """Schema for a single Estab detail response."""
+class NominalRollResponse(NominalRollListItem):
+    """Schema for a single Nominal Roll detail response."""
 
     notes: str | None = None
     confirmed_at: utc_dt.datetime | None = None
@@ -586,12 +587,13 @@ class EstabResponse(EstabListItem):
     created_at: utc_dt.datetime
 
 
-class EstabUpdate(BaseModel):
-    """Schema for updating an estab (status transitions, notes, label)."""
+class NominalRollUpdate(BaseModel):
+    """Schema for updating a nominal roll (status transitions, notes, label, remarks)."""
 
     status: Literal["confirmed", "draft"] | None = None
     notes: str | None = None
     label: str | None = Field(None, max_length=100)
+    remarks: str | None = None
 
     @field_validator("label")
     @classmethod
@@ -695,7 +697,7 @@ class DefermentResponse(BaseModel):
 
     id: str
     personnel_id: str
-    estab_id: str | None = None
+    nominal_roll_id: str | None = None
     rank_name: str
     sub_unit: str | None = None
     reason: str

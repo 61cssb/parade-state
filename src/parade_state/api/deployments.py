@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
 from parade_state.models.attendance import AttendanceRecord, Session
-from parade_state.models.csv_ingestion import Estab
+from parade_state.models.csv_ingestion import NominalRoll
 from parade_state.models.deployment import (
     Deployment,
     DeploymentNotes,
@@ -124,22 +124,22 @@ async def create_deployment(
             detail="Only admins and super admins can create deployments",
         )
 
-    # Verify estab exists and is confirmed
+    # Verify nominal roll exists and is confirmed
     result = await db.execute(
-        select(Estab).where(Estab.id == deployment_data.estab_id)
+        select(NominalRoll).where(NominalRoll.id == deployment_data.nominal_roll_id)
     )
-    estab = result.scalar_one_or_none()
-    if not estab:
+    nominal_roll = result.scalar_one_or_none()
+    if not nominal_roll:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Estab {deployment_data.estab_id} not found",
+            detail=f"Nominal roll {deployment_data.nominal_roll_id} not found",
         )
-    if estab.status != "confirmed":
+    if nominal_roll.status != "confirmed":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"Cannot create deployment from estab in '{estab.status}' status. "
-                "Estab must be confirmed."
+                f"Cannot create deployment from nominal roll in '{nominal_roll.status}' status. "
+                "Nominal roll must be confirmed."
             ),
         )
 
@@ -153,7 +153,7 @@ async def create_deployment(
     # Create deployment
     deployment = Deployment(
         name=deployment_data.name,
-        estab_id=deployment_data.estab_id,
+        nominal_roll_id=deployment_data.nominal_roll_id,
         status=deployment_data.status,
         valid_from=deployment_data.valid_from,
         valid_until=deployment_data.valid_until,
@@ -176,7 +176,7 @@ async def create_deployment(
 @router.get("/", response_model=list[DeploymentResponse])
 async def list_deployments(
     status: str | None = None,
-    estab_id: str | None = None,
+    nominal_roll_id: str | None = None,
     search: str | None = None,
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
@@ -195,8 +195,8 @@ async def list_deployments(
     if status:
         query = query.where(Deployment.status == status)
 
-    if estab_id:
-        query = query.where(Deployment.estab_id == estab_id)
+    if nominal_roll_id:
+        query = query.where(Deployment.nominal_roll_id == nominal_roll_id)
 
     if search:
         search_pattern = f"%{search}%"
@@ -541,17 +541,17 @@ async def create_exclusion(
             ),
         )
 
-    # Verify personnel belongs to this deployment's estab
+    # Verify personnel belongs to this deployment's nominal roll
     personnel_result = await db.execute(
         select(Personnel).where(
             Personnel.id == exclusion_data.personnel_id,
-            Personnel.estab_id == deployment.estab_id,
+            Personnel.nominal_roll_id == deployment.nominal_roll_id,
         )
     )
     if not personnel_result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Personnel not found in this deployment's estab.",
+            detail="Personnel not found in this deployment's nominal roll.",
         )
 
     # Check if already excluded (idempotent)
@@ -1042,9 +1042,11 @@ async def export_deployment_csv(
     # Verify deployment exists and user has access
     deployment = await verify_deployment_access(deployment_id, user_id, user_role, db)
 
-    # Get all personnel records for this deployment from the estab
+    # Get all personnel records for this deployment from the nominal roll
     personnel_result = await db.execute(
-        select(Personnel).where(Personnel.estab_id == deployment.estab_id)
+        select(Personnel).where(
+            Personnel.nominal_roll_id == deployment.nominal_roll_id
+        )
     )
     all_personnel = personnel_result.scalars().all()
 
@@ -1098,10 +1100,10 @@ async def export_deployment_csv(
             "ID",
             "Rank",
             "Name",
-            "Estab Unit",
-            "Estab SubUnit 1",
-            "Estab SubUnit 2",
-            "Estab SubUnit 3",
+            "Nominal Roll Unit",
+            "Nominal Roll SubUnit 1",
+            "Nominal Roll SubUnit 2",
+            "Nominal Roll SubUnit 3",
             "Override Unit",
             "Override SubUnit 1",
             "Override SubUnit 2",

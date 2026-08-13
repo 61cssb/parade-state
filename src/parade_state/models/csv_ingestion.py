@@ -1,4 +1,4 @@
-"""CSV ingestion and establishment models."""
+"""CSV ingestion and nominal roll models."""
 
 from typing import TYPE_CHECKING
 
@@ -24,15 +24,15 @@ if TYPE_CHECKING:
     from .personnel import Personnel
 
 
-class Estab(Base):
+class NominalRoll(Base):
     """Base personnel roster, sourced from CSV, pinned by CAA date."""
 
-    __tablename__ = "estabs"
+    __tablename__ = "nominal_rolls"
 
     caa: Mapped[utc_dt.date] = mapped_column(Date, unique=True, index=True)
     csv_hash: Mapped[str] = mapped_column(String(64), index=True)
     status: Mapped[str] = mapped_column(
-        Enum("draft", "confirmed", "archived", name="estab_status"),
+        Enum("draft", "confirmed", "archived", name="nominal_roll_status"),
         default="draft",
     )
     personnel_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -47,23 +47,24 @@ class Estab(Base):
     label: Mapped[str | None] = mapped_column(
         String(100), unique=True, nullable=True, index=True
     )
+    remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
     csv_uploads: Mapped[list["CsvUpload"]] = relationship(
-        back_populates="estab", cascade="all, delete-orphan"
+        back_populates="nominal_roll", cascade="all, delete-orphan"
     )
     column_metadata: Mapped[list["ColumnMetadata"]] = relationship(
-        back_populates="estab", cascade="all, delete-orphan"
+        back_populates="nominal_roll", cascade="all, delete-orphan"
     )
     personnel: Mapped[list["Personnel"]] = relationship(
-        back_populates="estab", cascade="all, delete-orphan"
+        back_populates="nominal_roll", cascade="all, delete-orphan"
     )
     deployments: Mapped[list["Deployment"]] = relationship(
-        back_populates="estab", cascade="all, delete-orphan"
+        back_populates="nominal_roll", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
-        return f"<Estab(caa={self.caa!r}, status={self.status!r}, label={self.label!r})>"
+        return f"<NominalRoll(caa={self.caa!r}, status={self.status!r}, label={self.label!r})>"
 
 
 class CsvUpload(Base):
@@ -71,8 +72,8 @@ class CsvUpload(Base):
 
     __tablename__ = "csv_uploads"
 
-    estab_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("estabs.id"), nullable=True
+    nominal_roll_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("nominal_rolls.id"), nullable=True
     )
     raw_content: Mapped[bytes] = mapped_column(LargeBinary)
     sha256_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
@@ -95,7 +96,7 @@ class CsvUpload(Base):
     )
 
     # Relationships
-    estab: Mapped[Estab | None] = relationship(back_populates="csv_uploads")
+    nominal_roll: Mapped[NominalRoll | None] = relationship(back_populates="csv_uploads")
 
     def __repr__(self) -> str:
         return f"<CsvUpload(hash={self.sha256_hash[:8]}..., status={self.status!r})>"
@@ -140,8 +141,8 @@ class ColumnMetadata(Base):
 
     __tablename__ = "column_metadata"
 
-    estab_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("estabs.id", ondelete="CASCADE")
+    nominal_roll_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("nominal_rolls.id", ondelete="CASCADE")
     )
     csv_upload_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("csv_uploads.id", ondelete="CASCADE")
@@ -167,13 +168,13 @@ class ColumnMetadata(Base):
     updated_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
 
     # Relationships
-    estab: Mapped[Estab] = relationship(back_populates="column_metadata")
+    nominal_roll: Mapped[NominalRoll] = relationship(back_populates="column_metadata")
     sensitivity_level: Mapped["AccessLevel"] = relationship(
         back_populates="column_metadata"
     )
 
     __table_args__ = (
-        UniqueConstraint("estab_id", "original_name", name="unique_estab_column"),
+        UniqueConstraint("nominal_roll_id", "original_name", name="unique_nominal_roll_column"),
     )
 
     def __repr__(self) -> str:

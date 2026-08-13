@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 
-{% block title %}Estabs - Parade State Admin{% endblock %}
+{% block title %}Nominal Rolls - Parade State Admin{% endblock %}
 
-{% block page_title %}Estabs{% endblock %}
+{% block page_title %}Nominal Rolls{% endblock %}
 
 {% block content %}
 <style>
@@ -25,22 +25,22 @@
     }
 </style>
 <p style="color: #6b7280; margin-bottom: 1.5rem;">
-    Base personnel rosters pinned by CAA date. Each estab is associated with its source CSV upload.
+    Base personnel rosters pinned by CAA date. Each nominal roll is associated with its source CSV upload.
 </p>
 
 <div class="card">
-    <h3>Estabs</h3>
+    <h3>Nominal Rolls</h3>
     <form method="get" style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
         <label for="status_filter" style="font-size: 0.875rem; color: #374151;">Status:</label>
         <select name="status_filter" id="status_filter" onchange="this.form.submit()" style="padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
             <option value="" {% if not status_filter %}selected{% endif %}>All</option>
-            {% for s in estab_statuses %}
+            {% for s in nominal_roll_statuses %}
             <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>{{ s }}</option>
             {% endfor %}
         </select>
     </form>
 
-    {% if estabs %}
+    {% if nominal_rolls %}
     <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
         <thead>
             <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
@@ -55,43 +55,43 @@
             </tr>
         </thead>
         <tbody>
-            {% for estab in estabs %}
+            {% for nr in nominal_rolls %}
             <tr style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 0.5rem;">{{ estab.caa }}</td>
-                <td style="padding: 0.5rem;" id="label-cell-{{ estab.id }}">
-                    {% if estab.status == 'draft' %}
-                    <span id="label-display-{{ estab.id }}"
+                <td style="padding: 0.5rem;">{{ nr.caa }}</td>
+                <td style="padding: 0.5rem;" id="label-cell-{{ nr.id }}">
+                    {% if nr.status == 'draft' %}
+                    <span id="label-display-{{ nr.id }}"
                           class="label-editable"
-                          data-value="{{ estab.label or '' }}"
-                          onclick="editLabel('{{ estab.id }}')"
-                          title="Click to edit label">{{ estab.label or '—' }}</span>
+                          data-value="{{ nr.label or '' }}"
+                          onclick="editLabel('{{ nr.id }}')"
+                          title="Click to edit label">{{ nr.label or '—' }}</span>
                     {% else %}
-                    {{ estab.label or '—' }}
+                    {{ nr.label or '—' }}
                     {% endif %}
                 </td>
-                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ estab.original_filename }}</td>
-                <td style="padding: 0.5rem;">{{ estab.personnel_count }}</td>
+                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ nr.original_filename }}</td>
+                <td style="padding: 0.5rem;">{{ nr.personnel_count }}</td>
                 <td style="padding: 0.5rem;">
-                    <span class="btn {% if estab.status == 'confirmed' %}btn-success{% elif estab.status == 'archived' %}btn-primary{% else %}btn-primary{% endif %}" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">{{ estab.status }}</span>
+                    <span class="btn {% if nr.status == 'confirmed' %}btn-success{% elif nr.status == 'archived' %}btn-primary{% else %}btn-primary{% endif %}" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">{{ nr.status }}</span>
                 </td>
-                <td style="padding: 0.5rem;">{{ estab.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ estab.csv_hash }}</td>
+                <td style="padding: 0.5rem;">{{ nr.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ nr.csv_hash }}</td>
                 <td style="padding: 0.5rem; white-space: nowrap;">
-                    {% if estab.status == 'draft' %}
+                    {% if nr.status == 'draft' %}
                     <button class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                            onclick="confirmEstab('{{ estab.id }}', '{{ estab.caa }}')">Confirm</button>
+                            onclick="confirmNominalRoll('{{ nr.id }}', '{{ nr.caa }}')">Confirm</button>
                     {% endif %}
-                    {% if estab.status == 'confirmed' %}
+                    {% if nr.status == 'confirmed' %}
                     <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                            onclick="openCreateModal('{{ estab.id }}', '{{ estab.caa }}', {{ estab.personnel_count }})">Create Deployment</button>
+                            onclick="openCreateModal('{{ nr.id }}', '{{ nr.caa }}', {{ nr.personnel_count }})">Create Deployment</button>
                     <button class="btn" style="background: #f59e0b; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
-                            onclick="unconfirmEstab('{{ estab.id }}', '{{ estab.caa }}')">Unconfirm</button>
+                            onclick="unconfirmNominalRoll('{{ nr.id }}', '{{ nr.caa }}')">Unconfirm</button>
                     {% endif %}
-                    {% if estab.status in ['draft', 'confirmed'] and user.role == 'super_admin' %}
+                    {% if nr.status in ['draft', 'confirmed'] and user.role == 'super_admin' %}
                     <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
-                            onclick="deleteEstab('{{ estab.id }}', '{{ estab.caa }}')">Delete</button>
+                            onclick="deleteNominalRoll('{{ nr.id }}', '{{ nr.caa }}')">Delete</button>
                     {% endif %}
-                    {% if estab.status not in ['draft', 'confirmed'] %}
+                    {% if nr.status not in ['draft', 'confirmed'] %}
                     <span style="font-size: 0.75rem; color: #9ca3af;">—</span>
                     {% endif %}
                 </td>
@@ -100,7 +100,7 @@
         </tbody>
     </table>
     {% else %}
-    <p style="color: #6b7280; margin-top: 1rem;">No estabs yet. Upload and process a CSV to create one.</p>
+    <p style="color: #6b7280; margin-top: 1rem;">No nominal rolls yet. Upload and process a CSV to create one.</p>
     {% endif %}
 </div>
 
@@ -113,7 +113,7 @@
     </div>
 
     <div style="background: #f9fafb; border-radius: 0.375rem; padding: 0.75rem; margin-bottom: 1rem; font-size: 0.875rem;">
-        <strong>Source Estab:</strong> CAA <span id="modal-estab-caa">—</span> &middot; <span id="modal-estab-personnel">—</span> personnel
+        <strong>Source Nominal Roll:</strong> CAA <span id="modal-nominal-roll-caa">—</span> &middot; <span id="modal-nominal-roll-personnel">—</span> personnel
     </div>
 
     <form id="create-deployment-form" onsubmit="event.preventDefault(); submitCreateDeployment();">
@@ -160,12 +160,12 @@
     const ADMIN_USER_ID = "{{ user.id }}";
     const ADMIN_USER_ROLE = "{{ user.role }}";
     const SINGAPORE_OFFSET = "+08:00";
-    let activeEstabId = null;
+    let activeNominalRollId = null;
 
-    function openCreateModal(estabId, caa, personnelCount) {
-        activeEstabId = estabId;
-        document.getElementById('modal-estab-caa').textContent = caa;
-        document.getElementById('modal-estab-personnel').textContent = personnelCount;
+    function openCreateModal(nominalRollId, caa, personnelCount) {
+        activeNominalRollId = nominalRollId;
+        document.getElementById('modal-nominal-roll-caa').textContent = caa;
+        document.getElementById('modal-nominal-roll-personnel').textContent = personnelCount;
         document.getElementById('modal-status').innerHTML = '';
         document.getElementById('create-deployment-form').reset();
         // Autofill valid_from/until to next day with default ops hours
@@ -205,7 +205,7 @@
     function closeCreateModal() {
         document.getElementById('create-modal-backdrop').style.display = 'none';
         document.getElementById('create-modal').style.display = 'none';
-        activeEstabId = null;
+        activeNominalRollId = null;
     }
 
     document.addEventListener('keydown', function(e) {
@@ -226,11 +226,11 @@
         div.innerHTML = '<p style="color: ' + color + '; font-weight: bold;">' + message + '</p>';
     }
 
-    async function confirmEstab(estabId, caa) {
-        if (!confirm('Confirm estab with CAA date ' + caa + '?')) return;
+    async function confirmNominalRoll(nominalRollId, caa) {
+        if (!confirm('Confirm nominal roll with CAA date ' + caa + '?')) return;
         try {
             const response = await fetch(
-                '/api/v1/estabs/' + estabId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/nominal-rolls/' + nominalRollId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
                 {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
@@ -238,7 +238,7 @@
                 }
             );
             if (response.ok) {
-                showPageStatus('Estab confirmed.', 'success');
+                showPageStatus('Nominal roll confirmed.', 'success');
                 setTimeout(function() { location.reload(); }, 800);
             } else {
                 const data = await response.json();
@@ -249,17 +249,17 @@
         }
     }
 
-    async function unconfirmEstab(estabId, caa) {
+    async function unconfirmNominalRoll(nominalRollId, caa) {
         const message =
-            'Revert estab with CAA date ' + caa + ' back to draft status?\n\n' +
+            'Revert nominal roll with CAA date ' + caa + ' back to draft status?\n\n' +
             'This will clear confirmation metadata (confirmed_at, confirmed_by).\n' +
             'The "Create Deployment" button will be hidden until re-confirmed.\n' +
-            'Existing deployments based on this estab are NOT affected.\n\n' +
+            'Existing deployments based on this nominal roll are NOT affected.\n\n' +
             'Intended for testing/maintenance only.';
         if (!confirm(message)) return;
         try {
             const response = await fetch(
-                '/api/v1/estabs/' + estabId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/nominal-rolls/' + nominalRollId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
                 {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
@@ -267,7 +267,7 @@
                 }
             );
             if (response.ok) {
-                showPageStatus('Estab reverted to draft.', 'success');
+                showPageStatus('Nominal roll reverted to draft.', 'success');
                 setTimeout(function() { location.reload(); }, 800);
             } else {
                 const data = await response.json();
@@ -278,22 +278,22 @@
         }
     }
 
-    async function deleteEstab(estabId, caa) {
+    async function deleteNominalRoll(nominalRollId, caa) {
         const message =
-            'Delete estab with CAA date ' + caa + '?\n\n' +
+            'Delete nominal roll with CAA date ' + caa + '?\n\n' +
             'This will permanently delete:\n' +
-            '  - All personnel records in this estab\n' +
-            '  - All deployments based on this estab\n' +
+            '  - All personnel records in this nominal roll\n' +
+            '  - All deployments based on this nominal roll\n' +
             '  - All sessions and attendance records under those deployments\n\n' +
             'This cannot be undone.';
         if (!confirm(message)) return;
         try {
             const response = await fetch(
-                '/api/v1/estabs/' + estabId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/nominal-rolls/' + nominalRollId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
                 { method: 'DELETE' }
             );
             if (response.ok) {
-                showPageStatus('Estab deleted.', 'success');
+                showPageStatus('Nominal roll deleted.', 'success');
                 setTimeout(function() { location.reload(); }, 800);
             } else {
                 const data = await response.json();
@@ -369,7 +369,7 @@
 
         const payload = {
             name: name,
-            estab_id: activeEstabId,
+            nominal_roll_id: activeNominalRollId,
             valid_from: validFrom,
             valid_until: validUntil,
             status: 'draft',
@@ -397,10 +397,10 @@
         }
     }
 
-    // --- Inline label editing (draft estabs only) ---
-    function editLabel(estabId) {
-        const cell = document.getElementById('label-cell-' + estabId);
-        const display = document.getElementById('label-display-' + estabId);
+    // --- Inline label editing (draft nominal rolls only) ---
+    function editLabel(nominalRollId) {
+        const cell = document.getElementById('label-cell-' + nominalRollId);
+        const display = document.getElementById('label-display-' + nominalRollId);
         if (!display) return;  // not editable
         const current = display.getAttribute('data-value') || '';
 
@@ -409,33 +409,33 @@
         wrap.style.gap = '0.25rem';
         wrap.style.alignItems = 'center';
         wrap.innerHTML =
-            '<input type="text" maxlength="100" id="label-input-' + estabId + '" value="' + escapeAttr(current) + '" ' +
+            '<input type="text" maxlength="100" id="label-input-' + nominalRollId + '" value="' + escapeAttr(current) + '" ' +
             '    style="padding: 0.25rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.875rem; max-width: 12rem;">' +
-            '<button type="button" class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;" onclick="saveLabel(\'' + estabId + '\')">Save</button>' +
-            '<button type="button" class="btn" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; border: 1px solid #d1d5db;" onclick="cancelEdit(\'' + estabId + '\')">Cancel</button>' +
-            '<span id="label-error-' + estabId + '" style="color: #ef4444; font-size: 0.75rem;"></span>';
+            '<button type="button" class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;" onclick="saveLabel(\'' + nominalRollId + '\')">Save</button>' +
+            '<button type="button" class="btn" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; border: 1px solid #d1d5db;" onclick="cancelEdit(\'' + nominalRollId + '\')">Cancel</button>' +
+            '<span id="label-error-' + nominalRollId + '" style="color: #ef4444; font-size: 0.75rem;"></span>';
         display.style.display = 'none';
         display.insertAdjacentElement('afterend', wrap);
 
-        const input = document.getElementById('label-input-' + estabId);
+        const input = document.getElementById('label-input-' + nominalRollId);
         input.focus();
         input.select();
         input.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') { e.preventDefault(); saveLabel(estabId); }
-            else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(estabId); }
+            if (e.key === 'Enter') { e.preventDefault(); saveLabel(nominalRollId); }
+            else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(nominalRollId); }
         });
     }
 
-    async function saveLabel(estabId) {
-        const input = document.getElementById('label-input-' + estabId);
-        const errSpan = document.getElementById('label-error-' + estabId);
+    async function saveLabel(nominalRollId) {
+        const input = document.getElementById('label-input-' + nominalRollId);
+        const errSpan = document.getElementById('label-error-' + nominalRollId);
         if (!input) return;
         const value = input.value.trim();
         errSpan.textContent = '';
 
         try {
             const response = await fetch(
-                '/api/v1/estabs/' + estabId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/nominal-rolls/' + nominalRollId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
                 {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
@@ -445,10 +445,10 @@
             if (response.ok) {
                 const data = await response.json();
                 const newLabel = data.label || '';
-                const display = document.getElementById('label-display-' + estabId);
+                const display = document.getElementById('label-display-' + nominalRollId);
                 display.setAttribute('data-value', newLabel);
                 display.textContent = newLabel || '—';
-                cancelEdit(estabId);
+                cancelEdit(nominalRollId);
                 showPageStatus('Label updated.', 'success');
             } else if (response.status === 409) {
                 errSpan.textContent = 'Label already in use.';
@@ -465,9 +465,9 @@
         }
     }
 
-    function cancelEdit(estabId) {
-        const display = document.getElementById('label-display-' + estabId);
-        const input = document.getElementById('label-input-' + estabId);
+    function cancelEdit(nominalRollId) {
+        const display = document.getElementById('label-display-' + nominalRollId);
+        const input = document.getElementById('label-input-' + nominalRollId);
         if (!display) return;
         const wrap = input ? input.parentElement : null;
         if (wrap) wrap.remove();

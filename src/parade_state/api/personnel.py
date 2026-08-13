@@ -88,9 +88,9 @@ def apply_personnel_filters(query, params: PersonnelListParams):
 
     Handles deployment-specific filtering and search functionality.
     """
-    # Filter by estab_id
-    if params.estab_id:
-        query = query.where(Personnel.estab_id == params.estab_id)
+    # Filter by nominal_roll_id
+    if params.nominal_roll_id:
+        query = query.where(Personnel.nominal_roll_id == params.nominal_roll_id)
 
     # Filter by status
     if params.status:
@@ -154,7 +154,7 @@ async def get_deployment_personnel_with_overrides(
 
     This is the core function for deployment-based personnel listing.
     It handles:
-    - Deployment-specific personnel (from estab)
+    - Deployment-specific personnel (from nominal roll)
     - Personnel overrides for this deployment
     - Unit hierarchy filtering
     - Search functionality
@@ -164,7 +164,9 @@ async def get_deployment_personnel_with_overrides(
     deployment = await verify_deployment_access(deployment_id, user_id, user_role, db)
 
     # Get base personnel query
-    query = select(Personnel).where(Personnel.estab_id == deployment.estab_id)
+    query = select(Personnel).where(
+        Personnel.nominal_roll_id == deployment.nominal_roll_id
+    )
 
     # Exclude personnel filtered out for this deployment
     excluded_subq = select(DeploymentPersonnelExclusion.personnel_id).where(
@@ -231,7 +233,7 @@ async def get_deployment_personnel_with_overrides(
 
         response = PersonnelResponseWithDeployment(
             id=personnel.id,
-            estab_id=personnel.estab_id,
+            nominal_roll_id=personnel.nominal_roll_id,
             short_id=personnel.short_id,
             rank=personnel.rank,
             name=personnel.full_name,
@@ -277,11 +279,11 @@ async def get_personnel_by_id_with_deployment_context(
             detail="Personnel not found",
         )
 
-    # Verify personnel belongs to deployment's estab
-    if personnel.estab_id != deployment.estab_id:
+    # Verify personnel belongs to deployment's nominal roll
+    if personnel.nominal_roll_id != deployment.nominal_roll_id:
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail="Personnel does not belong to this deployment's establishment",
+            detail="Personnel does not belong to this deployment's nominal roll",
         )
 
     # Get override if exists
@@ -317,7 +319,9 @@ async def get_personnel_by_id_with_deployment_context(
 @router.get("/personnel", response_model=list[PersonnelResponseWithDeployment])
 async def list_personnel(
     deployment_id: str | None = Query(None, description="Filter by deployment ID"),
-    estab_id: str | None = Query(None, description="Filter by establishment ID"),
+    nominal_roll_id: str | None = Query(
+        None, description="Filter by nominal roll ID"
+    ),
     unit: str | None = Query(None, description="Filter by unit"),
     sub_unit_1: str | None = Query(None, description="Filter by sub-unit 1"),
     sub_unit_2: str | None = Query(None, description="Filter by sub-unit 2"),
@@ -354,7 +358,7 @@ async def list_personnel(
     """
     params = PersonnelListParams(
         deployment_id=deployment_id,
-        estab_id=estab_id,
+        nominal_roll_id=nominal_roll_id,
         unit=unit,
         sub_unit_1=sub_unit_1,
         sub_unit_2=sub_unit_2,
@@ -400,7 +404,7 @@ async def list_personnel(
     personnel_responses = [
         PersonnelResponseWithDeployment(
             id=p.id,
-            estab_id=p.estab_id,
+            nominal_roll_id=p.nominal_roll_id,
             short_id=p.short_id,
             rank=p.rank,
             name=p.full_name,
@@ -444,7 +448,7 @@ async def get_personnel(
 
         return PersonnelResponseWithDeployment(
             id=personnel.id,
-            estab_id=personnel.estab_id,
+            nominal_roll_id=personnel.nominal_roll_id,
             short_id=personnel.short_id,
             rank=personnel.rank,
             name=personnel.full_name,
@@ -480,7 +484,7 @@ async def get_personnel(
 
         return PersonnelResponseWithDeployment(
             id=personnel.id,
-            estab_id=personnel.estab_id,
+            nominal_roll_id=personnel.nominal_roll_id,
             short_id=personnel.short_id,
             rank=personnel.rank,
             name=personnel.full_name,
@@ -542,7 +546,7 @@ async def update_personnel(
 
         return PersonnelResponseWithDeployment(
             id=personnel.id,
-            estab_id=personnel.estab_id,
+            nominal_roll_id=personnel.nominal_roll_id,
             short_id=personnel.short_id,
             rank=personnel.rank,
             name=personnel.full_name,
@@ -585,7 +589,7 @@ async def update_personnel(
 
         return PersonnelResponseWithDeployment(
             id=personnel.id,
-            estab_id=personnel.estab_id,
+            nominal_roll_id=personnel.nominal_roll_id,
             short_id=personnel.short_id,
             rank=personnel.rank,
             name=personnel.full_name,

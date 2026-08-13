@@ -27,7 +27,7 @@
                 <th style="padding: 0.5rem;">Hash</th>
                 <th style="padding: 0.5rem;">Lines</th>
                 <th style="padding: 0.5rem;">Status</th>
-                <th style="padding: 0.5rem;">Estab</th>
+                <th style="padding: 0.5rem;">Nominal Roll</th>
             </tr>
         </thead>
         <tbody>
@@ -39,7 +39,7 @@
                 <td style="padding: 0.5rem;">
                     <span class="btn {% if upload.status == 'received' %}btn-primary{% elif upload.status == 'failed' %}btn-success{% endif %}" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">{{ upload.status }}</span>
                 </td>
-                <td style="padding: 0.5rem;">{{ upload.estab_id or '--' }}</td>
+                <td style="padding: 0.5rem;">{{ upload.nominal_roll_id or '--' }}</td>
             </tr>
             {% endfor %}
         </tbody>

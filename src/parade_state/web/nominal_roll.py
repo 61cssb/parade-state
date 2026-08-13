@@ -1,9 +1,9 @@
-"""User-facing estab browser view.
+"""User-facing nominal roll browser view.
 
-Shows the personnel roster for the selected estab as a simple table.
-Accessible to all authenticated users — the estab is the unit's base roster
-(org-wide reference data). Deployment-based subunit scoping is a possible
-future refinement.
+Shows the personnel roster for the selected nominal roll as a simple table.
+Accessible to all authenticated users — the nominal roll is the unit's base
+roster (org-wide reference data). Deployment-based subunit scoping is a
+possible future refinement.
 """
 
 from fastapi import APIRouter, Request
@@ -13,22 +13,22 @@ from sqlalchemy import func, or_, select
 
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
-from parade_state.models import Estab, Personnel
+from parade_state.models import NominalRoll, Personnel
 
 router = APIRouter()
 
 
-@router.get("/estab", response_class=HTMLResponse)
-async def estab_view(
+@router.get("/nominal-roll", response_class=HTMLResponse)
+async def nominal_roll_view(
     request: Request,
-    estab_id: str | None = None,
+    nominal_roll_id: str | None = None,
     search: str | None = None,
     unit: str | None = None,
 ):
-    """Render the estab browser page.
+    """Render the nominal roll browser page.
 
-    Shows an estab selector and a table of personnel for the selected estab.
-    Optional filters: text search (rank/name/short_id) and unit filter.
+    Shows a nominal roll selector and a table of personnel for the selected
+    roll. Optional filters: text search (rank/name/short_id) and unit filter.
     """
     current_user = await get_current_user_optional(request)
     if not current_user:
@@ -36,40 +36,39 @@ async def estab_view(
 
     session_maker = get_session_maker()
     async with session_maker() as db:
-        # All estabs (org-wide reference data)
-        estabs_result = await db.execute(
-            select(Estab)
-            .order_by(Estab.caa.desc())
+        # All nominal rolls (org-wide reference data)
+        rolls_result = await db.execute(
+            select(NominalRoll).order_by(NominalRoll.caa.desc())
         )
-        all_estabs = estabs_result.scalars().all()
+        all_rolls = rolls_result.scalars().all()
 
-        if not all_estabs:
+        if not all_rolls:
             return _render(
                 request, current_user,
-                estabs=[], selected=None, units=[],
+                rolls=[], selected=None, units=[],
                 personnel=[], search=search or "", unit=unit or "",
                 total_count=0,
             )
 
-        # Resolve selected estab (default to most recent)
+        # Resolve selected nominal roll (default to most recent)
         selected = None
-        if estab_id:
-            for e in all_estabs:
-                if str(e.id) == estab_id:
-                    selected = e
+        if nominal_roll_id:
+            for r in all_rolls:
+                if str(r.id) == nominal_roll_id:
+                    selected = r
                     break
         if not selected:
             # Prefer confirmed, then draft, else most recent
-            non_archived = [e for e in all_estabs if e.status != "archived"]
-            pool = non_archived if non_archived else all_estabs
-            confirmed = [e for e in pool if e.status == "confirmed"]
+            non_archived = [r for r in all_rolls if r.status != "archived"]
+            pool = non_archived if non_archived else all_rolls
+            confirmed = [r for r in pool if r.status == "confirmed"]
             selected = confirmed[0] if confirmed else pool[0]
 
-        # Personnel query for selected estab
+        # Personnel query for selected nominal roll
         query = (
             select(Personnel)
             .where(
-                Personnel.estab_id == str(selected.id),
+                Personnel.nominal_roll_id == str(selected.id),
                 Personnel.status == "active",
             )
         )
@@ -94,7 +93,7 @@ async def estab_view(
             select(func.count())
             .select_from(Personnel)
             .where(
-                Personnel.estab_id == str(selected.id),
+                Personnel.nominal_roll_id == str(selected.id),
                 Personnel.status == "active",
             )
         )
@@ -122,7 +121,7 @@ async def estab_view(
         units_result = await db.execute(
             select(Personnel.unit)
             .where(
-                Personnel.estab_id == str(selected.id),
+                Personnel.nominal_roll_id == str(selected.id),
                 Personnel.status == "active",
                 Personnel.unit.is_not(None),
             )
@@ -146,14 +145,14 @@ async def estab_view(
 
     return _render(
         request, current_user,
-        estabs=[
+        rolls=[
             {
-                "id": str(e.id),
-                "caa": e.caa,
-                "status": e.status,
-                "personnel_count": e.personnel_count,
+                "id": str(r.id),
+                "caa": r.caa,
+                "status": r.status,
+                "personnel_count": r.personnel_count,
             }
-            for e in all_estabs
+            for r in all_rolls
         ],
         selected={
             "id": str(selected.id),
@@ -173,7 +172,7 @@ def _render(
     request: Request,
     user,
     *,
-    estabs: list,
+    rolls: list,
     selected,
     units: list,
     personnel: list,
@@ -187,7 +186,7 @@ def _render(
         autoescape=False,
         cache_size=0,
     )
-    template = env.get_template("estab.html")
+    template = env.get_template("nominal_roll.html")
     html = template.render(
         request=request,
         user={
@@ -196,9 +195,9 @@ def _render(
             "email": user.email,
             "role": user.role,
         },
-        active_page="estab",
-        estabs=estabs,
-        selected_estab=selected,
+        active_page="nominal-roll",
+        nominal_rolls=rolls,
+        selected_nominal_roll=selected,
         units=units,
         personnel=personnel,
         search=search,
