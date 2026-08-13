@@ -15,7 +15,7 @@ from parade_state.api.access_control import (
 )
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
-from parade_state.models import AttendanceRecord
+from parade_state.models import PRESENT_LIKE_STATUSES, AttendanceRecord
 from parade_state.models import Session as SessionModel
 from parade_state.utils import utc_dt
 
@@ -105,14 +105,16 @@ async def deployment_view(
             )
             counts = {row[0]: row[1] for row in counts_result.all()}
             total = sum(counts.values())
+            present = sum(
+                cnt for st, cnt in counts.items() if st in PRESENT_LIKE_STATUSES
+            )
             sessions_data.append(
                 {
                     "id": str(s.id),
                     "session_type": s.session_type,
                     "status": s.status,
-                    "present": counts.get("present", 0),
-                    "absent": counts.get("absent", 0),
-                    "excused": counts.get("excused", 0),
+                    "present": present,
+                    "absent": total - present,
                     "total": total,
                 }
             )
@@ -134,7 +136,7 @@ async def deployment_view(
                 )
                 .order_by(AttendanceRecord.unit_snapshot)
             )
-            # Aggregate into per-unit dict
+            # Aggregate into per-unit dict — bucket statuses
             unit_map: dict[str, dict] = {}
             for unit, status_val, count_val in unit_result.all():
                 key = unit or "—"
@@ -142,12 +144,14 @@ async def deployment_view(
                     unit_map[key] = {
                         "unit": key,
                         "present": 0,
-                        "absent": 0,
-                        "excused": 0,
                         "total": 0,
                     }
-                unit_map[key][status_val] = unit_map[key].get(status_val, 0) + count_val
+                if status_val in PRESENT_LIKE_STATUSES:
+                    unit_map[key]["present"] += count_val
                 unit_map[key]["total"] += count_val
+            # Derive absent from total - present for template compatibility
+            for stats in unit_map.values():
+                stats["absent"] = stats["total"] - stats["present"]
             unit_rows = list(unit_map.values())
 
     env = _get_templates(request)

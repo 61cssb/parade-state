@@ -409,12 +409,12 @@ async def sample_attendance_records(
             created_by=admin_id,
             updated_by=admin_id,
         ),
-        # Yesterday AM - excused
+        # Yesterday AM - late (present-like)
         AttendanceRecord(
             session_id=str(sample_sessions[2].id),
             personnel_id=str(sample_personnel[0].id),
             deployment_id=str(sample_deployment.id),
-            status="excused",
+            status="late",
             remarks="Official duty",
             created_by=admin_id,
             updated_by=admin_id,

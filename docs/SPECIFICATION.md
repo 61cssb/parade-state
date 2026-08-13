@@ -37,7 +37,7 @@ Nominal Roll (CAA-pinned, CSV-sourced, immutable)
 - **Nominal Roll**: Base source of truth, uploaded from CSV, pinned by CAA date, immutable after confirmation
 - **Deployment**: Based on specific nominal roll, remaps personnel assignments, valid for date+time range, only one active at a time
 - **Session**: AM/PM attendance window, admin-opened, associated with specific deployment; auto-populates AttendanceRecord entries for all active personnel (minus exclusions) on creation
-- **Attendance Record**: Per-personnel per-session with status (present/absent/excused), remarks, and snapshots
+- **Attendance Record**: Per-personnel per-session with status (one of nine operational reporting categories), remarks, and snapshots
 
 ### 1.3 Scope
 
@@ -45,7 +45,7 @@ Nominal Roll (CAA-pinned, CSV-sourced, immutable)
 - CSV ingestion with CAA versioning, column mapping, diff detection
 - Deployment management: create, clone (same-roll), migrate (cross-roll), scheduled activation
 - Session management: admin-opens, advance creation, notes auto-snapshot on open
-- Attendance taking: AM/PM, present/absent/excused, Notes (deployment-scoped), Remarks (session-scoped)
+- Attendance taking: AM/PM, nine-status operational reporting enum, Notes (deployment-scoped), Remarks (session-scoped)
 - Row access control (access level + subunit scope) and column sensitivity control
 - Parade state table view scoped to user access with inline editing
 - Admin UI (NiceGUI): enums, users, column sensitivity, column mapping, deployment/session management
@@ -309,7 +309,7 @@ AttendanceRecord
 ├── session_id: UUID (FK Session, on_delete=CASCADE)
 ├── personnel_id: UUID (FK Personnel, on_delete=CASCADE)
 ├── deployment_id: UUID (FK Deployment, on_delete=CASCADE)
-├── status: str ENUM ['present', 'absent', 'excused']  (default: 'absent')
+├── status: str ENUM ['present', 'absent', 'time_off', 'mc', 'yet_to_inpro', 'outpro', 'reporting_sick', 'late', 'att_out']  (default: 'absent')
 ├── remarks: str (session-scoped; e.g., "on leave", "TDY")
 ├── notes_snapshot: str (snapshot of deployment_notes at session open)
 ├── unit_snapshot: str (personnel's effective unit at time of write)

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
 from parade_state.models import (
+    PRESENT_LIKE_STATUSES,
     AttendanceRecord,
     Deployment,
     DeploymentNotes,
@@ -631,8 +632,8 @@ async def get_personnel_attendance_history(
 
     Returns attendance records with summary statistics including:
     - Total sessions attended
-    - Present/absent/excused counts
-    - Attendance rate (present + excused / total)
+    - Present-like / absent-like counts (present and late count as present)
+    - Attendance rate (present-like / total)
 
     Supports date range filtering and pagination.
     """
@@ -679,16 +680,13 @@ async def get_personnel_attendance_history(
     attendance_items = []
     present_count = 0
     absent_count = 0
-    excused_count = 0
 
     for record, session in records:
-        # Count by status
-        if record.status == "present":
+        # Bucket by present-like vs absent-like
+        if record.status in PRESENT_LIKE_STATUSES:
             present_count += 1
-        elif record.status == "absent":
+        else:
             absent_count += 1
-        elif record.status == "excused":
-            excused_count += 1
 
         attendance_items.append(
             PersonnelAttendanceHistoryItem(
@@ -705,10 +703,10 @@ async def get_personnel_attendance_history(
         )
 
     # Calculate attendance rate
-    # Attendance rate = (present + excused) / total_sessions
-    total_sessions = present_count + absent_count + excused_count
+    # Attendance rate = present-like / total_sessions
+    total_sessions = present_count + absent_count
     if total_sessions > 0:
-        attendance_rate = ((present_count + excused_count) / total_sessions) * 100
+        attendance_rate = (present_count / total_sessions) * 100
     else:
         attendance_rate = 0.0
 
@@ -717,7 +715,6 @@ async def get_personnel_attendance_history(
         total_sessions=total_sessions,
         present_count=present_count,
         absent_count=absent_count,
-        excused_count=excused_count,
         attendance_rate=round(attendance_rate, 2),
     )
 

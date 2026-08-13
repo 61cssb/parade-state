@@ -233,7 +233,7 @@ async def _populate_session_roster(
     """Create attendance records for all included personnel in the deployment roster.
 
     Uses batch queries to avoid N+1 when populating a large roster.
-    Personnel default to 'absent' — admins/users mark them as present/excused later.
+    Personnel default to 'absent' — admins/users mark them later.
     """
     # Batch-load roster (active personnel belonging to the deployment's nominal roll)
     roster_result = await db.execute(

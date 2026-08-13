@@ -209,8 +209,8 @@ async def test_example(client, sample_users, sample_deployment):
 - Retroactive edit detection and tracking
 - Complete audit trail (created/updated/last_edit timestamps)
 - Session status validation (open/closed/finalized)
-- Attendance status enum: present, absent, excused (default: absent)
-- **Attendance page UI enhancements:** Color-coded status dropdown (present=green, absent=red, excused=yellow), sub-unit 1 & 2 columns displayed, column filter and sort support
+- Attendance status enum: present, absent, time_off, mc, yet_to_inpro, outpro, reporting_sick, late, att_out (default: absent)
+- **Attendance page UI enhancements:** Color-coded status dropdown (9 operational reporting categories), sub-unit 1 & 2 columns displayed, column filter and sort support
 - **Endpoints:** 8 attendance management endpoints
 
 **Personnel Management (✅ Session 1 Complete)**
@@ -388,7 +388,7 @@ if search_term:
 - Show personnel details with deployment-specific assignments
 - Implement `GET /api/v1/personnel/{id}/attendance-history`
 - Filter attendance history by deployment and date range
-- Add attendance summary statistics (present/absent/excused counts)
+- Add attendance summary statistics (present-like/absent-like bucket counts)
 - Implement personnel search functionality
 - Write tests for detail views and history (8-10 tests expected)
 
