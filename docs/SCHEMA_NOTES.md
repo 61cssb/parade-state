@@ -30,7 +30,7 @@ WHERE u.id = :user_id;
 
 For a scoped user viewing a deployment:
 ```sql
--- Effective personnel assignment = override if present, else estab
+-- Effective personnel assignment = override if present, else nominal roll
 WITH effective_assignment AS (
     SELECT
         p.id            AS personnel_id,
@@ -40,7 +40,7 @@ WITH effective_assignment AS (
         COALESCE(dpo.sub_unit_2,  p.sub_unit_2)  AS sub_unit_2,
         COALESCE(dpo.sub_unit_3,  p.sub_unit_3)  AS sub_unit_3
     FROM personnel p
-    JOIN deployments d ON d.estab_id = p.estab_id
+    JOIN deployments d ON d.nominal_roll_id = p.nominal_roll_id
     LEFT JOIN deployment_personnel_overrides dpo
         ON dpo.deployment_id = d.id AND dpo.personnel_id = p.id
     WHERE d.id = :deployment_id
@@ -72,7 +72,7 @@ function writeAttendance(record, deployment):
     update status, remarks, notes_snapshot always
 
     if now >= deployment.valid_from AND now <= deployment.valid_until:
-        resolve effective assignment for the personnel row (override ?? estab)
+        resolve effective assignment for the personnel row (override ?? nominal roll)
         update unit_snapshot, sub_unit_1_snapshot, sub_unit_2_snapshot, sub_unit_3_snapshot
         set snapshot_taken_at = now
     else:
@@ -114,7 +114,7 @@ SELECT
     'absent',
     COALESCE(dn.notes, '')
 FROM personnel p
-JOIN deployments d ON d.estab_id = p.estab_id AND d.id = :deployment_id
+JOIN deployments d ON d.nominal_roll_id = p.nominal_roll_id AND d.id = :deployment_id
 LEFT JOIN deployment_notes dn ON dn.deployment_id = :deployment_id AND dn.personnel_id = p.id
 WHERE p.status = 'active'
 ON CONFLICT (session_id, personnel_id) DO NOTHING;
@@ -133,10 +133,10 @@ When a user edits notes in the attendance session view:
 
 ---
 
-## Notes transfer on new estab confirmation
+## Notes transfer on new nominal roll confirmation
 
-Notes follow the *person*, not the row. When a new estab is confirmed, personnel are matched
-to prior estabs by `short_id` (same person — see cross-estab matching in SPECIFICATION §3.2.1).
+Notes follow the *person*, not the row. When a new nominal roll is confirmed, personnel are matched
+to prior nominal rolls by `short_id` (same person — see cross-roll matching in SPECIFICATION §3.2.1).
 Notes from the prior active deployment are copied onto the matched personnel rows in the new
 deployment:
 
@@ -151,16 +151,16 @@ SELECT
 FROM deployment_notes dn
 JOIN deployments old_d ON old_d.id = dn.deployment_id
 JOIN personnel old_p ON old_p.id = dn.personnel_id
-JOIN personnel new_p ON new_p.short_id = old_p.short_id   -- same person, cross-estab
+JOIN personnel new_p ON new_p.short_id = old_p.short_id   -- same person, cross-roll
 WHERE old_d.id = :prior_deployment_id
-  AND new_p.estab_id = :new_estab_id
+  AND new_p.nominal_roll_id = :new_nominal_roll_id
   AND new_p.status = 'active'
 ON CONFLICT (deployment_id, personnel_id) DO NOTHING;
 ```
 
 Unmatched persons (no `short_id` counterpart in the prior deployment) start with no transferred
 notes. Admin-confirmed matches from the diff-review step are what make `short_id` line up across
-estabs.
+nominal rolls.
 
 ---
 

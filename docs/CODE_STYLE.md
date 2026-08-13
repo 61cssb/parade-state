@@ -395,7 +395,7 @@ class Personnel(Base):
 - Example:
 ```python
 class Personnel(Base):
-    short_id: Mapped[str] = mapped_column(String(8), index=True)  # cross-estab person identity
+    short_id: Mapped[str] = mapped_column(String(8), index=True)  # cross-roll person identity
     rank: Mapped[str] = mapped_column(String(50), index=True)
     status: Mapped[str] = mapped_column(
         Enum("active", "archived", name="personnel_status"),
@@ -412,14 +412,14 @@ Store UUIDs as strings for database compatibility:
 class Deployment(Base):
     __tablename__ = "deployments"
 
-    estab_id: Mapped[str] = mapped_column(
+    nominal_roll_id: Mapped[str] = mapped_column(
         String(36),  # String UUID for SQLite compatibility
-        ForeignKey("estabs.id", ondelete="CASCADE"),
+        ForeignKey("nominal_rolls.id", ondelete="CASCADE"),
     )
 
 # ❌ AVOID - Native UUID type (not SQLite compatible)
 class Deployment(Base):
-    estab_id: Mapped[UUID] = mapped_column(UUID)  # Not portable
+    nominal_roll_id: Mapped[UUID] = mapped_column(UUID)  # Not portable
 ```
 
 ---

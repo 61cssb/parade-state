@@ -10,7 +10,7 @@
 > References to `pers_no` as an imported/used identifier are **obsolete**. `pers_no` is no
 > longer imported or stored (it is an opaque, sensitive external primary key and is dropped on
 > parse). Personnel are now identified by a server-generated 8-char base62 `short_id` that is
-> stable across estabs; cross-estab matching uses `full_name` (rank disambiguates). See
+> stable across nominal rolls; cross-roll matching uses `full_name` (rank disambiguates). See
 > [SPECIFICATION.md §3.2.1](SPECIFICATION.md) for the current model.
 
 ---
@@ -24,14 +24,14 @@ The personnel branch currently manages battalion parade state through a manual m
 ## 2. Entity Hierarchy
 
 ```
-Estab (CAA-pinned, CSV-sourced, immutable)
+Nominal Roll (CAA-pinned, CSV-sourced, immutable)
  └── Deployment (remaps personnel unit+subunit; has a date+time validity range)
       └── Session (AM or PM, admin-opened, linked to a deployment)
            └── Attendance Record (per-personnel per-session; notes write-back to deployment)
 ```
 
-- **Estab** is the base source of truth. Uploaded from CSV, pinned by CAA date. Immutable after confirmation. Identified by content hash in addition to CAA for integrity verification.
-- **Deployment** is based on a specific estab. Remaps any subset of personnel to different unit+subunit assignments. Valid for a specified date+time range. Only one deployment is active at any point in time.
+- **Nominal Roll** is the base source of truth. Uploaded from CSV, pinned by CAA date. Immutable after confirmation. Identified by content hash in addition to CAA for integrity verification.
+- **Deployment** is based on a specific nominal roll. Remaps any subset of personnel to different unit+subunit assignments. Valid for a specified date+time range. Only one deployment is active at any point in time.
 - **Session** is an AM or PM attendance window, explicitly opened by an admin, associated with a specific deployment. May be created in advance.
 - **Attendance Record** is one record per personnel per session. Carries status, remarks (session-scoped), a notes snapshot (deployment-scoped, written at session open and each attendance write), and a unit+subunit snapshot (deployment assignment at time of write, subject to the validity-range rule).
 
@@ -42,7 +42,7 @@ Estab (CAA-pinned, CSV-sourced, immutable)
 **In scope (v1):**
 - CSV ingestion with CAA versioning, column mapping, diff detection
 - Required-column config in app config; column mapping table (global, admin-editable)
-- Deployment management: create, clone (same-estab), migrate (cross-estab), scheduled activation
+- Deployment management: create, clone (same-roll), migrate (cross-roll), scheduled activation
 - Session management: admin-opens, advance creation, notes auto-snapshot on open
 - Attendance taking: AM/PM, present/absent, Notes (deployment-scoped), Remarks (session-scoped)
 - Row access control (access level + subunit scope) and column sensitivity control
@@ -110,7 +110,7 @@ Declared in `app.config.json` (deployment-time change, not admin UI):
 
 ---
 
-## 6. Estab (CSV Ingestion)
+## 6. Nominal Roll (CSV Ingestion)
 
 ### 6.1 Storage
 - Raw CSV stored immutably in `csv_uploads` (append-only; SHA-256 hash recorded).
@@ -120,15 +120,15 @@ Declared in `app.config.json` (deployment-time change, not admin UI):
 
 ### 6.2 Upload Pipeline (3 steps)
 1. **Upload:** file received, raw CSV stored, headers parsed, auto-matching attempted. Returns mapping resolution payload.
-2. **Mapping confirmation:** admin resolves unmapped required columns and any conflicts. Global mapping table updated. **CAA conflict check:** if a CSV with the same CAA already exists in confirmed state, prompt admin for replacement confirmation. On confirm, prior confirmed CSV and its estab are marked archived (soft-deleted). Diff computed against prior confirmed CSV (if different).
-3. **Diff confirmation:** admin reviews single-page diff (max ~400 rows, sticky summary bar: N joined / N left / N changed). On confirm: personnel_snapshots populated, estab deployment created, leavers archived, notes transferred from prior deployment by internal personnel ID (not `pers_no`).
+2. **Mapping confirmation:** admin resolves unmapped required columns and any conflicts. Global mapping table updated. **CAA conflict check:** if a CSV with the same CAA already exists in confirmed state, prompt admin for replacement confirmation. On confirm, prior confirmed CSV and its nominal roll are marked archived (soft-deleted). Diff computed against prior confirmed CSV (if different).
+3. **Diff confirmation:** admin reviews single-page diff (max ~400 rows, sticky summary bar: N joined / N left / N changed). On confirm: personnel_snapshots populated, nominal roll deployment created, leavers archived, notes transferred from prior deployment by internal personnel ID (not `pers_no`).
 
 ---
 
 ## 7. Deployment
 
 ### 7.1 Data Model
-Each deployment: name, estab reference, status (`draft` | `active` | `inactive` | `archived` | `closed` | `finalized`), validity range (`valid_from` + `valid_until` datetimes), optional `scheduled_activation` datetime, personnel assignment overrides, and per-user access list.
+Each deployment: name, nominal roll reference, status (`draft` | `active` | `inactive` | `archived` | `closed` | `finalized`), validity range (`valid_from` + `valid_until` datetimes), optional `scheduled_activation` datetime, personnel assignment overrides, and per-user access list.
 
 **Deployment status lifecycle:** `draft` → `active` (auto or manual) → `inactive` (auto) → `archived` (optional admin action). Admins may also manually transition to `closed` (no further edits permitted) or `finalized` (permanent archive with all associated sessions finalized). A `finalized` deployment and all its sessions are immutable.
 
@@ -138,11 +138,11 @@ Each deployment: name, estab reference, status (`draft` | `active` | `inactive` 
 - Background job handles activation (at `valid_from` or `scheduled_activation`) and deactivation (at `valid_until`). Both transitions are idempotent.
 - No write-lock on personnel overrides — editable at any deployment status for operational flexibility. Attendance snapshot integrity maintained by the validity-range rule (§9.2).
 
-### 7.3 Clone (Same-Estab)
+### 7.3 Clone (Same-Nominal Roll)
 Admin-only. Copies overrides, prefixes name "Copy of …", resets validity range to blank. Admin chooses whether to transfer deployment notes.
 
-### 7.4 Migrate (Cross-Estab)
-Admin-only. Two-step: compute diff between source estab and target estab → present leavers (must be individually dismissed) and joiners (must each receive a unit+subunit assignment) → on confirm, create new draft deployment against target estab.
+### 7.4 Migrate (Cross-Nominal Roll)
+Admin-only. Two-step: compute diff between source nominal roll and target nominal roll → present leavers (must be individually dismissed) and joiners (must each receive a unit+subunit assignment) → on confirm, create new draft deployment against target nominal roll.
 
 ---
 
@@ -161,7 +161,7 @@ Fields: `personnel_id`, `session_id`, `deployment_id`, `status` (`present` | `ab
 
 ### 9.2 Unit+Subunit Snapshot Rule
 On any attendance write:
-- **Within deployment validity range:** resolve effective assignment (override ?? estab), write to all four `*_snapshot` fields.
+- **Within deployment validity range:** resolve effective assignment (override ?? nominal roll), write to all four `*_snapshot` fields.
 - **Outside validity range** (retroactive edit by any scoped user with write privileges): update `status`, `remarks`, `notes_snapshot` only. Snapshot fields are not touched. Detailed audit trail (e.g., showing which override was active at time of write) deferred to future work.
 
 ### 9.3 Notes
@@ -342,7 +342,7 @@ When a new deployment is created, **all existing, active users automatically gai
 
 ## 18. Resolved Clarifications (v0.4)
 
-1. **CAA conflict handling:** ✅ New upload with same CAA prompts admin to replace; prior CSV/estab archived.
+1. **CAA conflict handling:** ✅ New upload with same CAA prompts admin to replace; prior CSV/nominal-roll archived.
 2. **Retroactive edits:** ✅ Any scoped user with write privileges may edit attendance/remarks retroactively (outside validity range). Audit detail deferred.
 3. **pers_no handling:** ✅ External reference ID, stored in `extra_fields`. Internal `personnel_id` (UUID) is the system identity. Notes/records follow `personnel_id`, not `pers_no`.
 4. **Session constraints:** ✅ Max one session per (deployment, date); deployment closure cascades to all sessions; no session-level overrides.

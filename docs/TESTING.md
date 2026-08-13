@@ -294,7 +294,7 @@ All sample fixtures are function-scoped and use `db_session`:
 
 - `sample_access_levels`: Creates access level records
 - `sample_users`: Creates admin and regular users
-- `sample_estab`: Creates establishment record
+- `sample_nominal_roll`: Creates establishment record
 - `sample_personnel`: Creates personnel records
 - `sample_deployment`: Creates deployment with access grants
 - `sample_session`: Creates session record

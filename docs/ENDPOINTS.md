@@ -16,7 +16,7 @@ This document clarifies the different types of endpoints in the Parade State app
 **User-Facing View Routes (Phase 9D / 9F):**
 - `GET /deployment` - Deployment summary (today's AM/PM session counts, unit breakdown) — deployment selector dropdown
 - `GET /attendance` - Attendance marking table (inline status/remarks editing) — deployment + session selector
-- `GET /estab` - Estab browser (row-numbered roster table with unit/sub-unit columns, search, unit filter) — estab selector dropdown
+- `GET /nominal-roll` - Nominal Roll browser (row-numbered roster table with unit/sub-unit columns, search, unit filter) — nominal roll selector dropdown
 
 **Admin Interface Routes:**
 - `GET /admin` - Admin dashboard
@@ -24,7 +24,7 @@ This document clarifies the different types of endpoints in the Parade State app
 - `GET /admin/deployments/{id}/personnel` - Deployment personnel management (checkbox-based include/exclude, draft-only editing)
 - `GET /admin/users` - Users management page
 - `GET /admin/csv-upload` - CSV upload page
-- `GET /admin/estabs` - Estab management page (CAA date, label, source file, personnel count, status filter, confirm/unconfirm/delete actions)
+- `GET /admin/nominal-rolls` - Nominal Roll management page (CAA date, label, source file, personnel count, status filter, confirm/unconfirm/delete actions)
 - `GET /admin/settings` - Settings page
 - `GET /admin/audit` - Audit log page
 
@@ -58,7 +58,7 @@ This document clarifies the different types of endpoints in the Parade State app
 - `/api/v1/personnel/*` - Personnel management
 - `/api/v1/access-control/*` - Access control
 - `/api/v1/csv/*` - CSV upload and ingestion
-- `/api/v1/estabs/*` - Estab list/detail (admin-only), confirm/unconfirm (PATCH), delete (super_admin, DELETE)
+- `/api/v1/nominal-rolls/*` - Nominal Roll list/detail (admin-only), confirm/unconfirm (PATCH), delete (super_admin, DELETE)
 - `/api/v1/audit/*` - Audit log
 
 ### 3. CSV Upload API
@@ -93,7 +93,7 @@ This document clarifies the different types of endpoints in the Parade State app
 
 **Response:** Paginated list with `user_name` and `user_email` resolved via left outer join on User. System-generated entries (null `user_id`) return `user_name: null`.
 
-**Entity types:** attendance, deployment, session, user, csv_upload, estab, personnel, access_level, column_mapping
+**Entity types:** attendance, deployment, session, user, csv_upload, nominal roll, personnel, access_level, column_mapping
 
 **Actions:** create, update, delete, archive, close, finalize
 
@@ -169,14 +169,14 @@ app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 - `src/parade_state/web/auth.py` - Authentication web views
 - `src/parade_state/web/deployment.py` - Deployment summary view (non-admin)
 - `src/parade_state/web/attendance.py` - Attendance marking view (non-admin)
-- `src/parade_state/web/estab.py` - Estab browser view (non-admin)
+- `src/parade_state/web/nominal-roll.py` - Nominal Roll browser view (non-admin)
 - `src/parade_state/admin_routes.py` - Admin interface routes
 - `src/parade_state/templates/` - Jinja2 templates
 
 **API Routes:**
 - `src/parade_state/api/auth.py` - Authentication API
 - `src/parade_state/api/users.py` - Users API
-- `src/parade_state/api/estabs.py` - Estab list/detail API
+- `src/parade_state/api/nominal_rolls.py` - Nominal Roll list/detail API
 - `src/parade_state/api/*.py` - Other API endpoints
 
 **Authentication Logic:**
