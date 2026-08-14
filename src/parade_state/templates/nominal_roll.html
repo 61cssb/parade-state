@@ -204,12 +204,19 @@
         const input = document.createElement('input');
         input.type = 'text';
         input.className = 'cell-edit-input';
-        input.list = span.dataset.list;
+        input.setAttribute('list', span.dataset.list);
         input.value = span.dataset.value || '';
         span.textContent = '';
         span.appendChild(input);
         input.focus();
         input.select();
+        // Nudge browsers that only open the datalist on key interaction
+        // (untrusted events are best-effort; typing also opens it).
+        input.dispatchEvent(
+            new KeyboardEvent('keydown', {
+                key: 'ArrowDown', keyCode: 40, bubbles: true, cancelable: true,
+            })
+        );
 
         let done = false;
         function finish(save) {
