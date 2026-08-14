@@ -16,7 +16,7 @@ import parade_state.models.audit  # noqa: F401
 import parade_state.models.auth_session  # noqa: F401
 import parade_state.models.csv_ingestion  # noqa: F401
 import parade_state.models.deferments  # noqa: F401
-import parade_state.models.deployment  # noqa: F401
+import parade_state.models.grouping  # noqa: F401
 import parade_state.models.personnel  # noqa: F401
 import parade_state.models.tagging  # noqa: F401
 from parade_state.db import Base, get_session_maker, init_database
@@ -29,11 +29,11 @@ from parade_state.models import (
     ColumnMapping,
     ColumnMetadata,
     CsvUpload,
-    Deployment,
-    DeploymentNotes,
-    DeploymentPersonnelExclusion,
-    DeploymentPersonnelOverride,
-    DeploymentUserAccess,
+    Grouping,
+    GroupingNotes,
+    GroupingPersonnelExclusion,
+    GroupingPersonnelOverride,
+    GroupingUserAccess,
     NominalRoll,
     Personnel,
     User,
@@ -229,14 +229,15 @@ async def sample_personnel(db_session: AsyncSession, sample_nominal_roll, sample
 
 
 @pytest.fixture
-async def sample_deployment(db_session: AsyncSession, sample_nominal_roll, sample_users):
-    """Create a sample deployment for testing."""
+async def sample_grouping(db_session: AsyncSession, sample_nominal_roll, sample_users):
+    """Create a sample grouping for testing."""
     admin_id = str(sample_users["admin"].id)
     nominal_roll_id = str(sample_nominal_roll.id)
 
-    deployment = Deployment(
-        name="Test Deployment",
+    grouping = Grouping(
+        name="Test Grouping",
         nominal_roll_id=nominal_roll_id,
+        mode="standard",
         status="active",
         valid_from=utc_dt.utcnow() - timedelta(days=1),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
@@ -245,19 +246,19 @@ async def sample_deployment(db_session: AsyncSession, sample_nominal_roll, sampl
         activated_at=utc_dt.utcnow(),
     )
 
-    db_session.add(deployment)
+    db_session.add(grouping)
     await db_session.commit()
 
-    # Grant admin access to this deployment for testing
-    admin_access = DeploymentUserAccess(
+    # Grant admin access to this grouping for testing
+    admin_access = GroupingUserAccess(
         user_id=admin_id,
-        deployment_id=str(deployment.id),
+        grouping_id=str(grouping.id),
         granted_by=admin_id,
     )
     db_session.add(admin_access)
     await db_session.commit()
 
-    return deployment
+    return grouping
 
 
 @pytest.fixture

@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from parade_state.models import (
     AccessLevel,
-    DeploymentUserAccess,
+    GroupingUserAccess,
     User,
     UserSubunitScope,
 )
@@ -50,17 +50,17 @@ class TestUserAccessControl:
     """Test user access control and scoping logic."""
 
     @pytest.mark.asyncio
-    async def test_user_deployment_access_grant(
-        self, db_session, sample_users, sample_deployment
+    async def test_user_grouping_access_grant(
+        self, db_session, sample_users, sample_grouping
     ):
-        """Test granting user access to a deployment."""
+        """Test granting user access to a grouping."""
         user = sample_users["user"]
-        deployment = sample_deployment
+        grouping = sample_grouping
 
         # Grant access
-        access = DeploymentUserAccess(
+        access = GroupingUserAccess(
             user_id=user.id,
-            deployment_id=deployment.id,
+            grouping_id=grouping.id,
             granted_by=sample_users["admin"].id,
         )
 
@@ -68,29 +68,29 @@ class TestUserAccessControl:
         await db_session.flush()
 
         # Verify access exists
-        stmt = select(DeploymentUserAccess).where(
-            DeploymentUserAccess.user_id == user.id,
-            DeploymentUserAccess.deployment_id == deployment.id,
+        stmt = select(GroupingUserAccess).where(
+            GroupingUserAccess.user_id == user.id,
+            GroupingUserAccess.grouping_id == grouping.id,
         )
         result = await db_session.execute(stmt)
         access_record = result.scalar_one()
 
         assert access_record.user_id == user.id
-        assert access_record.deployment_id == deployment.id
+        assert access_record.grouping_id == grouping.id
         assert access_record.revoked_at is None
 
     @pytest.mark.asyncio
     async def test_user_subunit_scope_assignment(
-        self, db_session, sample_users, sample_deployment
+        self, db_session, sample_users, sample_grouping
     ):
         """Test assigning subunit scope to a user."""
         user = sample_users["user"]
-        deployment = sample_deployment
+        grouping = sample_grouping
 
         # Assign scope to Platoon 1
         scope = UserSubunitScope(
             user_id=user.id,
-            deployment_id=deployment.id,
+            grouping_id=grouping.id,
             unit="Coy A",
             sub_unit_1="Platoon 1",
             created_by=sample_users["admin"].id,
@@ -102,7 +102,7 @@ class TestUserAccessControl:
         # Verify scope exists
         stmt = select(UserSubunitScope).where(
             UserSubunitScope.user_id == user.id,
-            UserSubunitScope.deployment_id == deployment.id,
+            UserSubunitScope.grouping_id == grouping.id,
         )
         result = await db_session.execute(stmt)
         scope_record = result.scalar_one()
@@ -112,25 +112,25 @@ class TestUserAccessControl:
         assert scope_record.sub_unit_2 is None  # Not specified
 
     @pytest.mark.asyncio
-    async def test_user_multiple_scopes_same_deployment(
-        self, db_session, sample_users, sample_deployment
+    async def test_user_multiple_scopes_same_grouping(
+        self, db_session, sample_users, sample_grouping
     ):
-        """Test user can have multiple scopes within same deployment."""
+        """Test user can have multiple scopes within same grouping."""
         user = sample_users["user"]
-        deployment = sample_deployment
+        grouping = sample_grouping
 
         # Assign multiple scopes
         scopes = [
             UserSubunitScope(
                 user_id=user.id,
-                deployment_id=deployment.id,
+                grouping_id=grouping.id,
                 unit="Coy A",
                 sub_unit_1="Platoon 1",
                 created_by=sample_users["admin"].id,
             ),
             UserSubunitScope(
                 user_id=user.id,
-                deployment_id=deployment.id,
+                grouping_id=grouping.id,
                 unit="Coy A",
                 sub_unit_1="Platoon 2",
                 created_by=sample_users["admin"].id,
@@ -143,7 +143,7 @@ class TestUserAccessControl:
         # Verify both scopes exist
         stmt = select(UserSubunitScope).where(
             UserSubunitScope.user_id == user.id,
-            UserSubunitScope.deployment_id == deployment.id,
+            UserSubunitScope.grouping_id == grouping.id,
         )
         result = await db_session.execute(stmt)
         user_scopes = result.scalars().all()
@@ -154,21 +154,21 @@ class TestUserAccessControl:
 
     @pytest.mark.asyncio
     async def test_admin_bypasses_access_control(
-        self, db_session, sample_users, sample_deployment
+        self, db_session, sample_users, sample_grouping
     ):
         """Test that admin users bypass normal access controls."""
         admin = sample_users["admin"]
 
-        # Admin should have access to deployment without explicit grants
-        stmt = select(DeploymentUserAccess).where(
-            DeploymentUserAccess.user_id == admin.id,
-            DeploymentUserAccess.deployment_id == sample_deployment.id,
+        # Admin should have access to grouping without explicit grants
+        stmt = select(GroupingUserAccess).where(
+            GroupingUserAccess.user_id == admin.id,
+            GroupingUserAccess.grouping_id == sample_grouping.id,
         )
         result = await db_session.execute(stmt)
         access_records = result.scalars().all()
 
-        # With new access control system, admins get explicit deployment access
-        # The sample_deployment fixture automatically grants admin access
+        # With new access control system, admins get explicit grouping access
+        # The sample_grouping fixture automatically grants admin access
         assert len(access_records) >= 1  # Admin has explicit access grant
 
 

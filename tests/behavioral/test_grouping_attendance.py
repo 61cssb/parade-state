@@ -1,4 +1,4 @@
-"""Behavioral tests for deployment lifecycle and attendance logic.
+"""Behavioral tests for grouping lifecycle and attendance logic.
 
 Attendance is NR/Tagging-scoped with hardcoded AM/PM; sessions are gone.
 """
@@ -10,48 +10,50 @@ from sqlalchemy import select
 
 from parade_state.models import (
     Attendance,
-    Deployment,
-    DeploymentNotes,
+    Grouping,
+    GroupingNotes,
 )
 from parade_state.utils import utc_dt
 
 
-class TestDeploymentLifecycle:
-    """Test deployment status transitions and constraints."""
+class TestGroupingLifecycle:
+    """Test grouping status transitions and constraints."""
 
     @pytest.mark.asyncio
-    async def test_only_one_active_deployment(
+    async def test_only_one_active_grouping(
         self, db_session, sample_nominal_roll, sample_users
     ):
-        """Multiple active deployments are allowed at the DB level; app logic prevents it."""
+        """Multiple active groupings are allowed at the DB level; app logic prevents it."""
         admin_id = sample_users["admin"].id
 
-        deployment1 = Deployment(
-            name="Deployment 1",
+        grouping1 = Grouping(
+            name="Grouping 1",
             nominal_roll_id=sample_nominal_roll.id,
+            mode="standard",
             status="active",
             valid_from=utc_dt.utcnow() - timedelta(days=1),
             valid_until=utc_dt.utcnow() + timedelta(days=30),
             created_by=admin_id,
         )
-        db_session.add(deployment1)
+        db_session.add(grouping1)
         await db_session.commit()
 
-        deployment2 = Deployment(
-            name="Deployment 2",
+        grouping2 = Grouping(
+            name="Grouping 2",
             nominal_roll_id=sample_nominal_roll.id,
+            mode="standard",
             status="active",
             valid_from=utc_dt.utcnow() - timedelta(days=1),
             valid_until=utc_dt.utcnow() + timedelta(days=30),
             created_by=admin_id,
         )
-        db_session.add(deployment2)
+        db_session.add(grouping2)
         await db_session.commit()
 
-        stmt = select(Deployment).where(Deployment.status == "active")
+        stmt = select(Grouping).where(Grouping.status == "active")
         result = await db_session.execute(stmt)
-        active_deployments = result.scalars().all()
-        assert len(active_deployments) == 2  # DB allows it, app logic prevents
+        active_groupings = result.scalars().all()
+        assert len(active_groupings) == 2  # DB allows it, app logic prevents
 
 
 class TestAttendanceSnapshotRules:
@@ -131,20 +133,20 @@ class TestAttendanceSnapshotRules:
         assert attendance.is_retroactive_edit is True
 
 
-class TestDeploymentNotes:
-    """Test deployment-scoped notes functionality."""
+class TestGroupingNotes:
+    """Test grouping-scoped notes functionality."""
 
     @pytest.mark.asyncio
-    async def test_deployment_notes_uniqueness(
-        self, db_session, sample_deployment, sample_personnel, sample_users
+    async def test_grouping_notes_uniqueness(
+        self, db_session, sample_grouping, sample_personnel, sample_users
     ):
-        """Only one notes record per deployment-personnel pair."""
-        deployment = sample_deployment
+        """Only one notes record per grouping-personnel pair."""
+        grouping = sample_grouping
         personnel = sample_personnel[0]
         admin_id = sample_users["admin"].id
 
-        notes1 = DeploymentNotes(
-            deployment_id=deployment.id,
+        notes1 = GroupingNotes(
+            grouping_id=grouping.id,
             personnel_id=personnel.id,
             notes="First note",
             created_by=admin_id,
@@ -153,8 +155,8 @@ class TestDeploymentNotes:
         db_session.add(notes1)
         await db_session.commit()
 
-        notes2 = DeploymentNotes(
-            deployment_id=deployment.id,
+        notes2 = GroupingNotes(
+            grouping_id=grouping.id,
             personnel_id=personnel.id,
             notes="Second note",
             created_by=admin_id,
@@ -166,35 +168,35 @@ class TestDeploymentNotes:
 
     @pytest.mark.asyncio
     async def test_notes_snapshot_on_attendance_row(
-        self, db_session, sample_deployment, sample_personnel, sample_users
+        self, db_session, sample_grouping, sample_personnel, sample_users
     ):
         """Notes are snapshotted onto the attendance row when it is created."""
-        deployment = sample_deployment
+        grouping = sample_grouping
         personnel = sample_personnel[0]
         admin_id = sample_users["admin"].id
 
-        deployment_notes = DeploymentNotes(
-            deployment_id=deployment.id,
+        grouping_notes = GroupingNotes(
+            grouping_id=grouping.id,
             personnel_id=personnel.id,
             notes="Medical condition: requires accommodation",
             created_by=admin_id,
             updated_by=admin_id,
         )
-        db_session.add(deployment_notes)
+        db_session.add(grouping_notes)
         await db_session.commit()
 
         attendance = Attendance(
             personnel_id=personnel.id,
-            nominal_roll_id=deployment.nominal_roll_id,
+            nominal_roll_id=grouping.nominal_roll_id,
             tagging_id=None,
             date=date.today(),
             status_am="present",
             status_pm="present",
-            notes_snapshot=deployment_notes.notes,
+            notes_snapshot=grouping_notes.notes,
             created_by=admin_id,
             updated_by=admin_id,
         )
         db_session.add(attendance)
         await db_session.commit()
 
-        assert attendance.notes_snapshot == deployment_notes.notes
+        assert attendance.notes_snapshot == grouping_notes.notes
