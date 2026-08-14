@@ -5,8 +5,25 @@
 {% block page_title %}Attendance Marking{% endblock %}
 
 {% block content %}
+<style>
+    .changed-row { background: #fef3c7 !important; }
+    .changed-row td { background: #fef3c7 !important; }
+</style>
+
+{% if nominal_rolls %}
 <div class="card">
     <form method="get" action="/attendance" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <label for="nominal_roll_id" style="font-weight: bold;">Nominal Roll:</label>
+            <select name="nominal_roll_id" id="nominal_roll_id" onchange="this.form.submit()"
+                    style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                {% for e in nominal_rolls %}
+                <option value="{{ e.id }}" {% if selected_nominal_roll_id == e.id %}selected{% endif %}>
+                    CAA {{ e.caa }} ({{ e.status }}) — {{ e.personnel_count }} pers
+                </option>
+                {% endfor %}
+            </select>
+        </div>
         <div style="display: flex; gap: 0.5rem; align-items: center;">
             <label for="date" style="font-weight: bold;">Date:</label>
             <input type="date" name="date" id="date" value="{{ target_date.strftime('%Y-%m-%d') }}"
@@ -46,7 +63,12 @@
     </p>
     {% endif %}
 
-    {% if attendance_rows %}
+    {% if no_assignments %}
+    <p style="color: #6b7280;">
+        You have no Subunit-1 assignments on this nominal roll — ask a
+        super-admin to grant attendance access.
+    </p>
+    {% elif attendance_rows %}
     <table id="attendance-table" style="width: 100%; border-collapse: collapse;">
         <thead>
             <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
@@ -63,7 +85,7 @@
         </thead>
         <tbody id="attendance-body">
             {% for r in attendance_rows %}
-            <tr style="border-bottom: 1px solid #e5e7eb;" data-personnel-id="{{ r.personnel_id }}"
+            <tr class="{% if r.is_changed %}changed-row{% endif %}" style="border-bottom: 1px solid #e5e7eb;" data-personnel-id="{{ r.personnel_id }}"
                 data-unit="{{ r.unit }}" data-sub1="{{ r.sub_unit_1 or '' }}"
                 data-category="{{ r.category }}" data-rank="{{ r.rank }}" data-name="{{ r.full_name }}">
                 <td style="padding: 0.5rem;">{{ r.unit }}</td>
@@ -137,9 +159,10 @@
     <p style="color: #6b7280;">No personnel on this nominal roll.</p>
     {% endif %}
 </div>
+{% endif %}
 {% else %}
 <div class="card">
-    <p style="color: #6b7280;">No accessible groupings. Contact an administrator to get access.</p>
+    <p style="color: #6b7280;">No nominal rolls available yet.</p>
 </div>
 {% endif %}
 
