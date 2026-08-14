@@ -41,6 +41,9 @@ async def second_nominal_roll(
     personnel[0] and personnel[1] from the first NR are mirrored here under
     the same short_id (the cross-roll person identifier). personnel[2] is
     intentionally not mirrored — clone tests rely on it being unmatched.
+
+    An empty 1:1 tagging is auto-created so the clone-merge endpoint has a
+    target to merge into.
     """
     admin_id = str(sample_users["admin"].id)
     nr = NominalRoll(
@@ -54,6 +57,9 @@ async def second_nominal_roll(
     )
     db_session.add(nr)
     await db_session.flush()  # populate nr.id
+
+    # Auto-create the 1:1 tagging on this NR (matches production ingest flow).
+    db_session.add(Tagging(label=None, nominal_roll_id=str(nr.id), created_by=admin_id))
 
     source = sample_personnel  # 3 personnel on the first NR
     mirrored = [
@@ -177,15 +183,15 @@ async def test_create_tagging_snapshots_from_subunit(
 
 
 @pytest.mark.asyncio
-async def test_create_tagging_duplicate_label_409(
+async def test_create_tagging_one_per_nr_409(
     client: TestClient, super_admin_token_headers, sample_nominal_roll
 ):
-    payload = {"label": "same-label", "nominal_roll_id": str(sample_nominal_roll.id)}
+    """Under the 1:1 model, creating a second tagging on the same NR 409s."""
     first = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
         params=SUPER_ADMIN_PARAMS,
-        json=payload,
+        json={"label": "first", "nominal_roll_id": str(sample_nominal_roll.id)},
     )
     assert first.status_code == 201
 
@@ -193,10 +199,10 @@ async def test_create_tagging_duplicate_label_409(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
         params=SUPER_ADMIN_PARAMS,
-        json=payload,
+        json={"label": "second", "nominal_roll_id": str(sample_nominal_roll.id)},
     )
     assert second.status_code == 409
-    assert "same-label" in second.json()["detail"]
+    assert "1:1" in second.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -204,18 +210,18 @@ async def test_create_tagging_personnel_not_on_nr_400(
     client: TestClient, super_admin_token_headers, sample_personnel, second_nominal_roll
 ):
     """Personnel from a different NR is rejected."""
-    other_nr, _ = second_nominal_roll
-    p_on_first_nr = sample_personnel[0]
+    other_nr, mirrored = second_nominal_roll
+    p_from_other_nr = mirrored[0]
     response = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
         params=SUPER_ADMIN_PARAMS,
         json={
             "label": "cross-nr-attempt",
-            "nominal_roll_id": str(other_nr.id),
+            "nominal_roll_id": str(sample_personnel[0].nominal_roll_id),
             "entries": [
                 {
-                    "personnel_id": str(p_on_first_nr.id),
+                    "personnel_id": str(p_from_other_nr.id),
                     "to_unit": "Coy Z",
                 }
             ],
@@ -385,29 +391,37 @@ async def test_patch_full_replaces_entries(
 
 
 @pytest.mark.asyncio
-async def test_patch_duplicate_label_409(
-    client: TestClient, super_admin_token_headers, sample_nominal_roll
+async def test_patch_label_no_longer_globally_unique(
+    client: TestClient, super_admin_token_headers, sample_nominal_roll,
+    second_nominal_roll,
 ):
-    client.post(
+    """Labels are not globally unique under 1:1 — patching to a label that
+    exists on another NR's tagging is fine (the constraint is per-NR)."""
+    other_nr, _ = second_nominal_roll
+    # First tagging on sample_nominal_roll.
+    a = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
         params=SUPER_ADMIN_PARAMS,
-        json={"label": "taken", "nominal_roll_id": str(sample_nominal_roll.id)},
+        json={"label": "shared-label", "nominal_roll_id": str(sample_nominal_roll.id)},
     )
-    other = client.post(
-        "/api/v1/taggings",
-        headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
-        json={"label": "free", "nominal_roll_id": str(sample_nominal_roll.id)},
-    ).json()["id"]
+    assert a.status_code == 201
 
+    # Patch the second NR's existing (auto-created) tagging to the same label.
+    target = (
+        client.get(
+            "/api/v1/taggings",
+            headers=super_admin_token_headers,
+            params={**SUPER_ADMIN_PARAMS, "nominal_roll_id": str(other_nr.id)},
+        ).json()[0]["id"]
+    )
     response = client.patch(
-        f"/api/v1/taggings/{other}",
+        f"/api/v1/taggings/{target}",
         headers=super_admin_token_headers,
         params=SUPER_ADMIN_PARAMS,
-        json={"label": "taken"},
+        json={"label": "shared-label"},
     )
-    assert response.status_code == 409
+    assert response.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -629,9 +643,9 @@ async def test_clone_matches_by_short_id(
     client: TestClient, super_admin_token_headers, sample_personnel, sample_nominal_roll,
     second_nominal_roll, db_session: AsyncSession,
 ):
-    """Clone creates a new tagging on the target NR with entries pointing at the
-    target-NR personnel rows (matched by short_id). Source has 3 entries, target
-    has 2 of those persons mirrored → 2 matched, 1 unmatched.
+    """Clone-merge into the target NR's existing tagging: source has 3
+    entries, target has 2 of those persons mirrored → 2 matched, 1 unmatched.
+    The target tagging now holds the 2 merged entries.
     """
     other_nr, mirrored = second_nominal_roll
     create = client.post(
@@ -654,7 +668,7 @@ async def test_clone_matches_by_short_id(
         f"/api/v1/taggings/{source_id}/clone",
         headers=super_admin_token_headers,
         params=SUPER_ADMIN_PARAMS,
-        json={"target_nominal_roll_id": str(other_nr.id), "label": "clone-target"},
+        json={"target_nominal_roll_id": str(other_nr.id)},
     )
     assert response.status_code == 200, response.text
     data = response.json()
@@ -663,17 +677,16 @@ async def test_clone_matches_by_short_id(
     assert len(data["unmatched"]) == 1
     assert data["unmatched"][0]["short_id"] == sample_personnel[2].short_id
 
-    new_tagging = data["tagging"]
-    assert new_tagging["nominal_roll_id"] == str(other_nr.id)
-    assert new_tagging["label"] == "clone-target"
+    target_tagging = data["tagging"]
+    assert target_tagging["nominal_roll_id"] == str(other_nr.id)
 
     # Entries point at TARGET-NR personnel rows (not source).
     target_person_ids = {str(mirrored[0].id), str(mirrored[1].id)}
-    cloned_entry_person_ids = {e["personnel_id"] for e in new_tagging["entries"]}
-    assert cloned_entry_person_ids == target_person_ids
+    merged_entry_person_ids = {e["personnel_id"] for e in target_tagging["entries"]}
+    assert merged_entry_person_ids == target_person_ids
 
     # from_* snapshotted from the target NR personnel (Coy B / Platoon 9).
-    for entry in new_tagging["entries"]:
+    for entry in target_tagging["entries"]:
         assert entry["from_unit"] == "Coy B"
         assert entry["from_sub_unit_1"] == "Platoon 9"
 
@@ -696,23 +709,51 @@ async def test_clone_same_nr_400(
         params=SUPER_ADMIN_PARAMS,
         json={
             "target_nominal_roll_id": str(sample_nominal_roll.id),
-            "label": "whatever",
         },
     )
     assert response.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_clone_duplicate_label_409(
+async def test_clone_skips_existing_target_entries(
     client: TestClient, super_admin_token_headers, sample_personnel, sample_nominal_roll,
     second_nominal_roll,
 ):
-    other_nr, _ = second_nominal_roll
+    """Clone-merge does not clobber entries already on the target tagging."""
+    other_nr, mirrored = second_nominal_roll
+    # Pre-populate the target tagging with an entry for mirrored[0].
+    target_tagging = (
+        client.get(
+            "/api/v1/taggings",
+            headers=super_admin_token_headers,
+            params={**SUPER_ADMIN_PARAMS, "nominal_roll_id": str(other_nr.id)},
+        ).json()[0]
+    )
+    pre = client.patch(
+        f"/api/v1/taggings/{target_tagging['id']}",
+        headers=super_admin_token_headers,
+        params=SUPER_ADMIN_PARAMS,
+        json={
+            "entries": [
+                {"personnel_id": str(mirrored[0].id), "to_unit": "Existing Unit"},
+            ],
+        },
+    )
+    assert pre.status_code == 200
+
+    # Source tagging on sample_nominal_roll with entries for [0] and [1].
     create = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
         params=SUPER_ADMIN_PARAMS,
-        json={"label": "shared-label", "nominal_roll_id": str(sample_nominal_roll.id)},
+        json={
+            "label": "clone-source",
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "entries": [
+                {"personnel_id": str(sample_personnel[0].id), "to_unit": "Coy X"},
+                {"personnel_id": str(sample_personnel[1].id), "to_unit": "Coy Y"},
+            ],
+        },
     )
     source_id = create.json()["id"]
 
@@ -720,9 +761,17 @@ async def test_clone_duplicate_label_409(
         f"/api/v1/taggings/{source_id}/clone",
         headers=super_admin_token_headers,
         params=SUPER_ADMIN_PARAMS,
-        json={"target_nominal_roll_id": str(other_nr.id), "label": "shared-label"},
+        json={"target_nominal_roll_id": str(other_nr.id)},
     )
-    assert response.status_code == 409
+    assert response.status_code == 200
+    data = response.json()
+    # [0] was already on target → skipped. [1] matched → imported.
+    assert data["matched_count"] == 1
+    target_entries = data["tagging"]["entries"]
+    # Both entries remain on target; the pre-existing one isn't clobbered.
+    by_person = {e["personnel_id"]: e for e in target_entries}
+    assert by_person[str(mirrored[0].id)]["to_unit"] == "Existing Unit"
+    assert by_person[str(mirrored[1].id)]["to_unit"] == "Coy Y"
 
 
 # ============================================================================

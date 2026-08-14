@@ -479,9 +479,11 @@ async def test_update_personnel_as_admin(
     sample_grouping: Grouping,
     sample_personnel,
 ):
-    """Test updating personnel as admin."""
+    """Unit/subunit edits are redirected to a TaggingEntry overlay; the
+    personnel row stays read-only. Response returns effective values."""
+    original_unit = sample_personnel[0].unit
     update_data = {
-        "rank": "CPL",
+        "unit": "Remapped Unit",
     }
 
     response = client.patch(
@@ -498,7 +500,74 @@ async def test_update_personnel_as_admin(
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == str(sample_personnel[0].id)
-    assert data["rank"] == "CPL"
+    # Effective unit reflects the remap; canonical personnel row unchanged.
+    assert data["unit"] == "Remapped Unit"
+    # The personnel row itself was not mutated.
+    await db_session.refresh(sample_personnel[0])
+    assert sample_personnel[0].unit == original_unit
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_remap_upserts_tagging_entry(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    db_session,
+    sample_grouping: Grouping,
+    sample_personnel,
+):
+    """Two sequential remaps on the same person produce ONE tagging entry
+    whose ``to_*`` values reflect both edits (no duplicate rows)."""
+    p = sample_personnel[0]
+    base_params = {
+        "user_id": str(sample_users["admin"].id),
+        "user_role": "admin",
+    }
+
+    r1 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"sub_unit_1": "New S1"},
+    )
+    assert r1.status_code == 200
+    assert r1.json()["sub_unit_1"] == "New S1"
+
+    r2 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"sub_unit_2": "New S2"},
+    )
+    assert r2.status_code == 200
+    body = r2.json()
+    # Both edits preserved on the single entry.
+    assert body["sub_unit_1"] == "New S1"
+    assert body["sub_unit_2"] == "New S2"
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_identity_fields_rejected(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_grouping: Grouping,
+    sample_personnel,
+):
+    """Rank/name edits are rejected with 409 — the NR is read-only."""
+    for payload in ({"rank": "CPL"}, {"name": "New Name"}):
+        response = client.patch(
+            f"/api/v1/personnel/{sample_personnel[0].id}",
+            headers=admin_token_headers,
+            params={
+                "grouping_id": str(sample_grouping.id),
+                "user_id": str(sample_users["admin"].id),
+                "user_role": "admin",
+            },
+            json=payload,
+        )
+        assert response.status_code == 409, payload
+        assert "read-only" in response.json()["detail"].lower()
 
 
 async def test_update_personnel_as_user_forbidden(
@@ -651,6 +720,42 @@ async def test_list_personnel_with_category_filter(
 
 
 @pytest.mark.asyncio
+async def test_update_personnel_status_only_does_not_touch_tagging(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    db_session,
+    sample_grouping: Grouping,
+    sample_personnel,
+):
+    """Updating only ``status`` mutates the personnel row directly and does
+    not create a tagging entry (status is not a remap field)."""
+    from sqlalchemy import select
+
+    from parade_state.models import TaggingEntry
+
+    p = sample_personnel[0]
+    response = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params={
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "admin",
+        },
+        json={"status": "archived"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "archived"
+    await db_session.refresh(p)
+    assert p.status == "archived"
+    # No tagging entry was created.
+    rows = (await db_session.execute(
+        select(TaggingEntry).where(TaggingEntry.personnel_id == p.id)
+    )).scalars().all()
+    assert rows == []
+
+
+@pytest.mark.asyncio
 async def test_update_personnel_recomputes_category(
     client: TestClient,
     admin_token_headers: dict[str, str],
@@ -659,8 +764,8 @@ async def test_update_personnel_recomputes_category(
     sample_grouping: Grouping,
     sample_personnel,
 ):
-    """Changing rank across corps recomputes the inferred category."""
-    # sample_personnel[0] is PTE (WOSE); promote to CPT (Officer)
+    """Under the 1:1 read-only NR model, rank changes are rejected (409)
+    rather than recomputing category. Category follows the CSV source."""
     response = client.patch(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
@@ -671,11 +776,7 @@ async def test_update_personnel_recomputes_category(
         },
         json={"rank": "CPT"},
     )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["rank"] == "CPT"
-    assert data["category"] == "Officer"
+    assert response.status_code == 409
 
 
 @pytest.mark.asyncio
@@ -686,7 +787,8 @@ async def test_update_personnel_invalid_rank_rejected(
     sample_grouping: Grouping,
     sample_personnel,
 ):
-    """Patching to an unrecognized rank is rejected with 400."""
+    """Rank edits are identity edits — rejected with 409 under the read-only
+    NR model (no rank-validation 400 path is reachable via PATCH)."""
     response = client.patch(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
@@ -695,10 +797,9 @@ async def test_update_personnel_invalid_rank_rejected(
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
-        json={"rank": "SGT"},  # not a recognized SAF rank
+        json={"rank": "SGT"},
     )
-
-    assert response.status_code == 400
+    assert response.status_code == 409
 
 
 async def test_list_personnel_with_pagination(
@@ -762,11 +863,8 @@ async def test_update_personnel_invalid_id(
     admin_token_headers: dict[str, str],
     sample_users,
 ):
-    """Test updating personnel with invalid ID."""
-    update_data = {
-        "rank": "Updated Rank",
-    }
-
+    """Updating an unknown personnel id returns 404 (uses a remap field so
+    the identity-field 409 path doesn't short-circuit first)."""
     response = client.patch(
         "/api/v1/personnel/invalid-personnel-id",
         headers=admin_token_headers,
@@ -774,7 +872,7 @@ async def test_update_personnel_invalid_id(
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
-        json=update_data,
+        json={"unit": "Some Unit"},
     )
 
     assert response.status_code == 404
@@ -880,10 +978,10 @@ async def test_update_personnel_sets_audit_trail(
     sample_grouping: Grouping,
     sample_personnel,
 ):
-    """Test that updating personnel sets audit trail fields."""
+    """A status update sets audit fields on the personnel row. (Under the
+    1:1 model, identity edits are rejected — so we audit via status.)"""
     import time
 
-    # Get original personnel
     get_response = client.get(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
@@ -898,13 +996,7 @@ async def test_update_personnel_sets_audit_trail(
     original_data = get_response.json()
     original_updated_at = original_data.get("updated_at")
 
-    # Wait a bit to ensure timestamp difference
     time.sleep(0.1)
-
-    # Update personnel
-    update_data = {
-        "rank": "CPL",
-    }
 
     response = client.patch(
         f"/api/v1/personnel/{sample_personnel[0].id}",
@@ -914,17 +1006,16 @@ async def test_update_personnel_sets_audit_trail(
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
-        json=update_data,
+        json={"status": "archived"},
     )
 
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == str(sample_personnel[0].id)
-    assert data["rank"] == "CPL"
+    assert data["status"] == "archived"
     assert data["updated_at"] is not None
     assert data["updated_by"] == str(sample_users["admin"].id)
 
-    # Verify updated_at changed
     if original_updated_at:
         assert data["updated_at"] != original_updated_at
 
