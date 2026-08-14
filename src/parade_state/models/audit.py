@@ -20,7 +20,7 @@ class AuditLog(Base):
     entity_type: Mapped[str] = mapped_column(
         Enum(
             "attendance",
-            "deployment",
+            "grouping",
             "session",
             "user",
             "csv_upload",

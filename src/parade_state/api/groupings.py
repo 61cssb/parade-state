@@ -1,4 +1,8 @@
-"""Deployment management API endpoints."""
+"""Grouping management API endpoints.
+
+"Grouping" is the umbrella term covering standard operational groupings,
+adhoc groupings, and vehicle manifests.
+"""
 
 import csv
 
@@ -10,26 +14,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from parade_state.db import get_db_session
 from parade_state.models.attendance import PRESENT_LIKE_STATUSES, Attendance
 from parade_state.models.csv_ingestion import NominalRoll
-from parade_state.models.deployment import (
-    Deployment,
-    DeploymentNotes,
-    DeploymentPersonnelExclusion,
-    DeploymentPersonnelOverride,
+from parade_state.models.grouping import (
+    Grouping,
+    GroupingNotes,
+    GroupingPersonnelExclusion,
+    GroupingPersonnelOverride,
 )
 from parade_state.models.personnel import Personnel
 from parade_state.models.schemas import (
-    DeploymentCreate,
-    DeploymentNotesCreate,
-    DeploymentNotesResponse,
-    DeploymentNotesUpdate,
-    DeploymentPersonnelOverrideCreate,
-    DeploymentPersonnelOverrideResponse,
-    DeploymentResponse,
-    DeploymentStatusResponse,
-    DeploymentStatusSessionInfo,
-    DeploymentStatusUnitBreakdown,
-    DeploymentUpdate,
     ExclusionCreate,
+    GroupingCreate,
+    GroupingListParams,
+    GroupingNotesCreate,
+    GroupingNotesResponse,
+    GroupingNotesUpdate,
+    GroupingPersonnelOverrideCreate,
+    GroupingPersonnelOverrideResponse,
+    GroupingResponse,
+    GroupingStatusResponse,
+    GroupingStatusSessionInfo,
+    GroupingStatusUnitBreakdown,
+    GroupingUpdate,
 )
 from parade_state.utils import utc_dt
 
@@ -41,52 +46,52 @@ router = APIRouter()
 # ============================================================================
 
 
-async def verify_deployment_access(
-    deployment_id: str,
+async def verify_grouping_access(
+    grouping_id: str,
     user_id: str,
     user_role: str,
     db: AsyncSession,
-) -> Deployment:
-    """Verify user has access to deployment and return it."""
+) -> Grouping:
+    """Verify user has access to grouping and return it."""
     # Super admins have full access
     if user_role == "super_admin":
         result = await db.execute(
-            select(Deployment).where(Deployment.id == deployment_id)
+            select(Grouping).where(Grouping.id == grouping_id)
         )
-        deployment = result.scalar_one_or_none()
-        if not deployment:
+        grouping = result.scalar_one_or_none()
+        if not grouping:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Deployment not found",
+                detail="Grouping not found",
             )
-        return deployment
+        return grouping
 
-    # For regular users and admins, check deployment access
+    # For regular users and admins, check grouping access
     # TODO: Implement proper access control based on user scopes
-    # For now, admins can access all deployments
+    # For now, admins can access all groupings
     if user_role in ["admin", "user"]:
         result = await db.execute(
-            select(Deployment).where(Deployment.id == deployment_id)
+            select(Grouping).where(Grouping.id == grouping_id)
         )
-        deployment = result.scalar_one_or_none()
-        if not deployment:
+        grouping = result.scalar_one_or_none()
+        if not grouping:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Deployment not found",
+                detail="Grouping not found",
             )
-        return deployment
+        return grouping
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="Insufficient permissions to access this deployment",
+        detail="Insufficient permissions to access this grouping",
     )
 
 
-async def validate_deployment_status_transition(
+async def validate_grouping_status_transition(
     current_status: str,
     new_status: str,
 ) -> bool:
-    """Validate deployment status transition is allowed."""
+    """Validate grouping status transition is allowed."""
     valid_transitions = {
         "draft": ["active", "inactive", "archived"],
         "active": ["inactive", "closed"],
@@ -100,20 +105,20 @@ async def validate_deployment_status_transition(
 
 
 # ============================================================================
-# Deployment CRUD Endpoints
+# Grouping CRUD Endpoints
 # ============================================================================
 
 
 @router.post(
-    "/", response_model=DeploymentResponse, status_code=status.HTTP_201_CREATED
+    "/", response_model=GroupingResponse, status_code=status.HTTP_201_CREATED
 )
-async def create_deployment(
-    deployment_data: DeploymentCreate,
-    user_id: str = Query(..., description="User ID creating the deployment"),
+async def create_grouping(
+    grouping_data: GroupingCreate,
+    user_id: str = Query(..., description="User ID creating the grouping"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Create a new deployment.
+    """Create a new grouping.
 
     Requires admin or super_admin role.
     """
@@ -121,60 +126,67 @@ async def create_deployment(
     if user_role not in ["admin", "super_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can create deployments",
+            detail="Only admins and super admins can create groupings",
         )
 
     # Verify nominal roll exists and is confirmed
     result = await db.execute(
-        select(NominalRoll).where(NominalRoll.id == deployment_data.nominal_roll_id)
+        select(NominalRoll).where(NominalRoll.id == grouping_data.nominal_roll_id)
     )
     nominal_roll = result.scalar_one_or_none()
     if not nominal_roll:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Nominal roll {deployment_data.nominal_roll_id} not found",
+            detail=f"Nominal roll {grouping_data.nominal_roll_id} not found",
         )
     if nominal_roll.status != "confirmed":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"Cannot create deployment from nominal roll in '{nominal_roll.status}' status. "
+                f"Cannot create grouping from nominal roll in '{nominal_roll.status}' status. "
                 "Nominal roll must be confirmed."
             ),
         )
 
-    # Validate date range
-    if deployment_data.valid_until <= deployment_data.valid_from:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="valid_until must be after valid_from",
-        )
+    # Validate date range — required for standard mode, optional for adhoc/vehicle
+    if grouping_data.mode == "standard":
+        if not grouping_data.valid_from or not grouping_data.valid_until:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="valid_from and valid_until are required for standard groupings",
+            )
+        if grouping_data.valid_until <= grouping_data.valid_from:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="valid_until must be after valid_from",
+            )
 
-    # Create deployment
-    deployment = Deployment(
-        name=deployment_data.name,
-        nominal_roll_id=deployment_data.nominal_roll_id,
-        status=deployment_data.status,
-        valid_from=deployment_data.valid_from,
-        valid_until=deployment_data.valid_until,
-        scheduled_activation=deployment_data.scheduled_activation,
-        notes=deployment_data.notes,
+    # Create grouping
+    grouping = Grouping(
+        name=grouping_data.name,
+        nominal_roll_id=grouping_data.nominal_roll_id,
+        mode=grouping_data.mode,
+        status=grouping_data.status,
+        valid_from=grouping_data.valid_from,
+        valid_until=grouping_data.valid_until,
+        scheduled_activation=grouping_data.scheduled_activation,
+        notes=grouping_data.notes,
         created_by=user_id,
     )
 
     # Auto-activate if status is active
-    if deployment_data.status == "active":
-        deployment.activated_at = utc_dt.utcnow()
+    if grouping_data.status == "active":
+        grouping.activated_at = utc_dt.utcnow()
 
-    db.add(deployment)
+    db.add(grouping)
     await db.commit()
-    await db.refresh(deployment)
+    await db.refresh(grouping)
 
-    return deployment
+    return grouping
 
 
-@router.get("/", response_model=list[DeploymentResponse])
-async def list_deployments(
+@router.get("/", response_model=list[GroupingResponse])
+async def list_groupings(
     status: str | None = None,
     nominal_roll_id: str | None = None,
     search: str | None = None,
@@ -184,60 +196,60 @@ async def list_deployments(
     user_role: str = Query(..., description="User role for filtering"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """List deployments with optional filtering.
+    """List groupings with optional filtering.
 
-    All authenticated users can list deployments.
+    All authenticated users can list groupings.
     Filters may be applied based on user role.
     """
-    query = select(Deployment)
+    query = select(Grouping)
 
     # Apply filters
     if status:
-        query = query.where(Deployment.status == status)
+        query = query.where(Grouping.status == status)
 
     if nominal_roll_id:
-        query = query.where(Deployment.nominal_roll_id == nominal_roll_id)
+        query = query.where(Grouping.nominal_roll_id == nominal_roll_id)
 
     if search:
         search_pattern = f"%{search}%"
-        query = query.where(Deployment.name.ilike(search_pattern))
+        query = query.where(Grouping.name.ilike(search_pattern))
 
     # Order by created_at descending
-    query = query.order_by(Deployment.created_at.desc())
+    query = query.order_by(Grouping.created_at.desc())
 
     # Apply pagination
     query = query.offset(offset).limit(limit)
 
     result = await db.execute(query)
-    deployments = result.scalars().all()
+    groupings = result.scalars().all()
 
-    return deployments
+    return groupings
 
 
-@router.get("/{deployment_id}", response_model=DeploymentResponse)
-async def get_deployment(
-    deployment_id: str,
+@router.get("/{grouping_id}", response_model=GroupingResponse)
+async def get_grouping(
+    grouping_id: str,
     user_id: str = Query(..., description="User ID making the request"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Get a specific deployment by ID.
+    """Get a specific grouping by ID.
 
     Requires appropriate access permissions.
     """
-    deployment = await verify_deployment_access(deployment_id, user_id, user_role, db)
-    return deployment
+    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
+    return grouping
 
 
-@router.patch("/{deployment_id}", response_model=DeploymentResponse)
-async def update_deployment(
-    deployment_id: str,
-    update_data: DeploymentUpdate,
+@router.patch("/{grouping_id}", response_model=GroupingResponse)
+async def update_grouping(
+    grouping_id: str,
+    update_data: GroupingUpdate,
     user_id: str = Query(..., description="User ID making the update"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Update a deployment.
+    """Update a grouping.
 
     Requires admin or super_admin role.
     """
@@ -245,11 +257,11 @@ async def update_deployment(
     if user_role not in ["admin", "super_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can update deployments",
+            detail="Only admins and super admins can update groupings",
         )
 
-    # Get deployment
-    deployment = await verify_deployment_access(deployment_id, user_id, user_role, db)
+    # Get grouping
+    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
 
     # Validate date range if both provided
     if update_data.valid_from and update_data.valid_until:
@@ -261,27 +273,27 @@ async def update_deployment(
 
     # Update fields
     if update_data.name is not None:
-        deployment.name = update_data.name
+        grouping.name = update_data.name
 
     if update_data.valid_from is not None:
-        deployment.valid_from = update_data.valid_from
+        grouping.valid_from = update_data.valid_from
 
     if update_data.valid_until is not None:
-        deployment.valid_until = update_data.valid_until
+        grouping.valid_until = update_data.valid_until
 
     if update_data.scheduled_activation is not None:
-        deployment.scheduled_activation = update_data.scheduled_activation
+        grouping.scheduled_activation = update_data.scheduled_activation
 
     if update_data.notes is not None:
-        deployment.notes = update_data.notes
+        grouping.notes = update_data.notes
 
     # Handle status transition
     if update_data.status is not None:
-        current_status = deployment.status
+        current_status = grouping.status
         new_status = update_data.status
 
         # Validate transition
-        if not await validate_deployment_status_transition(current_status, new_status):
+        if not await validate_grouping_status_transition(current_status, new_status):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid status transition from {current_status} to {new_status}",
@@ -289,45 +301,45 @@ async def update_deployment(
 
         # Handle activation
         if new_status == "active" and current_status != "active":
-            # Check if another deployment is already active
+            # Check if another grouping is already active
             active_result = await db.execute(
-                select(Deployment).where(
+                select(Grouping).where(
                     and_(
-                        Deployment.status == "active",
-                        Deployment.id != deployment_id,
+                        Grouping.status == "active",
+                        Grouping.id != grouping_id,
                     )
                 )
             )
-            active_deployment = active_result.scalar_one_or_none()
+            active_grouping = active_result.scalar_one_or_none()
 
-            if active_deployment:
+            if active_grouping:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Another deployment is already active. Only one deployment can be active at a time.",
+                    detail="Another grouping is already active. Only one grouping can be active at a time.",
                 )
 
-            deployment.activated_at = utc_dt.utcnow()
+            grouping.activated_at = utc_dt.utcnow()
 
         # Handle deactivation
         if new_status in ["inactive", "closed"] and current_status == "active":
-            deployment.deactivated_at = utc_dt.utcnow()
+            grouping.deactivated_at = utc_dt.utcnow()
 
-        deployment.status = new_status
+        grouping.status = new_status
 
     await db.commit()
-    await db.refresh(deployment)
+    await db.refresh(grouping)
 
-    return deployment
+    return grouping
 
 
-@router.delete("/{deployment_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_deployment(
-    deployment_id: str,
+@router.delete("/{grouping_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_grouping(
+    grouping_id: str,
     user_id: str = Query(..., description="User ID making the deletion"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Delete a deployment.
+    """Delete a grouping.
 
     Requires super_admin role.
     """
@@ -335,38 +347,38 @@ async def delete_deployment(
     if user_role != "super_admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only super admins can delete deployments",
+            detail="Only super admins can delete groupings",
         )
 
-    # Get deployment
-    deployment = await verify_deployment_access(deployment_id, user_id, user_role, db)
+    # Get grouping
+    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
 
-    # Prevent deletion of active or finalized deployments
-    if deployment.status in ["active", "finalized"]:
+    # Prevent deletion of active or finalized groupings
+    if grouping.status in ["active", "finalized"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot delete deployment with status {deployment.status}",
+            detail=f"Cannot delete grouping with status {grouping.status}",
         )
 
-    await db.delete(deployment)
+    await db.delete(grouping)
     await db.commit()
 
     return None
 
 
 # ============================================================================
-# Deployment Activation Endpoints
+# Grouping Activation Endpoints
 # ============================================================================
 
 
-@router.post("/{deployment_id}/activate", response_model=DeploymentResponse)
-async def activate_deployment(
-    deployment_id: str,
-    user_id: str = Query(..., description="User ID activating the deployment"),
+@router.post("/{grouping_id}/activate", response_model=GroupingResponse)
+async def activate_grouping(
+    grouping_id: str,
+    user_id: str = Query(..., description="User ID activating the grouping"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Manually activate a deployment.
+    """Manually activate a grouping.
 
     Requires admin or super_admin role.
     """
@@ -374,61 +386,61 @@ async def activate_deployment(
     if user_role not in ["admin", "super_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can activate deployments",
+            detail="Only admins and super admins can activate groupings",
         )
 
-    # Get deployment
-    deployment = await verify_deployment_access(deployment_id, user_id, user_role, db)
+    # Get grouping
+    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
 
     # Check if already active
-    if deployment.status == "active":
+    if grouping.status == "active":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Deployment is already active",
+            detail="Grouping is already active",
         )
 
-    # Check if another deployment is already active
+    # Check if another grouping is already active
     active_result = await db.execute(
-        select(Deployment).where(
+        select(Grouping).where(
             and_(
-                Deployment.status == "active",
-                Deployment.id != deployment_id,
+                Grouping.status == "active",
+                Grouping.id != grouping_id,
             )
         )
     )
-    active_deployment = active_result.scalar_one_or_none()
+    active_grouping = active_result.scalar_one_or_none()
 
-    if active_deployment:
+    if active_grouping:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Another deployment is already active. Only one deployment can be active at a time.",
+            detail="Another grouping is already active. Only one grouping can be active at a time.",
         )
 
     # Validate transition
-    if not await validate_deployment_status_transition(deployment.status, "active"):
+    if not await validate_grouping_status_transition(grouping.status, "active"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot activate deployment with status {deployment.status}",
+            detail=f"Cannot activate grouping with status {grouping.status}",
         )
 
-    # Activate deployment
-    deployment.status = "active"
-    deployment.activated_at = utc_dt.utcnow()
+    # Activate grouping
+    grouping.status = "active"
+    grouping.activated_at = utc_dt.utcnow()
 
     await db.commit()
-    await db.refresh(deployment)
+    await db.refresh(grouping)
 
-    return deployment
+    return grouping
 
 
-@router.post("/{deployment_id}/deactivate", response_model=DeploymentResponse)
-async def deactivate_deployment(
-    deployment_id: str,
-    user_id: str = Query(..., description="User ID deactivating the deployment"),
+@router.post("/{grouping_id}/deactivate", response_model=GroupingResponse)
+async def deactivate_grouping(
+    grouping_id: str,
+    user_id: str = Query(..., description="User ID deactivating the grouping"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Manually deactivate a deployment.
+    """Manually deactivate a grouping.
 
     Requires admin or super_admin role.
     """
@@ -436,48 +448,48 @@ async def deactivate_deployment(
     if user_role not in ["admin", "super_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can deactivate deployments",
+            detail="Only admins and super admins can deactivate groupings",
         )
 
-    # Get deployment
-    deployment = await verify_deployment_access(deployment_id, user_id, user_role, db)
+    # Get grouping
+    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
 
     # Check if currently active
-    if deployment.status != "active":
+    if grouping.status != "active":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only active deployments can be deactivated",
+            detail="Only active groupings can be deactivated",
         )
 
-    # Deactivate deployment
-    deployment.status = "inactive"
-    deployment.deactivated_at = utc_dt.utcnow()
+    # Deactivate grouping
+    grouping.status = "inactive"
+    grouping.deactivated_at = utc_dt.utcnow()
 
     await db.commit()
-    await db.refresh(deployment)
+    await db.refresh(grouping)
 
-    return deployment
+    return grouping
 
 
 # ============================================================================
-# Deployment Personnel Exclusions
+# Grouping Personnel Exclusions
 # ============================================================================
 
 
 @router.post(
-    "/{deployment_id}/exclusions",
+    "/{grouping_id}/exclusions",
     status_code=status.HTTP_201_CREATED,
 )
 async def create_exclusion(
-    deployment_id: str,
+    grouping_id: str,
     exclusion_data: ExclusionCreate,
     user_id: str = Query(..., description="User ID creating the exclusion"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Exclude a personnel from a deployment's roster.
+    """Exclude a personnel from a grouping's roster.
 
-    Requires admin or super_admin role. Only allowed when deployment is in
+    Requires admin or super_admin role. Only allowed when grouping is in
     draft status. Idempotent — excluding an already-excluded personnel
     returns 200 with no change.
     """
@@ -487,48 +499,48 @@ async def create_exclusion(
             detail="Only admins and super admins can manage exclusions",
         )
 
-    # Verify deployment exists and is draft
-    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
-    deployment = result.scalar_one_or_none()
-    if not deployment:
+    # Verify grouping exists and is draft
+    result = await db.execute(select(Grouping).where(Grouping.id == grouping_id))
+    grouping = result.scalar_one_or_none()
+    if not grouping:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Deployment not found: {deployment_id}",
+            detail=f"Grouping not found: {grouping_id}",
         )
-    if deployment.status != "draft":
+    if grouping.status != "draft":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"Exclusions can only be modified for draft deployments "
-                f"(current status: '{deployment.status}')."
+                f"Exclusions can only be modified for draft groupings "
+                f"(current status: '{grouping.status}')."
             ),
         )
 
-    # Verify personnel belongs to this deployment's nominal roll
+    # Verify personnel belongs to this grouping's nominal roll
     personnel_result = await db.execute(
         select(Personnel).where(
             Personnel.id == exclusion_data.personnel_id,
-            Personnel.nominal_roll_id == deployment.nominal_roll_id,
+            Personnel.nominal_roll_id == grouping.nominal_roll_id,
         )
     )
     if not personnel_result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Personnel not found in this deployment's nominal roll.",
+            detail="Personnel not found in this grouping's nominal roll.",
         )
 
     # Check if already excluded (idempotent)
     existing = await db.execute(
-        select(DeploymentPersonnelExclusion).where(
-            DeploymentPersonnelExclusion.deployment_id == deployment_id,
-            DeploymentPersonnelExclusion.personnel_id == exclusion_data.personnel_id,
+        select(GroupingPersonnelExclusion).where(
+            GroupingPersonnelExclusion.grouping_id == grouping_id,
+            GroupingPersonnelExclusion.personnel_id == exclusion_data.personnel_id,
         )
     )
     if existing.scalar_one_or_none():
         return {"detail": "Personnel already excluded"}
 
-    exclusion = DeploymentPersonnelExclusion(
-        deployment_id=deployment_id,
+    exclusion = GroupingPersonnelExclusion(
+        grouping_id=grouping_id,
         personnel_id=exclusion_data.personnel_id,
         excluded_by=user_id,
     )
@@ -539,19 +551,19 @@ async def create_exclusion(
 
 
 @router.delete(
-    "/{deployment_id}/exclusions/{personnel_id}",
+    "/{grouping_id}/exclusions/{personnel_id}",
     status_code=status.HTTP_200_OK,
 )
 async def delete_exclusion(
-    deployment_id: str,
+    grouping_id: str,
     personnel_id: str,
     user_id: str = Query(..., description="User ID removing the exclusion"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Re-include a previously excluded personnel in a deployment's roster.
+    """Re-include a previously excluded personnel in a grouping's roster.
 
-    Requires admin or super_admin role. Only allowed when deployment is in
+    Requires admin or super_admin role. Only allowed when grouping is in
     draft status.
     """
     if user_role not in ["admin", "super_admin"]:
@@ -560,35 +572,35 @@ async def delete_exclusion(
             detail="Only admins and super admins can manage exclusions",
         )
 
-    # Verify deployment exists and is draft
-    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
-    deployment = result.scalar_one_or_none()
-    if not deployment:
+    # Verify grouping exists and is draft
+    result = await db.execute(select(Grouping).where(Grouping.id == grouping_id))
+    grouping = result.scalar_one_or_none()
+    if not grouping:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Deployment not found: {deployment_id}",
+            detail=f"Grouping not found: {grouping_id}",
         )
-    if deployment.status != "draft":
+    if grouping.status != "draft":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"Exclusions can only be modified for draft deployments "
-                f"(current status: '{deployment.status}')."
+                f"Exclusions can only be modified for draft groupings "
+                f"(current status: '{grouping.status}')."
             ),
         )
 
     # Find and delete the exclusion
     result = await db.execute(
-        select(DeploymentPersonnelExclusion).where(
-            DeploymentPersonnelExclusion.deployment_id == deployment_id,
-            DeploymentPersonnelExclusion.personnel_id == personnel_id,
+        select(GroupingPersonnelExclusion).where(
+            GroupingPersonnelExclusion.grouping_id == grouping_id,
+            GroupingPersonnelExclusion.personnel_id == personnel_id,
         )
     )
     exclusion = result.scalar_one_or_none()
     if not exclusion:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Personnel is not excluded from this deployment.",
+            detail="Personnel is not excluded from this grouping.",
         )
 
     await db.delete(exclusion)
@@ -598,23 +610,23 @@ async def delete_exclusion(
 
 
 # ============================================================================
-# Deployment Personnel Overrides
+# Grouping Personnel Overrides
 # ============================================================================
 
 
 @router.post(
-    "/{deployment_id}/personnel-overrides",
-    response_model=DeploymentPersonnelOverrideResponse,
+    "/{grouping_id}/personnel-overrides",
+    response_model=GroupingPersonnelOverrideResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_personnel_override(
-    deployment_id: str,
-    override_data: DeploymentPersonnelOverrideCreate,
+    grouping_id: str,
+    override_data: GroupingPersonnelOverrideCreate,
     user_id: str = Query(..., description="User ID creating the override"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Create a deployment personnel override.
+    """Create a grouping personnel override.
 
     Requires admin or super_admin role.
     """
@@ -625,15 +637,15 @@ async def create_personnel_override(
             detail="Only admins and super admins can create personnel overrides",
         )
 
-    # Verify deployment exists
-    await verify_deployment_access(deployment_id, user_id, user_role, db)
+    # Verify grouping exists
+    await verify_grouping_access(grouping_id, user_id, user_role, db)
 
     # Check if override already exists
     existing_result = await db.execute(
-        select(DeploymentPersonnelOverride).where(
+        select(GroupingPersonnelOverride).where(
             and_(
-                DeploymentPersonnelOverride.deployment_id == deployment_id,
-                DeploymentPersonnelOverride.personnel_id == override_data.personnel_id,
+                GroupingPersonnelOverride.grouping_id == grouping_id,
+                GroupingPersonnelOverride.personnel_id == override_data.personnel_id,
             )
         )
     )
@@ -642,17 +654,19 @@ async def create_personnel_override(
     if existing_override:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Personnel override already exists for this deployment and personnel",
+            detail="Personnel override already exists for this grouping and personnel",
         )
 
     # Create override
-    override = DeploymentPersonnelOverride(
-        deployment_id=deployment_id,
+    override = GroupingPersonnelOverride(
+        grouping_id=grouping_id,
         personnel_id=override_data.personnel_id,
         unit=override_data.unit,
         sub_unit_1=override_data.sub_unit_1,
         sub_unit_2=override_data.sub_unit_2,
         sub_unit_3=override_data.sub_unit_3,
+        checkbox=override_data.checkbox,
+        remarks=override_data.remarks,
         created_by=user_id,
         updated_at=utc_dt.utcnow(),
     )
@@ -665,26 +679,26 @@ async def create_personnel_override(
 
 
 @router.get(
-    "/{deployment_id}/personnel-overrides",
-    response_model=list[DeploymentPersonnelOverrideResponse],
+    "/{grouping_id}/personnel-overrides",
+    response_model=list[GroupingPersonnelOverrideResponse],
 )
 async def list_personnel_overrides(
-    deployment_id: str,
+    grouping_id: str,
     user_id: str = Query(..., description="User ID making the request"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """List all personnel overrides for a deployment.
+    """List all personnel overrides for a grouping.
 
     Requires appropriate access permissions.
     """
-    # Verify deployment exists and user has access
-    await verify_deployment_access(deployment_id, user_id, user_role, db)
+    # Verify grouping exists and user has access
+    await verify_grouping_access(grouping_id, user_id, user_role, db)
 
     # Get overrides
     result = await db.execute(
-        select(DeploymentPersonnelOverride).where(
-            DeploymentPersonnelOverride.deployment_id == deployment_id
+        select(GroupingPersonnelOverride).where(
+            GroupingPersonnelOverride.grouping_id == grouping_id
         )
     )
     overrides = result.scalars().all()
@@ -693,23 +707,23 @@ async def list_personnel_overrides(
 
 
 # ============================================================================
-# Deployment Notes
+# Grouping Notes
 # ============================================================================
 
 
 @router.post(
-    "/{deployment_id}/notes",
-    response_model=DeploymentNotesResponse,
+    "/{grouping_id}/notes",
+    response_model=GroupingNotesResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_deployment_notes(
-    deployment_id: str,
-    notes_data: DeploymentNotesCreate,
+async def create_grouping_notes(
+    grouping_id: str,
+    notes_data: GroupingNotesCreate,
     user_id: str = Query(..., description="User ID creating the notes"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Create deployment notes for a personnel.
+    """Create grouping notes for a personnel.
 
     Requires admin or super_admin role.
     """
@@ -717,18 +731,18 @@ async def create_deployment_notes(
     if user_role not in ["admin", "super_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can create deployment notes",
+            detail="Only admins and super admins can create grouping notes",
         )
 
-    # Verify deployment exists
-    await verify_deployment_access(deployment_id, user_id, user_role, db)
+    # Verify grouping exists
+    await verify_grouping_access(grouping_id, user_id, user_role, db)
 
     # Check if notes already exist
     existing_result = await db.execute(
-        select(DeploymentNotes).where(
+        select(GroupingNotes).where(
             and_(
-                DeploymentNotes.deployment_id == deployment_id,
-                DeploymentNotes.personnel_id == notes_data.personnel_id,
+                GroupingNotes.grouping_id == grouping_id,
+                GroupingNotes.personnel_id == notes_data.personnel_id,
             )
         )
     )
@@ -737,12 +751,12 @@ async def create_deployment_notes(
     if existing_notes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Deployment notes already exist for this personnel. Use update endpoint.",
+            detail="Grouping notes already exist for this personnel. Use update endpoint.",
         )
 
     # Create notes
-    notes = DeploymentNotes(
-        deployment_id=deployment_id,
+    notes = GroupingNotes(
+        grouping_id=grouping_id,
         personnel_id=notes_data.personnel_id,
         notes=notes_data.notes,
         created_by=user_id,
@@ -757,28 +771,28 @@ async def create_deployment_notes(
     return notes
 
 
-@router.get("/{deployment_id}/notes", response_model=list[DeploymentNotesResponse])
-async def list_deployment_notes(
-    deployment_id: str,
+@router.get("/{grouping_id}/notes", response_model=list[GroupingNotesResponse])
+async def list_grouping_notes(
+    grouping_id: str,
     personnel_id: str | None = None,
     user_id: str = Query(..., description="User ID making the request"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """List deployment notes.
+    """List grouping notes.
 
     Requires appropriate access permissions.
     """
-    # Verify deployment exists and user has access
-    await verify_deployment_access(deployment_id, user_id, user_role, db)
+    # Verify grouping exists and user has access
+    await verify_grouping_access(grouping_id, user_id, user_role, db)
 
     # Build query
-    query = select(DeploymentNotes).where(
-        DeploymentNotes.deployment_id == deployment_id
+    query = select(GroupingNotes).where(
+        GroupingNotes.grouping_id == grouping_id
     )
 
     if personnel_id:
-        query = query.where(DeploymentNotes.personnel_id == personnel_id)
+        query = query.where(GroupingNotes.personnel_id == personnel_id)
 
     result = await db.execute(query)
     notes_list = result.scalars().all()
@@ -787,17 +801,17 @@ async def list_deployment_notes(
 
 
 @router.patch(
-    "/{deployment_id}/notes/{personnel_id}", response_model=DeploymentNotesResponse
+    "/{grouping_id}/notes/{personnel_id}", response_model=GroupingNotesResponse
 )
-async def update_deployment_notes(
-    deployment_id: str,
+async def update_grouping_notes(
+    grouping_id: str,
     personnel_id: str,
-    notes_data: DeploymentNotesUpdate,
+    notes_data: GroupingNotesUpdate,
     user_id: str = Query(..., description="User ID updating the notes"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Update deployment notes for a personnel.
+    """Update grouping notes for a personnel.
 
     Requires admin or super_admin role.
     """
@@ -805,18 +819,18 @@ async def update_deployment_notes(
     if user_role not in ["admin", "super_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can update deployment notes",
+            detail="Only admins and super admins can update grouping notes",
         )
 
-    # Verify deployment exists
-    await verify_deployment_access(deployment_id, user_id, user_role, db)
+    # Verify grouping exists
+    await verify_grouping_access(grouping_id, user_id, user_role, db)
 
     # Get existing notes
     result = await db.execute(
-        select(DeploymentNotes).where(
+        select(GroupingNotes).where(
             and_(
-                DeploymentNotes.deployment_id == deployment_id,
-                DeploymentNotes.personnel_id == personnel_id,
+                GroupingNotes.grouping_id == grouping_id,
+                GroupingNotes.personnel_id == personnel_id,
             )
         )
     )
@@ -825,7 +839,7 @@ async def update_deployment_notes(
     if not notes:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Deployment notes not found for this personnel",
+            detail="Grouping notes not found for this personnel",
         )
 
     # Update notes
@@ -841,13 +855,13 @@ async def update_deployment_notes(
 
 
 # ============================================================================
-# Deployment Status
+# Grouping Status
 # ============================================================================
 
 
-@router.get("/{deployment_id}/status", response_model=DeploymentStatusResponse)
-async def get_deployment_status(
-    deployment_id: str,
+@router.get("/{grouping_id}/status", response_model=GroupingStatusResponse)
+async def get_grouping_status(
+    grouping_id: str,
     status_date: utc_dt.date | None = Query(
         None, description="Date to get status for (defaults to today)"
     ),
@@ -855,28 +869,28 @@ async def get_deployment_status(
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Get deployment status for a specific date.
+    """Get grouping status for a specific date.
 
     Returns current snapshot including:
-    - Deployment info
+    - Grouping info
     - Today's AM/PM attendance status
     - Personnel counts by attendance status
     - Unit-level breakdown
 
     Defaults to today if no date provided.
     """
-    # Verify deployment exists and user has access
-    deployment = await verify_deployment_access(deployment_id, user_id, user_role, db)
+    # Verify grouping exists and user has access
+    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
 
     # Default to today if no date provided
     if status_date is None:
         status_date = utc_dt.utcnow().date()
 
-    # Fetch attendance rows for the deployment's NR on the date.
+    # Fetch attendance rows for the grouping's NR on the date.
     attendance_result = await db.execute(
         select(Attendance).where(
             and_(
-                Attendance.nominal_roll_id == deployment.nominal_roll_id,
+                Attendance.nominal_roll_id == grouping.nominal_roll_id,
                 Attendance.date == status_date,
             )
         )
@@ -884,7 +898,7 @@ async def get_deployment_status(
     rows = list(attendance_result.scalars().all())
 
     # Build AM/PM present/absent/total counts.
-    def _slot_stats(slot: str) -> DeploymentStatusSessionInfo | None:
+    def _slot_stats(slot: str) -> GroupingStatusSessionInfo | None:
         if not rows:
             return None
         present = 0
@@ -894,7 +908,7 @@ async def get_deployment_status(
             total += 1
             if value in PRESENT_LIKE_STATUSES:
                 present += 1
-        return DeploymentStatusSessionInfo(
+        return GroupingStatusSessionInfo(
             status="open",  # AM/PM are hardcoded; "open" keeps the schema happy
             present=present,
             absent=total - present,
@@ -915,7 +929,7 @@ async def get_deployment_status(
                 stats["present"] += 1
 
     units = [
-        DeploymentStatusUnitBreakdown(
+        GroupingStatusUnitBreakdown(
             name=unit_name,
             total=stats["total"],
             present=stats["present"],
@@ -924,11 +938,11 @@ async def get_deployment_status(
         for unit_name, stats in sorted(unit_stats.items())
     ]
 
-    return DeploymentStatusResponse(
-        deployment_id=deployment.id,
-        deployment_name=deployment.name,
+    return GroupingStatusResponse(
+        grouping_id=grouping.id,
+        grouping_name=grouping.name,
         date=status_date,
-        deployment_status=deployment.status,  # type: ignore[assignment]
+        grouping_status=grouping.status,  # type: ignore[assignment]
         am_session=am_session_info,
         pm_session=pm_session_info,
         units=units,
@@ -940,37 +954,37 @@ async def get_deployment_status(
 # ============================================================================
 
 
-@router.get("/{deployment_id}/export")
-async def export_deployment_csv(
-    deployment_id: str,
+@router.get("/{grouping_id}/export")
+async def export_grouping_csv(
+    grouping_id: str,
     user_id: str = Query(..., description="User ID making the request"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Export deployment data to CSV format for debugging and analysis.
+    """Export grouping data to CSV format for debugging and analysis.
 
     Returns a CSV file containing:
-    - Personnel records with deployment-specific assignments
+    - Personnel records with grouping-specific assignments
     - Attendance rows (AM/PM status + remarks per date)
-    - Deployment notes
+    - Grouping notes
 
-    Access-controlled by deployment scope.
+    Access-controlled by grouping scope.
     """
-    # Verify deployment exists and user has access
-    deployment = await verify_deployment_access(deployment_id, user_id, user_role, db)
+    # Verify grouping exists and user has access
+    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
 
-    # Get all personnel records for this deployment from the nominal roll
+    # Get all personnel records for this grouping from the nominal roll
     personnel_result = await db.execute(
         select(Personnel).where(
-            Personnel.nominal_roll_id == deployment.nominal_roll_id
+            Personnel.nominal_roll_id == grouping.nominal_roll_id
         )
     )
     all_personnel = personnel_result.scalars().all()
 
-    # Get deployment overrides
+    # Get grouping overrides
     overrides_result = await db.execute(
-        select(DeploymentPersonnelOverride).where(
-            DeploymentPersonnelOverride.deployment_id == deployment_id
+        select(GroupingPersonnelOverride).where(
+            GroupingPersonnelOverride.grouping_id == grouping_id
         )
     )
     overrides = overrides_result.scalars().all()
@@ -978,19 +992,19 @@ async def export_deployment_csv(
     # Create a mapping of personnel_id to override
     override_map = {override.personnel_id: override for override in overrides}
 
-    # Get deployment notes
+    # Get grouping notes
     notes_result = await db.execute(
-        select(DeploymentNotes).where(DeploymentNotes.deployment_id == deployment_id)
+        select(GroupingNotes).where(GroupingNotes.grouping_id == grouping_id)
     )
     notes = notes_result.scalars().all()
 
     # Create a mapping of personnel_id to notes
     notes_map = {note.personnel_id: note.notes for note in notes}
 
-    # Get attendance rows for this deployment's NR.
+    # Get attendance rows for this grouping's NR.
     attendance_result = await db.execute(
         select(Attendance).where(
-            Attendance.nominal_roll_id == deployment.nominal_roll_id
+            Attendance.nominal_roll_id == grouping.nominal_roll_id
         )
     )
     attendance_records = attendance_result.scalars().all()
@@ -1024,7 +1038,9 @@ async def export_deployment_csv(
             "Override SubUnit 1",
             "Override SubUnit 2",
             "Override SubUnit 3",
-            "Deployment Notes",
+            "Checkbox",
+            "Remarks",
+            "Grouping Notes",
         ]
         + [
             f"{d.strftime('%Y-%m-%d')} AM Status"
@@ -1063,6 +1079,8 @@ async def export_deployment_csv(
             override.sub_unit_1 if override else "",
             override.sub_unit_2 if override else "",
             override.sub_unit_3 if override else "",
+            "Yes" if override and override.checkbox else "",
+            override.remarks if override else "",
             person_notes,
         ]
 
@@ -1082,8 +1100,8 @@ async def export_deployment_csv(
     csv_data = output.getvalue()
     output.close()
 
-    # Create filename with deployment name and timestamp
-    filename = f"deployment_{deployment.name.replace(' ', '_')}_{utc_dt.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    # Create filename with grouping name and timestamp
+    filename = f"grouping_{grouping.name.replace(' ', '_')}_{utc_dt.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
 
     return StreamingResponse(
         io.BytesIO(csv_data.encode("utf-8")),

@@ -11,7 +11,7 @@ from ..utils import utc_dt
 if TYPE_CHECKING:
     from .auth_session import UserSession
     from .csv_ingestion import ColumnMetadata, NominalRoll
-    from .deployment import Deployment
+    from .grouping import Grouping
 
 
 class AccessLevel(Base):
@@ -88,10 +88,10 @@ class User(Base):
         cascade="all, delete-orphan",
         foreign_keys="UserSubunitScope.user_id",
     )
-    deployment_accesses: Mapped[list["DeploymentUserAccess"]] = relationship(
+    grouping_accesses: Mapped[list["GroupingUserAccess"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
-        foreign_keys="DeploymentUserAccess.user_id",
+        foreign_keys="GroupingUserAccess.user_id",
     )
     subunit_assignments: Mapped[list["UserSubunitAssignment"]] = relationship(
         back_populates="user",
@@ -104,15 +104,15 @@ class User(Base):
 
 
 class UserSubunitScope(Base):
-    """Links a user to specific subunit(s) within each deployment."""
+    """Links a user to specific subunit(s) within each grouping."""
 
     __tablename__ = "user_subunit_scopes"
 
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
-    deployment_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("deployments.id", ondelete="CASCADE"), index=True
+    grouping_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("groupings.id", ondelete="CASCADE"), index=True
     )
     unit: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sub_unit_1: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -130,38 +130,38 @@ class UserSubunitScope(Base):
     user: Mapped[User] = relationship(
         back_populates="subunit_scopes", foreign_keys=[user_id]
     )
-    deployment: Mapped["Deployment"] = relationship(back_populates="user_scopes")
+    grouping: Mapped["Grouping"] = relationship(back_populates="user_scopes")
 
     __table_args__ = (
         UniqueConstraint(
             "user_id",
-            "deployment_id",
+            "grouping_id",
             "unit",
             "sub_unit_1",
             "sub_unit_2",
             "sub_unit_3",
-            name="unique_user_deployment_scope",
+            name="unique_user_grouping_scope",
         ),
     )
 
     def __repr__(self) -> str:
         return (
             f"<UserSubunitScope(user_id={self.user_id!r}, "
-            f"deployment_id={self.deployment_id!r}, "
+            f"grouping_id={self.grouping_id!r}, "
             f"unit={self.unit!r})>"
         )
 
 
-class DeploymentUserAccess(Base):
-    """Grants a user access to a specific deployment."""
+class GroupingUserAccess(Base):
+    """Grants a user access to a specific grouping."""
 
-    __tablename__ = "deployment_user_accesses"
+    __tablename__ = "grouping_user_accesses"
 
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
-    deployment_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("deployments.id", ondelete="CASCADE"), index=True
+    grouping_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("groupings.id", ondelete="CASCADE"), index=True
     )
     granted_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     granted_at: Mapped[utc_dt.datetime] = mapped_column(
@@ -171,27 +171,27 @@ class DeploymentUserAccess(Base):
 
     # Relationships
     user: Mapped[User] = relationship(
-        back_populates="deployment_accesses", foreign_keys=[user_id]
+        back_populates="grouping_accesses", foreign_keys=[user_id]
     )
-    deployment: Mapped["Deployment"] = relationship(back_populates="user_accesses")
+    grouping: Mapped["Grouping"] = relationship(back_populates="user_accesses")
 
     __table_args__ = (
         UniqueConstraint(
-            "user_id", "deployment_id", name="unique_user_deployment_access"
+            "user_id", "grouping_id", name="unique_user_grouping_access"
         ),
     )
 
     def __repr__(self) -> str:
         return (
-            f"<DeploymentUserAccess(user_id={self.user_id!r}, "
-            f"deployment_id={self.deployment_id!r})>"
+            f"<GroupingUserAccess(user_id={self.user_id!r}, "
+            f"grouping_id={self.grouping_id!r})>"
         )
 
 
 class UserSubunitAssignment(Base):
     """Grants a user attendance-update rights for one sub_unit_1 on an NR.
 
-    NR-scoped (issue #4): attendance access is no longer deployment-scoped.
+    NR-scoped (issue #4): attendance access is no longer grouping-scoped.
     A user may only upsert attendance for personnel whose effective
     ``sub_unit_1`` (canonical, or remapped under the active Tagging scope)
     matches one of their assignments on that NR. ``super_admin`` bypasses

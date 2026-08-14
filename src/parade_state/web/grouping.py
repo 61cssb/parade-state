@@ -1,6 +1,6 @@
-"""User-facing deployment summary view.
+"""User-facing grouping summary view.
 
-Shows deployment-level attendance summary with AM/PM counts and a unit
+Shows grouping-level attendance summary with AM/PM counts and a unit
 breakdown for the current day, drawn from the NR/Tagging-scoped attendance
 model.
 """
@@ -11,8 +11,8 @@ from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import select
 
 from parade_state.api.access_control import (
-    get_user_accessible_deployments,
-    verify_deployment_access_or_admin,
+    get_user_accessible_groupings,
+    verify_grouping_access_or_admin,
 )
 from parade_state.api.attendance import attendance_counts_for_date
 from parade_state.auth.admin_dependencies import get_current_user_optional
@@ -24,12 +24,12 @@ from parade_state.utils import utc_dt
 router = APIRouter()
 
 
-@router.get("/deployment", response_class=HTMLResponse)
-async def deployment_view(
+@router.get("/grouping", response_class=HTMLResponse)
+async def grouping_view(
     request: Request,
-    deployment_id: str | None = None,
+    grouping_id: str | None = None,
 ):
-    """Render the deployment summary page for non-admin users.
+    """Render the grouping summary page for non-admin users.
 
     Shows today's AM/PM attendance counts and a unit breakdown.
     """
@@ -39,43 +39,43 @@ async def deployment_view(
 
     session_maker = get_session_maker()
     async with session_maker() as db:
-        # Get deployments the user can access
-        accessible = await get_user_accessible_deployments(
+        # Get groupings the user can access
+        accessible = await get_user_accessible_groupings(
             str(current_user.id), current_user.role, db
         )
 
         if not accessible:
             env = _get_templates(request)
-            template = env.get_template("deployment.html")
+            template = env.get_template("grouping.html")
             return HTMLResponse(
                 content=template.render(
                     request=request,
                     user=_user_dict(current_user),
-                    active_page="deployment",
-                    deployments=[],
-                    selected_deployment=None,
+                    active_page="grouping",
+                    groupings=[],
+                    selected_grouping=None,
                     counts=None,
                     unit_breakdown=[],
                 )
             )
 
-        # Resolve selected deployment
+        # Resolve selected grouping
         selected = None
-        if deployment_id:
-            for d in accessible:
-                if str(d.id) == deployment_id:
-                    selected = d
+        if grouping_id:
+            for g in accessible:
+                if str(g.id) == grouping_id:
+                    selected = g
                     break
 
         if not selected:
-            active_deps = [d for d in accessible if d.status == "active"]
-            if active_deps:
-                selected = active_deps[0]
+            active_groups = [g for g in accessible if g.status == "active"]
+            if active_groups:
+                selected = active_groups[0]
             else:
                 selected = accessible[0]
 
         # Verify access (redundant but consistent)
-        _, has_access = await verify_deployment_access_or_admin(
+        _, has_access = await verify_grouping_access_or_admin(
             str(selected.id), str(current_user.id), current_user.role, db
         )
         if not has_access:
@@ -113,16 +113,16 @@ async def deployment_view(
         ]
 
     env = _get_templates(request)
-    template = env.get_template("deployment.html")
+    template = env.get_template("grouping.html")
 
     html_content = template.render(
         request=request,
         user=_user_dict(current_user),
-        active_page="deployment",
-        deployments=[
-            {"id": str(d.id), "name": d.name, "status": d.status} for d in accessible
+        active_page="grouping",
+        groupings=[
+            {"id": str(g.id), "name": g.name, "status": g.status} for g in accessible
         ],
-        selected_deployment={
+        selected_grouping={
             "id": str(selected.id),
             "name": selected.name,
             "status": selected.status,

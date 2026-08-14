@@ -2,7 +2,7 @@
 
 from .access import (
     AccessLevel,
-    DeploymentUserAccess,
+    GroupingUserAccess,
     User,
     UserSubunitAssignment,
     UserSubunitScope,
@@ -22,18 +22,18 @@ from .csv_ingestion import (
     NominalRoll,
 )
 from .deferments import Deferment
-from .deployment import (
-    Deployment,
-    DeploymentNotes,
-    DeploymentPersonnelExclusion,
-    DeploymentPersonnelOverride,
+from .grouping import (
+    Grouping,
+    GroupingNotes,
+    GroupingPersonnelExclusion,
+    GroupingPersonnelOverride,
 )
 from .personnel import Personnel
 from .tagging import Tagging, TaggingEntry
 
 __all__ = [
     "AccessLevel",
-    "DeploymentUserAccess",
+    "GroupingUserAccess",
     "User",
     "UserSubunitAssignment",
     "UserSubunitScope",
@@ -48,10 +48,10 @@ __all__ = [
     "CsvUpload",
     "NominalRoll",
     "Deferment",
-    "Deployment",
-    "DeploymentNotes",
-    "DeploymentPersonnelExclusion",
-    "DeploymentPersonnelOverride",
+    "Grouping",
+    "GroupingNotes",
+    "GroupingPersonnelExclusion",
+    "GroupingPersonnelOverride",
     "Personnel",
     "Tagging",
     "TaggingEntry",

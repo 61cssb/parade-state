@@ -19,35 +19,41 @@ AttendanceStatus = Literal[
 ]
 
 # ============================================================================
-# Deployment Schemas
+# Grouping Schemas
 # ============================================================================
 
 
-class DeploymentBase(BaseModel):
-    """Base deployment schema."""
+class GroupingBase(BaseModel):
+    """Base grouping schema.
+
+    ``valid_from`` / ``valid_until`` are optional to support adhoc groupings
+    (``mode="adhoc"``) that don't have a fixed validity window. Standard
+    groupings require them — enforced at the API layer.
+    """
 
     name: str = Field(..., min_length=1, max_length=255)
     nominal_roll_id: str = Field(..., min_length=1)
-    valid_from: utc_dt.datetime
-    valid_until: utc_dt.datetime
+    valid_from: utc_dt.datetime | None = None
+    valid_until: utc_dt.datetime | None = None
     notes: str | None = None
 
 
-class DeploymentCreate(DeploymentBase):
-    """Schema for creating a deployment."""
+class GroupingCreate(GroupingBase):
+    """Schema for creating a grouping."""
 
+    mode: Literal["standard", "adhoc", "vehicle"] = "standard"
     status: Literal["draft", "active", "inactive"] = "draft"
     scheduled_activation: utc_dt.datetime | None = None
 
 
 class ExclusionCreate(BaseModel):
-    """Schema for excluding a personnel from a deployment."""
+    """Schema for excluding a personnel from a grouping."""
 
     personnel_id: str = Field(..., min_length=1)
 
 
-class DeploymentUpdate(BaseModel):
-    """Schema for updating a deployment."""
+class GroupingUpdate(BaseModel):
+    """Schema for updating a grouping."""
 
     name: str | None = Field(None, min_length=1, max_length=255)
     status: (
@@ -59,10 +65,11 @@ class DeploymentUpdate(BaseModel):
     notes: str | None = None
 
 
-class DeploymentResponse(DeploymentBase):
-    """Schema for deployment response."""
+class GroupingResponse(GroupingBase):
+    """Schema for grouping response."""
 
     id: str
+    mode: str
     status: str
     scheduled_activation: utc_dt.datetime | None
     personnel_count: int
@@ -75,8 +82,8 @@ class DeploymentResponse(DeploymentBase):
         from_attributes = True
 
 
-class DeploymentListParams(BaseModel):
-    """Schema for deployment list query parameters."""
+class GroupingListParams(BaseModel):
+    """Schema for grouping list query parameters."""
 
     status: str | None = None
     nominal_roll_id: str | None = None
@@ -85,8 +92,8 @@ class DeploymentListParams(BaseModel):
     offset: int = Field(0, ge=0)
 
 
-class DeploymentStatusSessionInfo(BaseModel):
-    """Schema for session information in deployment status."""
+class GroupingStatusSessionInfo(BaseModel):
+    """Schema for session information in grouping status."""
 
     status: Literal["open", "closed", "finalized"]
     present: int = 0
@@ -94,8 +101,8 @@ class DeploymentStatusSessionInfo(BaseModel):
     total: int = 0
 
 
-class DeploymentStatusUnitBreakdown(BaseModel):
-    """Schema for unit-level breakdown in deployment status."""
+class GroupingStatusUnitBreakdown(BaseModel):
+    """Schema for unit-level breakdown in grouping status."""
 
     name: str
     total: int
@@ -103,45 +110,49 @@ class DeploymentStatusUnitBreakdown(BaseModel):
     absent: int
 
 
-class DeploymentStatusResponse(BaseModel):
-    """Schema for deployment status response."""
+class GroupingStatusResponse(BaseModel):
+    """Schema for grouping status response."""
 
-    deployment_id: str
-    deployment_name: str
+    grouping_id: str
+    grouping_name: str
     date: utc_dt.date
-    deployment_status: Literal[
+    grouping_status: Literal[
         "draft", "active", "inactive", "archived", "closed", "finalized"
     ]
-    am_session: DeploymentStatusSessionInfo | None = None
-    pm_session: DeploymentStatusSessionInfo | None = None
-    units: list[DeploymentStatusUnitBreakdown]
+    am_session: GroupingStatusSessionInfo | None = None
+    pm_session: GroupingStatusSessionInfo | None = None
+    units: list[GroupingStatusUnitBreakdown]
 
 
 # ============================================================================
-# Deployment Personnel Override Schemas
+# Grouping Personnel Override Schemas
 # ============================================================================
 
 
-class DeploymentPersonnelOverrideCreate(BaseModel):
-    """Schema for creating a deployment personnel override."""
+class GroupingPersonnelOverrideCreate(BaseModel):
+    """Schema for creating a grouping personnel override."""
 
     personnel_id: str
     unit: str = Field(..., min_length=1)
     sub_unit_1: str | None = None
     sub_unit_2: str | None = None
     sub_unit_3: str | None = None
+    checkbox: bool = False
+    remarks: str | None = None
 
 
-class DeploymentPersonnelOverrideResponse(BaseModel):
-    """Schema for deployment personnel override response."""
+class GroupingPersonnelOverrideResponse(BaseModel):
+    """Schema for grouping personnel override response."""
 
     id: str
-    deployment_id: str
+    grouping_id: str
     personnel_id: str
     unit: str
     sub_unit_1: str | None
     sub_unit_2: str | None
     sub_unit_3: str | None
+    checkbox: bool
+    remarks: str | None
     created_at: utc_dt.datetime
     created_by: str
     updated_at: utc_dt.datetime
@@ -151,28 +162,28 @@ class DeploymentPersonnelOverrideResponse(BaseModel):
 
 
 # ============================================================================
-# Deployment Notes Schemas
+# Grouping Notes Schemas
 # ============================================================================
 
 
-class DeploymentNotesCreate(BaseModel):
-    """Schema for creating deployment notes."""
+class GroupingNotesCreate(BaseModel):
+    """Schema for creating grouping notes."""
 
     personnel_id: str
     notes: str = Field(..., min_length=1)
 
 
-class DeploymentNotesUpdate(BaseModel):
-    """Schema for updating deployment notes."""
+class GroupingNotesUpdate(BaseModel):
+    """Schema for updating grouping notes."""
 
     notes: str = Field(..., min_length=1)
 
 
-class DeploymentNotesResponse(BaseModel):
-    """Schema for deployment notes response."""
+class GroupingNotesResponse(BaseModel):
+    """Schema for grouping notes response."""
 
     id: str
-    deployment_id: str
+    grouping_id: str
     personnel_id: str
     notes: str
     created_at: utc_dt.datetime
@@ -193,7 +204,7 @@ class DeploymentNotesResponse(BaseModel):
 class SessionBase(BaseModel):
     """Base session schema."""
 
-    deployment_id: str
+    grouping_id: str
     date: utc_dt.datetime
     session_type: Literal["AM", "PM"]
 
@@ -228,7 +239,7 @@ class SessionResponse(SessionBase):
 class SessionListParams(BaseModel):
     """Schema for session list query parameters."""
 
-    deployment_id: str | None = None
+    grouping_id: str | None = None
     status: str | None = None
     date_from: utc_dt.datetime | None = None
     date_to: utc_dt.datetime | None = None
@@ -385,7 +396,7 @@ class PersonnelListParams(BaseModel):
     """Schema for personnel list query parameters."""
 
     nominal_roll_id: str | None = None
-    deployment_id: str | None = None
+    grouping_id: str | None = None
     unit: str | None = None
     sub_unit_1: str | None = None
     sub_unit_2: str | None = None
@@ -405,8 +416,8 @@ class PersonnelListParams(BaseModel):
     offset: int = Field(0, ge=0)
 
 
-class PersonnelResponseWithDeployment(PersonnelBase):
-    """Schema for personnel response with deployment-specific assignments."""
+class PersonnelResponseWithGrouping(PersonnelBase):
+    """Schema for personnel response with grouping-specific assignments."""
 
     id: str
     nominal_roll_id: str
@@ -415,10 +426,10 @@ class PersonnelResponseWithDeployment(PersonnelBase):
     updated_at: utc_dt.datetime | None
     created_by: str
     updated_by: str | None
-    # Deployment-specific fields (included when deployment_id is provided)
-    deployment_id: str | None = None
+    # Grouping-specific fields (included when grouping_id is provided)
+    grouping_id: str | None = None
     has_override: bool = False
-    deployment_notes: str | None = None
+    grouping_notes: str | None = None
 
     class Config:
         from_attributes = True
@@ -472,19 +483,19 @@ class PersonnelAttendanceHistoryResponse(BaseModel):
 # ============================================================================
 
 
-class DeploymentUserAccessCreate(BaseModel):
-    """Schema for creating deployment user access."""
+class GroupingUserAccessCreate(BaseModel):
+    """Schema for creating grouping user access."""
 
-    # Empty for now - access is granted by user/deployment IDs
+    # Empty for now - access is granted by user/grouping IDs
     pass
 
 
-class DeploymentUserAccessResponse(BaseModel):
-    """Schema for deployment user access response."""
+class GroupingUserAccessResponse(BaseModel):
+    """Schema for grouping user access response."""
 
     id: str
     user_id: str
-    deployment_id: str
+    grouping_id: str
     granted_by: str
     granted_at: utc_dt.datetime
     revoked_at: utc_dt.datetime | None
@@ -507,7 +518,7 @@ class UserSubunitScopeResponse(BaseModel):
 
     id: str
     user_id: str
-    deployment_id: str
+    grouping_id: str
     unit: str | None
     sub_unit_1: str | None
     sub_unit_2: str | None
@@ -529,7 +540,7 @@ class UserAccessListParams(BaseModel):
 class UserSubunitScopeListParams(BaseModel):
     """Schema for user subunit scope list query parameters."""
 
-    deployment_id: str | None = None
+    grouping_id: str | None = None
     unit: str | None = None
 
 

@@ -279,7 +279,7 @@ def clear_cookie(
 def configure_production_settings() -> None:
     """Configure cookie settings for production environment.
 
-    Call this during application startup for production deployments.
+    Call this during application startup for production environments.
 
     Effects:
     - Sets secure=True for HTTPS-only transmission

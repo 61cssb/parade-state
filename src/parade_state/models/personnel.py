@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from .attendance import Attendance
     from .csv_ingestion import NominalRoll
     from .deferments import Deferment
-    from .deployment import DeploymentNotes, DeploymentPersonnelOverride
+    from .grouping import GroupingNotes, GroupingPersonnelOverride
 
 
 class Personnel(Base):
@@ -61,10 +61,10 @@ class Personnel(Base):
 
     # Relationships
     nominal_roll: Mapped["NominalRoll"] = relationship(back_populates="personnel")
-    deployment_overrides: Mapped[list["DeploymentPersonnelOverride"]] = relationship(
+    grouping_overrides: Mapped[list["GroupingPersonnelOverride"]] = relationship(
         back_populates="personnel", cascade="all, delete-orphan"
     )
-    deployment_notes: Mapped[list["DeploymentNotes"]] = relationship(
+    grouping_notes: Mapped[list["GroupingNotes"]] = relationship(
         back_populates="personnel", cascade="all, delete-orphan"
     )
     attendance: Mapped[list["Attendance"]] = relationship(

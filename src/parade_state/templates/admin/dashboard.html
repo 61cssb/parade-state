@@ -7,8 +7,8 @@
 {% block content %}
 <div class="stats">
     <div class="stat-card">
-        <div class="stat-label">Active Deployments</div>
-        <div class="stat-value">{{ active_deployments }}</div>
+        <div class="stat-label">Active Groupings</div>
+        <div class="stat-value">{{ active_groupings }}</div>
     </div>
     <div class="stat-card">
         <div class="stat-label">Active Attendance Scopes</div>
@@ -27,7 +27,7 @@
 <div class="card">
     <h3>Quick Actions</h3>
     <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
-        <button class="btn btn-primary">New Deployment</button>
+        <button class="btn btn-primary">New Grouping</button>
         <button class="btn btn-success">Open Session</button>
         <button class="btn btn-primary" onclick="window.location.href='/admin/csv-upload'">Upload CSV</button>
         <button class="btn btn-success">Add User</button>

@@ -17,8 +17,8 @@ from parade_state.models import (
     AuditLog,
     CsvUpload,
     Deferment,
-    Deployment,
-    DeploymentPersonnelExclusion,
+    Grouping,
+    GroupingPersonnelExclusion,
     NominalRoll,
     Personnel,
     Tagging,
@@ -34,7 +34,7 @@ depends_admin = Depends(require_admin_user_flexible)
 # Audit log filter dropdown options (mirrors AuditLog model enum values)
 AUDIT_ENTITY_TYPES = [
     "attendance",
-    "deployment",
+    "grouping",
     "session",
     "user",
     "csv_upload",
@@ -45,8 +45,8 @@ AUDIT_ENTITY_TYPES = [
 ]
 AUDIT_ACTIONS = ["create", "update", "delete", "archive", "close", "finalize"]
 
-# Deployment status filter dropdown options (mirrors Deployment model enum)
-DEPLOYMENT_STATUSES = [
+# Grouping status filter dropdown options (mirrors Grouping model enum)
+GROUPING_STATUSES = [
     "draft",
     "active",
     "inactive",
@@ -112,9 +112,9 @@ async def admin_dashboard(
     # Fetch real statistics from the database
     session_maker = get_session_maker()
     async with session_maker() as db:
-        active_deployments = (
+        active_groupings = (
             await db.execute(
-                select(func.count(Deployment.id)).where(Deployment.status == "active")
+                select(func.count(Grouping.id)).where(Grouping.status == "active")
             )
         ).scalar_one()
 
@@ -168,7 +168,7 @@ async def admin_dashboard(
             "role": current_admin.role,
         },
         active_page="dashboard",
-        active_deployments=active_deployments,
+        active_groupings=active_groupings,
         active_scopes=active_scopes,
         total_personnel=total_personnel,
         active_users=active_users,
@@ -178,12 +178,12 @@ async def admin_dashboard(
     return HTMLResponse(content=html_content)
 
 
-@router.get("/admin/deployments", response_class=HTMLResponse)
-async def admin_deployments(
+@router.get("/admin/groupings", response_class=HTMLResponse)
+async def admin_groupings(
     request: Request,
     status_filter: str | None = None,
 ):
-    """Render the deployments management page.
+    """Render the groupings management page.
 
     Sessions (AM/PM) are now hardcoded and no longer user-managed — the
     expanded session sub-views and create-session form have been removed.
@@ -195,28 +195,29 @@ async def admin_deployments(
 
     session_maker = get_session_maker()
     async with session_maker() as db:
-        query = select(Deployment).order_by(Deployment.created_at.desc()).limit(100)
+        query = select(Grouping).order_by(Grouping.created_at.desc()).limit(100)
         if status_filter:
-            query = query.where(Deployment.status == status_filter)
+            query = query.where(Grouping.status == status_filter)
 
-        deployments_result = await db.execute(query)
-        deployments = deployments_result.scalars().all()
+        groupings_result = await db.execute(query)
+        groupings = groupings_result.scalars().all()
 
-    deployments_data = [
+    groupings_data = [
         {
-            "id": str(d.id),
-            "name": d.name,
-            "status": d.status,
-            "valid_from": d.valid_from,
-            "valid_until": d.valid_until,
-            "notes": d.notes,
-            "created_at": d.created_at,
+            "id": str(g.id),
+            "name": g.name,
+            "mode": g.mode,
+            "status": g.status,
+            "valid_from": g.valid_from,
+            "valid_until": g.valid_until,
+            "notes": g.notes,
+            "created_at": g.created_at,
         }
-        for d in deployments
+        for g in groupings
     ]
 
     env = get_templates(request)
-    template = env.get_template("admin/deployments.html")
+    template = env.get_template("admin/groupings.html")
 
     html_content = template.render(
         request=request,
@@ -226,48 +227,48 @@ async def admin_deployments(
             "email": current_admin.email,
             "role": current_admin.role,
         },
-        active_page="deployments",
-        deployments=deployments_data,
+        active_page="groupings",
+        groupings=groupings_data,
         status_filter=status_filter or "",
-        deployment_statuses=DEPLOYMENT_STATUSES,
+        grouping_statuses=GROUPING_STATUSES,
     )
 
     return HTMLResponse(content=html_content)
 
 
-@router.get("/admin/deployments/{deployment_id}/personnel", response_class=HTMLResponse)
-async def admin_deployment_personnel(
+@router.get("/admin/groupings/{grouping_id}/personnel", response_class=HTMLResponse)
+async def admin_grouping_personnel(
     request: Request,
-    deployment_id: str,
+    grouping_id: str,
 ):
-    """Render the deployment personnel management page (included/excluded lists)."""
+    """Render the grouping personnel management page (included/excluded lists)."""
     current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
 
     session_maker = get_session_maker()
     async with session_maker() as db:
-        # Fetch deployment
+        # Fetch grouping
         result = await db.execute(
-            select(Deployment).where(Deployment.id == deployment_id)
+            select(Grouping).where(Grouping.id == grouping_id)
         )
-        deployment = result.scalar_one_or_none()
-        if not deployment:
-            return RedirectResponse(url="/admin/deployments", status_code=302)
+        grouping = result.scalar_one_or_none()
+        if not grouping:
+            return RedirectResponse(url="/admin/groupings", status_code=302)
 
-        # Fetch all personnel from the deployment's nominal roll
+        # Fetch all personnel from the grouping's nominal roll
         personnel_query = (
             select(Personnel)
-            .where(Personnel.nominal_roll_id == deployment.nominal_roll_id)
+            .where(Personnel.nominal_roll_id == grouping.nominal_roll_id)
             .order_by(Personnel.unit, Personnel.sub_unit_1, Personnel.rank, Personnel.full_name)
         )
         personnel_result = await db.execute(personnel_query)
         all_personnel = personnel_result.scalars().all()
 
-        # Fetch exclusion records for this deployment
+        # Fetch exclusion records for this grouping
         exclusions_result = await db.execute(
-            select(DeploymentPersonnelExclusion).where(
-                DeploymentPersonnelExclusion.deployment_id == deployment_id
+            select(GroupingPersonnelExclusion).where(
+                GroupingPersonnelExclusion.grouping_id == grouping_id
             )
         )
         exclusions = exclusions_result.scalars().all()
@@ -295,7 +296,7 @@ async def admin_deployment_personnel(
         })
 
     env = get_templates(request)
-    template = env.get_template("admin/deployment_personnel.html")
+    template = env.get_template("admin/grouping_personnel.html")
 
     html_content = template.render(
         request=request,
@@ -305,13 +306,13 @@ async def admin_deployment_personnel(
             "email": current_admin.email,
             "role": current_admin.role,
         },
-        active_page="deployments",
-        deployment={
-            "id": str(deployment.id),
-            "name": deployment.name,
-            "status": deployment.status,
+        active_page="groupings",
+        grouping={
+            "id": str(grouping.id),
+            "name": grouping.name,
+            "status": grouping.status,
         },
-        is_draft=deployment.status == "draft",
+        is_draft=grouping.status == "draft",
         personnel_rows=personnel_rows,
         included_count=included_count,
         excluded_count=excluded_count,
@@ -323,8 +324,8 @@ async def admin_deployment_personnel(
 
 @router.get("/admin/sessions", response_class=HTMLResponse)
 async def admin_sessions(request: Request):
-    """Redirect to combined deployments page (sessions managed there)."""
-    return RedirectResponse(url="/admin/deployments", status_code=302)
+    """Redirect to combined groupings page (sessions managed there)."""
+    return RedirectResponse(url="/admin/groupings", status_code=302)
 
 
 @router.get("/admin/users", response_class=HTMLResponse)

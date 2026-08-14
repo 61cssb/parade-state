@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}Deployment Personnel - Parade State Admin{% endblock %}
+{% block title %}Grouping Personnel - Parade State Admin{% endblock %}
 
-{% block page_title %}Personnel — {{ deployment.name }}{% endblock %}
+{% block page_title %}Personnel — {{ grouping.name }}{% endblock %}
 
 {% block content %}
 <p style="margin-bottom: 1rem;">
-    <a href="/admin/deployments" style="color: #3b82f6; text-decoration: none;">&larr; Back to Deployments</a>
+    <a href="/admin/groupings" style="color: #3b82f6; text-decoration: none;">&larr; Back to Groupings</a>
 </p>
 
 <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem; font-size: 0.875rem;">
@@ -19,7 +19,7 @@
 
 {% if not is_draft %}
 <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 0.375rem; padding: 0.75rem 1rem; margin-bottom: 1.5rem; font-size: 0.875rem; color: #92400e;">
-    This deployment is currently <strong>{{ deployment.status }}</strong>. Exclusions can only be modified while the deployment is in <strong>draft</strong> status.
+    This grouping is currently <strong>{{ grouping.status }}</strong>. Exclusions can only be modified while the grouping is in <strong>draft</strong> status.
 </div>
 {% endif %}
 
@@ -33,7 +33,7 @@
 
 {% if is_draft %}
 <p style="color: #374151; font-size: 0.875rem; margin-bottom: 0.75rem;">
-    Select personnel to include in this deployment. Checked rows will be included; unchecked rows will be excluded.
+    Select personnel to include in this grouping. Checked rows will be included; unchecked rows will be excluded.
 </p>
 {% endif %}
 
@@ -106,7 +106,7 @@
 
 {% block scripts %}
 <script>
-    const DEPLOYMENT_ID = "{{ deployment.id }}";
+    const GROUPING_ID = "{{ grouping.id }}";
     const ADMIN_USER_ID = "{{ user.id }}";
     const ADMIN_USER_ROLE = "{{ user.role }}";
     let hasUnsavedChanges = false;
@@ -234,7 +234,7 @@
         updateBtn.textContent = 'Updating…';
         updateBtn.style.opacity = '0.5';
 
-        const baseUrl = '/api/v1/deployments/' + DEPLOYMENT_ID + '/exclusions';
+        const baseUrl = '/api/v1/groupings/' + GROUPING_ID + '/exclusions';
         const params = '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE;
 
         const requests = [];

@@ -190,7 +190,7 @@ async def delete_nominal_roll(
     """Delete a nominal roll and cascade-delete all dependent data.
 
     Requires super_admin role. Only draft or confirmed nominal rolls can be
-    deleted. Cascades to personnel, deployments, sessions, attendance records,
+    deleted. Cascades to personnel, groupings, sessions, attendance records,
     and related data.
     """
     if user_role != "super_admin":

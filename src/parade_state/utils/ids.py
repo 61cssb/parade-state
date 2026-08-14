@@ -47,7 +47,7 @@ this module may expand to support other ID types in the future.
 
 *Generating new IDs:*
     user_id = ids.uuid4()
-    deployment_id = ids.uuid4_str()
+    grouping_id = ids.uuid4_str()
 
 *Validating user input:*
     if ids.is_valid(user_id):

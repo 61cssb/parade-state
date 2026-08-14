@@ -8,15 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
 from parade_state.models import (
-    Deployment,
-    DeploymentUserAccess,
+    Grouping,
+    GroupingUserAccess,
     NominalRoll,
     User,
     UserSubunitAssignment,
     UserSubunitScope,
 )
 from parade_state.models.schemas import (
-    DeploymentUserAccessResponse,
+    GroupingUserAccessResponse,
     UserSubunitAssignmentCreate,
     UserSubunitAssignmentResponse,
     UserSubunitScopeCreate,
@@ -32,48 +32,48 @@ router = APIRouter()
 # ============================================================================
 
 
-async def verify_deployment_access_or_admin(
-    deployment_id: str,
+async def verify_grouping_access_or_admin(
+    grouping_id: str,
     user_id: str,
     user_role: str,
     db: AsyncSession,
     allow_self_grant: bool = False,
-) -> tuple[Deployment, bool]:
-    """Verify user has access to deployment or is admin/super_admin.
+) -> tuple[Grouping, bool]:
+    """Verify user has access to grouping or is admin/super_admin.
 
-    Returns (deployment, has_access) tuple.
+    Returns (grouping, has_access) tuple.
     - Super admins always have access
-    - Admins need explicit deployment access (unless allow_self_grant is True)
-    - Regular users need explicit deployment access
+    - Admins need explicit grouping access (unless allow_self_grant is True)
+    - Regular users need explicit grouping access
 
     Args:
-        deployment_id: Deployment to check access for
+        grouping_id: Grouping to check access for
         user_id: User ID to check access for
         user_role: Role of the user (super_admin, admin, user)
         db: Database session
-        allow_self_grant: If True, allow admins to access deployment for self-grant purposes
+        allow_self_grant: If True, allow admins to access grouping for self-grant purposes
     """
-    # Get deployment
-    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
-    deployment = result.scalar_one_or_none()
+    # Get grouping
+    result = await db.execute(select(Grouping).where(Grouping.id == grouping_id))
+    grouping = result.scalar_one_or_none()
 
-    if not deployment:
+    if not grouping:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="Deployment not found",
+            detail="Grouping not found",
         )
 
     # Super admins have full access
     if user_role == "super_admin":
-        return deployment, True
+        return grouping, True
 
-    # Check for explicit deployment access
+    # Check for explicit grouping access
     access_result = await db.execute(
-        select(DeploymentUserAccess).where(
+        select(GroupingUserAccess).where(
             and_(
-                DeploymentUserAccess.user_id == user_id,
-                DeploymentUserAccess.deployment_id == deployment_id,
-                DeploymentUserAccess.revoked_at.is_(None),
+                GroupingUserAccess.user_id == user_id,
+                GroupingUserAccess.grouping_id == grouping_id,
+                GroupingUserAccess.revoked_at.is_(None),
             )
         )
     )
@@ -81,55 +81,55 @@ async def verify_deployment_access_or_admin(
 
     # Admins with explicit access
     if user_role == "admin" and access:
-        return deployment, True
+        return grouping, True
 
     # Allow self-grant for admins (for initial access setup)
     if user_role == "admin" and allow_self_grant:
-        return deployment, True
+        return grouping, True
 
     # Regular users need explicit access
     if access:
-        return deployment, True
+        return grouping, True
 
     # No access found
-    return deployment, False
+    return grouping, False
 
 
-async def get_user_accessible_deployments(
+async def get_user_accessible_groupings(
     user_id: str,
     user_role: str,
     db: AsyncSession,
-) -> list[Deployment]:
-    """Get list of deployments user has access to.
+) -> list[Grouping]:
+    """Get list of groupings user has access to.
 
-    Super admins get all deployments.
-    Admins and users get deployments they have explicit access to.
+    Super admins get all groupings.
+    Admins and users get groupings they have explicit access to.
     """
-    # Super admins get all deployments
+    # Super admins get all groupings
     if user_role == "super_admin":
-        result = await db.execute(select(Deployment))
+        result = await db.execute(select(Grouping))
         return list(result.scalars().all())
 
-    # Get deployments with explicit access
+    # Get groupings with explicit access
     result = await db.execute(
-        select(Deployment)
-        .join(DeploymentUserAccess)
+        select(Grouping)
+        .join(GroupingUserAccess)
         .where(
             and_(
-                DeploymentUserAccess.user_id == user_id,
-                DeploymentUserAccess.revoked_at.is_(None),
+                GroupingUserAccess.user_id == user_id,
+                GroupingUserAccess.revoked_at.is_(None),
             )
         )
     )
     return list(result.scalars().all())
 
 
-def apply_subunit_scope_filter(query, model, user_id: str, deployment_id: str):
+def apply_subunit_scope_filter(query, model, user_id: str, grouping_id: str):
     """Apply subunit scope filtering to a query.
 
     Filters results to only show data within user's subunit scope.
     """
-    # Get user's subunit scopes for this deployment
+    # Get user's subunit scopes for this grouping
     # This would typically be done with a join, but for now we'll return the query
     # The actual filtering logic will be implemented in the calling functions
     return query
@@ -137,15 +137,15 @@ def apply_subunit_scope_filter(query, model, user_id: str, deployment_id: str):
 
 async def get_user_subunit_scopes(
     user_id: str,
-    deployment_id: str,
+    grouping_id: str,
     db: AsyncSession,
 ) -> list[UserSubunitScope]:
-    """Get all subunit scopes for a user in a deployment."""
+    """Get all subunit scopes for a user in a grouping."""
     result = await db.execute(
         select(UserSubunitScope).where(
             and_(
                 UserSubunitScope.user_id == user_id,
-                UserSubunitScope.deployment_id == deployment_id,
+                UserSubunitScope.grouping_id == grouping_id,
             )
         )
     )
@@ -154,14 +154,14 @@ async def get_user_subunit_scopes(
 
 async def check_subunit_access(
     user_id: str,
-    deployment_id: str,
+    grouping_id: str,
     unit: str | None = None,
     sub_unit_1: str | None = None,
     sub_unit_2: str | None = None,
     sub_unit_3: str | None = None,
     db: AsyncSession | None = None,
 ) -> bool:
-    """Check if user has access to specific subunit within deployment.
+    """Check if user has access to specific subunit within grouping.
 
     Returns True if user has access to at least one scope that matches
     the provided unit hierarchy.
@@ -171,9 +171,9 @@ async def check_subunit_access(
         return True  # Optimistic default for now
 
     # Get user's subunit scopes
-    scopes = await get_user_subunit_scopes(user_id, deployment_id, db)
+    scopes = await get_user_subunit_scopes(user_id, grouping_id, db)
 
-    # If no scopes defined, user has access to all units (deployment-wide access)
+    # If no scopes defined, user has access to all units (grouping-wide access)
     if not scopes:
         return True
 
@@ -212,42 +212,42 @@ async def check_subunit_access(
 
 
 # ============================================================================
-# Deployment User Access Endpoints
+# Grouping User Access Endpoints
 # ============================================================================
 
 
 @router.post(
-    "/deployments/{deployment_id}/users/{user_id}/access",
-    response_model=DeploymentUserAccessResponse,
+    "/groupings/{grouping_id}/users/{user_id}/access",
+    response_model=GroupingUserAccessResponse,
 )
-async def grant_user_deployment_access(
-    deployment_id: str,
+async def grant_user_grouping_access(
+    grouping_id: str,
     user_id: str,
     granted_by: str = Query(..., description="User ID granting the access"),
     user_role: str = Query(..., description="Role of user granting access"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Grant a user access to a deployment.
+    """Grant a user access to a grouping.
 
-    Only admins and super admins can grant deployment access.
+    Only admins and super admins can grant grouping access.
     """
     # Check permissions
     if user_role not in ["admin", "super_admin"]:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="Only admins can grant deployment access",
+            detail="Only admins can grant grouping access",
         )
 
-    # Verify deployment exists and granting user has access
+    # Verify grouping exists and granting user has access
     # Allow self-grant for initial access setup
-    _, has_access = await verify_deployment_access_or_admin(
-        deployment_id, granted_by, user_role, db, allow_self_grant=True
+    _, has_access = await verify_grouping_access_or_admin(
+        grouping_id, granted_by, user_role, db, allow_self_grant=True
     )
 
     if not has_access:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this deployment",
+            detail="You do not have access to this grouping",
         )
 
     # Verify target user exists
@@ -262,11 +262,11 @@ async def grant_user_deployment_access(
 
     # Check if access already exists (and is not revoked)
     existing_access = await db.execute(
-        select(DeploymentUserAccess).where(
+        select(GroupingUserAccess).where(
             and_(
-                DeploymentUserAccess.user_id == user_id,
-                DeploymentUserAccess.deployment_id == deployment_id,
-                DeploymentUserAccess.revoked_at.is_(None),
+                GroupingUserAccess.user_id == user_id,
+                GroupingUserAccess.grouping_id == grouping_id,
+                GroupingUserAccess.revoked_at.is_(None),
             )
         )
     )
@@ -275,13 +275,13 @@ async def grant_user_deployment_access(
     if existing:
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail="User already has access to this deployment",
+            detail="User already has access to this grouping",
         )
 
     # Create access grant
-    access = DeploymentUserAccess(
+    access = GroupingUserAccess(
         user_id=user_id,
-        deployment_id=deployment_id,
+        grouping_id=grouping_id,
         granted_by=granted_by,
         granted_at=utc_dt.ensure_naive(utc_dt.utcnow()),
     )
@@ -293,44 +293,44 @@ async def grant_user_deployment_access(
     return access
 
 
-@router.delete("/deployments/{deployment_id}/users/{user_id}/access")
-async def revoke_user_deployment_access(
-    deployment_id: str,
+@router.delete("/groupings/{grouping_id}/users/{user_id}/access")
+async def revoke_user_grouping_access(
+    grouping_id: str,
     user_id: str,
     revoked_by: str = Query(..., description="User ID revoking the access"),
     user_role: str = Query(..., description="Role of user revoking access"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Revoke a user's access to a deployment.
+    """Revoke a user's access to a grouping.
 
-    Only admins and super admins can revoke deployment access.
+    Only admins and super admins can revoke grouping access.
     """
     # Check permissions
     if user_role not in ["admin", "super_admin"]:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="Only admins can revoke deployment access",
+            detail="Only admins can revoke grouping access",
         )
 
-    # Verify deployment exists and revoking user has access
+    # Verify grouping exists and revoking user has access
     # Allow admins to revoke even if they don't have access (for cleanup)
-    _, has_access = await verify_deployment_access_or_admin(
-        deployment_id, revoked_by, user_role, db, allow_self_grant=True
+    _, has_access = await verify_grouping_access_or_admin(
+        grouping_id, revoked_by, user_role, db, allow_self_grant=True
     )
 
     if not has_access:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this deployment",
+            detail="You do not have access to this grouping",
         )
 
     # Get existing access
     access_result = await db.execute(
-        select(DeploymentUserAccess).where(
+        select(GroupingUserAccess).where(
             and_(
-                DeploymentUserAccess.user_id == user_id,
-                DeploymentUserAccess.deployment_id == deployment_id,
-                DeploymentUserAccess.revoked_at.is_(None),
+                GroupingUserAccess.user_id == user_id,
+                GroupingUserAccess.grouping_id == grouping_id,
+                GroupingUserAccess.revoked_at.is_(None),
             )
         )
     )
@@ -350,9 +350,9 @@ async def revoke_user_deployment_access(
 
 
 @router.get(
-    "/users/{user_id}/deployments", response_model=list[DeploymentUserAccessResponse]
+    "/users/{user_id}/groupings", response_model=list[GroupingUserAccessResponse]
 )
-async def list_user_deployment_accesses(
+async def list_user_grouping_accesses(
     user_id: str,
     active_only: bool = Query(True, description="Show only active accesses"),
     requesting_user_id: str = Query(..., description="User ID making the request"),
@@ -361,10 +361,10 @@ async def list_user_deployment_accesses(
     ),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """List all deployment accesses for a user.
+    """List all grouping accesses for a user.
 
-    Users can only see their own deployment accesses.
-    Admins and super admins can see all users' deployment accesses.
+    Users can only see their own grouping accesses.
+    Admins and super admins can see all users' grouping accesses.
     """
     # Check permissions
     if requesting_user_id != user_id and requesting_user_role not in [
@@ -373,7 +373,7 @@ async def list_user_deployment_accesses(
     ]:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="You can only view your own deployment accesses",
+            detail="You can only view your own grouping accesses",
         )
 
     # Verify user exists
@@ -386,11 +386,11 @@ async def list_user_deployment_accesses(
             detail="User not found",
         )
 
-    # Get deployment accesses
-    query = select(DeploymentUserAccess).where(DeploymentUserAccess.user_id == user_id)
+    # Get grouping accesses
+    query = select(GroupingUserAccess).where(GroupingUserAccess.user_id == user_id)
 
     if active_only:
-        query = query.where(DeploymentUserAccess.revoked_at.is_(None))
+        query = query.where(GroupingUserAccess.revoked_at.is_(None))
 
     result = await db.execute(query)
     accesses = result.scalars().all()
@@ -399,11 +399,11 @@ async def list_user_deployment_accesses(
 
 
 @router.get(
-    "/deployments/{deployment_id}/users",
-    response_model=list[DeploymentUserAccessResponse],
+    "/groupings/{grouping_id}/users",
+    response_model=list[GroupingUserAccessResponse],
 )
-async def list_deployment_users(
-    deployment_id: str,
+async def list_grouping_users(
+    grouping_id: str,
     active_only: bool = Query(True, description="Show only active accesses"),
     requesting_user_id: str = Query(..., description="User ID making the request"),
     requesting_user_role: str = Query(
@@ -411,28 +411,28 @@ async def list_deployment_users(
     ),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """List all users with access to a deployment.
+    """List all users with access to a grouping.
 
-    Only users with access to the deployment can see other users.
+    Only users with access to the grouping can see other users.
     """
-    # Verify deployment exists and requesting user has access
-    _, has_access = await verify_deployment_access_or_admin(
-        deployment_id, requesting_user_id, requesting_user_role, db
+    # Verify grouping exists and requesting user has access
+    _, has_access = await verify_grouping_access_or_admin(
+        grouping_id, requesting_user_id, requesting_user_role, db
     )
 
     if not has_access:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this deployment",
+            detail="You do not have access to this grouping",
         )
 
-    # Get deployment users
-    query = select(DeploymentUserAccess).where(
-        DeploymentUserAccess.deployment_id == deployment_id
+    # Get grouping users
+    query = select(GroupingUserAccess).where(
+        GroupingUserAccess.grouping_id == grouping_id
     )
 
     if active_only:
-        query = query.where(DeploymentUserAccess.revoked_at.is_(None))
+        query = query.where(GroupingUserAccess.revoked_at.is_(None))
 
     result = await db.execute(query)
     accesses = result.scalars().all()
@@ -446,18 +446,18 @@ async def list_deployment_users(
 
 
 @router.post(
-    "/deployments/{deployment_id}/users/{user_id}/scopes",
+    "/groupings/{grouping_id}/users/{user_id}/scopes",
     response_model=UserSubunitScopeResponse,
 )
 async def create_user_subunit_scope(
-    deployment_id: str,
+    grouping_id: str,
     user_id: str,
     scope: UserSubunitScopeCreate,
     created_by: str = Query(..., description="User ID creating the scope"),
     user_role: str = Query(..., description="Role of user creating scope"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Create a subunit scope for a user within a deployment.
+    """Create a subunit scope for a user within a grouping.
 
     Only admins and super admins can create subunit scopes.
     """
@@ -468,15 +468,15 @@ async def create_user_subunit_scope(
             detail="Only admins can create subunit scopes",
         )
 
-    # Verify deployment exists and creating user has access
-    _, has_access = await verify_deployment_access_or_admin(
-        deployment_id, created_by, user_role, db, allow_self_grant=True
+    # Verify grouping exists and creating user has access
+    _, has_access = await verify_grouping_access_or_admin(
+        grouping_id, created_by, user_role, db, allow_self_grant=True
     )
 
     if not has_access:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this deployment",
+            detail="You do not have access to this grouping",
         )
 
     # Verify user exists
@@ -494,7 +494,7 @@ async def create_user_subunit_scope(
         select(UserSubunitScope).where(
             and_(
                 UserSubunitScope.user_id == user_id,
-                UserSubunitScope.deployment_id == deployment_id,
+                UserSubunitScope.grouping_id == grouping_id,
                 UserSubunitScope.unit == scope.unit,
                 UserSubunitScope.sub_unit_1 == scope.sub_unit_1,
                 UserSubunitScope.sub_unit_2 == scope.sub_unit_2,
@@ -513,7 +513,7 @@ async def create_user_subunit_scope(
     # Create scope
     new_scope = UserSubunitScope(
         user_id=user_id,
-        deployment_id=deployment_id,
+        grouping_id=grouping_id,
         unit=scope.unit,
         sub_unit_1=scope.sub_unit_1,
         sub_unit_2=scope.sub_unit_2,
@@ -528,9 +528,9 @@ async def create_user_subunit_scope(
     return new_scope
 
 
-@router.delete("/deployments/{deployment_id}/users/{user_id}/scopes/{scope_id}")
+@router.delete("/groupings/{grouping_id}/users/{user_id}/scopes/{scope_id}")
 async def delete_user_subunit_scope(
-    deployment_id: str,
+    grouping_id: str,
     user_id: str,
     scope_id: str,
     deleted_by: str = Query(..., description="User ID deleting the scope"),
@@ -548,15 +548,15 @@ async def delete_user_subunit_scope(
             detail="Only admins can delete subunit scopes",
         )
 
-    # Verify deployment exists and deleting user has access
-    _, has_access = await verify_deployment_access_or_admin(
-        deployment_id, deleted_by, user_role, db, allow_self_grant=True
+    # Verify grouping exists and deleting user has access
+    _, has_access = await verify_grouping_access_or_admin(
+        grouping_id, deleted_by, user_role, db, allow_self_grant=True
     )
 
     if not has_access:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this deployment",
+            detail="You do not have access to this grouping",
         )
 
     # Get scope
@@ -565,7 +565,7 @@ async def delete_user_subunit_scope(
             and_(
                 UserSubunitScope.id == scope_id,
                 UserSubunitScope.user_id == user_id,
-                UserSubunitScope.deployment_id == deployment_id,
+                UserSubunitScope.grouping_id == grouping_id,
             )
         )
     )
@@ -585,11 +585,11 @@ async def delete_user_subunit_scope(
 
 
 @router.get(
-    "/deployments/{deployment_id}/users/{user_id}/scopes",
+    "/groupings/{grouping_id}/users/{user_id}/scopes",
     response_model=list[UserSubunitScopeResponse],
 )
 async def list_user_subunit_scopes(
-    deployment_id: str,
+    grouping_id: str,
     user_id: str,
     requesting_user_id: str = Query(..., description="User ID making the request"),
     requesting_user_role: str = Query(
@@ -597,7 +597,7 @@ async def list_user_subunit_scopes(
     ),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """List all subunit scopes for a user within a deployment.
+    """List all subunit scopes for a user within a grouping.
 
     Users can only see their own scopes.
     Admins and super admins can see all users' scopes.
@@ -612,15 +612,15 @@ async def list_user_subunit_scopes(
             detail="You can only view your own subunit scopes",
         )
 
-    # Verify deployment exists and requesting user has access
-    _, has_access = await verify_deployment_access_or_admin(
-        deployment_id, requesting_user_id, requesting_user_role, db
+    # Verify grouping exists and requesting user has access
+    _, has_access = await verify_grouping_access_or_admin(
+        grouping_id, requesting_user_id, requesting_user_role, db
     )
 
     if not has_access:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this deployment",
+            detail="You do not have access to this grouping",
         )
 
     # Get scopes
@@ -628,7 +628,7 @@ async def list_user_subunit_scopes(
         select(UserSubunitScope).where(
             and_(
                 UserSubunitScope.user_id == user_id,
-                UserSubunitScope.deployment_id == deployment_id,
+                UserSubunitScope.grouping_id == grouping_id,
             )
         )
     )

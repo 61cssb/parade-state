@@ -10,8 +10,8 @@ from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import and_, select
 
 from parade_state.api.access_control import (
-    get_user_accessible_deployments,
-    verify_deployment_access_or_admin,
+    get_user_accessible_groupings,
+    verify_grouping_access_or_admin,
 )
 from parade_state.api.attendance import attendance_counts_for_date
 from parade_state.api.subunit_access import (
@@ -46,8 +46,8 @@ async def attendance_view(
 
     session_maker = get_session_maker()
     async with session_maker() as db:
-        # Resolve the NR via the user's accessible deployments if not given.
-        accessible = await get_user_accessible_deployments(
+        # Resolve the NR via the user's accessible groupings if not given.
+        accessible = await get_user_accessible_groupings(
             str(current_user.id), current_user.role, db
         )
 
@@ -159,9 +159,9 @@ async def attendance_view(
         request=request,
         user=_user_dict(current_user),
         active_page="attendance",
-        deployments=[
-            {"id": str(d.id), "name": d.name, "status": d.status}
-            for d in accessible
+        groupings=[
+            {"id": str(g.id), "name": g.name, "status": g.status}
+            for g in accessible
         ],
         selected_nominal_roll_id=selected_nr_id or "",
         scope_activated=scope is not None,

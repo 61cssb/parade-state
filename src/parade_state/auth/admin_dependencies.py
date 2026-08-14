@@ -94,7 +94,7 @@ async def get_current_user_optional(
 
     Identical to get_current_admin_user_optional() but allows any active
     authenticated user (no role check). Used by non-admin views like
-    deployment summary and attendance marking.
+    grouping summary and attendance marking.
 
     Args:
         request: FastAPI Request object
