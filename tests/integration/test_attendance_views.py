@@ -14,11 +14,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-def test_admin_attendance_redirects_when_unauthenticated(client: TestClient):
-    """Unauthenticated /admin/attendance redirects to login (302)."""
+def test_admin_attendance_page_removed(client: TestClient):
+    """The admin attendance page is removed — its capabilities live in
+    /attendance (Copy Remarks for super-admins, effective sub-unit filter)."""
     response = client.get("/admin/attendance", follow_redirects=False)
-    assert response.status_code == 302
-    assert "/auth/login" in response.headers["location"]
+    assert response.status_code == 404
 
 
 def test_user_attendance_redirects_when_unauthenticated(client: TestClient):
@@ -82,27 +82,6 @@ async def test_user_attendance_filters_roster_to_assigned_subunits(
 
 
 @pytest.mark.asyncio
-async def test_admin_attendance_rejects_non_super_admin(
-    client: TestClient,
-    sample_users,
-    monkeypatch,
-):
-    """An authenticated non-super-admin is redirected away from /admin/attendance."""
-    from parade_state import admin_routes
-
-    admin = sample_users["admin"]  # role='admin', not super_admin
-
-    async def _fake_current_admin(_request):
-        return admin
-
-    monkeypatch.setattr(admin_routes, "get_current_admin_user_optional", _fake_current_admin)
-
-    response = client.get("/admin/attendance", follow_redirects=False)
-    assert response.status_code == 302
-    assert response.headers["location"] == "/admin"
-
-
-@pytest.mark.asyncio
 async def test_user_attendance_shows_nr_picker_without_grouping_access(
     client: TestClient,
     sample_nominal_roll,
@@ -141,7 +120,7 @@ async def test_user_attendance_overlays_active_tagging_values(
     monkeypatch,
 ):
     """With the NR active for attendance, the roster shows effective (to_*)
-    values and the tagged row renders with the changed-row highlight."""
+    values, Copy Remarks (super-admin), and the changed-row highlight."""
     from parade_state.web import attendance as web_attendance
     from parade_state.models import Tagging, TaggingEntry, User
 
@@ -191,7 +170,126 @@ async def test_user_attendance_overlays_active_tagging_values(
     assert response.status_code == 200
     # Save controls only render when the NR is active for attendance.
     assert "Save Attendance" in response.text
+    # Copy Remarks is super-admin-only now that the admin page is gone.
+    assert "Copy Remarks" in response.text
     assert "changed-row" in response.text
     # Effective values come from the tagging entry, not the canonical row.
     assert "Coy B" in response.text
     assert "Platoon 9" in response.text
+
+
+@pytest.mark.asyncio
+async def test_user_attendance_copy_remarks_hidden_for_regular_users(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_attendance_scope,
+    sample_users,
+    monkeypatch,
+):
+    """Copy Remarks is super-admin-only; regular users get Save alone."""
+    from parade_state.web import attendance as web_attendance
+    from parade_state.models import UserSubunitAssignment
+
+    regular = sample_users["user"]
+
+    async def _fake_current_user(_request):
+        return regular
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
+
+    # Grant an assignment so the roster is visible with the active NR.
+    from parade_state.db import get_session_maker
+
+    sm = get_session_maker()
+    async with sm() as db:
+        db.add(
+            UserSubunitAssignment(
+                user_id=str(regular.id),
+                nominal_roll_id=str(sample_nominal_roll.id),
+                sub_unit_1="Platoon 1",
+                created_by=str(sample_users["admin"].id),
+            )
+        )
+        await db.commit()
+
+    response = client.get(
+        "/attendance", params={"nominal_roll_id": str(sample_nominal_roll.id)}
+    )
+    assert response.status_code == 200
+    assert "Save Attendance" in response.text
+    # The button (not the JS helper) is what's gated.
+    assert 'onclick="copyRemarks()"' not in response.text
+
+
+@pytest.mark.asyncio
+async def test_user_attendance_subunit_filter_is_effective_aware(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_users,
+    db_session,
+    monkeypatch,
+):
+    """The sub-unit filter matches effective (tagging-overlaid) values."""
+    from parade_state.web import attendance as web_attendance
+    from parade_state.models import Tagging, TaggingEntry, User
+
+    admin_id = str(sample_users["admin"].id)
+
+    # Remap personnel[0] (Platoon 1) → Platoon 9.
+    tagging = Tagging(
+        label=None,
+        nominal_roll_id=str(sample_nominal_roll.id),
+        created_by=admin_id,
+    )
+    tagging.entries.append(
+        TaggingEntry(
+            personnel_id=str(sample_personnel[0].id),
+            from_unit=sample_personnel[0].unit,
+            from_sub_unit_1=sample_personnel[0].sub_unit_1,
+            to_unit="Coy A",
+            to_sub_unit_1="Platoon 9",
+        )
+    )
+    db_session.add(tagging)
+    sample_nominal_roll.attendance_active = True
+    db_session.add(sample_nominal_roll)
+    await db_session.commit()
+
+    super_admin = User(
+        email="super2@example.com",
+        name="Super Admin",
+        role="super_admin",
+        status="active",
+    )
+    db_session.add(super_admin)
+    await db_session.commit()
+
+    async def _fake_current_user(_request):
+        return super_admin
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
+
+    # Filter by the effective value: personnel[0] appears under Platoon 9,
+    # not under their canonical Platoon 1.
+    r9 = client.get(
+        "/attendance",
+        params={
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "sub_unit_1": "Platoon 9",
+        },
+    )
+    assert r9.status_code == 200
+    assert "John Doe" in r9.text
+
+    r1 = client.get(
+        "/attendance",
+        params={
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "sub_unit_1": "Platoon 1",
+        },
+    )
+    assert r1.status_code == 200
+    assert "John Doe" not in r1.text
+    assert "Jane Smith" in r1.text  # canonical Platoon 1, untagged

@@ -236,24 +236,32 @@ async def test_example(client, sample_users, sample_grouping):
   `GET .../users/{user_id}/subunit-assignments`.
 - Migration `k1f2a3b4c5d6`. 332 tests passing.
 
-**Attendance Admin UI (✅ Active-NR model)**
-- Super-admin page at `/admin/attendance`: NR/date/subunit-1 selectors and a
-  roster editor with AM/PM status + remarks, plus a Copy Remarks button
-  (disabled on the NR's first day). The scope-activation control is removed —
-  activity is toggled on the Nominal Rolls page; editing is enabled only for
-  the NR active for attendance.
+**Attendance UI (✅ Active-NR model)**
+- The separate super-admin `/admin/attendance` page is **removed** — it
+  duplicated `/attendance`. All marking happens on `/attendance`: NR + date +
+  effective sub-unit-1 filters, roster editor with AM/PM status + remarks.
+- User-facing `/attendance`: defaults to the active NR; roster is filtered to
+  the caller's assigned subunits (tagging-aware effective sub_unit_1;
+  super_admin sees all) and shows the tagging overlay (yellow rows). With no
+  active NR it shows an inactive message instead of the marking table.
+- **Copy Remarks** lives on `/attendance`, visible to **super-admins only**
+  (before noon → previous day's PM remarks into today's AM; after noon →
+  today's AM into PM; the AM copy is disabled on the NR's first day).
 - Admin Nominal Rolls page: the active-for-attendance row is highlighted
   (green) with an "Active for attendance" badge; super-admins see
   "Use for Attendance" (auto-switch) / "Deactivate Attendance" buttons. The
   status column, filter, and Confirm/Unconfirm buttons are removed;
   "Create Grouping" is available on every row.
-- User-facing `/attendance`: defaults to the active NR; roster is filtered to
-  the caller's assigned subunits (tagging-aware effective sub_unit_1;
-  super_admin sees all) and shows the tagging overlay (yellow rows). With no
-  active NR it shows an inactive message instead of the marking table.
-- Copy Remarks UX: before noon → previous day's PM remarks into today's AM;
-  after noon → today's AM into PM; client disables the AM copy on the NR's
-  first day (no prior attendance).
+
+**Remap Editing (✅ datalist comboboxes)**
+- Public NR browser: super-admins click a unit / sub-unit cell to remap it —
+  the cell becomes a `<datalist>`-backed input (pick an existing value or
+  type a new one); Enter saves via `PATCH /api/v1/personnel/{id}` (recorded
+  on the tagging overlay; row turns yellow on reload). Regular users see the
+  read-only table.
+- Taggings edit modal: the cascading to-unit/to-sub selects are replaced by
+  the same datalist inputs — remap targets may be values that don't exist on
+  the NR yet (e.g. standing up a new subunit).
 
 **Personnel Management (✅ Session 1 Complete)**
 - Grouping-based personnel listing with filtering

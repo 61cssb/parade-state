@@ -164,6 +164,13 @@ Nominal Roll.
   message instead of the marking table when no NR is active
 - [x] Tagging delete guard: 409 when the tagging's NR has attendance rows
 - [x] NR browsers drop status labels; default to the active NR
+- [x] Follow-up: `/admin/attendance` page removed (duplicated `/attendance`);
+  Copy Remarks moved to `/attendance` (super-admin-only) and the
+  effective-aware sub-unit-1 filter ported over
+- [x] Follow-up: remap editing via native datalist comboboxes — super-admin
+  click-to-edit cells in the NR browser (PATCH → tagging overlay) and
+  free-typable inputs in the Taggings modal (targets may be values not yet
+  on the NR)
 
 ### Phase 9C-3: Grouping + Session Management — COMPLETED
 
