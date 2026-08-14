@@ -43,10 +43,10 @@ async def test_list_returns_rows_for_date(
 
 
 @pytest.mark.asyncio
-async def test_upsert_refuses_when_scope_not_active(
+async def test_upsert_refuses_when_nr_not_active(
     client: TestClient, sample_nominal_roll, sample_personnel, admin_id
 ):
-    """Without an activated scope, upsert returns 400."""
+    """When the NR is not the one active for attendance, upsert returns 400."""
     today = date.today().isoformat()
     response = client.put(
         "/api/v1/attendance/upsert",
@@ -64,7 +64,7 @@ async def test_upsert_refuses_when_scope_not_active(
         },
     )
     assert response.status_code == 400
-    assert "not activated" in response.json()["detail"].lower()
+    assert "not active" in response.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
@@ -160,37 +160,36 @@ async def test_upsert_rejects_personnel_not_on_nr(
 
 
 @pytest.mark.asyncio
-async def test_activate_scope_requires_super_admin(
+async def test_activate_attendance_requires_super_admin(
     client: TestClient, sample_nominal_roll, admin_id
 ):
-    """Non-super-admins cannot activate a scope."""
-    response = client.put(
-        f"/api/v1/attendance/scope/{sample_nominal_roll.id}",
+    """Non-super-admins cannot mark an NR active for attendance."""
+    response = client.post(
+        f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/activate-attendance",
         params={"user_id": admin_id, "user_role": "admin"},
-        json={},
     )
     assert response.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_activate_scope_then_upsert_succeeds(
+async def test_activate_attendance_then_upsert_succeeds(
     client: TestClient,
     sample_nominal_roll,
     sample_personnel,
     admin_subunit_assignment,
     admin_id,
 ):
-    """Activating the NR scope unblocks attendance upsert."""
+    """Marking the NR "Use for Attendance" unblocks attendance upsert."""
     nr_id = str(sample_nominal_roll.id)
     today = date.today().isoformat()
 
     # Activate (as super-admin).
-    response = client.put(
-        f"/api/v1/attendance/scope/{nr_id}",
+    response = client.post(
+        f"/api/v1/nominal-rolls/{nr_id}/activate-attendance",
         params={"user_id": admin_id, "user_role": "super_admin"},
-        json={},
     )
     assert response.status_code == 200
+    assert response.json()["attendance_active"] is True
 
     # Now upsert works.
     response = client.put(
@@ -238,10 +237,10 @@ async def test_copy_remarks_is_well_formed(
 
 
 @pytest.mark.asyncio
-async def test_copy_remarks_refuses_without_scope(
+async def test_copy_remarks_refuses_when_not_active(
     client: TestClient, sample_nominal_roll, admin_id
 ):
-    """copy-remarks refuses (400) when scope isn't activated."""
+    """copy-remarks refuses (400) when the NR isn't active for attendance."""
     today = date.today().isoformat()
     response = client.post(
         "/api/v1/attendance/copy-remarks",

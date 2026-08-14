@@ -16,7 +16,6 @@ async def _make_draft_grouping(db_session: AsyncSession, nominal_roll_id: str, a
         name="Draft Test Grouping",
         nominal_roll_id=nominal_roll_id,
         mode="standard",
-        status="draft",
         valid_from=utc_dt.utcnow() + timedelta(days=1),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by=admin_id,

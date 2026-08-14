@@ -293,11 +293,12 @@ async def test_upsert_tagging_aware_effective_subunit(
 ):
     """Access follows the active tagging's remapped sub_unit_1, not the canonical one.
 
-    personnel[2] canonically sits in Platoon 2. A tagging remaps them to
-    Platoon 1. With the tagging active as scope, a user assigned only Platoon 1
-    should be allowed to upsert for personnel[2].
+    personnel[2] canonically sits in Platoon 2. The NR's tagging remaps them
+    to Platoon 1. With the NR active for attendance (tagging always applied),
+    a user assigned only Platoon 1 should be allowed to upsert for
+    personnel[2].
     """
-    from parade_state.models import AttendanceScope, Tagging, TaggingEntry
+    from parade_state.models import Tagging, TaggingEntry
 
     admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
@@ -319,18 +320,13 @@ async def test_upsert_tagging_aware_effective_subunit(
         )
     )
     db_session.add(tagging)
+
+    # Mark the NR active for attendance (tagging is applied automatically).
+    sample_nominal_roll.attendance_active = True
+    sample_nominal_roll.attendance_activated_by = admin_id
+    db_session.add(sample_nominal_roll)
     await db_session.commit()
     await db_session.refresh(tagging)
-
-    # Activate the tagging as the scope.
-    db_session.add(
-        AttendanceScope(
-            nominal_roll_id=nr_id,
-            tagging_id=str(tagging.id),
-            activated_by=admin_id,
-        )
-    )
-    await db_session.commit()
 
     # Grant admin only Platoon 1.
     client.post(

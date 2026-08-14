@@ -140,10 +140,10 @@ async def test_user_attendance_overlays_active_tagging_values(
     db_session,
     monkeypatch,
 ):
-    """With a Tagging scope active, the roster shows effective (to_*) values
-    and the tagged row renders with the changed-row highlight."""
+    """With the NR active for attendance, the roster shows effective (to_*)
+    values and the tagged row renders with the changed-row highlight."""
     from parade_state.web import attendance as web_attendance
-    from parade_state.models import AttendanceScope, Tagging, TaggingEntry
+    from parade_state.models import Tagging, TaggingEntry, User
 
     admin_id = str(sample_users["admin"].id)
 
@@ -163,19 +163,14 @@ async def test_user_attendance_overlays_active_tagging_values(
         )
     )
     db_session.add(tagging)
-    await db_session.flush()
-    db_session.add(
-        AttendanceScope(
-            nominal_roll_id=str(sample_nominal_roll.id),
-            tagging_id=str(tagging.id),
-            activated_by=admin_id,
-        )
-    )
+
+    # Mark the NR active for attendance (tagging is applied automatically).
+    sample_nominal_roll.attendance_active = True
+    sample_nominal_roll.attendance_activated_by = admin_id
+    db_session.add(sample_nominal_roll)
     await db_session.commit()
 
     # super_admin sees the whole roster including the tagged row.
-    from parade_state.models import User
-
     super_admin = User(
         email="super@example.com",
         name="Super Admin",
@@ -194,7 +189,8 @@ async def test_user_attendance_overlays_active_tagging_values(
         "/attendance", params={"nominal_roll_id": str(sample_nominal_roll.id)}
     )
     assert response.status_code == 200
-    assert "Scope: Tagging" in response.text
+    # Save controls only render when the NR is active for attendance.
+    assert "Save Attendance" in response.text
     assert "changed-row" in response.text
     # Effective values come from the tagging entry, not the canonical row.
     assert "Coy B" in response.text

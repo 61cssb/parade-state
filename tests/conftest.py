@@ -24,7 +24,6 @@ from parade_state.main import app
 from parade_state.models import (
     AccessLevel,
     Attendance,
-    AttendanceScope,
     AuditLog,
     ColumnMapping,
     ColumnMetadata,
@@ -169,11 +168,8 @@ async def sample_nominal_roll(db_session: AsyncSession, sample_users):
     nominal_roll = NominalRoll(
         caa=date(2024, 1, 1),
         csv_hash="dummy_hash",
-        status="confirmed",
         personnel_count=3,
         uploaded_by=str(sample_users["admin"].id),
-        confirmed_by=str(sample_users["admin"].id),
-        confirmed_at=utc_dt.utcnow(),
     )
 
     db_session.add(nominal_roll)
@@ -319,16 +315,20 @@ def super_admin_token_headers() -> dict[str, str]:
 async def sample_attendance_scope(
     db_session: AsyncSession, sample_nominal_roll, sample_users
 ):
-    """Activate the attendance scope (NR itself) for the sample NR."""
+    """Mark the sample NR as the one active for attendance.
+
+    Kept under the historical name ``sample_attendance_scope`` so existing
+    test signatures keep working.
+    """
     admin_id = str(sample_users["admin"].id)
-    scope = AttendanceScope(
-        nominal_roll_id=str(sample_nominal_roll.id),
-        tagging_id=None,
-        activated_by=admin_id,
+    sample_nominal_roll.attendance_active = True
+    sample_nominal_roll.attendance_activated_at = utc_dt.ensure_naive(
+        utc_dt.utcnow()
     )
-    db_session.add(scope)
+    sample_nominal_roll.attendance_activated_by = admin_id
+    db_session.add(sample_nominal_roll)
     await db_session.commit()
-    return scope
+    return sample_nominal_roll
 
 
 @pytest.fixture
@@ -380,7 +380,6 @@ async def sample_attendance(
         Attendance(
             personnel_id=str(sample_personnel[0].id),
             nominal_roll_id=nominal_roll_id,
-            tagging_id=None,
             date=today,
             status_am="present",
             status_pm="absent",
@@ -391,7 +390,6 @@ async def sample_attendance(
         Attendance(
             personnel_id=str(sample_personnel[0].id),
             nominal_roll_id=nominal_roll_id,
-            tagging_id=None,
             date=yesterday,
             status_am="late",
             remarks_am="Official duty",
@@ -402,7 +400,6 @@ async def sample_attendance(
         Attendance(
             personnel_id=str(sample_personnel[1].id),
             nominal_roll_id=nominal_roll_id,
-            tagging_id=None,
             date=today,
             status_am="present",
             status_pm="present",

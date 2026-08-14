@@ -127,23 +127,23 @@ async def test_create_grouping_non_existent_nominal_roll(
 
 
 @pytest.mark.asyncio
-async def test_create_grouping_draft_nominal_roll(
+async def test_create_grouping_from_any_nominal_roll(
     client: TestClient, admin_token_headers: dict[str, str], db_session,
     sample_users,
 ):
-    """Test grouping creation fails when nominal_roll is not confirmed."""
-    draft_nominal_roll = NominalRoll(
+    """Grouping creation no longer requires a confirmed NR — all NRs are
+    equal under the active-NR attendance model."""
+    other_nominal_roll = NominalRoll(
         caa=date(2024, 3, 1),
-        csv_hash="draft-hash",
-        status="draft",
+        csv_hash="other-hash",
         uploaded_by=str(sample_users["admin"].id),
     )
-    db_session.add(draft_nominal_roll)
+    db_session.add(other_nominal_roll)
     await db_session.commit()
 
     grouping_data = {
         "name": "Test Grouping",
-        "nominal_roll_id": str(draft_nominal_roll.id),
+        "nominal_roll_id": str(other_nominal_roll.id),
         "mode": "standard",
         "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
         "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
@@ -156,42 +156,7 @@ async def test_create_grouping_draft_nominal_roll(
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
 
-    assert response.status_code == 400
-    assert "must be confirmed" in response.json()["detail"]
-
-
-@pytest.mark.asyncio
-async def test_create_grouping_archived_nominal_roll(
-    client: TestClient, admin_token_headers: dict[str, str], db_session,
-    sample_users,
-):
-    """Test grouping creation fails when nominal_roll is archived."""
-    archived_nominal_roll = NominalRoll(
-        caa=date(2023, 6, 1),
-        csv_hash="archived-hash",
-        status="archived",
-        uploaded_by=str(sample_users["admin"].id),
-    )
-    db_session.add(archived_nominal_roll)
-    await db_session.commit()
-
-    grouping_data = {
-        "name": "Test Grouping",
-        "nominal_roll_id": str(archived_nominal_roll.id),
-        "mode": "standard",
-        "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
-        "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
-    }
-
-    response = client.post(
-        "/api/v1/groupings/",
-        json=grouping_data,
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
-
-    assert response.status_code == 400
-    assert "must be confirmed" in response.json()["detail"]
+    assert response.status_code == 201
 
 
 @pytest.mark.asyncio
@@ -204,7 +169,6 @@ async def test_list_groupings(
         name="Grouping 1",
         nominal_roll_id="nominal_roll-1",
         mode="standard",
-        status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
@@ -257,7 +221,6 @@ async def test_list_groupings_with_status_filter(
         name="Draft Grouping",
         nominal_roll_id="nominal_roll-2",
         mode="standard",
-        status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
@@ -293,7 +256,6 @@ async def test_get_grouping(
         name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
         mode="standard",
-        status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
@@ -337,7 +299,6 @@ async def test_update_grouping(
         name="Original Name",
         nominal_roll_id="nominal_roll-1",
         mode="standard",
-        status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
@@ -370,7 +331,6 @@ async def test_update_grouping_status_transition(
         name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
         mode="standard",
-        status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
@@ -434,7 +394,6 @@ async def test_activate_grouping(
         name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
         mode="standard",
-        status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
@@ -524,7 +483,6 @@ async def test_delete_grouping_as_super_admin(
         name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
         mode="standard",
-        status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="super-admin-user-id",
@@ -557,7 +515,6 @@ async def test_delete_grouping_as_admin_forbidden(
         name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
         mode="standard",
-        status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
@@ -614,7 +571,6 @@ async def test_search_groupings(
         name="Alpha Grouping",
         nominal_roll_id="nominal_roll-1",
         mode="standard",
-        status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
@@ -623,7 +579,6 @@ async def test_search_groupings(
         name="Bravo Grouping",
         nominal_roll_id="nominal_roll-2",
         mode="standard",
-        status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
@@ -660,7 +615,6 @@ async def test_list_groupings_pagination(
             name=f"Grouping {i}",
             nominal_roll_id=f"nominal_roll-{i}",
             mode="standard",
-            status="draft",
             valid_from=utc_dt.utcnow(),
             valid_until=utc_dt.utcnow() + timedelta(days=30),
             created_by="admin-user-id",
@@ -769,7 +723,6 @@ async def test_get_grouping_status_with_sessions(
     attendance1 = Attendance(
         personnel_id=str(personnel1.id),
         nominal_roll_id="nominal_roll-1",
-        tagging_id=None,
         date=today,
         status_am="present",
         status_pm="present",
@@ -782,7 +735,6 @@ async def test_get_grouping_status_with_sessions(
     attendance2 = Attendance(
         personnel_id=str(personnel2.id),
         nominal_roll_id="nominal_roll-1",
-        tagging_id=None,
         date=today,
         status_am="absent",
         status_pm="absent",

@@ -83,16 +83,12 @@ class TestPersonnelIdentity:
         nominal_roll1 = NominalRoll(
             caa=date(2024, 1, 1),
             csv_hash="hash1",
-            status="confirmed",
             uploaded_by=admin_id,
-            confirmed_by=admin_id,
         )
         nominal_roll2 = NominalRoll(
             caa=date(2024, 2, 1),
             csv_hash="hash2",
-            status="confirmed",
             uploaded_by=admin_id,
-            confirmed_by=admin_id,
         )
         db_session.add_all([nominal_roll1, nominal_roll2])
         await db_session.commit()
@@ -168,16 +164,12 @@ class TestPersonnelIdentity:
         nominal_roll1 = NominalRoll(
             caa=date(2024, 1, 1),
             csv_hash="hash1",
-            status="confirmed",
             uploaded_by=admin_id,
-            confirmed_by=admin_id,
         )
         nominal_roll2 = NominalRoll(
             caa=date(2024, 2, 1),
             csv_hash="hash2",
-            status="confirmed",
             uploaded_by=admin_id,
-            confirmed_by=admin_id,
         )
         db_session.add_all([nominal_roll1, nominal_roll2])
         await db_session.commit()
@@ -218,9 +210,7 @@ class TestNominalRollVersioning:
         nominal_roll1 = NominalRoll(
             caa=caa_date,
             csv_hash="hash1",
-            status="confirmed",
             uploaded_by=admin_id,
-            confirmed_by=admin_id,
         )
 
         db_session.add(nominal_roll1)
@@ -230,9 +220,7 @@ class TestNominalRollVersioning:
         nominal_roll2 = NominalRoll(
             caa=caa_date,  # Same CAA
             csv_hash="hash2",
-            status="confirmed",
             uploaded_by=admin_id,
-            confirmed_by=admin_id,
         )
 
         db_session.add(nominal_roll2)

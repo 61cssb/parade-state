@@ -1,4 +1,4 @@
-"""Tests for nominal_roll API endpoints (PATCH confirm, label, DELETE)."""
+"""Tests for nominal_roll API endpoints (attendance activation, label, DELETE)."""
 
 from datetime import date
 
@@ -11,89 +11,124 @@ from tests.test_utils import assert_permission_denied
 
 
 # ============================================================================
-# PATCH /api/v1/nominal-rolls/{id} — confirm
+# POST /api/v1/nominal-rolls/{id}/activate-attendance | deactivate-attendance
 # ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_confirm_draft_nominal_roll(
-    client: TestClient, admin_token_headers: dict[str, str], db_session: AsyncSession,
-    sample_users,
+async def test_activate_attendance_marks_nr_active(
+    client: TestClient, super_admin_token_headers: dict[str, str],
+    sample_nominal_roll,
 ):
-    """Admin can confirm a draft nominal_roll."""
-    draft_nominal_roll = NominalRoll(
-        caa=date(2024, 5, 1),
-        csv_hash="draft-hash-confirm",
-        status="draft",
-        uploaded_by=str(sample_users["admin"].id),
-    )
-    db_session.add(draft_nominal_roll)
-    await db_session.commit()
-
-    response = client.patch(
-        f"/api/v1/nominal-rolls/{draft_nominal_roll.id}",
-        json={"status": "confirmed"},
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+    """Super admin can mark an NR active for attendance."""
+    response = client.post(
+        f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/activate-attendance",
+        headers=super_admin_token_headers,
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
 
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "confirmed"
-    assert data["confirmed_at"] is not None
-    assert data["confirmed_by"] == "admin-user-id"
+    assert data["attendance_active"] is True
+    assert data["attendance_activated_at"] is not None
+    assert data["attendance_activated_by"] == "super-admin-test-id"
 
 
 @pytest.mark.asyncio
-async def test_confirm_already_confirmed_nominal_roll(
-    client: TestClient, admin_token_headers: dict[str, str], sample_nominal_roll,
+async def test_activate_attendance_auto_switches(
+    client: TestClient, super_admin_token_headers: dict[str, str],
+    db_session: AsyncSession, sample_nominal_roll, sample_users,
 ):
-    """Cannot confirm an nominal_roll that is already confirmed."""
-    response = client.patch(
-        f"/api/v1/nominal-rolls/{sample_nominal_roll.id}",
-        json={"status": "confirmed"},
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
+    """Activating a second NR deactivates the previously active one."""
+    sample_nominal_roll.attendance_active = True
+    db_session.add(sample_nominal_roll)
 
-    assert response.status_code == 400
-    assert "Only draft nominal rolls" in response.json()["detail"]
-
-
-@pytest.mark.asyncio
-async def test_confirm_archived_nominal_roll(
-    client: TestClient, admin_token_headers: dict[str, str], db_session: AsyncSession,
-    sample_users,
-):
-    """Cannot confirm an archived nominal_roll."""
-    archived_nominal_roll = NominalRoll(
-        caa=date(2023, 1, 1),
-        csv_hash="archived-hash-confirm",
-        status="archived",
+    other = NominalRoll(
+        caa=date(2024, 9, 1),
+        csv_hash="auto-switch-hash",
         uploaded_by=str(sample_users["admin"].id),
     )
-    db_session.add(archived_nominal_roll)
+    db_session.add(other)
     await db_session.commit()
 
-    response = client.patch(
-        f"/api/v1/nominal-rolls/{archived_nominal_roll.id}",
-        json={"status": "confirmed"},
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+    response = client.post(
+        f"/api/v1/nominal-rolls/{other.id}/activate-attendance",
+        headers=super_admin_token_headers,
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
+    assert response.status_code == 200
+    assert response.json()["attendance_active"] is True
 
-    assert response.status_code == 400
-    assert "Only draft nominal rolls" in response.json()["detail"]
+    # The previously active NR was deactivated in the same action.
+    await db_session.refresh(sample_nominal_roll)
+    await db_session.refresh(other)
+    assert sample_nominal_roll.attendance_active is False
+    assert other.attendance_active is True
 
 
 @pytest.mark.asyncio
-async def test_confirm_non_existent_nominal_roll(
+async def test_deactivate_attendance(
+    client: TestClient, super_admin_token_headers: dict[str, str],
+    sample_nominal_roll,
+):
+    """Deactivate clears the active flag; activation stamp kept as history."""
+    client.post(
+        f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/activate-attendance",
+        headers=super_admin_token_headers,
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
+    )
+
+    response = client.post(
+        f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/deactivate-attendance",
+        headers=super_admin_token_headers,
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["attendance_active"] is False
+    assert data["attendance_activated_at"] is not None  # kept as history
+
+
+@pytest.mark.asyncio
+async def test_activate_attendance_requires_super_admin(
+    client: TestClient, admin_token_headers: dict[str, str], sample_nominal_roll,
+):
+    """Admins cannot toggle attendance activation."""
+    response = client.post(
+        f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/activate-attendance",
+        headers=admin_token_headers,
+        params={"user_id": "admin-user-id", "user_role": "admin"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_activate_attendance_non_existent_404(
+    client: TestClient, super_admin_token_headers: dict[str, str],
+):
+    """404 when activating a non-existent nominal_roll."""
+    response = client.post(
+        "/api/v1/nominal-rolls/does-not-exist/activate-attendance",
+        headers=super_admin_token_headers,
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
+    )
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+# ============================================================================
+# PATCH /api/v1/nominal-rolls/{id}
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_update_nominal_roll_non_existent_404(
     client: TestClient, admin_token_headers: dict[str, str],
 ):
-    """404 when confirming a non-existent nominal_roll."""
+    """404 when updating a non-existent nominal_roll."""
     response = client.patch(
         "/api/v1/nominal-rolls/does-not-exist",
-        json={"status": "confirmed"},
+        json={"remarks": "x"},
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
@@ -103,10 +138,10 @@ async def test_confirm_non_existent_nominal_roll(
 
 
 @pytest.mark.asyncio
-async def test_confirm_nominal_roll_as_regular_user_forbidden(
+async def test_update_nominal_roll_as_regular_user_forbidden(
     client: TestClient, user_token_headers: dict[str, str], sample_nominal_roll,
 ):
-    """Regular users cannot confirm nominal_rolls."""
+    """Regular users cannot update nominal_rolls."""
     assert_permission_denied(
         client,
         "patch",
@@ -114,53 +149,8 @@ async def test_confirm_nominal_roll_as_regular_user_forbidden(
         user_token_headers,
         expected_detail="Only admins and super admins",
         params={"user_id": "regular-user-id", "user_role": "user"},
-        json_data={"status": "confirmed"},
+        json_data={"remarks": "nope"},
     )
-
-
-@pytest.mark.asyncio
-async def test_revert_confirmed_nominal_roll_to_draft(
-    client: TestClient, admin_token_headers: dict[str, str], sample_nominal_roll,
-):
-    """Admin can revert a confirmed nominal_roll back to draft (for testing)."""
-    response = client.patch(
-        f"/api/v1/nominal-rolls/{sample_nominal_roll.id}",
-        json={"status": "draft"},
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "draft"
-    assert data["confirmed_at"] is None
-    assert data["confirmed_by"] is None
-
-
-@pytest.mark.asyncio
-async def test_revert_draft_nominal_roll_fails(
-    client: TestClient, admin_token_headers: dict[str, str], db_session: AsyncSession,
-    sample_users,
-):
-    """Cannot revert an already-draft nominal_roll."""
-    draft_nominal_roll = NominalRoll(
-        caa=date(2024, 8, 1),
-        csv_hash="draft-hash-revert",
-        status="draft",
-        uploaded_by=str(sample_users["admin"].id),
-    )
-    db_session.add(draft_nominal_roll)
-    await db_session.commit()
-
-    response = client.patch(
-        f"/api/v1/nominal-rolls/{draft_nominal_roll.id}",
-        json={"status": "draft"},
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
-
-    assert response.status_code == 400
-    assert "Only confirmed nominal rolls" in response.json()["detail"]
 
 
 # ============================================================================
@@ -169,20 +159,19 @@ async def test_revert_draft_nominal_roll_fails(
 
 
 @pytest.mark.asyncio
-async def test_delete_draft_nominal_roll(
+async def test_delete_nominal_roll(
     client: TestClient, super_admin_token_headers: dict[str, str],
     db_session: AsyncSession, sample_users,
 ):
-    """Super admin can delete a draft nominal_roll."""
-    draft_nominal_roll = NominalRoll(
+    """Super admin can delete a nominal_roll (no status gating)."""
+    doomed = NominalRoll(
         caa=date(2024, 7, 1),
-        csv_hash="draft-hash-delete",
-        status="draft",
+        csv_hash="hash-delete",
         uploaded_by=str(sample_users["admin"].id),
     )
-    db_session.add(draft_nominal_roll)
+    db_session.add(doomed)
     await db_session.commit()
-    nominal_roll_id = str(draft_nominal_roll.id)
+    nominal_roll_id = str(doomed.id)
 
     response = client.delete(
         f"/api/v1/nominal-rolls/{nominal_roll_id}",
@@ -207,7 +196,7 @@ async def test_delete_confirmed_nominal_roll(
     client: TestClient, super_admin_token_headers: dict[str, str],
     sample_nominal_roll,
 ):
-    """Super admin can delete a confirmed nominal_roll."""
+    """Super admin can delete the sample nominal_roll."""
     nominal_roll_id = str(sample_nominal_roll.id)
 
     response = client.delete(
@@ -226,31 +215,6 @@ async def test_delete_confirmed_nominal_roll(
         params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
     assert verify.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_delete_archived_nominal_roll(
-    client: TestClient, super_admin_token_headers: dict[str, str],
-    db_session: AsyncSession, sample_users,
-):
-    """Cannot delete an archived nominal_roll."""
-    archived_nominal_roll = NominalRoll(
-        caa=date(2022, 1, 1),
-        csv_hash="archived-hash-delete",
-        status="archived",
-        uploaded_by=str(sample_users["admin"].id),
-    )
-    db_session.add(archived_nominal_roll)
-    await db_session.commit()
-
-    response = client.delete(
-        f"/api/v1/nominal-rolls/{archived_nominal_roll.id}",
-        headers=super_admin_token_headers,
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
-    )
-
-    assert response.status_code == 400
-    assert "draft or confirmed" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -330,7 +294,6 @@ async def test_update_nominal_roll_label(
     draft_nominal_roll = NominalRoll(
         caa=date(2024, 9, 1),
         csv_hash="label-hash-set",
-        status="draft",
         uploaded_by=str(sample_users["admin"].id),
     )
     db_session.add(draft_nominal_roll)
@@ -365,7 +328,6 @@ async def test_update_nominal_roll_label_strips_whitespace(
     draft_nominal_roll = NominalRoll(
         caa=date(2024, 10, 1),
         csv_hash="label-hash-strip",
-        status="draft",
         uploaded_by=str(sample_users["admin"].id),
     )
     db_session.add(draft_nominal_roll)
@@ -391,14 +353,12 @@ async def test_update_nominal_roll_label_duplicate_rejected(
     nominal_roll_a = NominalRoll(
         caa=date(2024, 11, 1),
         csv_hash="label-hash-dup-a",
-        status="draft",
         uploaded_by=str(sample_users["admin"].id),
         label="Shared Label",
     )
     nominal_roll_b = NominalRoll(
         caa=date(2024, 12, 1),
         csv_hash="label-hash-dup-b",
-        status="draft",
         uploaded_by=str(sample_users["admin"].id),
     )
     db_session.add_all([nominal_roll_a, nominal_roll_b])
@@ -424,7 +384,6 @@ async def test_update_nominal_roll_label_empty_rejected(
     draft_nominal_roll = NominalRoll(
         caa=date(2025, 1, 1),
         csv_hash="label-hash-empty",
-        status="draft",
         uploaded_by=str(sample_users["admin"].id),
     )
     db_session.add(draft_nominal_roll)
@@ -449,14 +408,12 @@ async def test_list_nominal_rolls_includes_label(
     labeled = NominalRoll(
         caa=date(2025, 2, 1),
         csv_hash="label-hash-list-a",
-        status="draft",
         uploaded_by=str(sample_users["admin"].id),
         label="Visible",
     )
     unlabeled = NominalRoll(
         caa=date(2025, 3, 1),
         csv_hash="label-hash-list-b",
-        status="draft",
         uploaded_by=str(sample_users["admin"].id),
     )
     db_session.add_all([labeled, unlabeled])

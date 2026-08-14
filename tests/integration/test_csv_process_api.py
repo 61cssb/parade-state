@@ -174,7 +174,6 @@ async def test_process_csv_refuses_duplicate_caa(
     db_session.add(NominalRoll(
         caa=date(2026, 2, 20),
         csv_hash="pre-empt",
-        status="draft",
         personnel_count=0,
         uploaded_by=admin_id,
     ))
