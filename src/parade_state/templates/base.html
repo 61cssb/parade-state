@@ -476,17 +476,17 @@
             <span class="brand-text">Parade State</span>
         </a>
         <nav class="sidebar-nav">
-            <a href="/grouping" title="Grouping"
-               class="{% if active_page == 'grouping' %}active{% endif %}">
-                <span class="icon">📊</span><span>Grouping</span>
+            <a href="/nominal-roll" title="Nominal Roll Browser"
+               class="{% if active_page == 'nominal-roll' %}active{% endif %}">
+                <span class="icon">👥</span><span>Nominal Roll</span>
             </a>
             <a href="/attendance" title="Attendance"
                class="{% if active_page == 'attendance' %}active{% endif %}">
                 <span class="icon">✅</span><span>Attendance</span>
             </a>
-            <a href="/nominal-roll" title="Nominal Roll Browser"
-               class="{% if active_page == 'nominal-roll' %}active{% endif %}">
-                <span class="icon">👥</span><span>Nominal Roll</span>
+            <a href="/grouping" title="Grouping"
+               class="{% if active_page == 'grouping' %}active{% endif %}">
+                <span class="icon">📊</span><span>Grouping</span>
             </a>
             {% if user and user.role in ['admin', 'super_admin'] %}
             <div class="nav-section-label">Admin</div>
@@ -494,19 +494,15 @@
                class="{% if active_page == 'dashboard' %}active{% endif %}">
                 <span class="icon">🏠</span><span>Dashboard</span>
             </a>
+            <a href="/admin/csv-upload" title="CSV Upload"
+               class="{% if active_page == 'csv-upload' %}active{% endif %}">
+                <span class="icon">📤</span><span>CSV Upload</span>
+            </a>
             <a href="/admin/nominal-rolls" title="Nominal Rolls"
                class="{% if active_page == 'nominal-rolls' %}active{% endif %}">
                 <span class="icon">📋</span><span>Nominal Rolls</span>
             </a>
-            <a href="/admin/groupings" title="Groupings"
-               class="{% if active_page == 'groupings' %}active{% endif %}">
-                <span class="icon">🎖️</span><span>Groupings</span>
-            </a>
             {% if user.role == 'super_admin' %}
-            <a href="/admin/deferments" title="Deferments"
-               class="{% if active_page == 'deferments' %}active{% endif %}">
-                <span class="icon">🕓</span><span>Deferments</span>
-            </a>
             <a href="/admin/taggings" title="Taggings"
                class="{% if active_page == 'taggings' %}active{% endif %}">
                 <span class="icon">🏷️</span><span>Taggings</span>
@@ -516,13 +512,19 @@
                 <span class="icon">✅</span><span>Attendance</span>
             </a>
             {% endif %}
+            <a href="/admin/groupings" title="Groupings"
+               class="{% if active_page == 'groupings' %}active{% endif %}">
+                <span class="icon">🎖️</span><span>Groupings</span>
+            </a>
+            {% if user.role == 'super_admin' %}
+            <a href="/admin/deferments" title="Deferments"
+               class="{% if active_page == 'deferments' %}active{% endif %}">
+                <span class="icon">🕓</span><span>Deferments</span>
+            </a>
+            {% endif %}
             <a href="/admin/users" title="Users"
                class="{% if active_page == 'users' %}active{% endif %}">
                 <span class="icon">👥</span><span>Users</span>
-            </a>
-            <a href="/admin/csv-upload" title="CSV Upload"
-               class="{% if active_page == 'csv-upload' %}active{% endif %}">
-                <span class="icon">📤</span><span>CSV Upload</span>
             </a>
             <a href="/admin/settings" title="Settings"
                class="{% if active_page == 'settings' %}active{% endif %}">
