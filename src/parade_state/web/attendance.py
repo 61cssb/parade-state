@@ -35,6 +35,7 @@ async def attendance_view(
     request: Request,
     nominal_roll_id: str | None = None,
     date: utc_dt.date | None = None,
+    sub_unit_1: str | None = None,
 ):
     """Render the attendance marking page.
 
@@ -81,6 +82,7 @@ async def attendance_view(
 
         # Build roster + attendance rows.
         attendance_rows = []
+        subunit_options: list[str] = []
         has_prior_attendance = False
         no_assignments = False
         applied_tagging_id: str | None = None
@@ -151,6 +153,7 @@ async def attendance_view(
                     continue
                 record = att_by_person.get(str(person.id))
                 entry = entry_by_person.get(str(person.id))
+                eff_sub1 = entry.to_sub_unit_1 if entry else person.sub_unit_1
                 attendance_rows.append(
                     {
                         "id": str(record.id) if record else "",
@@ -159,11 +162,7 @@ async def attendance_view(
                         "category": person.category,
                         "full_name": person.full_name,
                         "unit": entry.to_unit if entry else person.unit,
-                        "sub_unit_1": (
-                            entry.to_sub_unit_1
-                            if entry
-                            else person.sub_unit_1
-                        ),
+                        "sub_unit_1": eff_sub1,
                         "is_changed": entry is not None,
                         "status_am": record.status_am if record else "absent",
                         "remarks_am": record.remarks_am if record else "",
@@ -171,6 +170,20 @@ async def attendance_view(
                         "remarks_pm": record.remarks_pm if record else "",
                     }
                 )
+
+            # Filter dropdown options: distinct effective sub_unit_1 across
+            # the user's whole visible roster (before the filter is applied).
+            subunit_options = sorted(
+                {
+                    r["sub_unit_1"]
+                    for r in attendance_rows
+                    if r["sub_unit_1"]
+                }
+            )
+            if sub_unit_1:
+                attendance_rows = [
+                    r for r in attendance_rows if r["sub_unit_1"] == sub_unit_1
+                ]
 
             has_prior_attendance = (
                 await db.execute(
@@ -210,6 +223,8 @@ async def attendance_view(
         any_active_nr=active_nr is not None,
         attendance_active=attendance_active,
         target_date=target_date,
+        sub_unit_1_filter=sub_unit_1 or "",
+        subunit_options=subunit_options,
         attendance_rows=attendance_rows,
         counts=counts,
         has_prior_attendance=has_prior_attendance,

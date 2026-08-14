@@ -101,6 +101,14 @@
 
         <h4 style="margin: 0 0 0.5rem; font-size: 0.95rem;">Per-person remaps</h4>
 
+        {# Suggestion datalists for the remap inputs (populated from the NR's
+           personnel). Datalist inputs also accept any typed value — remap
+           targets may be units/subunits that don't exist on this NR yet. #}
+        <datalist id="dl-to-unit"></datalist>
+        <datalist id="dl-to-s1"></datalist>
+        <datalist id="dl-to-s2"></datalist>
+        <datalist id="dl-to-s3"></datalist>
+
         <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0.375rem; padding: 0.6rem; margin-bottom: 0.75rem;">
             <p style="font-size: 0.75rem; color: #6b7280; margin: 0 0 0.4rem;">Find personnel to add as remap rows. Personnel already in the table are hidden from the list.</p>
             <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 0.4rem; margin-bottom: 0.4rem;">
@@ -217,64 +225,22 @@
         return res.json();
     }
 
-    function buildOptionList(values, selected, optional) {
-        let html = optional ? '<option value="">—</option>' : '';
-        if (selected && values.indexOf(selected) === -1) {
-            html += '<option value="' + escapeHtml(selected) + '" selected>' + escapeHtml(selected) + '</option>';
+    // Populate the remap suggestion datalists from the cached NR personnel.
+    // Datalist inputs accept any typed value, so remap targets may point at
+    // units/subunits that don't exist on this NR yet.
+    function fillRemapDatalists() {
+        const lists = { 'dl-to-unit': 'unit', 'dl-to-s1': 'sub_unit_1', 'dl-to-s2': 'sub_unit_2', 'dl-to-s3': 'sub_unit_3' };
+        for (const [dlId, field] of Object.entries(lists)) {
+            const values = [];
+            const seen = new Set();
+            for (const p of personnelCache) {
+                if (p[field] && !seen.has(p[field])) { seen.add(p[field]); values.push(p[field]); }
+            }
+            values.sort();
+            document.getElementById(dlId).innerHTML = values
+                .map(function(v) { return '<option value="' + escapeHtml(v) + '"></option>'; })
+                .join('');
         }
-        for (const v of values) {
-            html += '<option value="' + escapeHtml(v) + '"' + (v === selected ? ' selected' : '') + '>'
-                + escapeHtml(v) + '</option>';
-        }
-        return html;
-    }
-
-    function buildToUnitOptions(selected) {
-        const values = [];
-        const seen = new Set();
-        for (const p of personnelCache) {
-            if (p.unit && !seen.has(p.unit)) { seen.add(p.unit); values.push(p.unit); }
-        }
-        values.sort();
-        return buildOptionList(values, selected, false);
-    }
-
-    function buildToSubOptions(field, parents, selected) {
-        let filtered = personnelCache;
-        if (parents.unit) filtered = filtered.filter(function(p) { return p.unit === parents.unit; });
-        if (parents.sub_unit_1) filtered = filtered.filter(function(p) { return p.sub_unit_1 === parents.sub_unit_1; });
-        if (parents.sub_unit_2) filtered = filtered.filter(function(p) { return p.sub_unit_2 === parents.sub_unit_2; });
-        const values = [];
-        const seen = new Set();
-        for (const p of filtered) {
-            if (p[field] && !seen.has(p[field])) { seen.add(p[field]); values.push(p[field]); }
-        }
-        values.sort();
-        return buildOptionList(values, selected, true);
-    }
-
-    function onToUnitChange(sel) {
-        const tr = sel.closest('tr');
-        const unit = sel.value;
-        tr.querySelector('.remap-s1').innerHTML = buildToSubOptions('sub_unit_1', {unit: unit}, null);
-        tr.querySelector('.remap-s2').innerHTML = buildToSubOptions('sub_unit_2', {unit: unit}, null);
-        tr.querySelector('.remap-s3').innerHTML = buildToSubOptions('sub_unit_3', {unit: unit}, null);
-    }
-
-    function onToS1Change(sel) {
-        const tr = sel.closest('tr');
-        const unit = tr.querySelector('.remap-unit').value;
-        const s1 = sel.value;
-        tr.querySelector('.remap-s2').innerHTML = buildToSubOptions('sub_unit_2', {unit: unit, sub_unit_1: s1}, null);
-        tr.querySelector('.remap-s3').innerHTML = buildToSubOptions('sub_unit_3', {unit: unit, sub_unit_1: s1}, null);
-    }
-
-    function onToS2Change(sel) {
-        const tr = sel.closest('tr');
-        const unit = tr.querySelector('.remap-unit').value;
-        const s1 = tr.querySelector('.remap-s1').value;
-        const s2 = sel.value;
-        tr.querySelector('.remap-s3').innerHTML = buildToSubOptions('sub_unit_3', {unit: unit, sub_unit_1: s1, sub_unit_2: s2}, null);
     }
 
     function addRemapRow(entry) {
@@ -291,20 +257,21 @@
                 + (entry.from_sub_unit_1 ? ' / ' + escapeHtml(entry.from_sub_unit_1) : '')
                 + '</span>'
             : '';
-        const selectStyle = 'width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;';
+        const inputStyle = 'width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;';
+        function cell(listId, cls, value, required) {
+            return '<td style="padding: 0.35rem;">'
+                + '<input type="text" list="' + listId + '" class="' + cls + '" value="' + escapeHtml(value || '') + '"'
+                + (required ? ' required' : '') + ' style="' + inputStyle + '"></td>';
+        }
         tr.innerHTML = [
             '<td style="padding: 0.35rem;">'
                 + '<input type="hidden" class="remap-person-id" value="' + escapeHtml(entry.personnel_id || '') + '">'
                 + labelHtml + fromLine
                 + '</td>',
-            '<td style="padding: 0.35rem;"><select class="remap-unit" required onchange="onToUnitChange(this)" style="' + selectStyle + '">'
-                + buildToUnitOptions(entry.to_unit) + '</select></td>',
-            '<td style="padding: 0.35rem;"><select class="remap-s1" onchange="onToS1Change(this)" style="' + selectStyle + '">'
-                + buildToSubOptions('sub_unit_1', {unit: entry.to_unit}, entry.to_sub_unit_1) + '</select></td>',
-            '<td style="padding: 0.35rem;"><select class="remap-s2" onchange="onToS2Change(this)" style="' + selectStyle + '">'
-                + buildToSubOptions('sub_unit_2', {unit: entry.to_unit, sub_unit_1: entry.to_sub_unit_1}, entry.to_sub_unit_2) + '</select></td>',
-            '<td style="padding: 0.35rem;"><select class="remap-s3" style="' + selectStyle + '">'
-                + buildToSubOptions('sub_unit_3', {unit: entry.to_unit, sub_unit_1: entry.to_sub_unit_1, sub_unit_2: entry.to_sub_unit_2}, entry.to_sub_unit_3) + '</select></td>',
+            cell('dl-to-unit', 'remap-unit', entry.to_unit, true),
+            cell('dl-to-s1', 'remap-s1', entry.to_sub_unit_1, false),
+            cell('dl-to-s2', 'remap-s2', entry.to_sub_unit_2, false),
+            cell('dl-to-s3', 'remap-s3', entry.to_sub_unit_3, false),
             '<td style="padding: 0.35rem;"><button type="button" class="btn" style="background: #ef4444; color: white; font-size: 0.7rem; padding: 0.2rem 0.4rem;" onclick="this.closest(\'tr\').remove(); updatePickerList();">Remove</button></td>',
         ].join('');
         body.appendChild(tr);
@@ -438,6 +405,7 @@
             document.getElementById('picker-unit').value = '';
             document.getElementById('picker-subunit').value = '';
             buildPickerOptions();
+            fillRemapDatalists();
             updatePickerList();
 
             document.getElementById('edit-backdrop').style.display = 'block';

@@ -8,7 +8,50 @@
 <style>
     .changed-row { background: #fef3c7 !important; }
     .changed-row td { background: #fef3c7 !important; }
+    .cell-edit {
+        display: inline-block;
+        min-width: 3rem;
+        padding: 0.1rem 0.3rem;
+        border-radius: 0.25rem;
+        border: 1px dashed transparent;
+        cursor: pointer;
+    }
+    .cell-edit:hover {
+        background-color: #f3f4f6;
+        border-color: #2563eb;
+    }
+    .cell-edit-input {
+        width: 100%;
+        min-width: 6rem;
+        padding: 0.2rem 0.3rem;
+        border: 1px solid #2563eb;
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+    }
 </style>
+
+{# Super-admin click-to-edit cell for unit/subunit values. Edits are sent to
+   PATCH /api/v1/personnel/{id}, which records them as a tagging overlay —
+   the NR itself stays read-only and the row turns yellow on reload. #}
+{% macro editable_cell(pid, field, value, list_id) -%}
+<span class="cell-edit" data-pid="{{ pid }}" data-field="{{ field }}" data-list="{{ list_id }}" data-value="{{ value or '' }}" title="Click to edit">{{ value or '—' }}</span>
+{%- endmacro %}
+
+{% if user.role == 'super_admin' %}
+<datalist id="dl-edit-unit">
+    {% for v in edit_unit_options %}<option value="{{ v }}"></option>{% endfor %}
+</datalist>
+<datalist id="dl-edit-s1">
+    {% for v in edit_sub1_options %}<option value="{{ v }}"></option>{% endfor %}
+</datalist>
+<datalist id="dl-edit-s2">
+    {% for v in edit_sub2_options %}<option value="{{ v }}"></option>{% endfor %}
+</datalist>
+<datalist id="dl-edit-s3">
+    {% for v in edit_sub3_options %}<option value="{{ v }}"></option>{% endfor %}
+</datalist>
+{% endif %}
+
 {% if nominal_rolls %}
 <!-- Nominal roll selector -->
 <div class="card">
@@ -85,6 +128,14 @@
         <p style="margin: 0.5rem 0 0; font-size: 0.875rem; color: #374151; white-space: pre-wrap;">{{ selected_nominal_roll.remarks or '(none set — editable on the admin nominal rolls page)' }}</p>
     </details>
 
+    {% if user.role == 'super_admin' %}
+    <p style="margin: 0.5rem 0 0; font-size: 0.8rem; color: #6b7280;">
+        Yellow rows carry a tagging overlay. As super-admin you can click a
+        unit / sub-unit cell to remap it (pick a suggestion or type a new
+        value) — edits are recorded on the tagging, never on the nominal roll.
+    </p>
+    {% endif %}
+
     {% if personnel %}
     <div style="overflow-x: auto;">
     <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
@@ -106,10 +157,10 @@
             {% for p in personnel %}
             <tr class="{% if p.is_changed %}changed-row{% endif %}" style="border-bottom: 1px solid #e5e7eb;">
                 <td style="padding: 0.5rem; color: #9ca3af; font-variant-numeric: tabular-nums;">{{ loop.index }}</td>
-                <td style="padding: 0.5rem;">{{ p.unit or '—' }}</td>
-                <td style="padding: 0.5rem;">{{ p.sub_unit_1 or '—' }}</td>
-                <td style="padding: 0.5rem;">{{ p.sub_unit_2 or '—' }}</td>
-                <td style="padding: 0.5rem;">{{ p.sub_unit_3 or '—' }}</td>
+                <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'unit', p.unit, 'dl-edit-unit') if user.role == 'super_admin' else (p.unit or '—') }}</td>
+                <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_1', p.sub_unit_1, 'dl-edit-s1') if user.role == 'super_admin' else (p.sub_unit_1 or '—') }}</td>
+                <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_2', p.sub_unit_2, 'dl-edit-s2') if user.role == 'super_admin' else (p.sub_unit_2 or '—') }}</td>
+                <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_3', p.sub_unit_3, 'dl-edit-s3') if user.role == 'super_admin' else (p.sub_unit_3 or '—') }}</td>
                 <td style="padding: 0.5rem; white-space: nowrap;">{{ p.category }}</td>
                 <td style="padding: 0.5rem; white-space: nowrap;">{{ p.rank }}</td>
                 <td style="padding: 0.5rem;">{{ p.full_name }}</td>
@@ -134,5 +185,85 @@
 <div class="card">
     <p style="color: #6b7280;">No nominal rolls available yet.</p>
 </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if user.role == 'super_admin' and selected_nominal_roll %}
+<script>
+    const USER_ID = "{{ user.id }}";
+    const USER_ROLE = "{{ user.role }}";
+
+    document.addEventListener('click', function(e) {
+        const span = e.target.closest('.cell-edit');
+        if (!span || span.querySelector('input')) return;
+        startCellEdit(span);
+    });
+
+    function startCellEdit(span) {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'cell-edit-input';
+        input.list = span.dataset.list;
+        input.value = span.dataset.value || '';
+        span.textContent = '';
+        span.appendChild(input);
+        input.focus();
+        input.select();
+
+        let done = false;
+        function finish(save) {
+            if (done) return;
+            done = true;
+            if (save) {
+                saveCellEdit(span, input.value.trim());
+            } else {
+                span.textContent = span.dataset.value || '—';
+            }
+        }
+
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+            else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+        });
+        input.addEventListener('blur', function() { finish(false); });
+    }
+
+    async function saveCellEdit(span, value) {
+        const pid = span.dataset.pid;
+        const field = span.dataset.field;
+
+        if (field === 'unit' && !value) {
+            alert('Unit is required — to move the person, pick or type a unit.');
+            span.textContent = span.dataset.value || '—';
+            return;
+        }
+
+        const body = {};
+        body[field] = value || null;  // empty sub-unit → cleared
+
+        try {
+            const res = await fetch(
+                '/api/v1/personnel/' + encodeURIComponent(pid) +
+                '?user_id=' + USER_ID + '&user_role=' + USER_ROLE,
+                {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                }
+            );
+            if (res.ok) {
+                location.reload();  // row re-renders yellow with effective value
+            } else {
+                const data = await res.json();
+                alert('Save failed: ' + (data.detail || 'Unknown error'));
+                span.textContent = span.dataset.value || '—';
+            }
+        } catch (err) {
+            alert('Network error: ' + err.message);
+            span.textContent = span.dataset.value || '—';
+        }
+    }
+</script>
 {% endif %}
 {% endblock %}

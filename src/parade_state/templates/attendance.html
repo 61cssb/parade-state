@@ -31,6 +31,16 @@
                    onchange="this.form.submit()"
                    style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
         </div>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <label for="sub_unit_1" style="font-weight: bold;">Sub-unit 1:</label>
+            <select name="sub_unit_1" id="sub_unit_1" onchange="this.form.submit()"
+                    style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                <option value="">All</option>
+                {% for s in subunit_options %}
+                <option value="{{ s }}" {% if sub_unit_1_filter == s %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
         {% endif %}
     </form>
 </div>
@@ -158,11 +168,13 @@
     {% if attendance_active %}
     <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
         <button class="btn btn-primary" onclick="saveAttendance()">Save Attendance</button>
+        {% if user.role == 'super_admin' %}
         <button class="btn" style="background: #6366f1; color: white;"
                 onclick="copyRemarks()"
                 title="Copies previous day PM → today AM (before noon), or today AM → today PM (after noon). Disabled on the NR's first day.">
             Copy Remarks
         </button>
+        {% endif %}
         <span id="dirty-count" style="font-size: 0.8rem; color: #6b7280;"></span>
     </div>
     {% endif %}

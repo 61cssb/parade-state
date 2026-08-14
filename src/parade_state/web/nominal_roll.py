@@ -143,6 +143,8 @@ async def nominal_roll_view(
                 rolls=[], selected=None,
                 units=[], sub_unit_1_options=[], sub_unit_2_options=[],
                 rank_options=[],
+                edit_unit_options=[], edit_sub1_options=[],
+                edit_sub2_options=[], edit_sub3_options=[],
                 personnel=[], search=search or "",
                 unit=unit or "", sub_unit_1=sub_unit_1 or "",
                 sub_unit_2=sub_unit_2 or "", category=category or "",
@@ -208,6 +210,13 @@ async def nominal_roll_view(
             ),
         )
 
+        # Unscoped suggestion lists for the super-admin cell editor
+        # (datalist inputs also accept values not present on the NR).
+        edit_unit_options = units
+        edit_sub1_options = await _distinct_values(db, Personnel.sub_unit_1, base)
+        edit_sub2_options = await _distinct_values(db, Personnel.sub_unit_2, base)
+        edit_sub3_options = await _distinct_values(db, Personnel.sub_unit_3, base)
+
         # Load the NR's 1:1 tagging entries (overlay). The entry map is
         # keyed by personnel_id; each entry's ``to_*`` values override the
         # personnel's canonical unit/subunit when computing effective values.
@@ -226,6 +235,7 @@ async def nominal_roll_view(
         is_changed = entry is not None
         personnel_data.append(
             {
+                "id": str(p.id),
                 "rank": p.rank,
                 "category": p.category,
                 "full_name": p.full_name,
@@ -261,6 +271,10 @@ async def nominal_roll_view(
         sub_unit_1_options=sub_unit_1_options,
         sub_unit_2_options=sub_unit_2_options,
         rank_options=rank_options,
+        edit_unit_options=edit_unit_options,
+        edit_sub1_options=edit_sub1_options,
+        edit_sub2_options=edit_sub2_options,
+        edit_sub3_options=edit_sub3_options,
         personnel=personnel_data,
         search=search or "",
         unit=unit or "",
@@ -282,6 +296,10 @@ def _render(
     sub_unit_1_options: list,
     sub_unit_2_options: list,
     rank_options: list,
+    edit_unit_options: list,
+    edit_sub1_options: list,
+    edit_sub2_options: list,
+    edit_sub3_options: list,
     personnel: list,
     search: str,
     unit: str,
@@ -313,6 +331,10 @@ def _render(
         sub_unit_1_options=sub_unit_1_options,
         sub_unit_2_options=sub_unit_2_options,
         rank_options=rank_options,
+        edit_unit_options=edit_unit_options,
+        edit_sub1_options=edit_sub1_options,
+        edit_sub2_options=edit_sub2_options,
+        edit_sub3_options=edit_sub3_options,
         personnel=personnel,
         search=search,
         unit=unit,
