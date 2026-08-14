@@ -5,6 +5,10 @@
 {% block page_title %}Nominal Roll Browser{% endblock %}
 
 {% block content %}
+<style>
+    .changed-row { background: #fef3c7 !important; }
+    .changed-row td { background: #fef3c7 !important; }
+</style>
 {% if nominal_rolls %}
 <!-- Nominal roll selector -->
 <div class="card">
@@ -100,7 +104,7 @@
         </thead>
         <tbody>
             {% for p in personnel %}
-            <tr style="border-bottom: 1px solid #e5e7eb;">
+            <tr class="{% if p.is_changed %}changed-row{% endif %}" style="border-bottom: 1px solid #e5e7eb;">
                 <td style="padding: 0.5rem; color: #9ca3af; font-variant-numeric: tabular-nums;">{{ loop.index }}</td>
                 <td style="padding: 0.5rem;">{{ p.unit or '—' }}</td>
                 <td style="padding: 0.5rem;">{{ p.sub_unit_1 or '—' }}</td>

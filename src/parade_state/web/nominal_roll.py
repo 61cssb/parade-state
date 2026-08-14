@@ -13,7 +13,7 @@ from sqlalchemy import ColumnElement, func, or_, select
 
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
-from parade_state.models import NominalRoll, Personnel
+from parade_state.models import NominalRoll, Personnel, TaggingEntry
 
 router = APIRouter()
 
@@ -210,20 +210,36 @@ async def nominal_roll_view(
             ),
         )
 
-    personnel_data = [
-        {
-            "rank": p.rank,
-            "category": p.category,
-            "full_name": p.full_name,
-            "short_id": p.short_id,
-            "unit": p.unit,
-            "sub_unit_1": p.sub_unit_1,
-            "sub_unit_2": p.sub_unit_2,
-            "sub_unit_3": p.sub_unit_3,
-            "remarks": (p.extra_fields or {}).get("remarks"),
-        }
-        for p in personnel
-    ]
+        # Load the NR's 1:1 tagging entries (overlay). The entry map is
+        # keyed by personnel_id; each entry's ``to_*`` values override the
+        # personnel's canonical unit/subunit when computing effective values.
+        entry_rows = (
+            await db.execute(
+                select(TaggingEntry).where(
+                    TaggingEntry.personnel_id.in_([p.id for p in personnel])
+                )
+            )
+        ).scalars().all()
+        entry_by_personnel = {str(e.personnel_id): e for e in entry_rows}
+
+    personnel_data = []
+    for p in personnel:
+        entry = entry_by_personnel.get(str(p.id))
+        is_changed = entry is not None
+        personnel_data.append(
+            {
+                "rank": p.rank,
+                "category": p.category,
+                "full_name": p.full_name,
+                "short_id": p.short_id,
+                "unit": entry.to_unit if entry else p.unit,
+                "sub_unit_1": entry.to_sub_unit_1 if entry else p.sub_unit_1,
+                "sub_unit_2": entry.to_sub_unit_2 if entry else p.sub_unit_2,
+                "sub_unit_3": entry.to_sub_unit_3 if entry else p.sub_unit_3,
+                "remarks": (p.extra_fields or {}).get("remarks"),
+                "is_changed": is_changed,
+            }
+        )
 
     return _render(
         request, current_user,

@@ -423,9 +423,41 @@ async def admin_csv_upload(
                     CsvUpload.status,
                     CsvUpload.uploaded_at,
                     CsvUpload.nominal_roll_id,
+                    CsvUpload.original_filename,
                 )
                 .order_by(CsvUpload.uploaded_at.desc())
                 .limit(20)
+            )
+        ).all()
+
+        # Processable uploads (no NR yet) + source NRs (have at least one
+        # tagging entry). Both feed the Step 2 form.
+        processable_uploads_rows = (
+            await db.execute(
+                select(
+                    CsvUpload.id,
+                    CsvUpload.original_filename,
+                    CsvUpload.line_count,
+                    CsvUpload.uploaded_at,
+                )
+                .where(CsvUpload.nominal_roll_id.is_(None))
+                .order_by(CsvUpload.uploaded_at.desc())
+                .limit(20)
+            )
+        ).all()
+
+        source_nr_rows = (
+            await db.execute(
+                select(
+                    NominalRoll.id,
+                    NominalRoll.caa,
+                    func.count(TaggingEntry.id).label("entry_count"),
+                )
+                .join(Tagging, Tagging.nominal_roll_id == NominalRoll.id)
+                .outerjoin(TaggingEntry, TaggingEntry.tagging_id == Tagging.id)
+                .group_by(NominalRoll.id, NominalRoll.caa)
+                .having(func.count(TaggingEntry.id) > 0)
+                .order_by(NominalRoll.caa.desc())
             )
         ).all()
 
@@ -437,8 +469,24 @@ async def admin_csv_upload(
             "status": row.status,
             "uploaded_at": row.uploaded_at,
             "nominal_roll_id": row.nominal_roll_id,
+            "original_filename": row.original_filename,
         }
         for row in recent_uploads_rows
+    ]
+
+    processable_uploads = [
+        {
+            "id": row.id,
+            "original_filename": row.original_filename or "(no filename)",
+            "line_count": row.line_count,
+            "uploaded_at": row.uploaded_at,
+        }
+        for row in processable_uploads_rows
+    ]
+
+    source_nominal_rolls = [
+        {"id": row.id, "caa": row.caa, "entry_count": row.entry_count}
+        for row in source_nr_rows
     ]
 
     env = get_templates(request)
@@ -454,6 +502,8 @@ async def admin_csv_upload(
         },
         active_page="csv-upload",
         recent_uploads=recent_uploads,
+        processable_uploads=processable_uploads,
+        source_nominal_rolls=source_nominal_rolls,
     )
 
     return HTMLResponse(content=html_content)
@@ -648,7 +698,12 @@ async def admin_taggings(
     request: Request,
     nominal_roll_id: str | None = None,
 ):
-    """Render the tagging overlay management page (super-admin only)."""
+    """Render the tagging overlay management page (super-admin only).
+
+    Under the 1:1 model, each NR has exactly one tagging. This page shows
+    the entries of the selected NR's tagging (the remap list) and offers
+    edit/clone-into actions.
+    """
     current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
@@ -678,38 +733,70 @@ async def admin_taggings(
             nominal_roll_options[0]["id"] if nominal_roll_options else None
         )
 
-        # Taggings for the selected NR with entry counts (correlated subquery).
-        entry_count = (
-            select(func.count())
-            .select_from(TaggingEntry)
-            .where(TaggingEntry.tagging_id == Tagging.id)
-            .correlate(Tagging)
-            .scalar_subquery()
-        )
-        query = (
-            select(Tagging, entry_count, NominalRoll.caa)
-            .outerjoin(NominalRoll, Tagging.nominal_roll_id == NominalRoll.id)
-            .order_by(Tagging.created_at.desc())
-            .limit(200)
-        )
+        # The selected NR's single tagging (1:1) + entries joined to Personnel.
+        tagging_data = None
+        entries_data: list[dict] = []
         if resolved_nominal_roll_id:
-            query = query.where(Tagging.nominal_roll_id == resolved_nominal_roll_id)
+            tagging_row = (
+                await db.execute(
+                    select(Tagging).where(
+                        Tagging.nominal_roll_id == resolved_nominal_roll_id
+                    )
+                )
+            ).scalar_one_or_none()
 
-        rows = (await db.execute(query)).all()
+            if tagging_row is not None:
+                entry_rows = (
+                    await db.execute(
+                        select(
+                            TaggingEntry.id,
+                            TaggingEntry.personnel_id,
+                            Personnel.short_id,
+                            Personnel.rank,
+                            Personnel.full_name,
+                            TaggingEntry.from_unit,
+                            TaggingEntry.from_sub_unit_1,
+                            TaggingEntry.from_sub_unit_2,
+                            TaggingEntry.from_sub_unit_3,
+                            TaggingEntry.to_unit,
+                            TaggingEntry.to_sub_unit_1,
+                            TaggingEntry.to_sub_unit_2,
+                            TaggingEntry.to_sub_unit_3,
+                        )
+                        .outerjoin(Personnel, Personnel.id == TaggingEntry.personnel_id)
+                        .where(TaggingEntry.tagging_id == tagging_row.id)
+                        .order_by(Personnel.rank, Personnel.full_name)
+                    )
+                ).all()
 
-    taggings_data = [
-        {
-            "id": str(t.id),
-            "label": t.label,
-            "nominal_roll_id": t.nominal_roll_id,
-            "nominal_roll_caa": caa.isoformat() if caa else None,
-            "remarks": t.remarks or "",
-            "entry_count": count or 0,
-            "created_at": t.created_at,
-            "updated_at": t.updated_at,
-        }
-        for t, count, caa in rows
-    ]
+                entries_data = [
+                    {
+                        "id": str(row.id),
+                        "personnel_id": row.personnel_id,
+                        "short_id": row.short_id,
+                        "label": f"{row.rank} {row.full_name}".strip()
+                        if row.rank
+                        else "(unknown)",
+                        "from_unit": row.from_unit,
+                        "from_sub_unit_1": row.from_sub_unit_1,
+                        "from_sub_unit_2": row.from_sub_unit_2,
+                        "from_sub_unit_3": row.from_sub_unit_3,
+                        "to_unit": row.to_unit,
+                        "to_sub_unit_1": row.to_sub_unit_1,
+                        "to_sub_unit_2": row.to_sub_unit_2,
+                        "to_sub_unit_3": row.to_sub_unit_3,
+                    }
+                    for row in entry_rows
+                ]
+
+                tagging_data = {
+                    "id": str(tagging_row.id),
+                    "label": tagging_row.label,
+                    "remarks": tagging_row.remarks or "",
+                    "entry_count": len(entries_data),
+                    "created_at": tagging_row.created_at,
+                    "updated_at": tagging_row.updated_at,
+                }
 
     env = get_templates(request)
     template = env.get_template("admin/taggings.html")
@@ -728,7 +815,8 @@ async def admin_taggings(
             "role": current_admin.role,
         },
         active_page="taggings",
-        taggings=taggings_data,
+        tagging=tagging_data,
+        entries=entries_data,
         nominal_roll_options=nominal_roll_options,
         nominal_roll_filter=resolved_nominal_roll_id or "",
         active_nominal_roll_caa=active_nominal_roll_caa,
@@ -797,16 +885,18 @@ async def admin_attendance(
             )
             active_scope = scope_result.scalar_one_or_none()
 
-            # Taggings on this NR (for the scope-activation dropdown).
+            # Tagging for this NR (1:1; at most one row). Used for the
+            # scope-activation dropdown.
             tagging_rows = (
                 await db.execute(
                     select(Tagging).where(
                         Tagging.nominal_roll_id == resolved_nr_id
-                    ).order_by(Tagging.label)
+                    ).order_by(Tagging.created_at)
                 )
             ).scalars().all()
             scope_taggings = [
-                {"id": str(t.id), "label": t.label} for t in tagging_rows
+                {"id": str(t.id), "label": t.label or f"Tagging {str(t.id)[:8]}"}
+                for t in tagging_rows
             ]
 
             # Distinct sub_unit_1 values on the NR (for the filter dropdown).

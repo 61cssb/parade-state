@@ -5,7 +5,7 @@
 {% block page_title %}CSV Upload{% endblock %}
 
 {% block content %}
-<p style="color: #6b7280; margin-bottom: 1.5rem;">3-step upload process: Upload &rarr; Mapping &rarr; Diff Confirmation</p>
+<p style="color: #6b7280; margin-bottom: 1.5rem;">3-step upload process: Upload &rarr; Process into Nominal Roll (with optional tagging import) &rarr; Use</p>
 
 <div class="card">
     <h3>Step 1: Upload CSV File</h3>
@@ -18,12 +18,48 @@
 </div>
 
 <div class="card">
+    <h3>Step 2: Process Upload into Nominal Roll</h3>
+    <p style="color: #6b7280; font-size: 0.85rem; margin-top: 0.5rem;">
+        Pick an uploaded CSV (not yet processed) to build a NominalRoll + Personnel + auto-created empty Tagging.
+        Optionally import taggings from another NR (personnel matched by <em>short_id</em>).
+    </p>
+    {% if processable_uploads %}
+    <form id="process-form" onsubmit="event.preventDefault(); processUpload();" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.75rem;">
+        <div>
+            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Upload to process <span style="color: #ef4444;">*</span></label>
+            <select id="process-upload-id" required style="width: 100%; max-width: 600px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                {% for u in processable_uploads %}
+                <option value="{{ u.id }}">{{ u.original_filename }} ({{ u.line_count }} lines, {{ u.uploaded_at.strftime('%Y-%m-%d %H:%M') }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Import taggings from (optional)</label>
+            <select id="process-source-nr" style="width: 100%; max-width: 600px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                <option value="">— None (create empty tagging) —</option>
+                {% for nr in source_nominal_rolls %}
+                <option value="{{ nr.id }}">CAA {{ nr.caa }} ({{ nr.entry_count }} entries)</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <button type="submit" class="btn btn-primary" id="processBtn">Process into Nominal Roll</button>
+        </div>
+        <div id="process-status" style="font-size: 0.875rem;"></div>
+    </form>
+    {% else %}
+    <p style="color: #6b7280; margin-top: 1rem;">No unprocessed uploads. Upload a CSV above to begin.</p>
+    {% endif %}
+</div>
+
+<div class="card">
     <h3>Recent Uploads</h3>
     {% if recent_uploads %}
     <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
         <thead>
             <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
                 <th style="padding: 0.5rem;">Uploaded At</th>
+                <th style="padding: 0.5rem;">Filename</th>
                 <th style="padding: 0.5rem;">Hash</th>
                 <th style="padding: 0.5rem;">Lines</th>
                 <th style="padding: 0.5rem;">Status</th>
@@ -34,12 +70,13 @@
             {% for upload in recent_uploads %}
             <tr style="border-bottom: 1px solid #e5e7eb;">
                 <td style="padding: 0.5rem;">{{ upload.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td style="padding: 0.5rem; font-size: 0.85rem;">{{ upload.original_filename or '—' }}</td>
                 <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ upload.sha256_hash }}</td>
                 <td style="padding: 0.5rem;">{{ upload.line_count }}</td>
                 <td style="padding: 0.5rem;">
                     <span class="btn {% if upload.status == 'received' %}btn-primary{% elif upload.status == 'failed' %}btn-success{% endif %}" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">{{ upload.status }}</span>
                 </td>
-                <td style="padding: 0.5rem;">{{ upload.nominal_roll_id or '--' }}</td>
+                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ upload.nominal_roll_id[:8] if upload.nominal_roll_id else '—' }}</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -88,7 +125,7 @@
                 if (data.is_duplicate) {
                     statusDiv.innerHTML = '<p style="color: #f59e0b; font-weight: bold;">Duplicate file detected! This CSV was already uploaded.</p>';
                 } else {
-                    statusDiv.innerHTML = '<p style="color: #10b981; font-weight: bold;">Upload successful!</p>';
+                    statusDiv.innerHTML = '<p style="color: #10b981; font-weight: bold;">Upload successful! Reload the page to see it in the Step 2 dropdown.</p>';
                 }
 
                 let columnsHtml = data.detected_columns.map(function(col) {
@@ -117,6 +154,63 @@
         } finally {
             uploadBtn.disabled = false;
             uploadBtn.textContent = 'Upload';
+        }
+    }
+
+    async function processUpload() {
+        const uploadId = document.getElementById('process-upload-id').value;
+        const sourceNr = document.getElementById('process-source-nr').value;
+        const statusDiv = document.getElementById('process-status');
+        const btn = document.getElementById('processBtn');
+
+        if (!uploadId) {
+            statusDiv.innerHTML = '<p style="color: #ef4444;">Select an upload first.</p>';
+            return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = 'Processing...';
+        statusDiv.innerHTML = '<p style="color: #6b7280;">Processing CSV into Nominal Roll...</p>';
+
+        const body = { created_by: ADMIN_USER_ID };
+        if (sourceNr) {
+            body.source_nominal_roll_id = sourceNr;
+        }
+
+        try {
+            const response = await fetch('/api/v1/csv/' + uploadId + '/process?user_role=' + ADMIN_USER_ROLE, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            const data = await response.json();
+
+            if (response.ok) {
+                let html = '<div style="background: #f0fdf4; padding: 1rem; border-radius: 0.5rem; border: 1px solid #bbf7d0;">' +
+                    '<p style="font-weight: bold; color: #10b981; margin: 0 0 0.5rem;">Nominal roll created!</p>' +
+                    '<table style="width: 100%; font-size: 0.85rem;">' +
+                    '<tr><td style="font-weight: bold; padding: 0.25rem;">Nominal Roll ID:</td><td style="padding: 0.25rem; font-family: monospace;">' + data.nominal_roll_id + '</td></tr>' +
+                    '<tr><td style="font-weight: bold; padding: 0.25rem;">Personnel inserted:</td><td style="padding: 0.25rem;">' + data.personnel_inserted + '</td></tr>' +
+                    '<tr><td style="font-weight: bold; padding: 0.25rem;">Rows skipped:</td><td style="padding: 0.25rem;">' + data.rows_skipped + '</td></tr>' +
+                    '<tr><td style="font-weight: bold; padding: 0.25rem;">Tagging entries imported:</td><td style="padding: 0.25rem;">' + data.tagging_entries_imported + '</td></tr>' +
+                    '</table>';
+                if (data.unmatched && data.unmatched.length > 0) {
+                    html += '<p style="margin: 0.75rem 0 0.25rem; font-weight: bold;">Unmatched source personnel (' + data.unmatched.length + '):</p><ul style="margin: 0; padding-left: 1.25rem; font-size: 0.8rem;">';
+                    data.unmatched.forEach(function(u) {
+                        html += '<li>' + u.short_id + (u.name ? ' — ' + u.name : '') + '</li>';
+                    });
+                    html += '</ul>';
+                }
+                html += '<p style="margin: 0.75rem 0 0; font-size: 0.85rem;"><a href="/admin/nominal-rolls" style="color: #2563eb;">View nominal rolls &rarr;</a></p></div>';
+                statusDiv.innerHTML = html;
+            } else {
+                statusDiv.innerHTML = '<p style="color: #ef4444;">Processing failed: ' + (data.detail || 'Unknown error') + '</p>';
+            }
+        } catch (error) {
+            statusDiv.innerHTML = '<p style="color: #ef4444;">Network error: ' + error.message + '</p>';
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Process into Nominal Roll';
         }
     }
 </script>
