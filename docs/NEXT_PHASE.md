@@ -137,6 +137,34 @@ read-only; unit/subunit edits land on the Tagging overlay.
   (shared by `experiments/csv_to_nr/ingest.py` and the process endpoint)
 - [x] Demo ingest (`ingest.py`) auto-creates the empty tagging per run
 
+### Phase 9Y: Active-NR Attendance Model — COMPLETED (2026-08-14)
+
+**Goal:** Replace the per-NR AttendanceScope activation and the NR
+confirm/unconfirm workflow with a single system-wide "active for attendance"
+Nominal Roll.
+
+**Completed:**
+- [x] Migration `n4c5d6e7f8a9`: `nominal_rolls.attendance_active/_activated_at/
+  _activated_by` added (backfilled from the most recently activated scope
+  row); `attendance_scope` table dropped; `attendance.tagging_id` dropped
+  (derivable from `nominal_roll_id` under 1:1); NR `status`/`confirmed_at`/
+  `confirmed_by` dropped
+- [x] `POST /nominal-rolls/{id}/activate-attendance` (auto-switches; stamps
+  at/by) and `deactivate-attendance` (keeps stamp as history); super-admin
+  only; audit logged
+- [x] Attendance writes gated to the active NR only (400 otherwise); the NR's
+  1:1 tagging is always applied (no more NR-vs-tagging scope choice)
+- [x] Admin Nominal Rolls page: active row highlighted (green) + badge;
+  "Use for Attendance" / "Deactivate Attendance" buttons; status column,
+  filter and Confirm/Unconfirm removed; "Create Grouping" on every row
+  (groupings no longer require a confirmed NR)
+- [x] Admin attendance page: scope-activation control removed; editing
+  enabled only for the active NR
+- [x] User `/attendance`: defaults to the active NR; shows an inactive
+  message instead of the marking table when no NR is active
+- [x] Tagging delete guard: 409 when the tagging's NR has attendance rows
+- [x] NR browsers drop status labels; default to the active NR
+
 ### Phase 9C-3: Grouping + Session Management — COMPLETED
 
 - [x] Combined admin page at `/admin/groupings` with expandable session sub-views per grouping

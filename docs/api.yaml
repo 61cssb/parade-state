@@ -60,15 +60,21 @@ tags:
   - name: sessions
     description: >
       DEPRECATED (issue #4). Sessions were removed — AM/PM are now hardcoded
-      slots on NR/Tagging-scoped Attendance rows. All /api/v1/sessions/* routes
+      slots on Attendance rows. All /api/v1/sessions/* routes
       return 410 Gone. Retained here as a signpost; detailed paths below are
       stale and will be pruned in a follow-up.
   - name: attendance
     description: >
-      NR/Tagging-scoped attendance with hardcoded AM/PM slots (issue #4).
-      Active-scope gating, bulk upsert, and copy-remarks. One Attendance row
-      per (personnel, date). Writes are gated by Subunit-1 assignment (403;
+      Attendance with hardcoded AM/PM slots, taken against the Nominal Roll
+      currently active for attendance (with its 1:1 tagging applied). Bulk
+      upsert and copy-remarks; writes require the target NR to be the active
+      one (400 otherwise) and are gated by Subunit-1 assignment (403;
       super_admin bypasses; tagging-aware effective sub_unit_1).
+  - name: nominal-rolls
+    description: >
+      Nominal Roll management. Super-admin attendance activation:
+      exactly one NR is active for attendance at a time (auto-switch on
+      activate). The NR confirm/unconfirm workflow is removed.
   - name: subunit-assignments
     description: >
       NR-scoped Subunit-1 attendance access (issue #4 PR 2). Super-admin-only
@@ -92,6 +98,71 @@ tags:
 # =============================================================================
 
 paths:
+
+  # ---------------------------------------------------------------------------
+  # NOMINAL ROLLS — attendance activation
+  # ---------------------------------------------------------------------------
+
+  /nominal-rolls/{nominalRollId}/activate-attendance:
+    post:
+      tags: [nominal-rolls]
+      summary: Mark an NR as the one active for attendance (auto-switch)
+      description: |
+        Super-admin only. Deactivates any other currently-active NR in the
+        same action, then marks this NR active with an audit stamp
+        (`attendance_activated_at`/`_by`). Attendance writes are only
+        permitted against the active NR, with its 1:1 tagging applied.
+      parameters:
+        - name: nominalRollId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string, enum: [super_admin, admin, user] }
+      responses:
+        '200':
+          description: The updated nominal roll (attendance_active = true)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NominalRollResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /nominal-rolls/{nominalRollId}/deactivate-attendance:
+    post:
+      tags: [nominal-rolls]
+      summary: Deactivate attendance for this NR
+      description: |
+        Super-admin only. Clears `attendance_active` (the activation stamp is
+        kept as history). With no active NR, the attendance view shows an
+        inactive message and writes are refused (400).
+      parameters:
+        - name: nominalRollId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string, enum: [super_admin, admin, user] }
+      responses:
+        '200':
+          description: The updated nominal roll (attendance_active = false)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NominalRollResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   # ---------------------------------------------------------------------------
   # AUTH
@@ -2054,6 +2125,26 @@ components:
         details:
           type: object
           additionalProperties: true
+
+    # --- Nominal Roll ---
+
+    NominalRollResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        caa: { type: string, format: date }
+        attendance_active: { type: boolean }
+        attendance_activated_at: { type: string, format: date-time, nullable: true }
+        attendance_activated_by: { type: string, format: uuid, nullable: true }
+        personnel_count: { type: integer }
+        uploaded_at: { type: string, format: date-time }
+        uploaded_by: { type: string, format: uuid }
+        csv_hash: { type: string }
+        original_filename: { type: string, nullable: true }
+        label: { type: string, nullable: true }
+        remarks: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
 
     # --- Tagging (super-admin overlay) ---
 

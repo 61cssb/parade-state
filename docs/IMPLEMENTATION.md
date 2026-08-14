@@ -100,7 +100,7 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 - `tests/integration/test_deferments_api.py` - Deferment CRUD, callup_status transitions, super_admin auth (15 tests)
 - `tests/integration/test_groupings_api.py` - Grouping lifecycle, CRUD operations (18 tests)
 - `tests/integration/test_grouping_exclusions_api.py` - Personnel exclusion management (9 tests)
-- `tests/integration/test_nominal_rolls_api.py` - Nominal Roll lifecycle (confirm/unconfirm/delete, label updates) (18 tests)
+- `tests/integration/test_nominal_rolls_api.py` - Nominal Roll lifecycle (attendance activation auto-switch/deactivate, delete, label updates)
 - `tests/integration/test_personnel_api.py` - Personnel management, search, filtering (12 tests)
 - `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (NR/Tagging-scoped, AM/PM slots)
 - `tests/integration/test_sessions_410.py` - Sessions endpoints return 410 Gone (sessions removed in issue #4)
@@ -201,20 +201,24 @@ async def test_example(client, sample_users, sample_grouping):
 - Historical reporting views that depended on sessions are broken (see issue #4
   "Out of scope") and need separate consideration.
 
-**Attendance Management (✅ Reworked in issue #4 PR 1)**
-- NR/Tagging-scoped attendance: one `Attendance` row per `(personnel, date)`
-  carrying `status_am`/`remarks_am` and `status_pm`/`remarks_pm`.
-- Active-scope gating: a super-admin activates an `AttendanceScope` per NR
-  (NR itself or a Tagging) before attendance can be recorded.
+**Attendance Management (✅ Active-NR model)**
+- Attendance is taken against the one Nominal Roll currently **active for
+  attendance** (`NominalRoll.attendance_active`), with its 1:1 tagging
+  applied: one `Attendance` row per `(personnel, date)` carrying
+  `status_am`/`remarks_am` and `status_pm`/`remarks_pm`.
+- The per-NR `AttendanceScope` table and the NR confirm/unconfirm workflow
+  are **removed** (migration `n4c5d6e7f8a9`): super-admins toggle
+  "Use for Attendance" / "Deactivate Attendance" on the admin Nominal Rolls
+  page (`POST /api/v1/nominal-rolls/{id}/activate-attendance` /
+  `deactivate-attendance`); activating another NR auto-switches. With no
+  active NR the user view shows an inactive message and writes are refused.
 - Bulk upsert endpoint (`PUT /api/v1/attendance/upsert`) with snapshot capture.
 - "Copy Remarks" endpoint (`POST /api/v1/attendance/copy-remarks`): before 12pm
   copies previous day's `remarks_pm` → today's `remarks_am`; after 12pm copies
   today's `remarks_am` → `remarks_pm`.
-- Tagging delete guarded (409) when linked to attendance or set as active scope.
+- Tagging delete guarded (409) when its NR has attendance rows.
 - Attendance status enum: present, absent, time_off, mc, yet_to_inpro, outpro,
   reporting_sick, late, att_out (default: absent).
-- **Forthcoming (PR 3):** admin attendance page with scope-activation UI and
-  Copy Remarks button.
 
 **Subunit-1 Attendance Access (✅ Reworked in issue #4 PR 2)**
 - New `UserSubunitAssignment(user_id, nominal_roll_id, sub_unit_1)` model —
@@ -222,7 +226,7 @@ async def test_example(client, sample_users, sample_grouping):
 - Server-enforced 403 on `PUT /api/v1/attendance/upsert` and
   `POST /api/v1/attendance/copy-remarks` when the caller lacks an assignment
   for a target personnel's effective sub_unit_1. Effective sub_unit_1 follows
-  the active Tagging overlay's `to_sub_unit_1` (tagging-aware), falling back
+  the NR's tagging overlay's `to_sub_unit_1` (tagging-aware), falling back
   to the personnel's canonical `sub_unit_1`.
 - `super_admin` bypasses entirely; **deny-by-default** (no assignments = 403).
 - Super-admin CRUD API:
@@ -232,18 +236,24 @@ async def test_example(client, sample_users, sample_grouping):
   `GET .../users/{user_id}/subunit-assignments`.
 - Migration `k1f2a3b4c5d6`. 332 tests passing.
 
-**Attendance Admin UI (✅ Complete in issue #4 PR 3)**
-- New super-admin page at `/admin/attendance`: NR/date/subunit-1 selectors,
-  inline scope-activation control (NR or a Tagging on it), roster editor with
-  AM/PM status + remarks, and a Copy Remarks button (disabled on the NR's
-  first day). Nav link added under the super-admin section.
-- User-facing `/attendance` polished: roster is filtered to the caller's
-  assigned subunits (tagging-aware effective sub_unit_1; super_admin sees all),
-  Copy Remarks button wired up, active-scope banner shown.
+**Attendance Admin UI (✅ Active-NR model)**
+- Super-admin page at `/admin/attendance`: NR/date/subunit-1 selectors and a
+  roster editor with AM/PM status + remarks, plus a Copy Remarks button
+  (disabled on the NR's first day). The scope-activation control is removed —
+  activity is toggled on the Nominal Rolls page; editing is enabled only for
+  the NR active for attendance.
+- Admin Nominal Rolls page: the active-for-attendance row is highlighted
+  (green) with an "Active for attendance" badge; super-admins see
+  "Use for Attendance" (auto-switch) / "Deactivate Attendance" buttons. The
+  status column, filter, and Confirm/Unconfirm buttons are removed;
+  "Create Grouping" is available on every row.
+- User-facing `/attendance`: defaults to the active NR; roster is filtered to
+  the caller's assigned subunits (tagging-aware effective sub_unit_1;
+  super_admin sees all) and shows the tagging overlay (yellow rows). With no
+  active NR it shows an inactive message instead of the marking table.
 - Copy Remarks UX: before noon → previous day's PM remarks into today's AM;
   after noon → today's AM into PM; client disables the AM copy on the NR's
   first day (no prior attendance).
-- 336 tests passing.
 
 **Personnel Management (✅ Session 1 Complete)**
 - Grouping-based personnel listing with filtering
