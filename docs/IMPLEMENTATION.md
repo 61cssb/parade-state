@@ -232,6 +232,19 @@ async def test_example(client, sample_users, sample_deployment):
   `GET .../users/{user_id}/subunit-assignments`.
 - Migration `k1f2a3b4c5d6`. 332 tests passing.
 
+**Attendance Admin UI (✅ Complete in issue #4 PR 3)**
+- New super-admin page at `/admin/attendance`: NR/date/subunit-1 selectors,
+  inline scope-activation control (NR or a Tagging on it), roster editor with
+  AM/PM status + remarks, and a Copy Remarks button (disabled on the NR's
+  first day). Nav link added under the super-admin section.
+- User-facing `/attendance` polished: roster is filtered to the caller's
+  assigned subunits (tagging-aware effective sub_unit_1; super_admin sees all),
+  Copy Remarks button wired up, active-scope banner shown.
+- Copy Remarks UX: before noon → previous day's PM remarks into today's AM;
+  after noon → today's AM into PM; client disables the AM copy on the NR's
+  first day (no prior attendance).
+- 336 tests passing.
+
 **Personnel Management (✅ Session 1 Complete)**
 - Deployment-based personnel listing with filtering
 - Personnel detail view with deployment context
