@@ -27,8 +27,8 @@ The personnel branch currently manages battalion parade state through a manual m
 ### 1.2 Core Entity Hierarchy
 
 ```
-Nominal Roll (CAA-pinned, CSV-sourced, immutable)
- ├── Tagging (named overlay of person → subunit remaps; never mutates the NR)
+Nominal Roll (CAA-pinned, CSV-sourced, read-only)
+ ├── Tagging (1:1 with NR; the overlay of person → subunit remaps; never mutates the NR)
  └── Attendance Scope (1:1 with NR; the active NR-or-Tagging scope)
       └── Attendance (one row per personnel/day; carries AM and PM status + remarks)
 
@@ -37,8 +37,8 @@ Grouping (remaps personnel unit+subunit; has date+time validity range) —
 ```
 
 **Key Concepts:**
-- **Nominal Roll**: Base source of truth, uploaded from CSV, pinned by CAA date, immutable after confirmation
-- **Tagging**: A named overlay of person → subunit remaps on a single NR; never mutates the NR; consumed by attendance to render a remapped structure
+- **Nominal Roll**: Base source of truth, uploaded from CSV, pinned by CAA date, read-only — unit/subunit edits are recorded on the NR's Tagging
+- **Tagging**: 1:1 with an NR; the overlay of person → subunit remaps; never mutates the NR; consumed by attendance / groupings / the NR browser to render the effective structure
 - **Attendance Scope**: 1:1 with an NR; the active scope (NR itself or a Tagging) that attendance is taken against. A super-admin must activate a scope before attendance can be recorded.
 - **Attendance**: One row per `(personnel, date)`, carrying `status_am`/`remarks_am` and `status_pm`/`remarks_pm` (statuses from the nine-value operational enum). AM and PM are hardcoded — there is no longer a user-managed Session model.
 - **Grouping**: Based on a nominal roll, remaps personnel assignments, valid for date+time range. Retained for overrides/exclusions/notes but no longer anchors attendance.
@@ -92,6 +92,17 @@ Nominal Roll
 - Status transition: draft → confirmed → archived (one-way)
 - Raw CSV stored immutably in csv_uploads (append-only; SHA-256 hash recorded)
 - Parsed personnel in personnel_snapshots: required columns as typed fields; all others in extra_fields JSON
+- **Read-only after ingestion** — unit/subunit edits are recorded on the NR's 1:1 Tagging, never on personnel rows
+
+**CSV → NR processing flow (app-side):**
+1. `POST /api/v1/csv/upload` — stores raw bytes in `CsvUpload` (SHA-256 dedup)
+2. `POST /api/v1/csv/{upload_id}/process` — parses the stored upload (CAA date
+   from the `caaYYMMDD` filename token) and inserts NominalRoll +
+   ColumnMetadata + Personnel + an auto-created empty Tagging; links the
+   upload via `CsvUpload.nominal_roll_id`. Optional
+   `source_nominal_roll_id` copies the source NR's tagging entries across
+   by `short_id` matching instead of starting empty (unmatched source
+   personnel are surfaced in the response).
 
 ### 2.2 Grouping
 
@@ -311,17 +322,22 @@ Deferment
   scoping to be tightened in a later phase.
 - See §4.6 for the callup_status transition rule driven by `status` changes.
 
-### 3.4 Tagging Overlay
+### 3.4 Tagging Overlay (1:1 with Nominal Roll)
 
 #### 3.4.1 Tagging
 
-**A named overlay of person → subunit remappings on a single nominal roll.**
+**The single overlay of person → subunit remappings on a Nominal Roll — strictly 1:1.**
+
+CSV-sourced NRs are read-only: all unit/subunit edits land on the NR's
+Tagging as TaggingEntry rows. A Tagging is auto-created (empty) on NR
+ingestion; downstream views overlay `to_*` values on top of the canonical
+personnel rows.
 
 ```
 Tagging
 ├── id: UUID (PK)
-├── label: str (globally unique; user-specified)
-├── nominal_roll_id: UUID (FK NominalRoll, on_delete=CASCADE)
+├── label: str (nullable; informational — the NR identity is the natural key)
+├── nominal_roll_id: UUID (FK NominalRoll, on_delete=CASCADE; UNIQUE — 1:1)
 ├── remarks: text (nullable)
 ├── created_at: datetime
 ├── created_by: UUID (FK User)
@@ -330,13 +346,14 @@ Tagging
 ```
 
 **Constraints:**
-- `label` is **globally unique** (server-enforced — 409 on duplicate).
-- Linked to exactly one NominalRoll; deleting the NR cascades to its taggings.
+- UNIQUE(nominal_roll_id) — exactly one tagging per NR (server-enforced).
+- `label` is optional and no longer globally unique.
+- Deleting the NR cascades to its tagging.
 - Visible to **super_admin only** (admin role gets 403).
 - **Overlay semantics:** creating, editing, or deleting a Tagging must not
   mutate the underlying NR's personnel or their canonical subunit. Downstream
-  consumers (attendance / groupings, issues #4/#5) read the remapped structure
-  from the tagging without modifying the NR.
+  consumers (attendance / groupings / the NR browser) read the remapped
+  structure from the tagging without modifying the NR.
 
 #### 3.4.2 TaggingEntry
 
@@ -365,23 +382,37 @@ TaggingEntry
 - `from_*` is optional. When omitted at create/edit time, the server
   snapshots the linked personnel's canonical subunit (mirrors Deferment's
   `rank_name`/`sub_unit` snapshot pattern).
-- On clone, `from_*` is re-snapshotted from the **target NR** personnel (the
-  source NR's subunit layout may differ).
+- On merge/import, `from_*` is re-snapshotted from the **target NR** personnel
+  (the source NR's subunit layout may differ).
 
-#### 3.4.3 Clone Semantics
+#### 3.4.3 Merge Semantics (clone endpoint)
 
-`POST /api/v1/taggings/{id}/clone` clones a tagging to a different NR:
+`POST /api/v1/taggings/{id}/clone` merges the source tagging's entries into
+the target NR's **existing** tagging (under 1:1 the target always has one):
 
 - For each source TaggingEntry, look up the target-NR Personnel row by
   `Personnel.short_id` (the cross-roll person identifier — `Personnel.id` is
   per-roll and will not match across NRs).
-- Matched: a new TaggingEntry is created on the target NR pointing at the
-  target-NR personnel row, preserving the source's `to_*` and re-snapshotting
-  `from_*` from the target personnel.
+- Matched: a new TaggingEntry is appended to the target tagging pointing at
+  the target-NR personnel row, preserving the source's `to_*` and
+  re-snapshotting `from_*` from the target personnel.
+- Personnel already on the target tagging are **skipped** (no clobber).
 - Unmatched (source `short_id` not present on target NR): skipped and
   surfaced in the response as `{short_id, name}`.
 - Target NR must differ from the source NR (400 otherwise).
-- Always creates a new tagging; up to the user to delete the old one.
+
+#### 3.4.4 Read-Only NR + PATCH Redirect
+
+The NR personnel row is immutable for unit/subunit fields:
+
+- `PATCH /api/v1/personnel/{id}` with `unit`/`sub_unit_1/2/3` upserts a
+  TaggingEntry on the personnel's NR tagging (existing entry values are
+  merged — unmentioned fields preserved). The personnel row is not mutated.
+- `PATCH` with identity fields (`rank`, `name`) → 409 (NR is read-only).
+- `PATCH` with `status` alone → still mutates the personnel row.
+- The response returns **effective** values (`to_*` if tagged, else canonical).
+- The public NR browser (`/nominal-roll`) shows effective values with a
+  yellow row background (`.changed-row`) for tagged personnel.
 
 ### 3.5 Attendance Tracking
 

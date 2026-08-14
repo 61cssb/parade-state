@@ -83,7 +83,9 @@ tags:
   - name: deferments
     description: Personnel deferments — super-admin only; drives callup_status
   - name: taggings
-    description: Tagging overlays — super-admin only; person→subunit remappings on a Nominal Roll
+    description: Tagging overlays — super-admin only; person→subunit remappings on a Nominal Roll (1:1 with the NR)
+  - name: csv
+    description: CSV upload and processing into Nominal Rolls
 
 # =============================================================================
 # PATHS
@@ -1690,12 +1692,14 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
     post:
       tags: [taggings]
-      summary: Create a tagging
+      summary: Create a tagging (backfill only)
       description: |
-        Super-admin only. Creates a tagging with optional initial entries. For
+        Super-admin only. Under the 1:1 model taggings are auto-created on NR
+        ingestion — this endpoint exists to backfill NRs that predate the
+        auto-creation flow. Returns 409 if the NR already has a tagging. For
         each entry, if `from_*` is omitted, the server snapshots the linked
-        personnel's canonical subunit. Duplicate label → 409. Personnel must
-        belong to the tagging's nominal roll (400 otherwise).
+        personnel's canonical subunit. Personnel must belong to the tagging's
+        nominal roll (400 otherwise).
       parameters:
         - name: user_id
           in: query
@@ -1711,9 +1715,9 @@ paths:
           application/json:
             schema:
               type: object
-              required: [label, nominal_roll_id]
+              required: [nominal_roll_id]
               properties:
-                label: { type: string, maxLength: 100 }
+                label: { type: string, maxLength: 100, nullable: true }
                 nominal_roll_id: { type: string, format: uuid }
                 remarks: { type: string }
                 entries:
@@ -1729,7 +1733,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: A tagging with this label already exists }
+        '409': { description: Nominal roll already has a tagging (1:1) }
 
   /taggings/{taggingId}:
     get:
@@ -1783,7 +1787,7 @@ paths:
             schema:
               type: object
               properties:
-                label: { type: string, minLength: 1, maxLength: 100 }
+                label: { type: string, maxLength: 100, nullable: true }
                 remarks: { type: string, nullable: true }
                 entries:
                   type: array
@@ -1798,7 +1802,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: A tagging with this label already exists }
+        '409': { description: Constraint violation }
     delete:
       tags: [taggings]
       summary: Delete a tagging
@@ -1831,13 +1835,16 @@ paths:
   /taggings/{taggingId}/clone:
     post:
       tags: [taggings]
-      summary: Clone a tagging to another nominal roll
+      summary: Merge a tagging's entries into a target NR's tagging
       description: |
-        Super-admin only. For each source entry, look up the target-NR
-        Personnel row by `short_id` (the cross-roll person identifier).
-        Matched personnel get a new entry on the target NR (with `from_*`
-        re-snapshotted from the target personnel); unmatched source personnel
-        are surfaced in the response. Target NR must differ from source.
+        Super-admin only. Under the 1:1 model the target NR already has a
+        tagging — this merges the source's entries into it. For each source
+        entry, look up the target-NR Personnel row by `short_id` (the
+        cross-roll person identifier). Matched personnel get a new entry on
+        the target tagging (with `from_*` re-snapshotted from the target
+        personnel); personnel already on the target tagging are skipped (no
+        clobber); unmatched source personnel are surfaced in the response.
+        Target NR must differ from source.
       parameters:
         - name: taggingId
           in: path
@@ -1857,13 +1864,12 @@ paths:
           application/json:
             schema:
               type: object
-              required: [target_nominal_roll_id, label]
+              required: [target_nominal_roll_id]
               properties:
                 target_nominal_roll_id: { type: string, format: uuid }
-                label: { type: string, maxLength: 100 }
       responses:
         '200':
-          description: Clone result
+          description: Merge result
           content:
             application/json:
               schema:
@@ -1882,7 +1888,64 @@ paths:
         '400': { description: Target NR same as source, or invalid }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: A tagging with this label already exists }
+        '409': { description: Constraint violation }
+
+  /csv/{uploadId}/process:
+    post:
+      tags: [csv]
+      summary: Process a stored CSV upload into a Nominal Roll
+      description: |
+        Admin/super-admin only. Reads the stored CsvUpload's raw content,
+        parses the CAA date from the `caaYYMMDD` token in the original
+        filename, and inserts a full NR pipeline: NominalRoll +
+        ColumnMetadata + Personnel + an auto-created empty 1:1 Tagging. The
+        upload is linked via `CsvUpload.nominal_roll_id` (already-processed
+        uploads → 409; duplicate CAA → 409). Optional
+        `source_nominal_roll_id` copies the source NR's tagging entries
+        across by `short_id` matching instead of starting empty; unmatched
+        source personnel are surfaced in the response.
+      parameters:
+        - name: uploadId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string, enum: [super_admin, admin, user] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [created_by]
+              properties:
+                created_by: { type: string, format: uuid }
+                source_nominal_roll_id: { type: string, format: uuid, nullable: true }
+      responses:
+        '201':
+          description: Processing result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nominal_roll_id: { type: string, format: uuid }
+                  personnel_inserted: { type: integer }
+                  rows_skipped: { type: integer }
+                  tagging_entries_imported: { type: integer }
+                  unmatched:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        short_id: { type: string }
+                        name: { type: string, nullable: true }
+        '400': { description: Unparseable filename or column count mismatch }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Upload already processed, or CAA already exists }
 
 # =============================================================================
 # COMPONENTS

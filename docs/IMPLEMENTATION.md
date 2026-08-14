@@ -271,26 +271,39 @@ async def test_example(client, sample_users, sample_grouping):
 - **Endpoints:** 5 deferment endpoints under `/api/v1/deferments`
 - **Tests:** 15 behavioral tests
 
-**Taggings (✅ Super-admin MVP)**
-- Tagging overlay CRUD: a named overlay of person → subunit remappings on a
-  single Nominal Roll. Taggings never mutate the underlying NR's personnel
-  or subunit data — downstream views (attendance / groupings, issues #4/#5)
-  consume the remapped structure from here.
-- Two entities: `Tagging` (globally-unique label, NR FK CASCADE, audit fields)
-  and `TaggingEntry` (one remap per person per tagging; 4-string `from_*` /
-  `to_*` subunit tuple mirroring `GroupingPersonnelOverride`).
+**Taggings (✅ 1:1 with Nominal Roll — model simplification)**
+- Tagging overlay: **exactly one Tagging per Nominal Roll** (DB unique
+  constraint on `nominal_roll_id`, mirroring `AttendanceScope`). Auto-created
+  (empty) on NR ingestion; all unit/subunit edits land on the Tagging as
+  `TaggingEntry` rows — the NR itself is read-only.
+- Two entities: `Tagging` (optional informational label, NR FK CASCADE,
+  audit fields) and `TaggingEntry` (one remap per person per tagging;
+  4-string `from_*` / `to_*` subunit tuple mirroring
+  `GroupingPersonnelOverride`).
 - `from_*` auto-snapshotted from the linked personnel when omitted at
   create/edit time.
-- Clone-to-NR: `POST /api/v1/taggings/{id}/clone` matches source personnel
-  to target-NR rows by `Personnel.short_id` (the cross-roll person
-  identifier); unmatched source personnel are surfaced in the response.
-- Label uniqueness is server-enforced (409 on duplicate). Personnel must
-  belong to the parent tagging's NR (400 on cross-NR contamination).
-- Super-admin-only: API and admin UI enforce `role == "super_admin"`.
-- Admin UI under `/admin/taggings` (nav link gated by super_admin role) with
-  create/edit (per-person remap picker) and clone modals.
-- **Endpoints:** 6 tagging endpoints under `/api/v1/taggings`
-- **Tests:** 20 behavioral tests
+- `PATCH /api/v1/personnel/{id}` redirects unit/subunit edits to a
+  TaggingEntry upsert (merged with existing entry values); identity fields
+  (rank/name) are rejected with 409; `status` still mutates the personnel
+  row; the response returns effective (`to_*`-overlaid) values.
+- Merge-into-target: `POST /api/v1/taggings/{id}/clone` merges the source's
+  entries into the target NR's existing tagging by `Personnel.short_id`;
+  already-present personnel are skipped (no clobber); unmatched source
+  personnel are surfaced in the response.
+- `POST /api/v1/csv/{upload_id}/process` turns a stored CSV upload into a
+  full NR pipeline (NR + Personnel + ColumnMetadata + auto-tagging), with an
+  optional "import taggings from another NR" source.
+- The public NR browser (`/nominal-roll`) overlays effective unit/subunit
+  values with a yellow row background (`.changed-row`) for tagged personnel.
+- Personnel must belong to the parent tagging's NR (400 on cross-NR
+  contamination). Super-admin-only: API and admin UI enforce
+  `role == "super_admin"`.
+- Admin UI under `/admin/taggings` (nav link gated by super_admin role):
+  NR dropdown → entries-only view (from→to) with edit (per-person remap
+  picker) and import-from-NR modals.
+- **Endpoints:** 6 tagging endpoints under `/api/v1/taggings` + 1 CSV
+  process endpoint under `/api/v1/csv/{id}/process`
+- **Tests:** tagging (24) + personnel remap/409 + CSV process (7)
 
 **Total API Endpoints:** 63 fully implemented and tested endpoints ✨ UPDATED
 
