@@ -129,7 +129,7 @@ async def create_grouping(
             detail="Only admins and super admins can create groupings",
         )
 
-    # Verify nominal roll exists and is confirmed
+    # Verify nominal roll exists
     result = await db.execute(
         select(NominalRoll).where(NominalRoll.id == grouping_data.nominal_roll_id)
     )
@@ -138,14 +138,6 @@ async def create_grouping(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Nominal roll {grouping_data.nominal_roll_id} not found",
-        )
-    if nominal_roll.status != "confirmed":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Cannot create grouping from nominal roll in '{nominal_roll.status}' status. "
-                "Nominal roll must be confirmed."
-            ),
         )
 
     # Validate date range — required for standard mode, optional for adhoc/vehicle

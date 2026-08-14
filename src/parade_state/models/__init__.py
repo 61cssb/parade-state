@@ -11,7 +11,6 @@ from .attendance import (
     ATTENDANCE_STATUSES,
     PRESENT_LIKE_STATUSES,
     Attendance,
-    AttendanceScope,
 )
 from .audit import AuditLog
 from .auth_session import UserSession
@@ -40,7 +39,6 @@ __all__ = [
     "ATTENDANCE_STATUSES",
     "PRESENT_LIKE_STATUSES",
     "Attendance",
-    "AttendanceScope",
     "AuditLog",
     "UserSession",
     "ColumnMapping",

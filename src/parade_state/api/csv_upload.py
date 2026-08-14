@@ -381,7 +381,6 @@ async def process_csv_upload(
     nominal_roll = NominalRoll(
         caa=caa_date,
         csv_hash=upload.sha256_hash,
-        status="draft",
         personnel_count=0,
         uploaded_by=created_by,
         notes=f"Processed from CSV upload {upload.original_filename}",

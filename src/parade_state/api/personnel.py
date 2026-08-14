@@ -822,7 +822,6 @@ async def get_personnel_attendance_history(
             PersonnelAttendanceHistoryItem(
                 id=record.id,
                 nominal_roll_id=record.nominal_roll_id,
-                tagging_id=record.tagging_id,
                 date=record.date,
                 status_am=record.status_am,
                 remarks_am=record.remarks_am,
