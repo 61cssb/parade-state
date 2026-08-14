@@ -1,11 +1,11 @@
 """Tagging overlay models.
 
-A Tagging is an overlay of person → subunit remappings applied on top of a
-Nominal Roll. Taggings never mutate the underlying NR's personnel or subunit
-data; they are consumed downstream (attendance / groupings) to render the
-remapped structure. A tagging is linked to exactly one nominal roll; cloning
-to another NR creates an independent tagging whose entries point at the
-target NR's personnel rows.
+A Tagging is the single overlay of person → subunit remappings applied on
+top of a Nominal Roll — 1:1 with the NR. Taggings never mutate the
+underlying NR's personnel or subunit data; they are consumed downstream
+(attendance / groupings / the NR browser) to render the effective structure.
+Edits to a CSV-sourced NR's unit/subunit assignments land here as
+TaggingEntry rows; the NR itself stays read-only.
 """
 
 from typing import TYPE_CHECKING
@@ -24,18 +24,21 @@ if TYPE_CHECKING:
 
 
 class Tagging(Base):
-    """A named overlay of person → subunit remappings on a single nominal roll.
+    """The overlay of person → subunit remappings on a Nominal Roll (1:1).
 
-    ``label`` is globally unique (server-enforced) so admins can refer to a
-    tagging unambiguously across NRs. Deleting the NR cascades to its taggings.
+    One Tagging per NR — enforced by a unique constraint on
+    ``nominal_roll_id``. Auto-created on NR ingestion. ``label`` is optional
+    and informational only; the NR identity is the natural key. Deleting the
+    NR cascades to its tagging.
     """
 
     __tablename__ = "taggings"
 
-    label: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    label: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     nominal_roll_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("nominal_rolls.id", ondelete="CASCADE"),
+        unique=True,
         index=True,
     )
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -49,7 +52,7 @@ class Tagging(Base):
     )
 
     # Relationships
-    nominal_roll: Mapped["NominalRoll"] = relationship(back_populates="taggings")
+    nominal_roll: Mapped["NominalRoll"] = relationship(back_populates="tagging")
     entries: Mapped[list["TaggingEntry"]] = relationship(
         back_populates="tagging", cascade="all, delete-orphan"
     )
@@ -60,6 +63,10 @@ class Tagging(Base):
     updater: Mapped["User | None"] = relationship(
         foreign_keys=[updated_by],
         primaryjoin="Tagging.updated_by == User.id",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("nominal_roll_id", name="uq_taggings_nominal_roll_id"),
     )
 
     def __repr__(self) -> str:

@@ -64,8 +64,8 @@ class NominalRoll(Base):
     groupings: Mapped[list["Grouping"]] = relationship(
         back_populates="nominal_roll", cascade="all, delete-orphan"
     )
-    taggings: Mapped[list["Tagging"]] = relationship(
-        back_populates="nominal_roll", cascade="all, delete-orphan"
+    tagging: Mapped["Tagging | None"] = relationship(
+        back_populates="nominal_roll", cascade="all, delete-orphan", uselist=False
     )
     attendance_scope: Mapped["AttendanceScope | None"] = relationship(
         back_populates="nominal_roll", cascade="all, delete-orphan", uselist=False

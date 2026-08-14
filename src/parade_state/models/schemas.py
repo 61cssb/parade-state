@@ -605,6 +605,36 @@ class CsvUploadListItem(BaseModel):
         from_attributes = True
 
 
+class CsvUploadProcessRequest(BaseModel):
+    """Schema for processing a stored CsvUpload into a NominalRoll.
+
+    ``source_nominal_roll_id`` (optional): when set, copy the source NR's
+    tagging entries into the new NR's auto-created tagging by matching
+    personnel across NRs on ``short_id``. Personnel in the source tagging
+    with no short_id match in the new NR are surfaced in the response.
+    """
+
+    source_nominal_roll_id: str | None = Field(None, min_length=1)
+    created_by: str = Field(..., min_length=1)
+
+
+class CsvUploadProcessUnmatchedItem(BaseModel):
+    """Schema for an unmatched personnel row surfaced during tagging import."""
+
+    short_id: str
+    name: str | None = None
+
+
+class CsvUploadProcessResponse(BaseModel):
+    """Schema for the process response — created NR plus ingestion diagnostics."""
+
+    nominal_roll_id: str
+    personnel_inserted: int
+    rows_skipped: int
+    tagging_entries_imported: int = 0
+    unmatched: list[CsvUploadProcessUnmatchedItem] = []
+
+
 # ============================================================================
 # Nominal Roll Schemas
 # ============================================================================
@@ -811,9 +841,13 @@ class TaggingEntryResponse(BaseModel):
 
 
 class TaggingCreate(BaseModel):
-    """Schema for creating a tagging."""
+    """Schema for creating a tagging.
 
-    label: str = Field(..., min_length=1, max_length=100)
+    Under the 1:1 model, taggings are auto-created on NR ingestion and this
+    schema is rarely used directly. ``label`` is optional and informational.
+    """
+
+    label: str | None = Field(None, max_length=100)
     nominal_roll_id: str = Field(..., min_length=1)
     remarks: str | None = None
     entries: list[TaggingEntryInput] = Field(default_factory=list)
@@ -827,7 +861,7 @@ class TaggingUpdate(BaseModel):
     label/remarks.
     """
 
-    label: str | None = Field(None, min_length=1, max_length=100)
+    label: str | None = Field(None, max_length=100)
     remarks: str | None = None
     entries: list[TaggingEntryInput] | None = None
 
@@ -836,7 +870,7 @@ class TaggingListItem(BaseModel):
     """Schema for a tagging summary in list responses (no entries)."""
 
     id: str
-    label: str
+    label: str | None = None
     nominal_roll_id: str
     remarks: str | None = None
     entry_count: int = 0
@@ -853,7 +887,7 @@ class TaggingResponse(BaseModel):
     """Schema for a single tagging detail response (with entries)."""
 
     id: str
-    label: str
+    label: str | None = None
     nominal_roll_id: str
     remarks: str | None = None
     entries: list[TaggingEntryResponse] = []
@@ -867,10 +901,9 @@ class TaggingResponse(BaseModel):
 
 
 class TaggingCloneCreate(BaseModel):
-    """Schema for cloning a tagging to another nominal roll."""
+    """Schema for merging a source tagging's entries into a target NR's tagging."""
 
     target_nominal_roll_id: str = Field(..., min_length=1)
-    label: str = Field(..., min_length=1, max_length=100)
 
 
 class TaggingCloneUnmatchedItem(BaseModel):
@@ -881,7 +914,7 @@ class TaggingCloneUnmatchedItem(BaseModel):
 
 
 class TaggingCloneResponse(BaseModel):
-    """Schema for clone response — new tagging plus clone diagnostics."""
+    """Schema for clone response — target tagging plus clone diagnostics."""
 
     tagging: TaggingResponse
     source_count: int

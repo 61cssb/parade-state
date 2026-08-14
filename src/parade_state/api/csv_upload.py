@@ -8,10 +8,36 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from parade_state.db import get_db_session
-from parade_state.models import AuditLog, CsvUpload, User
-from parade_state.models.schemas import CsvUploadListItem, CsvUploadResponse
+from parade_state.models import (
+    AuditLog,
+    ColumnMetadata,
+    CsvUpload,
+    NominalRoll,
+    Personnel,
+    Tagging,
+    User,
+)
+from parade_state.models.schemas import (
+    CsvUploadListItem,
+    CsvUploadProcessRequest,
+    CsvUploadProcessResponse,
+    CsvUploadProcessUnmatchedItem,
+    CsvUploadResponse,
+)
+from parade_state.utils import ranks, utc_dt
+from parade_state.utils.csv_constants import (
+    CANONICAL_MAP,
+    EXTRA_KEY_FOR_INDEX,
+    INFERRED_TYPES,
+    coerce_int,
+    is_integer_column,
+    parse_caa_date,
+    snake,
+)
+from parade_state.api.tagging import _load_nr_tagging, copy_entries_by_short_id
 
 router = APIRouter()
 
@@ -234,3 +260,282 @@ async def list_csv_uploads(
         )
         for row in rows
     ]
+
+
+# ----------------------------------------------------------------------------
+# CSV → Nominal Roll processing
+# ----------------------------------------------------------------------------
+
+
+def _decode_raw(raw_bytes: bytes) -> str:
+    """Decode raw CSV bytes (UTF-8 with Latin-1 fallback)."""
+    try:
+        return raw_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw_bytes.decode("latin-1")
+
+
+def _parse_csv_rows(raw_bytes: bytes) -> tuple[list[str], list[list[str]]]:
+    """Parse raw CSV bytes into (header, data_rows)."""
+    text = _decode_raw(raw_bytes)
+    reader = csv.reader(io.StringIO(text))
+    all_rows = list(reader)
+    if not all_rows:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="CSV file contains no data",
+        )
+    return all_rows[0], all_rows[1:]
+
+
+@router.post(
+    "/{upload_id}/process",
+    response_model=CsvUploadProcessResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def process_csv_upload(
+    upload_id: str,
+    payload: CsvUploadProcessRequest,
+    user_role: str = Query(..., description="User role for authorization"),
+    db: AsyncSession = Depends(get_db_session),
+) -> CsvUploadProcessResponse:
+    """Process a stored CsvUpload into a full NominalRoll pipeline.
+
+    Reads ``CsvUpload.raw_content``, parses CAA date from the original
+    filename, and inserts a NominalRoll + Personnel + ColumnMetadata +
+    auto-created empty Tagging. Links the upload to the new NR via
+    ``CsvUpload.nominal_roll_id``.
+
+    When ``source_nominal_roll_id`` is provided, copies the source NR's
+    tagging entries into the new NR's tagging by ``short_id`` matching.
+    Personnel in the source tagging with no short_id match in the new NR
+    are surfaced in the response.
+
+    Requires admin or super_admin role.
+    """
+    if user_role not in ["admin", "super_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins and super admins can process CSV uploads",
+        )
+
+    # Load the upload.
+    upload = (
+        await db.execute(select(CsvUpload).where(CsvUpload.id == upload_id))
+    ).scalar_one_or_none()
+    if upload is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"CSV upload not found: {upload_id}",
+        )
+    if upload.nominal_roll_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"CSV upload {upload_id} has already been processed into "
+                f"nominal roll {upload.nominal_roll_id}."
+            ),
+        )
+
+    # CAA date from filename.
+    if not upload.original_filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot parse CAA date: upload has no original_filename.",
+        )
+    try:
+        caa_date = parse_caa_date(upload.original_filename)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Cannot parse CAA date from filename "
+                f"{upload.original_filename!r}. Expected a 'caaYYMMDD' token."
+            ),
+        ) from exc
+
+    # Refuse if an NR with this CAA already exists.
+    existing_nr = (
+        await db.execute(select(NominalRoll).where(NominalRoll.caa == caa_date))
+    ).scalar_one_or_none()
+    if existing_nr is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Nominal roll with CAA {caa_date.isoformat()} already exists.",
+        )
+
+    # Parse CSV rows.
+    header, data_rows = _parse_csv_rows(upload.raw_content)
+    if len(header) != len(CANONICAL_MAP):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"CSV header has {len(header)} columns; expected "
+                f"{len(CANONICAL_MAP)} per the canonical mapping."
+            ),
+        )
+
+    created_by = payload.created_by
+
+    # Create the NominalRoll (personnel_count set after Personnel insert).
+    nominal_roll = NominalRoll(
+        caa=caa_date,
+        csv_hash=upload.sha256_hash,
+        status="draft",
+        personnel_count=0,
+        uploaded_by=created_by,
+        notes=f"Processed from CSV upload {upload.original_filename}",
+    )
+    db.add(nominal_roll)
+    await db.flush()
+
+    # Per-roll column metadata.
+    for idx, raw_name, canonical, _ in CANONICAL_MAP:
+        original_label = raw_name if raw_name else "(empty header)"
+        if raw_name == "Remarks":
+            original_label = f"Remarks (column {idx + 1})"
+        db.add(
+            ColumnMetadata(
+                nominal_roll_id=nominal_roll.id,
+                csv_upload_id=upload.id,
+                original_name=original_label,
+                canonical_name=canonical,
+                inferred_type=INFERRED_TYPES.get(raw_name, "string"),
+                is_required=canonical in {"rank", "full_name", "unit"},
+            )
+        )
+
+    # Personnel rows.
+    inserted_personnel = 0
+    skipped_rows: list[dict[str, str | int]] = []
+    for row_num, row in enumerate(data_rows, start=2):
+        if len(row) < len(CANONICAL_MAP):
+            continue  # malformed row (too few columns)
+        core_values: dict[str, str] = {}
+        extra_fields: dict[str, str | int | None] = {}
+        for idx, raw_name, canonical, goes_to_extra in CANONICAL_MAP:
+            value = row[idx].strip()
+            if canonical and not goes_to_extra:
+                core_values[canonical] = value
+            elif goes_to_extra:
+                key = EXTRA_KEY_FOR_INDEX.get(idx, snake(raw_name))
+                if is_integer_column(raw_name):
+                    extra_fields[key] = coerce_int(value)
+                else:
+                    extra_fields[key] = value or None
+
+        rank_value = core_values.get("rank") or ""
+        try:
+            category = ranks.category_for_rank(rank_value)
+        except ValueError:
+            skipped_rows.append(
+                {
+                    "row": row_num,
+                    "rank": rank_value,
+                    "full_name": core_values.get("full_name") or "",
+                }
+            )
+            continue
+
+        db.add(
+            Personnel(
+                nominal_roll_id=nominal_roll.id,
+                rank=rank_value,
+                category=category,
+                full_name=core_values.get("full_name") or "",
+                unit=core_values.get("unit") or "",
+                sub_unit_1=core_values.get("sub_unit_1") or None,
+                sub_unit_2=core_values.get("sub_unit_2") or None,
+                sub_unit_3=core_values.get("sub_unit_3") or None,
+                extra_fields=extra_fields,
+                status="active",
+                created_by=created_by,
+            )
+        )
+        inserted_personnel += 1
+
+    nominal_roll.personnel_count = inserted_personnel
+
+    # Auto-create the 1:1 tagging for this NR.
+    tagging = Tagging(
+        label=f"Tagging for CAA {caa_date.isoformat()}",
+        nominal_roll_id=nominal_roll.id,
+        created_by=created_by,
+    )
+    db.add(tagging)
+    await db.flush()
+
+    # Optional: copy entries from a source NR's tagging.
+    matched_count = 0
+    unmatched: list[CsvUploadProcessUnmatchedItem] = []
+    if payload.source_nominal_roll_id is not None:
+        if payload.source_nominal_roll_id == nominal_roll.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="source_nominal_roll_id must differ from the new nominal roll.",
+            )
+        source_tagging = await _load_nr_tagging(
+            db, payload.source_nominal_roll_id, with_entries=True
+        )
+        if source_tagging is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    "Source nominal roll "
+                    f"{payload.source_nominal_roll_id} has no tagging."
+                ),
+            )
+        # Re-load the new tagging with the entries collection materialized
+        # (db.refresh does not populate relationships; copy_entries_by_short_id
+        # reads .entries which would otherwise lazy-load outside async ctx).
+        tagging = (
+            await db.execute(
+                select(Tagging)
+                .where(Tagging.id == tagging.id)
+                .options(selectinload(Tagging.entries))
+            )
+        ).scalar_one()
+        matched_count, raw_unmatched = await copy_entries_by_short_id(
+            db, source_tagging, tagging, nominal_roll.id
+        )
+        unmatched = [
+            CsvUploadProcessUnmatchedItem(short_id=u.short_id, name=u.name)
+            for u in raw_unmatched
+        ]
+        if matched_count:
+            tagging.updated_at = utc_dt.ensure_naive(utc_dt.utcnow())
+            tagging.updated_by = created_by
+
+    # Link the upload to the new NR.
+    upload.nominal_roll_id = nominal_roll.id
+
+    audit_log = AuditLog(
+        user_id=created_by,
+        entity_type="nominal_roll",
+        entity_id=nominal_roll.id,
+        action="create",
+        description=(
+            f"Processed CSV upload {upload.original_filename!r} into nominal "
+            f"roll CAA {caa_date.isoformat()}: {inserted_personnel} personnel "
+            f"inserted, {len(skipped_rows)} skipped, "
+            f"{matched_count} tagging entries imported."
+        ),
+    )
+    db.add(audit_log)
+
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="CSV processing failed (constraint violation).",
+        ) from exc
+
+    return CsvUploadProcessResponse(
+        nominal_roll_id=nominal_roll.id,
+        personnel_inserted=inserted_personnel,
+        rows_skipped=len(skipped_rows),
+        tagging_entries_imported=matched_count,
+        unmatched=unmatched,
+    )
