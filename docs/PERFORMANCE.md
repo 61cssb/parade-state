@@ -44,7 +44,7 @@ personnel_list = result.scalars().all()
 ❌ **Don't query in loops:**
 ```python
 # BAD: N+1 query problem
-sessions = await db.execute(select(Session).where(Session.deployment_id == deployment_id))
+sessions = await db.execute(select(Session).where(Session.grouping_id == grouping_id))
 for session in sessions.scalars():
     # Separate query for each session
     attendance = await db.execute(
@@ -58,7 +58,7 @@ for session in sessions.scalars():
 result = await db.execute(
     select(Session, AttendanceRecord)
     .join(AttendanceRecord, AttendanceRecord.session_id == Session.id)
-    .where(Session.deployment_id == deployment_id)
+    .where(Session.grouping_id == grouping_id)
 )
 ```
 
@@ -232,11 +232,11 @@ def get_access_level(role: str) -> AccessLevel:
     """Cache access level lookups."""
     return _get_access_level_from_db(role)
 
-# For deployment status (changes infrequently)
+# For grouping status (changes infrequently)
 @lru_cache(maxsize=32)
-def get_deployment_status(deployment_id: str) -> str:
-    """Cache deployment status lookups."""
-    return _get_status_from_db(deployment_id)
+def get_grouping_status(grouping_id: str) -> str:
+    """Cache grouping status lookups."""
+    return _get_status_from_db(grouping_id)
 ```
 
 ---

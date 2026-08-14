@@ -4,7 +4,7 @@
 **Status:** For review  
 **Last updated:** 2026-07-02  
 **Changelog v0.4:** Tech stack pinned (FastAPI + NiceGUI + SQLAlchemy + APScheduler + Railway); deployment section updated for Railway; APScheduler job store model specified; mobile attendance UI confirmed as static HTML/JS for MVP; Vue SFC refactor deferred; Flask removed.  
-**Amended 2026-07-02:** §8 Session — session creation restricted to `active` deployments (was: draft or active); session status lifecycle rewritten to reflect individual close/reopen (was: cascade-only via deployment). §9.1 — `excused` added to status enum; closed/finalized session read-only rule noted. See [SPECIFICATION.md](SPECIFICATION.md) for the authoritative current behavior.
+**Amended 2026-07-02:** §8 Session — session creation restricted to `active` groupings (was: draft or active); session status lifecycle rewritten to reflect individual close/reopen (was: cascade-only via grouping). §9.1 — `excused` added to status enum; closed/finalized session read-only rule noted. See [SPECIFICATION.md](SPECIFICATION.md) for the authoritative current behavior.
 
 > ⚠️ **SUPERSEDED — personnel identity sections.** This is a historical document.
 > References to `pers_no` as an imported/used identifier are **obsolete**. `pers_no` is no
@@ -17,7 +17,7 @@
 
 ## 1. Problem Statement
 
-The personnel branch currently manages battalion parade state through a manual mapreduce process — aggregating attendance from subunits by hand. This consumes most of a working day during parade state periods. This system replaces that process with a structured, access-controlled, deployment-aware web application suitable for field use.
+The personnel branch currently manages battalion parade state through a manual mapreduce process — aggregating attendance from subunits by hand. This consumes most of a working day during parade state periods. This system replaces that process with a structured, access-controlled, grouping-aware web application suitable for field use.
 
 ---
 
@@ -25,15 +25,15 @@ The personnel branch currently manages battalion parade state through a manual m
 
 ```
 Nominal Roll (CAA-pinned, CSV-sourced, immutable)
- └── Deployment (remaps personnel unit+subunit; has a date+time validity range)
-      └── Session (AM or PM, admin-opened, linked to a deployment)
-           └── Attendance Record (per-personnel per-session; notes write-back to deployment)
+ └── Grouping (remaps personnel unit+subunit; has a date+time validity range)
+      └── Session (AM or PM, admin-opened, linked to a grouping)
+           └── Attendance Record (per-personnel per-session; notes write-back to grouping)
 ```
 
 - **Nominal Roll** is the base source of truth. Uploaded from CSV, pinned by CAA date. Immutable after confirmation. Identified by content hash in addition to CAA for integrity verification.
-- **Deployment** is based on a specific nominal roll. Remaps any subset of personnel to different unit+subunit assignments. Valid for a specified date+time range. Only one deployment is active at any point in time.
-- **Session** is an AM or PM attendance window, explicitly opened by an admin, associated with a specific deployment. May be created in advance.
-- **Attendance Record** is one record per personnel per session. Carries status, remarks (session-scoped), a notes snapshot (deployment-scoped, written at session open and each attendance write), and a unit+subunit snapshot (deployment assignment at time of write, subject to the validity-range rule).
+- **Grouping** is based on a specific nominal roll. Remaps any subset of personnel to different unit+subunit assignments. Valid for a specified date+time range. Only one grouping is active at any point in time.
+- **Session** is an AM or PM attendance window, explicitly opened by an admin, associated with a specific grouping. May be created in advance.
+- **Attendance Record** is one record per personnel per session. Carries status, remarks (session-scoped), a notes snapshot (grouping-scoped, written at session open and each attendance write), and a unit+subunit snapshot (grouping assignment at time of write, subject to the validity-range rule).
 
 ---
 
@@ -42,12 +42,12 @@ Nominal Roll (CAA-pinned, CSV-sourced, immutable)
 **In scope (v1):**
 - CSV ingestion with CAA versioning, column mapping, diff detection
 - Required-column config in app config; column mapping table (global, admin-editable)
-- Deployment management: create, clone (same-roll), migrate (cross-roll), scheduled activation
+- Grouping management: create, clone (same-roll), migrate (cross-roll), scheduled activation
 - Session management: admin-opens, advance creation, notes auto-snapshot on open
-- Attendance taking: AM/PM, present/absent, Notes (deployment-scoped), Remarks (session-scoped)
+- Attendance taking: AM/PM, present/absent, Notes (grouping-scoped), Remarks (session-scoped)
 - Row access control (access level + subunit scope) and column sensitivity control
 - Parade state table view scoped to user access; inline editing
-- Admin UI: enums, users, column sensitivity, column mapping, deployment/session management (NiceGUI)
+- Admin UI: enums, users, column sensitivity, column mapping, grouping/session management (NiceGUI)
 - Mobile-friendly static HTML/JS attendance frontend
 - Service worker + IndexedDB read-only cache (24hr TTL, stale indicator)
 - SSE stale-detection signal on attendance view
@@ -66,16 +66,16 @@ Nominal Roll (CAA-pinned, CSV-sourced, immutable)
 Bootstrapped via `SUPER_ADMIN_EMAIL` env var. Auto-granted on first Google sign-in. Cannot be revoked via UI.
 
 ### 4.2 App Admin
-Granted by super-admin. Full read/write access to all entities, all columns, all deployments. Access to audit log. All structural operations (CSV upload, deployment management, session creation, clone/migrate, column mapping, user management) are admin-only.
+Granted by super-admin. Full read/write access to all entities, all columns, all groupings. Access to audit log. All structural operations (CSV upload, grouping management, session creation, clone/migrate, column mapping, user management) are admin-only.
 
 ### 4.3 Scoped User
 Google-authenticated. Has:
 - **Access level:** single admin-assigned label from the ordered access level vocabulary. Determines row visibility (which personnel they see) and column visibility (which columns they see).
-- **Subunit scope:** one or more (deployment, subunit) pairs. A user sees personnel rows that fall within their scoped subunit(s) for a given deployment.
+- **Subunit scope:** one or more (grouping, subunit) pairs. A user sees personnel rows that fall within their scoped subunit(s) for a given grouping.
 - **Write scope:** attendance status, Notes, Remarks — for rows within their scope only.
 
 ### 4.4 Account Lifecycle
-1. Admin preregisters account by email with access level, subunit scope, and deployment grants assigned upfront. Account created in `pending` state.
+1. Admin preregisters account by email with access level, subunit scope, and grouping grants assigned upfront. Account created in `pending` state.
 2. On first Google sign-in, if email matches a `pending` account → activated. If no match → held as `unrecognised` (no access); auth event written to audit log.
 3. Admin may suspend at any time. Suspension immediately invalidates active sessions.
 
@@ -116,56 +116,56 @@ Declared in `app.config.json` (deployment-time change, not admin UI):
 - Raw CSV stored immutably in `csv_uploads` (append-only; SHA-256 hash recorded).
 - Parsed personnel in `personnel_snapshots`: required columns as typed fields; all others in `extra_fields JSONB`. **Each personnel record has an internal auto-generated `personnel_id` (UUID or serial); `pers_no` is stored in `extra_fields` as a read-only reference, never used for application logic or identity matching.**
 - Column registry in `column_metadata` per CSV version: original name, canonical name, inferred type, sensitivity label.
-- **Note on pers_no:** across CSV versions, internal `personnel_id` is *not* automatically transferred on pers_no match. `pers_no` is external-source data; notes and records belong to specific `personnel_id` entities within a deployment.
+- **Note on pers_no:** across CSV versions, internal `personnel_id` is *not* automatically transferred on pers_no match. `pers_no` is external-source data; notes and records belong to specific `personnel_id` entities within a grouping.
 
 ### 6.2 Upload Pipeline (3 steps)
 1. **Upload:** file received, raw CSV stored, headers parsed, auto-matching attempted. Returns mapping resolution payload.
 2. **Mapping confirmation:** admin resolves unmapped required columns and any conflicts. Global mapping table updated. **CAA conflict check:** if a CSV with the same CAA already exists in confirmed state, prompt admin for replacement confirmation. On confirm, prior confirmed CSV and its nominal roll are marked archived (soft-deleted). Diff computed against prior confirmed CSV (if different).
-3. **Diff confirmation:** admin reviews single-page diff (max ~400 rows, sticky summary bar: N joined / N left / N changed). On confirm: personnel_snapshots populated, nominal roll deployment created, leavers archived, notes transferred from prior deployment by internal personnel ID (not `pers_no`).
+3. **Diff confirmation:** admin reviews single-page diff (max ~400 rows, sticky summary bar: N joined / N left / N changed). On confirm: personnel_snapshots populated, nominal roll grouping created, leavers archived, notes transferred from prior grouping by internal personnel ID (not `pers_no`).
 
 ---
 
-## 7. Deployment
+## 7. Grouping
 
 ### 7.1 Data Model
-Each deployment: name, nominal roll reference, status (`draft` | `active` | `inactive` | `archived` | `closed` | `finalized`), validity range (`valid_from` + `valid_until` datetimes), optional `scheduled_activation` datetime, personnel assignment overrides, and per-user access list.
+Each grouping: name, nominal roll reference, status (`draft` | `active` | `inactive` | `archived` | `closed` | `finalized`), validity range (`valid_from` + `valid_until` datetimes), optional `scheduled_activation` datetime, personnel assignment overrides, and per-user access list.
 
-**Deployment status lifecycle:** `draft` → `active` (auto or manual) → `inactive` (auto) → `archived` (optional admin action). Admins may also manually transition to `closed` (no further edits permitted) or `finalized` (permanent archive with all associated sessions finalized). A `finalized` deployment and all its sessions are immutable.
+**Grouping status lifecycle:** `draft` → `active` (auto or manual) → `inactive` (auto) → `archived` (optional admin action). Admins may also manually transition to `closed` (no further edits permitted) or `finalized` (permanent archive with all associated sessions finalized). A `finalized` grouping and all its sessions are immutable.
 
 ### 7.2 Lifecycle Rules
-- Only one deployment `active` at any time (enforced by DB partial unique index + application layer).
-- Validity range overlaps with any existing `draft` or `active` deployment are hard-rejected.
+- Only one grouping `active` at any time (enforced by DB partial unique index + application layer).
+- Validity range overlaps with any existing `draft` or `active` grouping are hard-rejected.
 - Background job handles activation (at `valid_from` or `scheduled_activation`) and deactivation (at `valid_until`). Both transitions are idempotent.
-- No write-lock on personnel overrides — editable at any deployment status for operational flexibility. Attendance snapshot integrity maintained by the validity-range rule (§9.2).
+- No write-lock on personnel overrides — editable at any grouping status for operational flexibility. Attendance snapshot integrity maintained by the validity-range rule (§9.2).
 
 ### 7.3 Clone (Same-Nominal Roll)
-Admin-only. Copies overrides, prefixes name "Copy of …", resets validity range to blank. Admin chooses whether to transfer deployment notes.
+Admin-only. Copies overrides, prefixes name "Copy of …", resets validity range to blank. Admin chooses whether to transfer grouping notes.
 
 ### 7.4 Migrate (Cross-Nominal Roll)
-Admin-only. Two-step: compute diff between source nominal roll and target nominal roll → present leavers (must be individually dismissed) and joiners (must each receive a unit+subunit assignment) → on confirm, create new draft deployment against target nominal roll.
+Admin-only. Two-step: compute diff between source nominal roll and target nominal roll → present leavers (must be individually dismissed) and joiners (must each receive a unit+subunit assignment) → on confirm, create new draft grouping against target nominal roll.
 
 ---
 
 ## 8. Session
 
-Admin-explicitly opened. Defined by deployment + date + session type (AM/PM). **At most one session per (deployment, date) pair across both AM and PM.** May be created only for **active** deployments (draft deployments must be activated first; inactive/archived/closed/finalized are rejected). On creation: all active personnel (minus deployment exclusions) pre-populated as `absent` with `notes_snapshot` from current `deployment_notes`. No retroactive session creation on inactive deployments.
+Admin-explicitly opened. Defined by grouping + date + session type (AM/PM). **At most one session per (grouping, date) pair across both AM and PM.** May be created only for **active** groupings (draft groupings must be activated first; inactive/archived/closed/finalized are rejected). On creation: all active personnel (minus grouping exclusions) pre-populated as `absent` with `notes_snapshot` from current `grouping_notes`. No retroactive session creation on inactive groupings.
 
-**Session status lifecycle:** individual sessions move through `open → closed → finalized`, with admins able to transition each session independently. `closed → open` (reopen) is allowed and clears `closed_at`/`closed_by`. `finalized` is terminal. Deployment-level closure/finalization still cascades to child sessions, but individual session-level close/reopen is also supported. See [SPECIFICATION.md §4.3](SPECIFICATION.md) for the authoritative state machine and editability rules.
+**Session status lifecycle:** individual sessions move through `open → closed → finalized`, with admins able to transition each session independently. `closed → open` (reopen) is allowed and clears `closed_at`/`closed_by`. `finalized` is terminal. Grouping-level closure/finalization still cascades to child sessions, but individual session-level close/reopen is also supported. See [SPECIFICATION.md §4.3](SPECIFICATION.md) for the authoritative state machine and editability rules.
 
 ---
 
 ## 9. Attendance
 
 ### 9.1 Record
-Fields: `personnel_id`, `session_id`, `deployment_id`, `status` (`present` | `absent` | `excused`), `remarks` (session-scoped), `notes_snapshot`, four unit+subunit snapshot fields, `updated_at`, `updated_by`. Records can only be created/updated/deleted while the linked session is `open`; closed and finalized sessions are read-only (HTTP 400).
+Fields: `personnel_id`, `session_id`, `grouping_id`, `status` (`present` | `absent` | `excused`), `remarks` (session-scoped), `notes_snapshot`, four unit+subunit snapshot fields, `updated_at`, `updated_by`. Records can only be created/updated/deleted while the linked session is `open`; closed and finalized sessions are read-only (HTTP 400).
 
 ### 9.2 Unit+Subunit Snapshot Rule
 On any attendance write:
-- **Within deployment validity range:** resolve effective assignment (override ?? nominal roll), write to all four `*_snapshot` fields.
+- **Within grouping validity range:** resolve effective assignment (override ?? nominal roll), write to all four `*_snapshot` fields.
 - **Outside validity range** (retroactive edit by any scoped user with write privileges): update `status`, `remarks`, `notes_snapshot` only. Snapshot fields are not touched. Detailed audit trail (e.g., showing which override was active at time of write) deferred to future work.
 
 ### 9.3 Notes
-Canonical store: `deployment_notes (deployment_id, pers_no)`. Editable wherever visible — in deployment view (writes to canonical only) or attendance session view (writes to canonical and updates `notes_snapshot` on current session's record). Transferred to new deployment by `pers_no` on new CSV confirmation. Leavers' notes remain in archived deployment only.
+Canonical store: `grouping_notes (grouping_id, pers_no)`. Editable wherever visible — in grouping view (writes to canonical only) or attendance session view (writes to canonical and updates `notes_snapshot` on current session's record). Transferred to new grouping by `pers_no` on new CSV confirmation. Leavers' notes remain in archived grouping only.
 
 ---
 
@@ -177,7 +177,7 @@ Admin-defined ordered string labels (e.g. `unit`, `coy`, `platoon`, `section`). 
 **Access level stability:** A user's access level is determined at login and remains stable for the duration of the session. Changes to a user's access level require re-login to take effect.
 
 ### 10.2 Row Visibility
-User sees a personnel row if: subunit assignment falls within at least one subunit scope grant for the requested deployment AND user has a deployment grant for that deployment. Admins bypass both checks.
+User sees a personnel row if: subunit assignment falls within at least one subunit scope grant for the requested grouping AND user has a grouping grant for that grouping. Admins bypass both checks.
 
 ### 10.3 Column Visibility
 Column visible if user's access level `level_order` ≥ column's sensitivity label `level_order`. `null` sensitivity label = admin-only. Applies uniformly across all visible rows. Admins see all columns.
@@ -195,7 +195,7 @@ Column visible if user's access level `level_order` ≥ column's sensitivity lab
 
 Served at `/admin`. Built with NiceGUI mounted on the FastAPI app. Intended for desktop/tablet use by admins. Covers:
 - CSV upload pipeline (3-step flow with mapping and diff review)
-- Deployment management (create, edit, clone, migrate, activate)
+- Grouping management (create, edit, clone, migrate, activate)
 - Session management (open, close)
 - User management (preregister, edit access, grants)
 - Column sensitivity configuration
@@ -217,7 +217,7 @@ Served at `/` (root). Single static HTML file with vanilla JS, served by FastAPI
 
 ### 12.1 Features
 - Session selector (date + AM/PM; defaults to admin-configured default session type)
-- Deployment switcher (for users with multiple grants)
+- Grouping switcher (for users with multiple grants)
 - Parade state table: columns from manifest only, rows scoped to user
 - Inline status toggle (present/absent), remarks and notes inline edit
 - Subunit filter, column sort
@@ -236,7 +236,7 @@ Served at `/` (root). Single static HTML file with vanilla JS, served by FastAPI
 OpenAPI 3.1 spec maintained separately (`api.yaml`). Key design decisions:
 
 - **Column manifest pattern (Option C):** all data endpoints return `columns` (user-visible column manifest) + `rows` (objects containing only manifest keys). Clients render headers from manifest; never hardcode column names.
-- **SSE stale detection:** `GET /api/v1/events/attendance?deploymentId=&sessionId=` emits `data_changed` signal events (no payload data) when any record in the user's scope is modified. Client fetches on user confirmation. 30s keep-alive ping. Server closes connection on session expiry or access revocation.
+- **SSE stale detection:** `GET /api/v1/events/attendance?groupingId=&sessionId=` emits `data_changed` signal events (no payload data) when any record in the user's scope is modified. Client fetches on user confirmation. 30s keep-alive ping. Server closes connection on session expiry or access revocation.
 - **Auth:** session cookie (HttpOnly, Secure, SameSite=Strict). Google OAuth via Authlib.
 
 ---
@@ -280,11 +280,11 @@ OpenAPI 3.1 spec maintained separately (`api.yaml`). Key design decisions:
 uvicorn
  └── FastAPI app
       ├── Authlib session middleware
-      ├── /api/v1/*        REST API routes (attendance, deployments, sessions, etc.)
+      ├── /api/v1/*        REST API routes (attendance, groupings, sessions, etc.)
       ├── /admin/*         NiceGUI admin UI (mounted via nicegui.app.mount)
       ├── /                Static file serving (mobile HTML/JS)
       ├── /events/*        SSE endpoints
-      └── APScheduler      Embedded async scheduler (deployment activation jobs)
+      └── APScheduler      Embedded async scheduler (grouping activation jobs)
 ```
 
 SQLAlchemy async session factory shared across all layers. No separate worker process for MVP.
@@ -334,9 +334,9 @@ This alerts the user that the data is pending sync. On reconnect and successful 
 
 ---
 
-## 17. Deployment Access Grants
+## 17. Grouping Access Grants
 
-When a new deployment is created, **all existing, active users automatically gain read+write access** to the new deployment within their existing subunit scopes. Admins retain full access. Explicit per-user grant assignment is not required for MVP.
+When a new grouping is created, **all existing, active users automatically gain read+write access** to the new grouping within their existing subunit scopes. Admins retain full access. Explicit per-user grant assignment is not required for MVP.
 
 ---
 
@@ -345,14 +345,14 @@ When a new deployment is created, **all existing, active users automatically gai
 1. **CAA conflict handling:** ✅ New upload with same CAA prompts admin to replace; prior CSV/nominal-roll archived.
 2. **Retroactive edits:** ✅ Any scoped user with write privileges may edit attendance/remarks retroactively (outside validity range). Audit detail deferred.
 3. **pers_no handling:** ✅ External reference ID, stored in `extra_fields`. Internal `personnel_id` (UUID) is the system identity. Notes/records follow `personnel_id`, not `pers_no`.
-4. **Session constraints:** ✅ Max one session per (deployment, date); deployment closure cascades to all sessions; no session-level overrides.
+4. **Session constraints:** ✅ Max one session per (grouping, date); grouping closure cascades to all sessions; no session-level overrides.
 5. **Column mapping:** ✅ Many-to-one (multiple CSV → one canonical allowed); each canonical maps to at most one CSV column.
 6. **Access level stability:** ✅ Stable per session; access level changes require re-login.
-7. **Deployment activation edge cases:** ⏳ Deferred pending implementation clarity.
+7. **Grouping activation edge cases:** ⏳ Deferred pending implementation clarity.
 8. **Session expiry & SSE:** ✅ Expiry = user logout; SSE forcibly closed on user suspension/removal.
 9. **Audit log:** ✅ Sequential append of all changes; queryability pattern TBD.
 10. **Offline UX:** ✅ Unsaved changes highlighted (bold + orange border).
-11. **Deployment access on creation:** ✅ Auto-grant all existing users; explicit grants not required.
+11. **Grouping access on creation:** ✅ Auto-grant all existing users; explicit grants not required.
 12. **Concurrent admin operations:** ⏳ TBD pending design review.
 
 ---

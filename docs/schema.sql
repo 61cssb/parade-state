@@ -99,38 +99,38 @@ COMMENT ON COLUMN users.google_sub IS
 
 
 -- ---------------------------------------------------------------------------
--- 4. USER DEPLOYMENT GRANTS
---    Controls which deployments a user can see (separate from subunit scope).
---    A user must have a grant for a deployment to know it exists.
+-- 4. USER GROUPING GRANTS
+--    Controls which groupings a user can see (separate from subunit scope).
+--    A user must have a grant for a grouping to know it exists.
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE user_deployment_grants (
+CREATE TABLE user_grouping_grants (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    deployment_id   UUID NOT NULL,                     -- FK to deployments; defined below
+    grouping_id     UUID NOT NULL,                     -- FK to groupings; defined below
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by      UUID REFERENCES users(id),
-    UNIQUE (user_id, deployment_id)
+    UNIQUE (user_id, grouping_id)
 );
 
-COMMENT ON TABLE user_deployment_grants IS
-    'Controls deployment visibility per user. A user without a grant for a deployment cannot see or know it exists.';
+COMMENT ON TABLE user_grouping_grants IS
+    'Controls grouping visibility per user. A user without a grant for a grouping cannot see or know it exists.';
 
 
 -- ---------------------------------------------------------------------------
 -- 5. USER SUBUNIT SCOPE GRANTS
---    Controls which personnel rows a user can see within a given deployment.
---    Each row scopes a user to a specific subunit within a deployment.
+--    Controls which personnel rows a user can see within a given grouping.
+--    Each row scopes a user to a specific subunit within a grouping.
 --    Nulls in subunit fields mean "any value at that level".
 --    A unit-level user would have sub_unit_1/2/3 all null.
 --    A coy-level user would have sub_unit_1 set, sub_unit_2/3 null.
---    A user's visible rows = UNION of all their subunit scope grants for that deployment.
+--    A user's visible rows = UNION of all their subunit scope grants for that grouping.
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE user_subunit_scope_grants (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    deployment_id   UUID NOT NULL,                     -- FK to deployments
+    grouping_id     UUID NOT NULL,                     -- FK to groupings
     unit            TEXT,                              -- null = any
     sub_unit_1      TEXT,
     sub_unit_2      TEXT,
@@ -140,7 +140,7 @@ CREATE TABLE user_subunit_scope_grants (
 );
 
 COMMENT ON TABLE user_subunit_scope_grants IS
-    'Determines which personnel rows a user can see within a deployment. '
+    'Determines which personnel rows a user can see within a grouping. '
     'Null subunit fields act as wildcards. Row is visible if any grant matches. '
     'Admin role bypasses this table entirely.';
 
@@ -275,15 +275,15 @@ COMMENT ON TABLE personnel_snapshots IS
 
 
 -- ---------------------------------------------------------------------------
--- 10. DEPLOYMENTS
+-- 10. GROUPINGS
 --     Named, date-ranged assignment of personnel to subunits.
 --     Based on a specific estab (csv_upload). Personnel assignment overrides
 --     remap a subset of personnel; non-overridden inherit estab assignment.
---     Only one deployment may be active at any point in time.
+--     Only one grouping may be active at any point in time.
 --     Validity enforced by background job (activate at valid_from, deactivate at valid_until).
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE deployments (
+CREATE TABLE groupings (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name            TEXT NOT NULL,
     csv_upload_id   UUID NOT NULL REFERENCES csv_uploads(id),
@@ -292,7 +292,7 @@ CREATE TABLE deployments (
     valid_from      TIMESTAMPTZ NOT NULL,
     valid_until     TIMESTAMPTZ NOT NULL,
     scheduled_activation TIMESTAMPTZ,                 -- if set, background job activates at this time
-    cloned_from_id  UUID REFERENCES deployments(id),  -- if this was created via clone or migrate
+    cloned_from_id  UUID REFERENCES groupings(id),    -- if this was created via clone or migrate
     clone_type      TEXT CHECK (clone_type IN ('same_estab', 'cross_estab')),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by      UUID NOT NULL REFERENCES users(id),
@@ -301,31 +301,31 @@ CREATE TABLE deployments (
     CONSTRAINT valid_range_check CHECK (valid_until > valid_from)
 );
 
-CREATE UNIQUE INDEX idx_deployments_one_active
-    ON deployments(status)
+CREATE UNIQUE INDEX idx_groupings_one_active
+    ON groupings(status)
     WHERE status = 'active';
 
-COMMENT ON TABLE deployments IS
+COMMENT ON TABLE groupings IS
     'Named date-ranged operational contexts. Based on a specific CSV estab. '
-    'Only one active deployment at a time (enforced by partial unique index). '
+    'Only one active grouping at a time (enforced by partial unique index). '
     'Background job handles activation/deactivation at valid_from/valid_until. '
     'No overlapping valid_from/valid_until ranges permitted (enforced in application layer).';
 
-COMMENT ON COLUMN deployments.scheduled_activation IS
+COMMENT ON COLUMN groupings.scheduled_activation IS
     'If set, background job transitions status from draft to active at this datetime, '
-    'and deactivates the currently active deployment.';
+    'and deactivates the currently active grouping.';
 
 
 -- ---------------------------------------------------------------------------
--- 11. DEPLOYMENT PERSONNEL OVERRIDES
---     Subunit remappings for cross-attached personnel within a deployment.
+-- 11. GROUPING PERSONNEL OVERRIDES
+--     Subunit remappings for cross-attached personnel within a grouping.
 --     Personnel without an override inherit their estab (csv_upload) subunit assignment.
---     Overrides are editable on draft/active/inactive deployments (no write-lock).
+--     Overrides are editable on draft/active/inactive groupings (no write-lock).
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE deployment_personnel_overrides (
+CREATE TABLE grouping_personnel_overrides (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    deployment_id   UUID NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+    grouping_id     UUID NOT NULL REFERENCES groupings(id) ON DELETE CASCADE,
     personnel_id    UUID NOT NULL REFERENCES personnel_snapshots(id),
     unit            TEXT NOT NULL,
     sub_unit_1      TEXT,
@@ -335,49 +335,49 @@ CREATE TABLE deployment_personnel_overrides (
     created_by      UUID REFERENCES users(id),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_by      UUID REFERENCES users(id),
-    UNIQUE (deployment_id, personnel_id)
+    UNIQUE (grouping_id, personnel_id)
 );
 
-COMMENT ON TABLE deployment_personnel_overrides IS
-    'Per-deployment subunit remappings. Takes precedence over estab assignment for the given personnel row. '
+COMMENT ON TABLE grouping_personnel_overrides IS
+    'Per-grouping subunit remappings. Takes precedence over estab assignment for the given personnel row. '
     'Absence of a row = inherit estab assignment. Editable at any time (no write-lock).';
 
 
 -- ---------------------------------------------------------------------------
--- 12. DEPLOYMENT NOTES
---     Canonical notes store, keyed by (deployment_id, personnel_id).
---     Notes are deployment-scoped and persist across sessions.
---     Edited from both deployment view and attendance session view.
+-- 12. GROUPING NOTES
+--     Canonical notes store, keyed by (grouping_id, personnel_id).
+--     Notes are grouping-scoped and persist across sessions.
+--     Edited from both grouping view and attendance session view.
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE deployment_notes (
+CREATE TABLE grouping_notes (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    deployment_id   UUID NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+    grouping_id     UUID NOT NULL REFERENCES groupings(id) ON DELETE CASCADE,
     personnel_id    UUID NOT NULL REFERENCES personnel_snapshots(id),
     notes_text      TEXT NOT NULL DEFAULT '',
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_by      UUID REFERENCES users(id),
-    UNIQUE (deployment_id, personnel_id)
+    UNIQUE (grouping_id, personnel_id)
 );
 
-CREATE INDEX idx_deployment_notes_lookup ON deployment_notes(deployment_id, personnel_id);
+CREATE INDEX idx_grouping_notes_lookup ON grouping_notes(grouping_id, personnel_id);
 
-COMMENT ON TABLE deployment_notes IS
-    'Canonical deployment-scoped notes per personnel. '
-    'Written from both deployment view and attendance session view (write-back from session). '
-    'Transferred to a new deployment by following the person across estabs via short_id on new estab confirmation.';
+COMMENT ON TABLE grouping_notes IS
+    'Canonical grouping-scoped notes per personnel. '
+    'Written from both grouping view and attendance session view (write-back from session). '
+    'Transferred to a new grouping by following the person across estabs via short_id on new estab confirmation.';
 
 
 -- ---------------------------------------------------------------------------
 -- 13. SESSIONS
 --     AM/PM attendance windows. Explicitly opened by admin.
---     May be created in advance (for a draft or active deployment).
+--     May be created in advance (for a draft or active grouping).
 --     On creation, notes are snapshotted into attendance records.
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE sessions (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    deployment_id   UUID NOT NULL REFERENCES deployments(id),
+    grouping_id     UUID NOT NULL REFERENCES groupings(id),
     session_date    DATE NOT NULL,
     session_type    TEXT NOT NULL CHECK (session_type IN ('AM', 'PM')),
     status          TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
@@ -385,39 +385,39 @@ CREATE TABLE sessions (
     created_by      UUID NOT NULL REFERENCES users(id),
     closed_at       TIMESTAMPTZ,
     closed_by       UUID REFERENCES users(id),
-    UNIQUE (deployment_id, session_date, session_type)
+    UNIQUE (grouping_id, session_date, session_type)
 );
 
 COMMENT ON TABLE sessions IS
     'AM/PM attendance windows, explicitly admin-opened. May be created in advance. '
-    'On creation, current deployment_notes are snapshotted into all attendance records for this session. '
-    'Unique constraint prevents duplicate AM/PM sessions per deployment per day.';
+    'On creation, current grouping_notes are snapshotted into all attendance records for this session. '
+    'Unique constraint prevents duplicate AM/PM sessions per grouping per day.';
 
 
 -- ---------------------------------------------------------------------------
 -- 14. ATTENDANCE RECORDS
 --     One record per personnel per session.
 --     Stores status, remarks (session-scoped), and a notes snapshot.
---     Also stores a unit+subunit snapshot (deployment assignment at time of write),
+--     Also stores a unit+subunit snapshot (grouping assignment at time of write),
 --     subject to the validity-range rule:
---       - Write within deployment valid_from/valid_until: snapshot unit+subunit from active deployment.
+--       - Write within grouping valid_from/valid_until: snapshot unit+subunit from active grouping.
 --       - Write outside validity range (retroactive admin edit): do NOT update unit+subunit snapshots.
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE attendance_records (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id          UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    deployment_id       UUID NOT NULL REFERENCES deployments(id),
+    grouping_id         UUID NOT NULL REFERENCES groupings(id),
     personnel_id        UUID NOT NULL REFERENCES personnel_snapshots(id),
 
     -- Attendance data
     status              TEXT NOT NULL DEFAULT 'absent' CHECK (status IN ('present', 'absent')),
     remarks             TEXT NOT NULL DEFAULT '',      -- session-scoped; not carried forward
 
-    -- Notes snapshot (deployment-level notes at time of this write)
+    -- Notes snapshot (grouping-level notes at time of this write)
     notes_snapshot      TEXT NOT NULL DEFAULT '',
 
-    -- Unit+subunit snapshot (deployment assignment at time of write, within validity period)
+    -- Unit+subunit snapshot (grouping assignment at time of write, within validity period)
     unit_snapshot       TEXT,
     sub_unit_1_snapshot TEXT,
     sub_unit_2_snapshot TEXT,
@@ -433,12 +433,12 @@ CREATE TABLE attendance_records (
 
 CREATE INDEX idx_attendance_session ON attendance_records(session_id);
 CREATE INDEX idx_attendance_personnel ON attendance_records(personnel_id);
-CREATE INDEX idx_attendance_deployment ON attendance_records(deployment_id);
+CREATE INDEX idx_attendance_grouping ON attendance_records(grouping_id);
 
 COMMENT ON TABLE attendance_records IS
     'One record per personnel per session. '
-    'notes_snapshot: copy of deployment_notes.notes_text at time of this write (updated on every write). '
-    'unit+subunit snapshots: updated only when NOW() is within the session deployment validity range. '
+    'notes_snapshot: copy of grouping_notes.notes_text at time of this write (updated on every write). '
+    'unit+subunit snapshots: updated only when NOW() is within the session grouping validity range. '
     'Retroactive admin edits outside validity range may update status/remarks/notes_snapshot '
     'but must NOT update unit/sub_unit snapshots.';
 
@@ -458,8 +458,8 @@ CREATE TABLE audit_log (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     actor_id        UUID REFERENCES users(id),         -- null for system/background job actions
     actor_email     TEXT,                              -- denormalised; preserved even if user is deleted
-    action          TEXT NOT NULL,                     -- e.g. 'attendance.update', 'deployment.activate'
-    entity_type     TEXT NOT NULL,                     -- e.g. 'attendance_record', 'deployment'
+    action          TEXT NOT NULL,                     -- e.g. 'attendance.update', 'grouping.activate'
+    entity_type     TEXT NOT NULL,                     -- e.g. 'attendance_record', 'grouping'
     entity_id       UUID,
     payload         JSONB NOT NULL DEFAULT '{}',       -- before/after values or relevant context
     ip_address      INET,
@@ -511,8 +511,8 @@ ALTER TABLE subunit_enum_values
 ALTER TABLE column_mappings
     ADD CONSTRAINT fk_column_mappings_first_seen FOREIGN KEY (first_seen_in) REFERENCES csv_uploads(id);
 
-ALTER TABLE user_deployment_grants
-    ADD CONSTRAINT fk_user_dep_grants_deployment FOREIGN KEY (deployment_id) REFERENCES deployments(id) ON DELETE CASCADE;
+ALTER TABLE user_grouping_grants
+    ADD CONSTRAINT fk_user_grp_grants_grouping FOREIGN KEY (grouping_id) REFERENCES groupings(id) ON DELETE CASCADE;
 
 ALTER TABLE user_subunit_scope_grants
-    ADD CONSTRAINT fk_user_scope_grants_deployment FOREIGN KEY (deployment_id) REFERENCES deployments(id) ON DELETE CASCADE;
+    ADD CONSTRAINT fk_user_scope_grants_grouping FOREIGN KEY (grouping_id) REFERENCES groupings(id) ON DELETE CASCADE;

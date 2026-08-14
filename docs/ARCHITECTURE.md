@@ -61,11 +61,11 @@
 uvicorn (single process)
  └── FastAPI app
       ├── Authlib session middleware
-      ├── /api/v1/*        REST API routes (attendance, deployments, sessions, etc.)
+      ├── /api/v1/*        REST API routes (attendance, groupings, sessions, etc.)
       ├── /admin/*         NiceGUI admin UI (mounted via nicegui.app.mount)
       ├── /                Static file serving (mobile HTML/JS)
       ├── /events/*        SSE endpoints
-      └── APScheduler      Embedded async scheduler (deployment activation jobs)
+      └── APScheduler      Embedded async scheduler (grouping activation jobs)
 ```
 
 **Key design decisions:**
@@ -96,7 +96,7 @@ uvicorn (single process)
 - **Purpose:** System administration
 - **Features:**
   - CSV upload pipeline
-  - Deployment management
+  - Grouping management
   - User management
   - Column configuration
   - Audit log viewer
@@ -108,17 +108,17 @@ uvicorn (single process)
 - **Authentication:** Google OAuth + session cookies
 - **Key endpoints:**
   - `/api/v1/attendance/*` - Attendance operations
-  - `/api/v1/deployments/*` - Deployment management
+  - `/api/v1/groupings/*` - Grouping management
   - `/api/v1/sessions/*` - Session management
   - `/api/v1/users/*` - User operations
   - `/api/v1/events/*` - SSE endpoints
 
 #### Background Scheduler (APScheduler)
-- **Purpose:** Time-based deployment activation/deactivation
+- **Purpose:** Time-based grouping activation/deactivation
 - **Storage:** SQLAlchemy job store (PostgreSQL)
 - **Jobs:**
-  - Deployment activation at `valid_from` or `scheduled_activation`
-  - Deployment deactivation at `valid_until`
+  - Grouping activation at `valid_from` or `scheduled_activation`
+  - Grouping deactivation at `valid_until`
   - Idempotent execution for safety
 
 ---
@@ -208,7 +208,7 @@ The `parade_state` application follows a strict layered architecture with clear 
 #### **Layer 2: Data Models**
 
 **`parade_state.models`**
-- **Modules:** `access.py`, `attendance.py`, `audit.py`, `auth_session.py`, `csv_ingestion.py`, `deployment.py`, `personnel.py`, `schemas.py`
+- **Modules:** `access.py`, `attendance.py`, `audit.py`, `auth_session.py`, `csv_ingestion.py`, `grouping.py`, `personnel.py`, `schemas.py`
 - **Purpose:** Database models and Pydantic schemas
 - **Dependencies:** `parade_state.db` (for `Base` class)
 - **Initialization:** Third
@@ -242,7 +242,7 @@ The `parade_state` application follows a strict layered architecture with clear 
 - **Note:** Returns HTML/redirects, not JSON
 
 **`parade_state.api`**
-- **Modules:** `auth.py`, `users.py`, `deployments.py`, `sessions.py`, `attendance.py`, `personnel.py`, `access_control.py`
+- **Modules:** `auth.py`, `users.py`, `groupings.py`, `sessions.py`, `attendance.py`, `personnel.py`, `access_control.py`
 - **Purpose:** REST API route handlers (JSON responses)
 - **Dependencies:** All previous layers
 - **Initialization:** Seventh
@@ -294,13 +294,13 @@ from ..db import Base
 
 if TYPE_CHECKING:
     from .auth_session import UserSession
-    from .deployment import Deployment
+    from .grouping import Grouping
 ```
 
 **Why this works:**
 - `TYPE_CHECKING` is `False` at runtime, preventing circular imports
 - Type checkers and IDEs still see the full type information
-- Relationships work via string references (e.g., `"Deployment"`)
+- Relationships work via string references (e.g., `"Grouping"`)
 
 #### **2. Dependency Injection**
 
@@ -406,7 +406,7 @@ async def login(request: Request):
 /api/v1/auth/me     → Get current user info
 /api/v1/auth/logout → Logout user
 /api/v1/users/      → List users
-/api/v1/deployments/ → Manage deployments
+/api/v1/groupings/ → Manage groupings
 ```
 
 **Example:**
@@ -578,17 +578,17 @@ from parade_state.api.some_module import function  # Circular risk
 Nominal Roll (CSV source of truth)
  │
  ├── Personnel (roster entries)
- │    ├── DeploymentPersonnelOverride (assignment changes)
- │    ├── DeploymentNotes (per-deployment notes)
+ │    ├── GroupingPersonnelOverride (assignment changes)
+ │    ├── GroupingNotes (per-grouping notes)
  │    └── AttendanceRecord (session attendance)
  │
- ├── Deployment (operational windows)
- │    ├── DeploymentPersonnelOverride
- │    ├── DeploymentNotes
- │    ├── DeploymentPersonnelExclusion (draft-only roster filtering)
+ ├── Grouping (operational windows)
+ │    ├── GroupingPersonnelOverride
+ │    ├── GroupingNotes
+ │    ├── GroupingPersonnelExclusion (draft-only roster filtering)
  │    ├── Session (AM/PM windows)
  │    │    └── AttendanceRecord
- │    ├── DeploymentUserAccess (user grants)
+ │    ├── GroupingUserAccess (user grants)
  │    └── UserSubunitScope (user scoping)
  │
  └── CsvUpload (raw file storage)
@@ -600,33 +600,33 @@ Nominal Roll (CSV source of truth)
 AccessLevel (vocabulary)
  │
  └── User (Google-authenticated accounts)
-      ├── UserSubunitScope (deployment-specific scoping)
-      └── DeploymentUserAccess (deployment grants)
+      ├── UserSubunitScope (grouping-specific scoping)
+      └── GroupingUserAccess (grouping grants)
 ```
 
 ### 4.3 Attendance Tracking Hierarchy
 
 ```
-Deployment
+Grouping
  │
  └── Session (AM/PM windows)
       └── AttendanceRecord (per-personnel records)
            ├── status (present/absent)
            ├── remarks (session-scoped)
-           ├── notes_snapshot (deployment notes frozen at session open)
+           ├── notes_snapshot (grouping notes frozen at session open)
            └── unit_snapshot (personnel assignment frozen at write time)
 ```
 
 ### 4.4 Key Cascades
 
-**Deployment cascades:**
-- Deployment deleted → all sessions, overrides, notes, access grants deleted
-- Deployment closed → all sessions marked closed
-- Deployment finalized → all sessions marked finalized
+**Grouping cascades:**
+- Grouping deleted → all sessions, overrides, notes, access grants deleted
+- Grouping closed → all sessions marked closed
+- Grouping finalized → all sessions marked finalized
 
 **Nominal Roll cascades:**
 - Nominal Roll deleted → all personnel records deleted
-- Nominal Roll confirmed → creates initial draft deployment
+- Nominal Roll confirmed → creates initial draft grouping
 
 **User cascades:**
 - User deleted → all scopes and access grants soft-deleted
@@ -671,10 +671,10 @@ async def get_attendance(session_id: str, db: AsyncSession = Depends(get_db_sess
     return result.scalars().all()
 
 # Background async job
-async def activate_deployment(deployment_id: str):
+async def activate_grouping(grouping_id: str):
     async with get_db_session() as db:
-        await deactivate_current_deployment(db)
-        await activate_deployment_by_id(db, deployment_id)
+        await deactivate_current_grouping(db)
+        await activate_grouping_by_id(db, grouping_id)
 ```
 
 **Benefits:**
@@ -812,12 +812,12 @@ class User(Base):
 **Row-level security:**
 ```python
 # User sees personnel rows matching their subunit scope
-async def get_visible_personnel(user_id: str, deployment_id: str):
-    # Get user's scopes for this deployment
-    scopes = await get_user_subunit_scopes(user_id, deployment_id)
+async def get_visible_personnel(user_id: str, grouping_id: str):
+    # Get user's scopes for this grouping
+    scopes = await get_user_subunit_scopes(user_id, grouping_id)
     
     # Query personnel matching at least one scope
-    personnel = await query_personnel_in_scopes(deployment_id, scopes)
+    personnel = await query_personnel_in_scopes(grouping_id, scopes)
     return personnel
 ```
 
@@ -832,20 +832,20 @@ async def get_visible_columns(user_id: str):
     return columns
 ```
 
-### 7.3 Multi-Tenant Deployment Access Control (Phase 5)
+### 7.3 Multi-Tenant Grouping Access Control (Phase 5)
 
-**Overview:** Enterprise-grade deployment isolation ensuring users can only access data from deployments they're explicitly authorized to access.
+**Overview:** Enterprise-grade grouping isolation ensuring users can only access data from groupings they're explicitly authorized to access.
 
 **Architecture:**
 ```
 ┌─────────────────────────────────────────────────────────┐
 │           Multi-Tenant Access Control                    │
 │                                                           │
-│  User Request → verify_deployment_access()               │
+│  User Request → verify_grouping_access()               │
 │       ↓                                                  │
-│  Check DeploymentUserAccess table                        │
+│  Check GroupingUserAccess table                        │
 │       ↓                                                  │
-│  Filter data by deployment_id                            │
+│  Filter data by grouping_id                            │
 │       ↓                                                  │
 │  Return authorized data only                             │
 │                                                           │
@@ -854,25 +854,25 @@ async def get_visible_columns(user_id: str):
 
 **Implementation Pattern:**
 ```python
-async def verify_deployment_access(
-    deployment_id: str,
+async def verify_grouping_access(
+    grouping_id: str,
     user_id: str,
     user_role: str,
     db: AsyncSession,
-) -> Deployment:
-    """Verify user has access to deployment and return it."""
+) -> Grouping:
+    """Verify user has access to grouping and return it."""
     
     # Super admins have full access
     if user_role == "super_admin":
-        return deployment
+        return grouping
     
-    # Check for explicit deployment access
+    # Check for explicit grouping access
     access = await db.execute(
-        select(DeploymentUserAccess).where(
+        select(GroupingUserAccess).where(
             and_(
-                DeploymentUserAccess.user_id == user_id,
-                DeploymentUserAccess.deployment_id == deployment_id,
-                DeploymentUserAccess.revoked_at.is_(None),
+                GroupingUserAccess.user_id == user_id,
+                GroupingUserAccess.grouping_id == grouping_id,
+                GroupingUserAccess.revoked_at.is_(None),
             )
         )
     )
@@ -880,29 +880,29 @@ async def verify_deployment_access(
     if not access:
         raise HTTPException(status_code=403, detail="Access denied")
     
-    return deployment
+    return grouping
 ```
 
 **Access Control Enforcement Points:**
-- ✅ **Personnel API** - Deployment-based listing and filtering
-- ✅ **Sessions API** - Session creation and listing restricted by deployment
-- ✅ **Attendance API** - Attendance operations respect deployment boundaries
-- ✅ **Deployments API** - Deployment management with access checks
+- ✅ **Personnel API** - Grouping-based listing and filtering
+- ✅ **Sessions API** - Session creation and listing restricted by grouping
+- ✅ **Attendance API** - Attendance operations respect grouping boundaries
+- ✅ **Groupings API** - Grouping management with access checks
 
 **Data Isolation:**
-- Users only see personnel from their authorized deployments
-- Sessions filtered by deployment access
-- Attendance records scoped to accessible deployments
+- Users only see personnel from their authorized groupings
+- Sessions filtered by grouping access
+- Attendance records scoped to accessible groupings
 - Automatic filtering in all list operations
 
 **Access Management:**
-- `POST /api/v1/access-control/deployments/{id}/users/{user_id}/access` - Grant access
-- `DELETE /api/v1/access-control/deployments/{id}/users/{user_id}/access` - Revoke access
-- `GET /api/v1/access-control/deployments/{id}/users` - List deployment users
-- `GET /api/v1/access-control/users/{user_id}/deployments` - List user deployments
+- `POST /api/v1/access-control/groupings/{id}/users/{user_id}/access` - Grant access
+- `DELETE /api/v1/access-control/groupings/{id}/users/{user_id}/access` - Revoke access
+- `GET /api/v1/access-control/groupings/{id}/users` - List grouping users
+- `GET /api/v1/access-control/users/{user_id}/groupings` - List user groupings
 
 **Security Guarantees:**
-- No cross-deployment data leakage
+- No cross-grouping data leakage
 - Explicit access grants required
 - Audit trail for all access changes
 - Role-based + scope-based authorization
@@ -1133,7 +1133,7 @@ pytest --cov=src/parade_state --cov-report=term-missing
 **Future scaling path:**
 1. **Horizontal scaling:** Add more Railway instances
 2. **Database scaling:** PostgreSQL read replicas for heavy read operations
-3. **Caching:** Redis cache for frequently accessed data (sessions, deployments)
+3. **Caching:** Redis cache for frequently accessed data (sessions, groupings)
 4. **CDN:** Serve static files via CDN for better global performance
 
 ---

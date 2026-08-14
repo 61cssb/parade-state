@@ -98,8 +98,8 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 - `tests/integration/test_attendance_api.py` - Attendance management, snapshots, constraints (40 tests)
 - `tests/integration/test_csv_upload_api.py` - CSV upload pipeline, hash dedup, mapping (9 tests)
 - `tests/integration/test_deferments_api.py` - Deferment CRUD, callup_status transitions, super_admin auth (15 tests)
-- `tests/integration/test_deployments_api.py` - Deployment lifecycle, CRUD operations (18 tests)
-- `tests/integration/test_deployment_exclusions_api.py` - Personnel exclusion management (9 tests)
+- `tests/integration/test_groupings_api.py` - Grouping lifecycle, CRUD operations (18 tests)
+- `tests/integration/test_grouping_exclusions_api.py` - Personnel exclusion management (9 tests)
 - `tests/integration/test_nominal_rolls_api.py` - Nominal Roll lifecycle (confirm/unconfirm/delete, label updates) (18 tests)
 - `tests/integration/test_personnel_api.py` - Personnel management, search, filtering (12 tests)
 - `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (NR/Tagging-scoped, AM/PM slots)
@@ -117,14 +117,14 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 
 ```python
 @pytest.mark.asyncio
-async def test_your_feature(db_session, sample_deployment, sample_users):
+async def test_your_feature(db_session, sample_grouping, sample_users):
     """Test description."""
     # Arrange: Set up test data using fixtures
     user = sample_users["admin"]
-    deployment = sample_deployment
+    grouping = sample_grouping
     
     # Act: Perform the operation being tested
-    result = await your_function(deployment.id, user.id)
+    result = await your_function(grouping.id, user.id)
     
     # Assert: Verify expected behavior
     assert result.status == "expected_value"
@@ -152,7 +152,7 @@ sample_access_levels    # Creates: unit, coy, platoon, section
 sample_users            # Creates: admin user, regular user
 sample_nominal_roll            # Creates: sample establishment
 sample_personnel        # Creates: 3 sample personnel records
-sample_deployment       # Creates: sample active deployment
+sample_grouping       # Creates: sample active grouping
 sample_sessions         # Creates: multiple session records
 sample_attendance_records  # Creates: attendance records
 ```
@@ -160,13 +160,13 @@ sample_attendance_records  # Creates: attendance records
 **Using fixtures:**
 
 ```python
-async def test_example(client, sample_users, sample_deployment):
+async def test_example(client, sample_users, sample_grouping):
     # Fixtures automatically provide fresh, isolated data
     admin = sample_users["admin"]
-    deployment = sample_deployment
+    grouping = sample_grouping
 
     # HTTP endpoint testing
-    response = client.get(f"/api/v1/deployments/{deployment.id}")
+    response = client.get(f"/api/v1/groupings/{grouping.id}")
     assert response.status_code == 200
 ```
 
@@ -184,15 +184,15 @@ async def test_example(client, sample_users, sample_deployment):
 - User CRUD operations with proper access control
 - **Endpoints:** 7 authentication + 5 user management = 12 total
 
-**Deployment Management (✅ Complete)**
-- Deployment lifecycle (draft → active → inactive → closed → finalized)
-- Personnel assignment overrides per deployment
-- Deployment notes with version tracking
+**Grouping Management (✅ Complete)**
+- Grouping lifecycle (draft → active → inactive → closed → finalized)
+- Personnel assignment overrides per grouping
+- Grouping notes with version tracking
 - Validity window enforcement
 - Manual activation/deactivation
-- **Deployment date editing:** Admin UI supports editing valid_from/valid_until via an inline form; API validates that no sessions fall outside the new date range
-- **Admin deployments page:** Auto-expands active deployment on page load; per-session "Update" button linking to /attendance; autofills next session date/type
-- **Endpoints:** 7 deployment management endpoints
+- **Grouping date editing:** Admin UI supports editing valid_from/valid_until via an inline form; API validates that no sessions fall outside the new date range
+- **Admin groupings page:** Auto-expands active grouping on page load; per-session "Update" button linking to /attendance; autofills next session date/type
+- **Endpoints:** 7 grouping management endpoints
 
 **Attendance Session Management (🗑 Removed in issue #4)**
 - The user-managed `Session` model (open/closed/finalized) has been removed.
@@ -246,12 +246,12 @@ async def test_example(client, sample_users, sample_deployment):
 - 336 tests passing.
 
 **Personnel Management (✅ Session 1 Complete)**
-- Deployment-based personnel listing with filtering
-- Personnel detail view with deployment context
+- Grouping-based personnel listing with filtering
+- Personnel detail view with grouping context
 - Unit hierarchy filtering (unit, sub_unit_1, sub_unit_2, sub_unit_3)
 - Search functionality (name and service number)
 - Personnel override awareness (shows effective assignments)
-- Deployment notes integration
+- Grouping notes integration
 - Personnel update operations (admin only)
 - Role-based access control (admin/super_admin/user)
 - **Endpoints:** 3 personnel management endpoints
@@ -278,7 +278,7 @@ async def test_example(client, sample_users, sample_deployment):
   consume the remapped structure from here.
 - Two entities: `Tagging` (globally-unique label, NR FK CASCADE, audit fields)
   and `TaggingEntry` (one remap per person per tagging; 4-string `from_*` /
-  `to_*` subunit tuple mirroring `DeploymentPersonnelOverride`).
+  `to_*` subunit tuple mirroring `GroupingPersonnelOverride`).
 - `from_*` auto-snapshotted from the linked personnel when omitted at
   create/edit time.
 - Clone-to-NR: `POST /api/v1/taggings/{id}/clone` matches source personnel
@@ -304,26 +304,26 @@ async def test_example(client, sample_users, sample_deployment):
 
 **Completed Endpoints (Session 1):**
 ```python
-# ✅ List personnel within a deployment context
-GET /api/v1/personnel?deployment_id=xxx&unit=Alpha&sub_unit_1=1stPlatoon&search=John
+# ✅ List personnel within a grouping context
+GET /api/v1/personnel?grouping_id=xxx&unit=Alpha&sub_unit_1=1stPlatoon&search=John
 
-# ✅ Get specific personnel record (shows deployment context)
-GET /api/v1/personnel/{id}?deployment_id=xxx
+# ✅ Get specific personnel record (shows grouping context)
+GET /api/v1/personnel/{id}?grouping_id=xxx
 
-# ✅ Update personnel record (admin only, within deployment context)
-PATCH /api/v1/personnel/{id}?deployment_id=xxx
+# ✅ Update personnel record (admin only, within grouping context)
+PATCH /api/v1/personnel/{id}?grouping_id=xxx
 ```
 
 **Proposed Endpoints (Session 2):**
 ```python
-# 🎯 Get personnel attendance history (within deployment)
-GET /api/v1/personnel/{id}/attendance-history?deployment_id=xxx&date_from=xxx&date_to=xxx
+# 🎯 Get personnel attendance history (within grouping)
+GET /api/v1/personnel/{id}/attendance-history?grouping_id=xxx&date_from=xxx&date_to=xxx
 ```
 
 ### 3.3 Personnel API Implementation Details (Session 1)
 
 **Architecture Overview:**
-The Personnel API is built on the principle of deployment-scoped access, ensuring all personnel operations respect deployment boundaries and personnel overrides.
+The Personnel API is built on the principle of grouping-scoped access, ensuring all personnel operations respect grouping boundaries and personnel overrides.
 
 **Key Implementation Features:**
 
@@ -331,24 +331,24 @@ The Personnel API is built on the principle of deployment-scoped access, ensurin
 ```python
 # Personnel overrides take precedence over base assignments
 # Effective assignments = override data if exists, else base data
-def get_effective_assignment(personnel, deployment_id):
-    override = get_personnel_override(personnel.id, deployment_id)
+def get_effective_assignment(personnel, grouping_id):
+    override = get_personnel_override(personnel.id, grouping_id)
     if override:
         return override.unit, override.sub_unit_1, override.sub_unit_2, override.sub_unit_3
     return personnel.unit, personnel.sub_unit_1, personnel.sub_unit_2, personnel.sub_unit_3
 ```
 
-**2. Deployment Access Control:**
+**2. Grouping Access Control:**
 ```python
-# Verify user has access to deployment before querying personnel
-async def verify_deployment_access(deployment_id, user_id, user_role, db):
+# Verify user has access to grouping before querying personnel
+async def verify_grouping_access(grouping_id, user_id, user_role, db):
     # Super admins have full access
-    # Admins can access all deployments
-    # Regular users need explicit deployment access (TODO)
+    # Admins can access all groupings
+    # Regular users need explicit grouping access (TODO)
     if user_role == "super_admin":
-        return get_deployment(deployment_id)
+        return get_grouping(grouping_id)
     elif user_role == "admin":
-        return get_deployment(deployment_id)
+        return get_grouping(grouping_id)
     else:
         raise HTTPException(403, "Insufficient permissions")
 ```
@@ -356,7 +356,7 @@ async def verify_deployment_access(deployment_id, user_id, user_role, db):
 **3. Comprehensive Filtering:**
 ```python
 # Filter by unit hierarchy with override awareness
-query = select(Personnel).where(Personnel.nominal_roll_id == deployment.nominal_roll_id)
+query = select(Personnel).where(Personnel.nominal_roll_id == grouping.nominal_roll_id)
 
 # Apply filters to effective assignments (overrides take precedence)
 for personnel in personnel_list:
@@ -380,74 +380,74 @@ if search_term:
 **Database Performance Optimizations:**
 - Composite indexes on frequently queried fields
 - Efficient LEFT JOIN for override data
-- Pagination support for large deployments
-- Single-query deployment validation
+- Pagination support for large groupings
+- Single-query grouping validation
 
 **Testing Strategy:**
 - 23 comprehensive tests covering all functionality
 - Tests for override handling, filtering, search, and access control
-- Edge cases (invalid deployment_id, different nominal roll, etc.)
+- Edge cases (invalid grouping_id, different nominal roll, etc.)
 - Role-based access control testing
 
 **Files Modified/Created:**
 - `src/parade_state/api/personnel.py` - Main API implementation
-- `src/parade_state/models/schemas.py` - Added PersonnelResponseWithDeployment
+- `src/parade_state/models/schemas.py` - Added PersonnelResponseWithGrouping
 - `tests/test_personnel_api.py` - Comprehensive test suite
 - `src/parade_state/main.py` - Integrated personnel router
 
 **Key Features:**
-- **Deployment-Scoped Querying:** All personnel operations within deployment context
-- **Override Awareness:** Shows deployment-specific unit assignments (not base nominal roll)
+- **Grouping-Scoped Querying:** All personnel operations within grouping context
+- **Override Awareness:** Shows grouping-specific unit assignments (not base nominal roll)
 - **Filtering Capabilities:** By unit, subunit hierarchy, name, service number
-- **Access Control:** Users can only see personnel in deployments they have access to
+- **Access Control:** Users can only see personnel in groupings they have access to
 - **Attendance Integration:** Shows attendance history and current status
 - **Search:** Full-text search across name and service number
 
 **Implementation Priority:**
-1. **Session 1:** Core deployment-based listing and filtering
+1. **Session 1:** Core grouping-based listing and filtering
 2. **Session 2:** Personnel detail view and attendance history
 3. **Session 3:** Personnel update operations and advanced filtering
 
 **Future Phases:**
-- **Advanced Access Control** (Phase 5): Deployment/subunit scope refinement **MOVED UP**
+- **Advanced Access Control** (Phase 5): Grouping/subunit scope refinement **MOVED UP**
 - **Reporting & Analytics** (Phase 6): Attendance summaries and trends **MOVED DOWN**
 - **Performance & Scalability** (Phase 7): Database optimization and caching
 - **Frontend Integration Support** (Phase 8): Mobile optimization and offline sync
 
 **Implementation Priority:**
-1. **Session 1:** ✅ Core deployment-based listing and filtering **COMPLETE**
+1. **Session 1:** ✅ Core grouping-based listing and filtering **COMPLETE**
 2. **Session 2:** Personnel detail view and attendance history
 3. **Session 3:** Personnel update operations and advanced filtering
 
 **Why Access Control Before Reports:**
-- Reports need proper deployment/subunit scoping to prevent unauthorized access
+- Reports need proper grouping/subunit scoping to prevent unauthorized access
 - Security foundation must be solid before exposing analytics
-- Deployment-based access control ensures users only see relevant data
+- Grouping-based access control ensures users only see relevant data
 - Subunit scope filtering is essential for meaningful reports
 
-### 3.3 Implementation Strategy: Deployment-Based Personnel API
+### 3.3 Implementation Strategy: Grouping-Based Personnel API
 
 **Session 1: Core Personnel Listing & Filtering**
 - Create `src/parade_state/api/personnel.py`
-- Implement `GET /api/v1/personnel` with deployment-based filtering
-- Filter parameters: `deployment_id` (required), `unit`, `sub_unit_1`, `sub_unit_2`, `sub_unit_3`, `search`
-- Integrate with deployment personnel overrides (show overridden assignments, not base)
+- Implement `GET /api/v1/personnel` with grouping-based filtering
+- Filter parameters: `grouping_id` (required), `unit`, `sub_unit_1`, `sub_unit_2`, `sub_unit_3`, `search`
+- Integrate with grouping personnel overrides (show overridden assignments, not base)
 - Add Pydantic schemas for personnel response models
-- Implement basic access control (user must have deployment access)
+- Implement basic access control (user must have grouping access)
 - Write comprehensive tests (12-15 tests expected)
 
 **Session 2: Personnel Detail View & History**
-- Implement `GET /api/v1/personnel/{id}` with deployment context
-- Show personnel details with deployment-specific assignments
+- Implement `GET /api/v1/personnel/{id}` with grouping context
+- Show personnel details with grouping-specific assignments
 - Implement `GET /api/v1/personnel/{id}/attendance-history`
-- Filter attendance history by deployment and date range
+- Filter attendance history by grouping and date range
 - Add attendance summary statistics (present-like/absent-like bucket counts)
 - Implement personnel search functionality
 - Write tests for detail views and history (8-10 tests expected)
 
 **Session 3: Personnel Update Operations**
 - Implement `PATCH /api/v1/personnel/{id}` for admin-only updates
-- Validate updates are within deployment context
+- Validate updates are within grouping context
 - Add audit trail for personnel changes
 - Implement advanced filtering and sorting
 - Add pagination support for large result sets
@@ -455,20 +455,20 @@ if search_term:
 - Complete test coverage (5-8 tests expected)
 
 **Technical Considerations:**
-- **Override Handling:** Query must join with `DeploymentPersonnelOverride` table
-- **Access Control:** Check user's deployment access before returning personnel
-- **Performance:** Add database indexes on `deployment_id`, `unit`, `sub_unit_*` fields
+- **Override Handling:** Query must join with `GroupingPersonnelOverride` table
+- **Access Control:** Check user's grouping access before returning personnel
+- **Performance:** Add database indexes on `grouping_id`, `unit`, `sub_unit_*` fields
 - **Search:** Use database `LIKE` or full-text search for name/service_number
-- **Pagination:** Implement cursor-based pagination for large deployments
+- **Pagination:** Implement cursor-based pagination for large groupings
 
 **Database Queries to Implement:**
 ```python
-# Base query for deployment personnel (with overrides)
+# Base query for grouping personnel (with overrides)
 SELECT p.*, dop.unit as override_unit, dop.sub_unit_1 as override_sub_unit_1, ...
 FROM personnel p
-LEFT JOIN deployment_personnel_overrides dop
-  ON dop.personnel_id = p.id AND dop.deployment_id = :deployment_id
-WHERE p.nominal_roll_id = (SELECT nominal_roll_id FROM deployments WHERE id = :deployment_id)
+LEFT JOIN grouping_personnel_overrides dop
+  ON dop.personnel_id = p.id AND dop.grouping_id = :grouping_id
+WHERE p.nominal_roll_id = (SELECT nominal_roll_id FROM groupings WHERE id = :grouping_id)
   AND (p.unit = :filter_unit OR :filter_unit IS NULL)
   AND (p.full_name LIKE :search OR p.short_id LIKE :search OR :search IS NULL)
 
@@ -477,14 +477,14 @@ SELECT ar.*, s.date, s.session_type
 FROM attendance_records ar
 JOIN sessions s ON s.id = ar.session_id
 WHERE ar.personnel_id = :personnel_id
-  AND s.deployment_id = :deployment_id
+  AND s.grouping_id = :grouping_id
 ORDER BY s.date DESC, s.session_type ASC
 ```
 
 **Expected Outcomes:**
 - **3 new API endpoints** for personnel management
 - **25-33 new tests** for comprehensive coverage
-- **Enhanced deployment roster** functionality for mobile UI
+- **Enhanced grouping roster** functionality for mobile UI
 - **Foundation for reporting** and analytics features
 - **Improved total test count:** ~135-140 tests
 
@@ -547,9 +547,9 @@ class Base(DeclarativeBase):
 
 ```python
 # Foreign keys use String(36) for consistency
-deployment_id: Mapped[str] = mapped_column(
+grouping_id: Mapped[str] = mapped_column(
     String(36), 
-    ForeignKey("deployments.id", ondelete="CASCADE")
+    ForeignKey("groupings.id", ondelete="CASCADE")
 )
 ```
 
@@ -608,13 +608,13 @@ parade-state/
 │   ├── admin_routes.py          # Admin section Jinja2 routes (/admin/*)
 │   ├── api/                     # REST API endpoints (JSON)
 │   │   ├── __init__.py
-│   │   ├── access_control.py    # Deployment access grants + subunit scopes
+│   │   ├── access_control.py    # Grouping access grants + subunit scopes
 │   │   ├── attendance.py        # Attendance record CRUD + bulk ops
 │   │   ├── audit.py             # Audit log query
 │   │   ├── auth.py              # Google OAuth flow, login/logout
 │   │   ├── csv_upload.py        # CSV upload pipeline
 │   │   ├── deferments.py        # Deferment CRUD (super_admin only)
-│   │   ├── deployments.py       # Deployment lifecycle
+│   │   ├── groupings.py      # Grouping lifecycle
 │   │   ├── nominal_rolls.py            # Nominal Roll list/get/update (status, notes, label)/delete
 │   │   ├── personnel.py         # Personnel listing + attendance history
 │   │   ├── sessions.py          # Session open/close/reopen/finalize
@@ -631,13 +631,13 @@ parade-state/
 │   │   └── versions/
 │   ├── models/                  # SQLAlchemy ORM models
 │   │   ├── __init__.py
-│   │   ├── access.py            # User, AccessLevel, UserSubunitScope, DeploymentUserAccess
+│   │   ├── access.py            # User, AccessLevel, UserSubunitScope, GroupingUserAccess
 │   │   ├── attendance.py        # Session, AttendanceRecord
 │   │   ├── audit.py             # AuditLog
 │   │   ├── auth_session.py      # UserSession
 │   │   ├── csv_ingestion.py     # Nominal Roll, CsvUpload, ColumnMapping, ColumnMetadata
 │   │   ├── deferments.py        # Deferment
-│   │   ├── deployment.py        # Deployment, overrides, notes, exclusions
+│   │   ├── grouping.py        # Grouping, overrides, notes, exclusions
 │   │   ├── personnel.py         # Personnel (with callup_status)
 │   │   └── schemas.py           # Pydantic request/response schemas
 │   ├── utils/                   # Shared utilities (see CODE_STYLE.md)
@@ -649,7 +649,7 @@ parade-state/
 │   └── web/                     # User-facing web routes (Jinja2)
 │       ├── attendance.py        # /attendance marking view
 │       ├── auth.py              # /auth login/logout redirects
-│       ├── deployment.py        # /deployment summary view
+│       ├── grouping.py        # /grouping summary view
 │       └── nominal roll.py             # /nominal-roll roster browser
 ├── tests/
 │   ├── conftest.py              # Pytest fixtures (db, client, sample data)

@@ -22,7 +22,7 @@
 
 ### 1.1 Problem Statement
 
-The personnel branch currently manages battalion parade state through a manual mapreduce process — aggregating attendance from subunits by hand. This system replaces that process with a structured, access-controlled, deployment-aware web application suitable for field use.
+The personnel branch currently manages battalion parade state through a manual mapreduce process — aggregating attendance from subunits by hand. This system replaces that process with a structured, access-controlled, grouping-aware web application suitable for field use.
 
 ### 1.2 Core Entity Hierarchy
 
@@ -32,7 +32,7 @@ Nominal Roll (CAA-pinned, CSV-sourced, immutable)
  └── Attendance Scope (1:1 with NR; the active NR-or-Tagging scope)
       └── Attendance (one row per personnel/day; carries AM and PM status + remarks)
 
-Deployment (remaps personnel unit+subunit; has date+time validity range) —
+Grouping (remaps personnel unit+subunit; has date+time validity range) —
   retained for overrides/exclusions/notes but is no longer the attendance anchor.
 ```
 
@@ -41,17 +41,17 @@ Deployment (remaps personnel unit+subunit; has date+time validity range) —
 - **Tagging**: A named overlay of person → subunit remaps on a single NR; never mutates the NR; consumed by attendance to render a remapped structure
 - **Attendance Scope**: 1:1 with an NR; the active scope (NR itself or a Tagging) that attendance is taken against. A super-admin must activate a scope before attendance can be recorded.
 - **Attendance**: One row per `(personnel, date)`, carrying `status_am`/`remarks_am` and `status_pm`/`remarks_pm` (statuses from the nine-value operational enum). AM and PM are hardcoded — there is no longer a user-managed Session model.
-- **Deployment**: Based on a nominal roll, remaps personnel assignments, valid for date+time range. Retained for overrides/exclusions/notes but no longer anchors attendance.
+- **Grouping**: Based on a nominal roll, remaps personnel assignments, valid for date+time range. Retained for overrides/exclusions/notes but no longer anchors attendance.
 
 ### 1.3 Scope
 
 **In Scope (v1):**
 - CSV ingestion with CAA versioning, column mapping, diff detection
-- Deployment management: create, clone (same-roll), migrate (cross-roll), scheduled activation
+- Grouping management: create, clone (same-roll), migrate (cross-roll), scheduled activation
 - Attendance taking: AM/PM (hardcoded), nine-status operational reporting enum, NR/Tagging-scoped, active-scope gating
 - Row access control (access level + subunit scope) and column sensitivity control
 - Parade state table view scoped to user access with inline editing
-- Admin UI: enums, users, column sensitivity, column mapping, deployment/tagging/attendance management
+- Admin UI: enums, users, column sensitivity, column mapping, grouping/tagging/attendance management
 - Mobile-friendly static HTML/JS attendance frontend
 - Service worker + IndexedDB read-only cache (24hr TTL, stale indicator)
 - SSE stale-detection signal on attendance view
@@ -93,12 +93,12 @@ Nominal Roll
 - Raw CSV stored immutably in csv_uploads (append-only; SHA-256 hash recorded)
 - Parsed personnel in personnel_snapshots: required columns as typed fields; all others in extra_fields JSON
 
-### 2.2 Deployment
+### 2.2 Grouping
 
-**Operational deployment based on an nominal roll, with overrides and validity window.**
+**Operational grouping based on an nominal roll, with overrides and validity window.**
 
 ```
-Deployment
+Grouping
 ├── id: UUID (PK)
 ├── name: str
 ├── nominal_roll_id: UUID (FK Nominal Roll, on_delete=RESTRICT)
@@ -109,10 +109,10 @@ Deployment
 │   └── archived: retained for history but no longer operational
 │   └── closed: no further edits permitted
 │   └── finalized: permanent archive; cascades closure to all sessions
-├── valid_from: datetime (when deployment becomes active)
-├── valid_until: datetime (when deployment expires)
+├── valid_from: datetime (when grouping becomes active)
+├── valid_until: datetime (when grouping expires)
 ├── scheduled_activation: datetime (nullable; explicit scheduled time)
-├── personnel_count: int (snapshot; non-archived personnel in this deployment)
+├── personnel_count: int (snapshot; non-archived personnel in this grouping)
 ├── created_at: datetime
 ├── created_by: UUID (FK User)
 ├── activated_at: datetime (nullable; when actually transitioned to active)
@@ -121,8 +121,8 @@ Deployment
 ```
 
 **Constraints:**
-- Only one deployment can have status = 'active' (enforced at application layer)
-- Validity range overlaps with existing draft/active deployment → hard reject
+- Only one grouping can have status = 'active' (enforced at application layer)
+- Validity range overlaps with existing draft/active grouping → hard reject
 
 ### 2.3 Attendance Scope & Attendance (AM/PM hardcoded)
 
@@ -210,13 +210,13 @@ User
 
 #### 3.1.3 UserSubunitScope
 
-**Links a user to specific subunit(s) within each deployment.**
+**Links a user to specific subunit(s) within each grouping.**
 
 ```
 UserSubunitScope
 ├── id: UUID (PK)
 ├── user_id: UUID (FK User, on_delete=CASCADE)
-├── deployment_id: UUID (FK Deployment, on_delete=CASCADE)
+├── grouping_id: UUID (FK Grouping, on_delete=CASCADE)
 ├── unit: str (nullable; part of scoped path)
 ├── sub_unit_1: str (nullable)
 ├── sub_unit_2: str (nullable)
@@ -227,7 +227,7 @@ UserSubunitScope
 ```
 
 **Constraints:**
-- UNIQUE(user_id, deployment_id, unit, sub_unit_1, sub_unit_2, sub_unit_3)
+- UNIQUE(user_id, grouping_id, unit, sub_unit_1, sub_unit_2, sub_unit_3)
 - NULL values = "include all at that level and below"
 
 ### 3.2 Personnel & CSV Ingestion
@@ -398,7 +398,7 @@ Attendance
 ├── date: date
 ├── status_am / remarks_am: attendance_status enum + text (default 'absent')
 ├── status_pm / remarks_pm: attendance_status enum + text (default 'absent')
-├── notes_snapshot: str (snapshot of deployment notes at row creation)
+├── notes_snapshot: str (snapshot of grouping notes at row creation)
 ├── unit_snapshot, sub_unit_{1,2,3}_snapshot: str (personnel's effective hierarchy)
 ├── created_at/by, updated_at/by, last_edit_at/by, is_retroactive_edit: audit
 ```
@@ -418,10 +418,10 @@ Attendance
 
 ### 4.1 Attendance Snapshot Rule
 
-**Condition 1: Within deployment.valid_from to valid_until**
+**Condition 1: Within grouping.valid_from to valid_until**
 - On write, resolve effective unit+subunit: override ?? nominal roll
 - Populate: unit_snapshot, sub_unit_1_snapshot, sub_unit_2_snapshot, sub_unit_3_snapshot
-- Populate: notes_snapshot from current DeploymentNotes
+- Populate: notes_snapshot from current GroupingNotes
 - Update: last_edit_at, last_edit_by (for display purposes)
 
 **Condition 2: Outside validity range (retroactive edit)**
@@ -429,10 +429,10 @@ Attendance
 - DO NOT update: any *_snapshot fields (preserve original snapshot)
 - Update: last_edit_at, last_edit_by (for display purposes)
 
-### 4.2 Deployment Lifecycle
+### 4.2 Grouping Lifecycle
 
 ```
-Deployment created (draft)
+Grouping created (draft)
   ├─ valid_from, valid_until, optional scheduled_activation set
   ├─ Admin can edit overrides
   ├─ PersonnelOverrides populated (initially mirrored from Nominal Roll)
@@ -441,7 +441,7 @@ Deployment created (draft)
               At valid_from time (or scheduled_activation, or manual):
               ↓
         status → active
-        ├─ Only one deployment active at a time (application-enforced)
+        ├─ Only one grouping active at a time (application-enforced)
         ├─ Sessions can be created/opened
         └─ Admin can still edit overrides (live reorg)
 
@@ -453,7 +453,7 @@ Deployment created (draft)
 
         [Manual admin actions at any status:]
         ├─ archived: retain for history, hide from active lists
-        ├─ closed: no further edits allowed (deployment locked)
+        ├─ closed: no further edits allowed (grouping locked)
         └─ finalized: permanent archive (immutable)
 ```
 
@@ -542,8 +542,8 @@ Compute diff (current CSV vs prior confirmed CSV)
   ↓
 Populate NominalRoll.status = 'confirmed'
 Populate Personnel records (callup_status defaults to 'Called Up')
-Auto-create initial Deployment (status=draft)
-Transfer notes from prior deployment (by Personnel.id match)
+Auto-create initial Grouping (status=draft)
+Transfer notes from prior grouping (by Personnel.id match)
 ```
 
 ### 4.6 Deferment Callup-Status Transition
@@ -574,8 +574,8 @@ callup transitions.
 | AccessLevel | (name), (level_order) | - | Vocab uniqueness |
 | Nominal Roll | (caa) among non-archived | (caa) | CAA uniqueness |
 | ColumnMapping | (canonical_name) among non-deprecated | (canonical_name) | Mapping uniqueness |
-| Deployment | Application-level: only one active | (status) | Active deployment enforcement |
-| UserSubunitScope | (user_id, deployment_id, unit, sub_unit_1-3) | (user_id, deployment_id) | Scope lookup |
+| Grouping | Application-level: only one active | (status) | Active grouping enforcement |
+| UserSubunitScope | (user_id, grouping_id, unit, sub_unit_1-3) | (user_id, grouping_id) | Scope lookup |
 | AttendanceScope | (nominal_roll_id) | (nominal_roll_id) | One active scope per NR |
 | Attendance | (personnel_id, date) | (personnel_id, date) | One row per person per day |
 | UserSubunitAssignment | (user_id, nominal_roll_id, sub_unit_1) | (user_id, nominal_roll_id, sub_unit_1) | One grant per user/NR/subunit |
@@ -595,27 +595,27 @@ callup transitions.
 
 **App Admin:**
 - Granted by super-admin
-- Full read/write access to all entities, all columns, all deployments
+- Full read/write access to all entities, all columns, all groupings
 - Access to audit log
 - All structural operations are admin-only
 
 **Scoped User:**
 - Google-authenticated
 - Has access level: single admin-assigned label from ordered vocabulary
-- Has subunit scope: one or more (deployment, subunit) pairs
+- Has subunit scope: one or more (grouping, subunit) pairs
 - Write scope: attendance status, Notes, Remarks — for rows within scope only
 
 ### 5.2 Account Lifecycle
 
-1. Admin preregisters account by email with access level, subunit scope, and deployment grants assigned upfront. Account created in pending state.
+1. Admin preregisters account by email with access level, subunit scope, and grouping grants assigned upfront. Account created in pending state.
 2. On first Google sign-in, if email matches a pending account → activated. If no match → held as unrecognised (no access); auth event written to audit log.
 3. Admin may suspend at any time. Suspension immediately invalidates active sessions.
 
 ### 5.3 Row Visibility Rules
 
 **User sees personnel row if:**
-- User has DeploymentUserAccess for deployment, AND
-- Personnel's (unit, sub_unit_1, sub_unit_2, sub_unit_3) matches at least one UserSubunitScope for that deployment, AND
+- User has GroupingUserAccess for grouping, AND
+- Personnel's (unit, sub_unit_1, sub_unit_2, sub_unit_3) matches at least one UserSubunitScope for that grouping, AND
 - User.access_level_id.level_order ≥ ColumnMetadata.sensitivity_level_id.level_order (for each visible column)
 
 *(Admins bypass all checks)*
@@ -640,7 +640,7 @@ Admin-defined ordered string labels (e.g. unit, coy, platoon, section). Linear h
 
 **Column manifest pattern:** All data endpoints return columns (user-visible column manifest) + rows (objects containing only manifest keys). Clients render headers from manifest; never hardcode column names.
 
-**SSE stale detection:** GET /api/v1/events/attendance?deploymentId=&sessionId= emits data_changed signal events (no payload data) when any record in the user's scope is modified. Client fetches on user confirmation. 30s keep-alive ping.
+**SSE stale detection:** GET /api/v1/events/attendance?groupingId=&sessionId= emits data_changed signal events (no payload data) when any record in the user's scope is modified. Client fetches on user confirmation. 30s keep-alive ping.
 
 **Auth:** session cookie (HttpOnly, Secure, SameSite=Strict). Google OAuth via Authlib.
 
@@ -660,18 +660,18 @@ Declared in app.config.json (deployment-time change, not admin UI):
 **Note:** There is **no** `pers_no` canonical column. Personnel identity (`short_id`) is generated
 by the application, not imported from the CSV.
 
-### 6.3 Deployment Operations
+### 6.3 Grouping Operations
 
 **Clone (Same-Nominal Roll):**
 - Admin-only
 - Copies overrides, prefixes name "Copy of …", resets validity range to blank
-- Admin chooses whether to transfer deployment notes
+- Admin chooses whether to transfer grouping notes
 
 **Migrate (Cross-Nominal Roll):**
 - Admin-only
 - Two-step: compute diff between source nominal roll and target nominal roll
 - Present leavers (must be individually dismissed) and joiners (must each receive a unit+subunit assignment)
-- On confirm, create new draft deployment against target nominal roll
+- On confirm, create new draft grouping against target nominal roll
 
 ---
 
@@ -727,15 +727,15 @@ extra_fields: Mapped[dict] = mapped_column(JSON, default=dict)
 
 **Decision:** Enforce certain business rules at application level rather than database level
 
-**Active Deployment Constraint:**
-- Original Spec: Only one deployment can have status = 'active' (database constraint)
+**Active Grouping Constraint:**
+- Original Spec: Only one grouping can have status = 'active' (database constraint)
 - Implementation: Application-level validation only
 
 **Rationale:**
 - SQLite doesn't support partial unique indexes (e.g., WHERE status = 'active')
 - PostgreSQL supports this, but maintaining divergent constraints increases complexity
 - Application layer can provide better error messages and validation logic
-- Allows multiple "draft" or "inactive" deployments without constraint violations
+- Allows multiple "draft" or "inactive" groupings without constraint violations
 
 ### 7.5 Test Architecture
 

@@ -181,7 +181,7 @@ async def get_session(...):
     pass
 
 # ❌ AVOID - Unrelated endpoints in same file
-# parade_state/api/mixed.py - Don't mix sessions, users, deployments
+# parade_state/api/mixed.py - Don't mix sessions, users, groupings
 ```
 
 ---
@@ -369,11 +369,11 @@ Use appropriate HTTP methods and status codes:
 
 **Table Names:**
 - Use `snake_case` (plural for tables)
-- Example: `personnel`, `deployment_user_accesses`
+- Example: `personnel`, `grouping_user_accesses`
 
 **Column Names:**
 - Use `snake_case`
-- Example: `created_at`, `deployment_id`, `full_name`
+- Example: `created_at`, `grouping_id`, `full_name`
 
 **Relationships:**
 - Use `relationship()` with clear `back_populates`
@@ -384,7 +384,7 @@ class Personnel(Base):
     __tablename__ = "personnel"
 
     # Relationships
-    deployment_overrides: Mapped[list["DeploymentPersonnelOverride"]] = relationship(
+    grouping_overrides: Mapped[list["GroupingPersonnelOverride"]] = relationship(
         back_populates="personnel",
         cascade="all, delete-orphan",
     )
@@ -409,8 +409,8 @@ Store UUIDs as strings for database compatibility:
 
 ```python
 # ✅ CORRECT - String UUIDs
-class Deployment(Base):
-    __tablename__ = "deployments"
+class Grouping(Base):
+    __tablename__ = "groupings"
 
     nominal_roll_id: Mapped[str] = mapped_column(
         String(36),  # String UUID for SQLite compatibility
@@ -418,7 +418,7 @@ class Deployment(Base):
     )
 
 # ❌ AVOID - Native UUID type (not SQLite compatible)
-class Deployment(Base):
+class Grouping(Base):
     nominal_roll_id: Mapped[UUID] = mapped_column(UUID)  # Not portable
 ```
 

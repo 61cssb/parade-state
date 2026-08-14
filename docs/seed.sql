@@ -27,6 +27,6 @@ ON CONFLICT (label) DO NOTHING;
 INSERT INTO app_settings (key, value, description) VALUES
     ('default_session_type', 'AM',
      'Default attendance session type shown on load. AM or PM.'),
-    ('deployment_overlap_strict', 'true',
-     'Whether to hard-reject deployment date range edits that would overlap an existing deployment.')
+    ('grouping_overlap_strict', 'true',
+     'Whether to hard-reject grouping date range edits that would overlap an existing grouping.')
 ON CONFLICT (key) DO NOTHING;

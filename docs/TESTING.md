@@ -296,16 +296,16 @@ All sample fixtures are function-scoped and use `db_session`:
 - `sample_users`: Creates admin and regular users
 - `sample_nominal_roll`: Creates establishment record
 - `sample_personnel`: Creates personnel records
-- `sample_deployment`: Creates deployment with access grants
+- `sample_grouping`: Creates grouping with access grants
 - `sample_session`: Creates session record
 - `sample_sessions`: Creates multiple session records
 - `sample_attendance_records`: Creates attendance records
 
 **Usage**:
 ```python
-async def test_with_samples(sample_users, sample_deployment):
+async def test_with_samples(sample_users, sample_grouping):
     admin = sample_users["admin"]
-    deployment = sample_deployment
+    grouping = sample_grouping
 ```
 
 ---
