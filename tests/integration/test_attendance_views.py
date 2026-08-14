@@ -100,3 +100,102 @@ async def test_admin_attendance_rejects_non_super_admin(
     response = client.get("/admin/attendance", follow_redirects=False)
     assert response.status_code == 302
     assert response.headers["location"] == "/admin"
+
+
+@pytest.mark.asyncio
+async def test_user_attendance_shows_nr_picker_without_grouping_access(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_attendance_scope,
+    sample_users,
+    monkeypatch,
+):
+    """Attendance is NR-scoped, not grouping-scoped: a user with no grouping
+    access and no subunit assignments still gets the NR picker (and the
+    no-assignments hint), never the old "No accessible groupings" dead end."""
+    from parade_state.web import attendance as web_attendance
+
+    async def _fake_current_user(_request):
+        return sample_users["user"]
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
+
+    response = client.get("/attendance")
+    assert response.status_code == 200
+    assert "No accessible groupings" not in response.text
+    # NR selector is present with the sample roll's CAA.
+    assert 'name="nominal_roll_id"' in response.text
+    assert "CAA 2024-01-01" in response.text
+    # Default NR resolution picked the sample roll (no grouping involvement).
+    assert "no Subunit-1 assignments" in response.text
+
+
+@pytest.mark.asyncio
+async def test_user_attendance_overlays_active_tagging_values(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_users,
+    db_session,
+    monkeypatch,
+):
+    """With a Tagging scope active, the roster shows effective (to_*) values
+    and the tagged row renders with the changed-row highlight."""
+    from parade_state.web import attendance as web_attendance
+    from parade_state.models import AttendanceScope, Tagging, TaggingEntry
+
+    admin_id = str(sample_users["admin"].id)
+
+    # Build the NR's tagging with one remap for personnel[0] (Platoon 1 → 9).
+    tagging = Tagging(
+        label=None,
+        nominal_roll_id=str(sample_nominal_roll.id),
+        created_by=admin_id,
+    )
+    tagging.entries.append(
+        TaggingEntry(
+            personnel_id=str(sample_personnel[0].id),
+            from_unit=sample_personnel[0].unit,
+            from_sub_unit_1=sample_personnel[0].sub_unit_1,
+            to_unit="Coy B",
+            to_sub_unit_1="Platoon 9",
+        )
+    )
+    db_session.add(tagging)
+    await db_session.flush()
+    db_session.add(
+        AttendanceScope(
+            nominal_roll_id=str(sample_nominal_roll.id),
+            tagging_id=str(tagging.id),
+            activated_by=admin_id,
+        )
+    )
+    await db_session.commit()
+
+    # super_admin sees the whole roster including the tagged row.
+    from parade_state.models import User
+
+    super_admin = User(
+        email="super@example.com",
+        name="Super Admin",
+        role="super_admin",
+        status="active",
+    )
+    db_session.add(super_admin)
+    await db_session.commit()
+
+    async def _fake_current_user(_request):
+        return super_admin
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
+
+    response = client.get(
+        "/attendance", params={"nominal_roll_id": str(sample_nominal_roll.id)}
+    )
+    assert response.status_code == 200
+    assert "Scope: Tagging" in response.text
+    assert "changed-row" in response.text
+    # Effective values come from the tagging entry, not the canonical row.
+    assert "Coy B" in response.text
+    assert "Platoon 9" in response.text
