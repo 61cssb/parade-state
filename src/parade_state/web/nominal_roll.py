@@ -150,7 +150,9 @@ async def nominal_roll_view(
                 total_count=0,
             )
 
-        # Resolve selected nominal roll (default to most recent)
+        # Resolve selected nominal roll (default to the one active for
+        # attendance, else most recent)
+        active_nr = next((r for r in all_rolls if r.attendance_active), None)
         selected = None
         if nominal_roll_id:
             for r in all_rolls:
@@ -158,11 +160,7 @@ async def nominal_roll_view(
                     selected = r
                     break
         if not selected:
-            # Prefer confirmed, then draft, else most recent
-            non_archived = [r for r in all_rolls if r.status != "archived"]
-            pool = non_archived if non_archived else all_rolls
-            confirmed = [r for r in pool if r.status == "confirmed"]
-            selected = confirmed[0] if confirmed else pool[0]
+            selected = active_nr or (all_rolls[0] if all_rolls else None)
 
         base = _base_conditions(str(selected.id))
         filters = _optional_conditions(
@@ -247,7 +245,7 @@ async def nominal_roll_view(
             {
                 "id": str(r.id),
                 "caa": r.caa,
-                "status": r.status,
+                "attendance_active": bool(r.attendance_active),
                 "personnel_count": r.personnel_count,
             }
             for r in all_rolls
@@ -255,7 +253,7 @@ async def nominal_roll_view(
         selected={
             "id": str(selected.id),
             "caa": selected.caa,
-            "status": selected.status,
+            "attendance_active": bool(selected.attendance_active),
             "personnel_count": selected.personnel_count,
             "remarks": selected.remarks,
         },

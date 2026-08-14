@@ -13,7 +13,6 @@ from parade_state.db import get_session_maker
 from parade_state.models import (
     AccessLevel,
     Attendance,
-    AttendanceScope,
     AuditLog,
     CsvUpload,
     Deferment,
@@ -118,9 +117,11 @@ async def admin_dashboard(
             )
         ).scalar_one()
 
-        active_scopes = (
+        active_attendance_nrs = (
             await db.execute(
-                select(func.count(AttendanceScope.nominal_roll_id))
+                select(func.count(NominalRoll.id)).where(
+                    NominalRoll.attendance_active.is_(True)
+                )
             )
         ).scalar_one()
 
@@ -169,7 +170,7 @@ async def admin_dashboard(
         },
         active_page="dashboard",
         active_groupings=active_groupings,
-        active_scopes=active_scopes,
+        active_scopes=active_attendance_nrs,
         total_personnel=total_personnel,
         active_users=active_users,
         recent_activity=recent_activity,
@@ -512,9 +513,12 @@ async def admin_csv_upload(
 @router.get("/admin/nominal-rolls", response_class=HTMLResponse)
 async def admin_nominal_rolls(
     request: Request,
-    status_filter: str | None = None,
 ):
-    """Render the nominal rolls management page."""
+    """Render the nominal rolls management page.
+
+    Highlights the NR currently active for attendance; super-admins can
+    toggle "Use for Attendance" / "Deactivate Attendance" per row.
+    """
     current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
@@ -536,7 +540,8 @@ async def admin_nominal_rolls(
             select(
                 NominalRoll.id,
                 NominalRoll.caa,
-                NominalRoll.status,
+                NominalRoll.attendance_active,
+                NominalRoll.attendance_activated_at,
                 NominalRoll.personnel_count,
                 NominalRoll.uploaded_at,
                 NominalRoll.csv_hash,
@@ -551,8 +556,6 @@ async def admin_nominal_rolls(
             .order_by(NominalRoll.uploaded_at.desc())
             .limit(100)
         )
-        if status_filter:
-            query = query.where(NominalRoll.status == status_filter)
 
         rows = (await db.execute(query)).all()
 
@@ -560,7 +563,8 @@ async def admin_nominal_rolls(
         {
             "id": str(row.id),
             "caa": row.caa,
-            "status": row.status,
+            "attendance_active": bool(row.attendance_active),
+            "attendance_activated_at": row.attendance_activated_at,
             "personnel_count": row.personnel_count,
             "uploaded_at": row.uploaded_at,
             "csv_hash": row.csv_hash[:12] + "...",
@@ -584,8 +588,6 @@ async def admin_nominal_rolls(
         },
         active_page="nominal-rolls",
         nominal_rolls=nominal_rolls,
-        status_filter=status_filter or "",
-        nominal_roll_statuses=["draft", "confirmed", "archived"],
     )
 
     return HTMLResponse(content=html_content)
@@ -834,10 +836,11 @@ async def admin_attendance(
 ):
     """Render the admin attendance page (super-admin only).
 
-    Super-admin control center: activate the NR's attendance scope (NR itself
-    or a Tagging), filter the roster by sub_unit_1, edit AM/PM status +
-    remarks, and trigger Copy Remarks. Copy Remarks is disabled on the NR's
-    first day (no prior attendance).
+    Super-admin control center: pick an NR + date, filter the roster by
+    sub_unit_1, edit AM/PM status + remarks, and trigger Copy Remarks.
+    Editing is enabled only when the selected NR is the one active for
+    attendance (toggle on the Nominal Rolls page). Copy Remarks is disabled
+    on the NR's first day (no prior attendance).
     """
     current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
@@ -868,8 +871,7 @@ async def admin_attendance(
             nominal_roll_options[0]["id"] if nominal_roll_options else None
         )
 
-        active_scope = None
-        scope_taggings = []
+        attendance_active = False
         subunit_options: list[str] = []
         roster_rows: list[dict] = []
         has_prior_attendance = False
@@ -877,27 +879,16 @@ async def admin_attendance(
                   "pm": {"present": 0, "absent": 0, "total": 0}}
 
         if resolved_nr_id:
-            # Active scope for this NR.
-            scope_result = await db.execute(
-                select(AttendanceScope).where(
-                    AttendanceScope.nominal_roll_id == resolved_nr_id
-                )
+            # Is this NR the one active for attendance?
+            attendance_active = bool(
+                (
+                    await db.execute(
+                        select(NominalRoll.attendance_active).where(
+                            NominalRoll.id == resolved_nr_id
+                        )
+                    )
+                ).scalar_one_or_none()
             )
-            active_scope = scope_result.scalar_one_or_none()
-
-            # Tagging for this NR (1:1; at most one row). Used for the
-            # scope-activation dropdown.
-            tagging_rows = (
-                await db.execute(
-                    select(Tagging).where(
-                        Tagging.nominal_roll_id == resolved_nr_id
-                    ).order_by(Tagging.created_at)
-                )
-            ).scalars().all()
-            scope_taggings = [
-                {"id": str(t.id), "label": t.label or f"Tagging {str(t.id)[:8]}"}
-                for t in tagging_rows
-            ]
 
             # Distinct sub_unit_1 values on the NR (for the filter dropdown).
             sub_rows = (
@@ -999,15 +990,7 @@ async def admin_attendance(
         target_date=target_date,
         sub_unit_1_filter=sub_unit_1 or "",
         subunit_options=subunit_options,
-        active_scope=(
-            {
-                "tagging_id": active_scope.tagging_id,
-                "activated_at": active_scope.activated_at,
-            }
-            if active_scope
-            else None
-        ),
-        scope_taggings=scope_taggings,
+        attendance_active=attendance_active,
         roster_rows=roster_rows,
         has_prior_attendance=has_prior_attendance,
         counts=counts,

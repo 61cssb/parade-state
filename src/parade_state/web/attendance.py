@@ -1,10 +1,9 @@
 """User-facing attendance marking view.
 
-Attendance is always taken against a **Nominal Roll** (with the active
-scope's Tagging applied) — never against a Grouping. Groupings are a
-separate feature and are not linked to attendance. Shows an
-inline-editable attendance table for the active scope on the current
-day, with AM/PM status + remarks columns.
+Attendance is always taken against the Nominal Roll that is currently
+**active for attendance** (with its 1:1 tagging applied) — never against a
+Grouping. When no NR is active, the page shows an inactive message instead
+of the marking table.
 """
 
 from fastapi import APIRouter, Request
@@ -17,11 +16,11 @@ from parade_state.api.subunit_access import (
     get_assigned_subunit_1s,
     resolve_effective_subunit_1_map,
 )
+from parade_state.api.tagging import _load_nr_tagging
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
 from parade_state.models import (
     Attendance,
-    AttendanceScope,
     NominalRoll,
     Personnel,
     TaggingEntry,
@@ -39,11 +38,12 @@ async def attendance_view(
 ):
     """Render the attendance marking page.
 
-    Lists the active roster (with the active scope's tagging overlay
-    applied) joined to the selected day's attendance rows (AM/PM columns).
-    Attendance scope must be activated for the NR before rows can be edited.
-    Non-super-admins only see personnel whose effective sub_unit_1 matches
-    one of their UserSubunitAssignment rows on the NR.
+    Defaults to the NR currently active for attendance (if any). Lists the
+    roster with the NR's 1:1 tagging overlay applied, joined to the selected
+    day's attendance rows (AM/PM columns). Editing is enabled only when the
+    selected NR is the active one. Non-super-admins only see personnel whose
+    effective sub_unit_1 matches one of their UserSubunitAssignment rows on
+    the NR.
     """
     current_user = await get_current_user_optional(request)
     if not current_user:
@@ -64,9 +64,9 @@ async def attendance_view(
             .scalars()
             .all()
         )
+        active_nr = next((r for r in all_rolls if r.attendance_active), None)
 
-        # Resolve the selected NR (default: most recent confirmed, then
-        # draft, else newest — matches the nominal roll browser).
+        # Resolve the selected NR (default: the active one, else newest).
         selected = None
         if nominal_roll_id:
             for r in all_rolls:
@@ -74,27 +74,20 @@ async def attendance_view(
                     selected = r
                     break
         if selected is None:
-            non_archived = [r for r in all_rolls if r.status != "archived"]
-            pool = non_archived if non_archived else all_rolls
-            confirmed = [r for r in pool if r.status == "confirmed"]
-            selected = confirmed[0] if confirmed else pool[0] if pool else None
+            selected = active_nr or (all_rolls[0] if all_rolls else None)
 
         selected_nr_id = str(selected.id) if selected else None
-
-        scope: AttendanceScope | None = None
-        if selected_nr_id:
-            scope_result = await db.execute(
-                select(AttendanceScope).where(
-                    AttendanceScope.nominal_roll_id == selected_nr_id
-                )
-            )
-            scope = scope_result.scalar_one_or_none()
+        attendance_active = bool(selected and selected.attendance_active)
 
         # Build roster + attendance rows.
         attendance_rows = []
         has_prior_attendance = False
         no_assignments = False
+        applied_tagging_id: str | None = None
         if selected_nr_id:
+            tagging = await _load_nr_tagging(db, selected_nr_id, with_entries=False)
+            applied_tagging_id = str(tagging.id) if tagging else None
+
             roster_result = await db.execute(
                 select(Personnel).where(
                     and_(
@@ -110,14 +103,14 @@ async def attendance_view(
             )
             roster = roster_result.scalars().all()
 
-            # Tagging overlay for the active scope: effective unit/sub_unit_1
-            # come from the scope tagging's entries when present.
+            # Tagging overlay: effective unit/sub_unit_1 come from the NR's
+            # tagging entries when present.
             entry_by_person: dict[str, TaggingEntry] = {}
-            if scope and scope.tagging_id:
+            if applied_tagging_id:
                 entries = (
                     await db.execute(
                         select(TaggingEntry).where(
-                            TaggingEntry.tagging_id == scope.tagging_id
+                            TaggingEntry.tagging_id == applied_tagging_id
                         )
                     )
                 ).scalars().all()
@@ -131,7 +124,7 @@ async def attendance_view(
                 eff_map = await resolve_effective_subunit_1_map(
                     db,
                     all_pids,
-                    scope.tagging_id if scope else None,
+                    applied_tagging_id,
                 )
                 allowed = await get_assigned_subunit_1s(
                     db, str(current_user.id), selected_nr_id
@@ -208,14 +201,14 @@ async def attendance_view(
             {
                 "id": str(r.id),
                 "caa": r.caa,
-                "status": r.status,
+                "attendance_active": bool(r.attendance_active),
                 "personnel_count": r.personnel_count,
             }
             for r in all_rolls
         ],
         selected_nominal_roll_id=selected_nr_id or "",
-        scope_activated=scope is not None,
-        scope_tagging_id=(scope.tagging_id if scope else None),
+        any_active_nr=active_nr is not None,
+        attendance_active=attendance_active,
         target_date=target_date,
         attendance_rows=attendance_rows,
         counts=counts,

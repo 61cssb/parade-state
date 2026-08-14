@@ -18,7 +18,7 @@
                 style="flex: 1; min-width: 240px; max-width: 400px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
             {% for e in nominal_rolls %}
             <option value="{{ e.id }}" {% if selected_nominal_roll and e.id == selected_nominal_roll.id %}selected{% endif %}>
-                CAA {{ e.caa }} ({{ e.status }}) — {{ e.personnel_count }} pers
+                CAA {{ e.caa }} — {{ e.personnel_count }} pers{% if e.attendance_active %} (active for attendance){% endif %}
             </option>
             {% endfor %}
         </select>

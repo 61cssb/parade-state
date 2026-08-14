@@ -39,30 +39,21 @@
 </div>
 
 {% if nominal_roll_filter %}
-<!-- Active scope banner + activation control -->
+<!-- Attendance status banner (activation lives on the Nominal Rolls page) -->
 <div class="card">
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
         <h3 style="margin: 0;">
-            Active scope:
+            Attendance:
             <span style="padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.8rem;
-                {% if active_scope %}background: #d1fae5; color: #065f46;
+                {% if attendance_active %}background: #d1fae5; color: #065f46;
                 {% else %}background: #fee2e2; color: #991b1b;{% endif %}">
-                {% if active_scope %}
-                    {% if active_scope.tagging_id %}Tagging{% else %}Nominal Roll{% endif %}
+                {% if attendance_active %}
+                    Active for this nominal roll
                 {% else %}
-                    Not activated
+                    Not active
                 {% endif %}
             </span>
         </h3>
-        <div style="display: flex; gap: 0.5rem; align-items: center;">
-            <select id="scope-select" style="padding: 0.4rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
-                <option value="" {% if active_scope and not active_scope.tagging_id %}selected{% endif %}>Nominal Roll (no tagging)</option>
-                {% for t in scope_taggings %}
-                <option value="{{ t.id }}" {% if active_scope and active_scope.tagging_id == t.id %}selected{% endif %}>{{ t.label }}</option>
-                {% endfor %}
-            </select>
-            <button class="btn btn-primary" onclick="activateScope()">Activate</button>
-        </div>
     </div>
     {% if counts %}
     <div style="margin-top: 0.5rem; font-size: 0.85rem; color: #6b7280;">
@@ -79,17 +70,18 @@
         <div style="display: flex; gap: 0.5rem;">
             <button class="btn" style="background: #6366f1; color: white;"
                     onclick="copyRemarks()"
-                    {% if not active_scope %}disabled{% endif %}
+                    {% if not attendance_active %}disabled{% endif %}
                     title="Copies previous day PM → today AM (before noon), or today AM → today PM (after noon). Disabled on the NR's first day.">
                 Copy Remarks
             </button>
-            <button class="btn btn-primary" onclick="saveAttendance()">Save</button>
+            <button class="btn btn-primary" onclick="saveAttendance()" {% if not attendance_active %}disabled{% endif %}>Save</button>
         </div>
     </div>
 
-    {% if not active_scope %}
+    {% if not attendance_active %}
     <p style="color: #991b1b; font-size: 0.9rem;">
-        Activate a scope above before attendance can be recorded.
+        This nominal roll is not active for attendance. Mark it
+        "Use for Attendance" on the <a href="/admin/nominal-rolls">Nominal Rolls</a> page first.
     </p>
     {% endif %}
 
@@ -183,26 +175,6 @@
     function markDirty(el) {
         dirtyPids.add(el.dataset.pid);
         updateStatusColors();
-    }
-
-    async function activateScope() {
-        const taggingId = document.getElementById('scope-select').value || null;
-        try {
-            const response = await fetch(`/api/v1/attendance/scope/${NR_ID}?user_id=${USER_ID}&user_role=${USER_ROLE}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tagging_id: taggingId }),
-            });
-            if (response.ok) {
-                showStatus('Scope activated.', 'success');
-                setTimeout(() => location.reload(), 600);
-            } else {
-                const data = await response.json();
-                showStatus('Activate failed: ' + (data.detail || 'Unknown error'), 'error');
-            }
-        } catch (e) {
-            showStatus('Network error: ' + e.message, 'error');
-        }
     }
 
     async function saveAttendance() {

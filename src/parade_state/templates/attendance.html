@@ -19,32 +19,43 @@
                     style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
                 {% for e in nominal_rolls %}
                 <option value="{{ e.id }}" {% if selected_nominal_roll_id == e.id %}selected{% endif %}>
-                    CAA {{ e.caa }} ({{ e.status }}) — {{ e.personnel_count }} pers
+                    CAA {{ e.caa }} — {{ e.personnel_count }} pers{% if e.attendance_active %} (active for attendance){% endif %}
                 </option>
                 {% endfor %}
             </select>
         </div>
+        {% if any_active_nr %}
         <div style="display: flex; gap: 0.5rem; align-items: center;">
             <label for="date" style="font-weight: bold;">Date:</label>
             <input type="date" name="date" id="date" value="{{ target_date.strftime('%Y-%m-%d') }}"
                    onchange="this.form.submit()"
                    style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
         </div>
+        {% endif %}
     </form>
 </div>
 
-{% if selected_nominal_roll_id %}
+{% if not any_active_nr %}
+<div class="card">
+    <h3 style="margin: 0 0 0.5rem;">Attendance is not currently active</h3>
+    <p style="color: #6b7280; margin: 0;">
+        An administrator must mark a nominal roll "Use for Attendance"
+        before attendance can be taken. Please check back later or contact
+        an administrator.
+    </p>
+</div>
+{% elif selected_nominal_roll_id %}
 <div class="card">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
         <h3 style="margin: 0;">
             {{ target_date.strftime('%Y-%m-%d') }}
             <span style="padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem;
-                {% if scope_activated %}background: #d1fae5; color: #065f46;
+                {% if attendance_active %}background: #d1fae5; color: #065f46;
                 {% else %}background: #fee2e2; color: #991b1b;{% endif %}">
-                {% if scope_activated %}
-                    Scope: {% if scope_tagging_id %}Tagging{% else %}Nominal Roll{% endif %}
+                {% if attendance_active %}
+                    Active
                 {% else %}
-                    Not activated
+                    Not active
                 {% endif %}
             </span>
         </h3>
@@ -56,10 +67,10 @@
         {% endif %}
     </div>
 
-    {% if not scope_activated %}
+    {% if not attendance_active %}
     <p style="color: #991b1b; font-size: 0.9rem;">
-        Attendance is not activated for this nominal roll. A super-admin must
-        activate a scope before attendance can be recorded.
+        This nominal roll is not the one active for attendance. A super-admin
+        must mark it "Use for Attendance" before attendance can be recorded here.
     </p>
     {% endif %}
 
@@ -95,7 +106,7 @@
                 <td style="padding: 0.5rem;">{{ r.full_name }}</td>
                 <td style="padding: 0.5rem;">
                     <select class="status-select" data-slot="am" data-pid="{{ r.personnel_id }}"
-                            {% if not scope_activated %}disabled{% endif %}
+                            {% if not attendance_active %}disabled{% endif %}
                             onchange="markDirty(this)"
                             style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-weight: 600;">
                         <option value="present" {% if r.status_am == 'present' %}selected{% endif %}>Present</option>
@@ -112,13 +123,13 @@
                 <td style="padding: 0.5rem;">
                     <input type="text" data-slot="am" data-field="remarks" data-pid="{{ r.personnel_id }}"
                            value="{{ r.remarks_am }}"
-                           {% if not scope_activated %}disabled{% endif %}
+                           {% if not attendance_active %}disabled{% endif %}
                            onchange="markDirty(this)"
                            style="width: 100%; min-width: 160px; padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
                 </td>
                 <td style="padding: 0.5rem;">
                     <select class="status-select" data-slot="pm" data-pid="{{ r.personnel_id }}"
-                            {% if not scope_activated %}disabled{% endif %}
+                            {% if not attendance_active %}disabled{% endif %}
                             onchange="markDirty(this)"
                             style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-weight: 600;">
                         <option value="present" {% if r.status_pm == 'present' %}selected{% endif %}>Present</option>
@@ -135,7 +146,7 @@
                 <td style="padding: 0.5rem;">
                     <input type="text" data-slot="pm" data-field="remarks" data-pid="{{ r.personnel_id }}"
                            value="{{ r.remarks_pm }}"
-                           {% if not scope_activated %}disabled{% endif %}
+                           {% if not attendance_active %}disabled{% endif %}
                            onchange="markDirty(this)"
                            style="width: 100%; min-width: 160px; padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
                 </td>
@@ -144,7 +155,7 @@
         </tbody>
     </table>
 
-    {% if scope_activated %}
+    {% if attendance_active %}
     <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
         <button class="btn btn-primary" onclick="saveAttendance()">Save Attendance</button>
         <button class="btn" style="background: #6366f1; color: white;"
