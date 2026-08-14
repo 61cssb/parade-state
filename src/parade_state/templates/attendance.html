@@ -125,6 +125,11 @@
     {% if scope_activated %}
     <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
         <button class="btn btn-primary" onclick="saveAttendance()">Save Attendance</button>
+        <button class="btn" style="background: #6366f1; color: white;"
+                onclick="copyRemarks()"
+                title="Copies previous day PM → today AM (before noon), or today AM → today PM (after noon). Disabled on the NR's first day.">
+            Copy Remarks
+        </button>
         <span id="dirty-count" style="font-size: 0.8rem; color: #6b7280;"></span>
     </div>
     {% endif %}
@@ -147,6 +152,7 @@
     const USER_ROLE = "{{ user.role }}";
     const NOMINAL_ROLL_ID = "{{ selected_nominal_roll_id }}";
     const TARGET_DATE = "{{ target_date.strftime('%Y-%m-%d') }}";
+    const HAS_PRIOR = {{ has_prior_attendance | tojson }};
     const dirtyPids = new Set();
 
     function markDirty(el) {
@@ -192,6 +198,30 @@
             } else {
                 const data = await response.json();
                 showStatus('Save failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    async function copyRemarks() {
+        // Before noon copies prev-day PM → today AM; requires prior attendance.
+        const beforeNoon = new Date().getHours() < 12;
+        if (beforeNoon && !HAS_PRIOR) {
+            showStatus('Copy Remarks unavailable on the NR first day (no prior remarks).', 'info');
+            return;
+        }
+        try {
+            const response = await fetch('/api/v1/attendance/copy-remarks?nominal_roll_id=' + NOMINAL_ROLL_ID + '&date=' + TARGET_DATE + '&user_id=' + USER_ID + '&user_role=' + USER_ROLE, {
+                method: 'POST',
+            });
+            if (response.ok) {
+                const data = await response.json();
+                showStatus('Copied ' + data.updated + ' remark(s) (' + data.slot.toUpperCase() + '); ' + data.skipped + ' skipped.', 'success');
+                setTimeout(function() { location.reload(); }, 1000);
+            } else {
+                const data = await response.json();
+                showStatus('Copy failed: ' + (data.detail || 'Unknown error'), 'error');
             }
         } catch (error) {
             showStatus('Network error: ' + error.message, 'error');

@@ -14,6 +14,10 @@ from parade_state.api.access_control import (
     verify_deployment_access_or_admin,
 )
 from parade_state.api.attendance import attendance_counts_for_date
+from parade_state.api.subunit_access import (
+    get_assigned_subunit_1s,
+    resolve_effective_subunit_1_map,
+)
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
 from parade_state.models import Attendance, AttendanceScope, Personnel
@@ -62,6 +66,7 @@ async def attendance_view(
 
         # Build roster + attendance rows.
         attendance_rows = []
+        has_prior_attendance = False
         if selected_nr_id:
             roster_result = await db.execute(
                 select(Personnel).where(
@@ -78,6 +83,23 @@ async def attendance_view(
             )
             roster = roster_result.scalars().all()
 
+            # Filter roster to the user's assigned subunits (tagging-aware).
+            # super_admin sees the whole roster.
+            accessible_pids: set[str] | None = None
+            if current_user.role != "super_admin":
+                all_pids = [str(p.id) for p in roster]
+                eff_map = await resolve_effective_subunit_1_map(
+                    db,
+                    all_pids,
+                    scope.tagging_id if scope else None,
+                )
+                allowed = await get_assigned_subunit_1s(
+                    db, str(current_user.id), selected_nr_id
+                )
+                accessible_pids = {
+                    pid for pid, sub in eff_map.items() if sub in allowed
+                }
+
             att_result = await db.execute(
                 select(Attendance).where(
                     and_(
@@ -91,6 +113,8 @@ async def attendance_view(
             }
 
             for person in roster:
+                if accessible_pids is not None and str(person.id) not in accessible_pids:
+                    continue
                 record = att_by_person.get(str(person.id))
                 attendance_rows.append(
                     {
@@ -107,6 +131,19 @@ async def attendance_view(
                         "remarks_pm": record.remarks_pm if record else "",
                     }
                 )
+
+            from sqlalchemy import func as sa_func
+
+            has_prior_attendance = (
+                await db.execute(
+                    select(sa_func.count())
+                    .select_from(Attendance)
+                    .where(
+                        Attendance.nominal_roll_id == selected_nr_id,
+                        Attendance.date < target_date,
+                    )
+                )
+            ).scalar_one() > 0
 
         counts = (
             await attendance_counts_for_date(selected_nr_id, target_date, db)
@@ -132,6 +169,7 @@ async def attendance_view(
         target_date=target_date,
         attendance_rows=attendance_rows,
         counts=counts,
+        has_prior_attendance=has_prior_attendance,
     )
 
     return HTMLResponse(content=html_content)
