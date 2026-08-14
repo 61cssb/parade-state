@@ -164,6 +164,12 @@ Attendance (one row per personnel/day)
 - UNIQUE(personnel_id, date) — one attendance row per person per day
 - Attendance writes are refused (400) until the NR's scope is activated
 - A Tagging linked to any attendance row, or set as an NR's active scope, cannot be deleted (409)
+- **Attendance is always taken against a Nominal Roll** (with the active
+  scope's Tagging applied) — never against a Grouping. Groupings are a
+  separate feature and play no part in attendance access or scoping. The
+  user-facing marking view (`/attendance`) offers an NR picker and shows the
+  tagging-overlaid roster (tagged rows highlighted); write access is gated
+  per-NR by `UserSubunitAssignment` on the effective `sub_unit_1`.
 
 **"Copy Remarks" semantics (issue #4 Q3):**
 - Before 12pm: copy previous day's `remarks_pm` → today's `remarks_am`
