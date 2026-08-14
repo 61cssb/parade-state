@@ -131,8 +131,10 @@
     {% if user.role == 'super_admin' %}
     <p style="margin: 0.5rem 0 0; font-size: 0.8rem; color: #6b7280;">
         Yellow rows carry a tagging overlay. As super-admin you can click a
-        unit / sub-unit cell to remap it (pick a suggestion or type a new
-        value) — edits are recorded on the tagging, never on the nominal roll.
+        unit / sub-unit cell to remap it — the current value shows as the
+        placeholder; pick from the suggestion list or type a new value
+        (Enter saves, Esc cancels, an emptied sub-unit clears it). Edits are
+        recorded on the tagging, never on the nominal roll.
     </p>
     {% endif %}
 
@@ -205,11 +207,14 @@
         input.type = 'text';
         input.className = 'cell-edit-input';
         input.setAttribute('list', span.dataset.list);
-        input.value = span.dataset.value || '';
+        // Open EMPTY: browsers filter the datalist popup against the
+        // input's current text, so pre-filling the old value would hide
+        // most/all suggestions. The placeholder keeps the context.
+        input.value = '';
+        input.placeholder = span.dataset.value || '';
         span.textContent = '';
         span.appendChild(input);
         input.focus();
-        input.select();
         // Nudge browsers that only open the datalist on key interaction
         // (untrusted events are best-effort; typing also opens it).
         input.dispatchEvent(
@@ -239,10 +244,17 @@
     async function saveCellEdit(span, value) {
         const pid = span.dataset.pid;
         const field = span.dataset.field;
+        const original = span.dataset.value || '';
+
+        // No change → treat as cancel.
+        if ((value || null) === (original || null)) {
+            span.textContent = original || '—';
+            return;
+        }
 
         if (field === 'unit' && !value) {
             alert('Unit is required — to move the person, pick or type a unit.');
-            span.textContent = span.dataset.value || '—';
+            span.textContent = original || '—';
             return;
         }
 
