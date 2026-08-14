@@ -263,16 +263,16 @@ class TestNominalRollVersioning:
             assert nominal_roll.status == to_status
 
     @pytest.mark.asyncio
-    async def test_nominal_roll_archived_blocks_new_deployments(
+    async def test_nominal_roll_archived_blocks_new_groupings(
         self, db_session, sample_nominal_roll
     ):
-        """Test that archived nominal rolls cannot be used for new deployments."""
+        """Test that archived nominal rolls cannot be used for new groupings."""
         # This would be enforced by business logic
         # Archive the nominal_roll
         sample_nominal_roll.status = "archived"
         await db_session.commit()
 
-        # Attempting to create deployment from archived nominal_roll should fail
+        # Attempting to create grouping from archived nominal_roll should fail
         # (Test would verify application-level validation)
         assert sample_nominal_roll.status == "archived"
 

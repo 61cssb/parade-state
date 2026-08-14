@@ -286,11 +286,11 @@ async def test_delete_non_existent_nominal_roll(
 @pytest.mark.asyncio
 async def test_delete_nominal_roll_cascades(
     client: TestClient, super_admin_token_headers: dict[str, str],
-    sample_nominal_roll, sample_deployment, sample_attendance,
+    sample_nominal_roll, sample_grouping, sample_attendance,
 ):
     """Deleting an nominal_roll cascade-deletes dependent data (verified via API)."""
     nominal_roll_id = str(sample_nominal_roll.id)
-    deployment_id = str(sample_deployment.id)
+    grouping_id = str(sample_grouping.id)
 
     response = client.delete(
         f"/api/v1/nominal-rolls/{nominal_roll_id}",
@@ -307,9 +307,9 @@ async def test_delete_nominal_roll_cascades(
     )
     assert nominal_roll_response.status_code == 404
 
-    # Deployment cascade-deleted — no longer accessible
+    # Grouping cascade-deleted — no longer accessible
     dep_response = client.get(
-        f"/api/v1/deployments/{deployment_id}",
+        f"/api/v1/groupings/{grouping_id}",
         headers=super_admin_token_headers,
         params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )

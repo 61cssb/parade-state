@@ -2,7 +2,7 @@
 
 Shows the personnel roster for the selected nominal roll as a simple table.
 Accessible to all authenticated users — the nominal roll is the unit's base
-roster (org-wide reference data). Deployment-based subunit scoping is a
+roster (org-wide reference data). Grouping-based subunit scoping is a
 possible future refinement.
 """
 

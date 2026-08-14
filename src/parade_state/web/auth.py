@@ -107,7 +107,7 @@ async def login(request: Request):
     current_user = await get_current_user_optional(request)
     if current_user:
         from fastapi.responses import RedirectResponse
-        return RedirectResponse(url="/deployment", status_code=302)
+        return RedirectResponse(url="/grouping", status_code=302)
 
     # Show login page
     from jinja2 import Environment, FileSystemLoader
@@ -258,8 +258,8 @@ async def auth_callback(
         base_url = f"{request.url.scheme}://{request.url.netloc}"
 
         # Create redirect response with authentication cookie
-        # Redirect admins to admin dashboard, regular users to deployment view
-        redirect_path = "/admin" if user.role in ["admin", "super_admin"] else "/deployment"
+        # Redirect admins to admin dashboard, regular users to grouping view
+        redirect_path = "/admin" if user.role in ["admin", "super_admin"] else "/grouping"
         response = RedirectResponse(url=f"{base_url}{redirect_path}", status_code=302)
 
         # Set the authentication cookie using centralized cookie utility

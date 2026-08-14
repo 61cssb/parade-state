@@ -28,7 +28,7 @@ WHERE u.id = :user_id;
 
 ## Row visibility query pattern
 
-For a scoped user viewing a deployment:
+For a scoped user viewing a grouping:
 ```sql
 -- Effective personnel assignment = override if present, else nominal roll
 WITH effective_assignment AS (
@@ -40,10 +40,10 @@ WITH effective_assignment AS (
         COALESCE(dpo.sub_unit_2,  p.sub_unit_2)  AS sub_unit_2,
         COALESCE(dpo.sub_unit_3,  p.sub_unit_3)  AS sub_unit_3
     FROM personnel p
-    JOIN deployments d ON d.nominal_roll_id = p.nominal_roll_id
-    LEFT JOIN deployment_personnel_overrides dpo
-        ON dpo.deployment_id = d.id AND dpo.personnel_id = p.id
-    WHERE d.id = :deployment_id
+    JOIN groupings d ON d.nominal_roll_id = p.nominal_roll_id
+    LEFT JOIN grouping_personnel_overrides dpo
+        ON dpo.grouping_id = d.id AND dpo.personnel_id = p.id
+    WHERE d.id = :grouping_id
       AND p.status = 'active'
 )
 SELECT ea.*
@@ -52,7 +52,7 @@ WHERE EXISTS (
     SELECT 1
     FROM user_subunit_scope_grants g
     WHERE g.user_id = :user_id
-      AND g.deployment_id = :deployment_id
+      AND g.grouping_id = :grouping_id
       AND (g.unit       IS NULL OR g.unit       = ea.unit)
       AND (g.sub_unit_1 IS NULL OR g.sub_unit_1 = ea.sub_unit_1)
       AND (g.sub_unit_2 IS NULL OR g.sub_unit_2 = ea.sub_unit_2)
@@ -67,11 +67,11 @@ WHERE EXISTS (
 The DB does not enforce the validity-range rule — this is application-layer logic that MUST be implemented in the attendance write handler:
 
 ```
-function writeAttendance(record, deployment):
+function writeAttendance(record, grouping):
     now = current_timestamp()
     update status, remarks, notes_snapshot always
 
-    if now >= deployment.valid_from AND now <= deployment.valid_until:
+    if now >= grouping.valid_from AND now <= grouping.valid_until:
         resolve effective assignment for the personnel row (override ?? nominal roll)
         update unit_snapshot, sub_unit_1_snapshot, sub_unit_2_snapshot, sub_unit_3_snapshot
         set snapshot_taken_at = now
@@ -79,55 +79,55 @@ function writeAttendance(record, deployment):
         do NOT touch *_snapshot fields
 ```
 
-This must hold even when an admin retroactively opens a session or edits attendance on an inactive deployment.
+This must hold even when an admin retroactively opens a session or edits attendance on an inactive grouping.
 
 ---
 
-## Deployment non-overlap enforcement (application layer)
+## Grouping non-overlap enforcement (application layer)
 
-The DB has a partial unique index ensuring only one `active` deployment exists. Overlap prevention for `draft`/future deployments is enforced in the application layer:
+The DB has a partial unique index ensuring only one `active` grouping exists. Overlap prevention for `draft`/future groupings is enforced in the application layer:
 
-On deployment create or valid_from/valid_until edit:
+On grouping create or valid_from/valid_until edit:
 ```sql
 SELECT id, name, valid_from, valid_until
-FROM deployments
+FROM groupings
 WHERE status IN ('draft', 'active')
-  AND id != :this_deployment_id
+  AND id != :this_grouping_id
   AND valid_from  < :new_valid_until
   AND valid_until > :new_valid_from;
--- If any rows returned → reject with conflict error showing the offending deployment names
+-- If any rows returned → reject with conflict error showing the offending grouping names
 ```
 
 ---
 
 ## Session creation and notes snapshotting
 
-On session create, populate `attendance_records` for all non-archived personnel in the deployment, snapshotting current notes:
+On session create, populate `attendance_records` for all non-archived personnel in the grouping, snapshotting current notes:
 
 ```sql
 INSERT INTO attendance_records
-    (session_id, deployment_id, personnel_id, status, notes_snapshot)
+    (session_id, grouping_id, personnel_id, status, notes_snapshot)
 SELECT
     :session_id,
-    :deployment_id,
+    :grouping_id,
     p.id,
     'absent',
     COALESCE(dn.notes, '')
 FROM personnel p
-JOIN deployments d ON d.nominal_roll_id = p.nominal_roll_id AND d.id = :deployment_id
-LEFT JOIN deployment_notes dn ON dn.deployment_id = :deployment_id AND dn.personnel_id = p.id
+JOIN groupings d ON d.nominal_roll_id = p.nominal_roll_id AND d.id = :grouping_id
+LEFT JOIN grouping_notes dn ON dn.grouping_id = :grouping_id AND dn.personnel_id = p.id
 WHERE p.status = 'active'
 ON CONFLICT (session_id, personnel_id) DO NOTHING;
 ```
 
-This means every session starts fully populated (all absent) and notes are frozen at open time in the snapshot. The canonical notes in `deployment_notes` remain live.
+This means every session starts fully populated (all absent) and notes are frozen at open time in the snapshot. The canonical notes in `grouping_notes` remain live.
 
 ---
 
 ## Notes write-back from attendance view
 
 When a user edits notes in the attendance session view:
-1. UPSERT into `deployment_notes (deployment_id, personnel_id)` with new text.
+1. UPSERT into `grouping_notes (grouping_id, personnel_id)` with new text.
 2. UPDATE `attendance_records.notes_snapshot` for the current session's record.
 3. Do NOT update `notes_snapshot` in other sessions' attendance records (those are historical).
 
@@ -137,28 +137,28 @@ When a user edits notes in the attendance session view:
 
 Notes follow the *person*, not the row. When a new nominal roll is confirmed, personnel are matched
 to prior nominal rolls by `short_id` (same person — see cross-roll matching in SPECIFICATION §3.2.1).
-Notes from the prior active deployment are copied onto the matched personnel rows in the new
-deployment:
+Notes from the prior active grouping are copied onto the matched personnel rows in the new
+grouping:
 
 ```sql
-INSERT INTO deployment_notes (deployment_id, personnel_id, notes, updated_at, updated_by)
+INSERT INTO grouping_notes (grouping_id, personnel_id, notes, updated_at, updated_by)
 SELECT
-    :new_deployment_id,
+    :new_grouping_id,
     new_p.id,
     dn.notes,
     NOW(),
     :system_user_id
-FROM deployment_notes dn
-JOIN deployments old_d ON old_d.id = dn.deployment_id
+FROM grouping_notes dn
+JOIN groupings old_d ON old_d.id = dn.grouping_id
 JOIN personnel old_p ON old_p.id = dn.personnel_id
 JOIN personnel new_p ON new_p.short_id = old_p.short_id   -- same person, cross-roll
-WHERE old_d.id = :prior_deployment_id
+WHERE old_d.id = :prior_grouping_id
   AND new_p.nominal_roll_id = :new_nominal_roll_id
   AND new_p.status = 'active'
-ON CONFLICT (deployment_id, personnel_id) DO NOTHING;
+ON CONFLICT (grouping_id, personnel_id) DO NOTHING;
 ```
 
-Unmatched persons (no `short_id` counterpart in the prior deployment) start with no transferred
+Unmatched persons (no `short_id` counterpart in the prior grouping) start with no transferred
 notes. Admin-confirmed matches from the diff-review step are what make `short_id` line up across
 nominal rolls.
 
@@ -197,18 +197,18 @@ Surface each conflict to the admin with: raw name / existing mapping / new sugge
 
 ---
 
-## Background job — deployment scheduler
+## Background job — grouping scheduler
 
 The background job (pg-boss or BullMQ) must handle two transitions:
 
-1. **Activation:** At `valid_from` (or `scheduled_activation` if set), if deployment status is `draft`:
+1. **Activation:** At `valid_from` (or `scheduled_activation` if set), if grouping status is `draft`:
    - BEGIN transaction
-   - UPDATE current `active` deployment → `inactive`
-   - UPDATE this deployment → `active`
+   - UPDATE current `active` grouping → `inactive`
+   - UPDATE this grouping → `active`
    - Write audit log entries for both
    - COMMIT
 
-2. **Deactivation:** At `valid_until`, if deployment status is `active`:
+2. **Deactivation:** At `valid_until`, if grouping status is `active`:
    - UPDATE → `inactive`
    - Write audit log entry
 

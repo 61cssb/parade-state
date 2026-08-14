@@ -1,104 +1,109 @@
 {% extends "base.html" %}
 
-{% block title %}Deployments - Parade State Admin{% endblock %}
+{% block title %}Groupings - Parade State Admin{% endblock %}
 
-{% block page_title %}Deployments{% endblock %}
+{% block page_title %}Groupings{% endblock %}
 
 {% block content %}
 <div class="page-meta">
-    <span style="color: #6b7280; font-size: 0.875rem;">{{ deployments|length }} deployments</span>
+    <span style="color: #6b7280; font-size: 0.875rem;">{{ groupings|length }} groupings</span>
 </div>
 
 <div class="card">
-    <form method="get" action="/admin/deployments" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+    <form method="get" action="/admin/groupings" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
         <select name="status_filter" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
             <option value="">All Statuses</option>
-            {% for s in deployment_statuses %}
+            {% for s in grouping_statuses %}
             <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>{{ s }}</option>
             {% endfor %}
         </select>
         <button type="submit" class="btn btn-primary">Filter</button>
-        <a href="/admin/deployments" class="btn" style="background: #e5e7eb; color: #374151; padding: 0.5rem 1rem; border-radius: 0.25rem; text-decoration: none;">Clear</a>
+        <a href="/admin/groupings" class="btn" style="background: #e5e7eb; color: #374151; padding: 0.5rem 1rem; border-radius: 0.25rem; text-decoration: none;">Clear</a>
     </form>
 
-    {% if deployments %}
-    {% for d in deployments %}
+    {% if groupings %}
+    {% for g in groupings %}
     <div class="card" style="margin-bottom: 1rem; border-left: 4px solid
-        {% if d.status == 'active' %}#10b981
-        {% elif d.status == 'draft' %}#9ca3af
-        {% elif d.status == 'inactive' %}#f59e0b
-        {% elif d.status == 'closed' %}#3b82f6
-        {% elif d.status == 'finalized' %}#8b5cf6
-        {% elif d.status == 'archived' %}#4b5563
+        {% if g.status == 'active' %}#10b981
+        {% elif g.status == 'draft' %}#9ca3af
+        {% elif g.status == 'inactive' %}#f59e0b
+        {% elif g.status == 'closed' %}#3b82f6
+        {% elif g.status == 'finalized' %}#8b5cf6
+        {% elif g.status == 'archived' %}#4b5563
         {% else %}#e5e7eb{% endif %};">
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
             <div style="display: flex; align-items: center; gap: 0.75rem;">
-                <strong>{{ d.name }}</strong>
+                <strong>{{ g.name }}</strong>
+                <span style="padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; background: #f3f4f6; color: #374151;">{{ g.mode }}</span>
                 <span style="padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem;
-                    {% if d.status == 'active' %}background: #d1fae5; color: #065f46;
-                    {% elif d.status == 'draft' %}background: #f3f4f6; color: #374151;
-                    {% elif d.status == 'inactive' %}background: #fef3c7; color: #92400e;
-                    {% elif d.status == 'closed' %}background: #dbeafe; color: #1e40af;
-                    {% elif d.status == 'finalized' %}background: #ede9fe; color: #5b21b6;
-                    {% elif d.status == 'archived' %}background: #e5e7eb; color: #4b5563;
-                    {% else %}background: #e5e7eb; color: #374151;{% endif %}">{{ d.status }}</span>
+                    {% if g.status == 'active' %}background: #d1fae5; color: #065f46;
+                    {% elif g.status == 'draft' %}background: #f3f4f6; color: #374151;
+                    {% elif g.status == 'inactive' %}background: #fef3c7; color: #92400e;
+                    {% elif g.status == 'closed' %}background: #dbeafe; color: #1e40af;
+                    {% elif g.status == 'finalized' %}background: #ede9fe; color: #5b21b6;
+                    {% elif g.status == 'archived' %}background: #e5e7eb; color: #4b5563;
+                    {% else %}background: #e5e7eb; color: #374151;{% endif %}">{{ g.status }}</span>
             </div>
             <div style="display: flex; gap: 0.5rem; align-items: center;">
-                <span id="date-display-{{ d.id }}" style="font-size: 0.8rem; color: #6b7280;">
-                    {{ d.valid_from.strftime('%Y-%m-%d') }} → {{ d.valid_until.strftime('%Y-%m-%d') }}
+                {% if g.valid_from and g.valid_until %}
+                <span id="date-display-{{ g.id }}" style="font-size: 0.8rem; color: #6b7280;">
+                    {{ g.valid_from.strftime('%Y-%m-%d') }} → {{ g.valid_until.strftime('%Y-%m-%d') }}
                 </span>
-                {% if d.status in ['draft', 'active', 'inactive'] %}
+                {% else %}
+                <span style="font-size: 0.8rem; color: #9ca3af;">No validity window</span>
+                {% endif %}
+                {% if g.status in ['draft', 'active', 'inactive'] and g.valid_from and g.valid_until %}
                 <button class="btn" style="font-size: 0.7rem; padding: 0.15rem 0.4rem; background: #f3f4f6; color: #374151;"
-                        onclick="toggleEditDates('{{ d.id }}')">Edit Dates</button>
+                        onclick="toggleEditDates('{{ g.id }}')">Edit Dates</button>
                 {% endif %}
-                {% if d.status == 'draft' %}
+                {% if g.status == 'draft' %}
                 <a class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; text-decoration: none;"
-                   href="/admin/deployments/{{ d.id }}/personnel">Manage Personnel</a>
+                   href="/admin/groupings/{{ g.id }}/personnel">Manage Personnel</a>
                 <button class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                        onclick="transitionDeployment('{{ d.id }}', 'active')">Activate</button>
-                {% elif d.status == 'active' %}
+                        onclick="transitionGrouping('{{ g.id }}', 'active')">Activate</button>
+                {% elif g.status == 'active' %}
                 <button class="btn" style="background: #3b82f6; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                        onclick="transitionDeployment('{{ d.id }}', 'closed')">Close</button>
-                {% elif d.status == 'inactive' %}
+                        onclick="transitionGrouping('{{ g.id }}', 'closed')">Close</button>
+                {% elif g.status == 'inactive' %}
                 <button class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                        onclick="transitionDeployment('{{ d.id }}', 'active')">Activate</button>
+                        onclick="transitionGrouping('{{ g.id }}', 'active')">Activate</button>
                 <button class="btn" style="background: #3b82f6; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                        onclick="transitionDeployment('{{ d.id }}', 'closed')">Close</button>
+                        onclick="transitionGrouping('{{ g.id }}', 'closed')">Close</button>
                 <button class="btn" style="background: #6b7280; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                        onclick="transitionDeployment('{{ d.id }}', 'archived')">Archive</button>
-                {% elif d.status == 'closed' %}
+                        onclick="transitionGrouping('{{ g.id }}', 'archived')">Archive</button>
+                {% elif g.status == 'closed' %}
                 <button class="btn" style="background: #8b5cf6; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                        onclick="transitionDeployment('{{ d.id }}', 'finalized')">Finalize</button>
+                        onclick="transitionGrouping('{{ g.id }}', 'finalized')">Finalize</button>
                 {% endif %}
-                {% if user.role == 'super_admin' and d.status not in ['active', 'finalized'] %}
+                {% if user.role == 'super_admin' and g.status not in ['active', 'finalized'] %}
                 <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                        onclick="deleteDeployment('{{ d.id }}', '{{ d.name }}')">Delete</button>
+                        onclick="deleteGrouping('{{ g.id }}', '{{ g.name }}')">Delete</button>
                 {% endif %}
             </div>
         </div>
 
-        {% if d.notes %}
-        <p style="margin-top: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ d.notes }}</p>
+        {% if g.notes %}
+        <p style="margin-top: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ g.notes }}</p>
         {% endif %}
 
-        {% if d.status in ['draft', 'active', 'inactive'] %}
-        <div id="edit-dates-{{ d.id }}" style="display: none; margin-top: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 0.375rem; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+        {% if g.status in ['draft', 'active', 'inactive'] and g.valid_from and g.valid_until %}
+        <div id="edit-dates-{{ g.id }}" style="display: none; margin-top: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 0.375rem; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
             <label style="font-size: 0.8rem; font-weight: 600;">Valid from:</label>
-            <input type="date" id="valid-from-{{ d.id }}" value="{{ d.valid_from.strftime('%Y-%m-%d') }}"
+            <input type="date" id="valid-from-{{ g.id }}" value="{{ g.valid_from.strftime('%Y-%m-%d') }}"
                    style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
             <label style="font-size: 0.8rem; font-weight: 600;">until:</label>
-            <input type="date" id="valid-until-{{ d.id }}" value="{{ d.valid_until.strftime('%Y-%m-%d') }}"
+            <input type="date" id="valid-until-{{ g.id }}" value="{{ g.valid_until.strftime('%Y-%m-%d') }}"
                    style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
             <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                    onclick="saveDates('{{ d.id }}')">Save</button>
+                    onclick="saveDates('{{ g.id }}')">Save</button>
             <button class="btn" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; background: #e5e7eb; color: #374151;"
-                    onclick="toggleEditDates('{{ d.id }}')">Cancel</button>
+                    onclick="toggleEditDates('{{ g.id }}')">Cancel</button>
         </div>
         {% endif %}
     </div>
     {% endfor %}
     {% else %}
-    <p style="color: #6b7280;">No deployments found.</p>
+    <p style="color: #6b7280;">No groupings found.</p>
     {% endif %}
 </div>
 
@@ -110,8 +115,8 @@
     const ADMIN_USER_ID = "{{ user.id }}";
     const ADMIN_USER_ROLE = "{{ user.role }}";
 
-    function toggleEditDates(deploymentId) {
-        const div = document.getElementById('edit-dates-' + deploymentId);
+    function toggleEditDates(groupingId) {
+        const div = document.getElementById('edit-dates-' + groupingId);
         if (div.style.display === 'none' || div.style.display === '') {
             div.style.display = 'flex';
         } else {
@@ -119,15 +124,15 @@
         }
     }
 
-    async function saveDates(deploymentId) {
-        const fromInput = document.getElementById('valid-from-' + deploymentId);
-        const untilInput = document.getElementById('valid-until-' + deploymentId);
+    async function saveDates(groupingId) {
+        const fromInput = document.getElementById('valid-from-' + groupingId);
+        const untilInput = document.getElementById('valid-until-' + groupingId);
         if (!fromInput.value || !untilInput.value) {
             showStatus('Both dates are required.', 'error');
             return;
         }
         try {
-            const response = await fetch('/api/v1/deployments/' + deploymentId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
+            const response = await fetch('/api/v1/groupings/' + groupingId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -136,7 +141,7 @@
                 }),
             });
             if (response.ok) {
-                showStatus('Deployment dates updated.', 'success');
+                showStatus('Grouping dates updated.', 'success');
                 setTimeout(function() { location.reload(); }, 800);
             } else {
                 const data = await response.json();
@@ -147,15 +152,15 @@
         }
     }
 
-    async function transitionDeployment(deploymentId, newStatus) {
+    async function transitionGrouping(groupingId, newStatus) {
         try {
-            const response = await fetch('/api/v1/deployments/' + deploymentId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
+            const response = await fetch('/api/v1/groupings/' + groupingId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ status: newStatus }),
             });
             if (response.ok) {
-                showStatus('Deployment transitioned to ' + newStatus + '.', 'success');
+                showStatus('Grouping transitioned to ' + newStatus + '.', 'success');
                 setTimeout(function() { location.reload(); }, 800);
             } else {
                 const data = await response.json();
@@ -166,14 +171,14 @@
         }
     }
 
-    async function deleteDeployment(deploymentId, name) {
-        if (!confirm('Delete deployment "' + name + '"? This cannot be undone.')) return;
+    async function deleteGrouping(groupingId, name) {
+        if (!confirm('Delete grouping "' + name + '"? This cannot be undone.')) return;
         try {
-            const response = await fetch('/api/v1/deployments/' + deploymentId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
+            const response = await fetch('/api/v1/groupings/' + groupingId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
                 method: 'DELETE',
             });
             if (response.ok) {
-                showStatus('Deployment deleted.', 'success');
+                showStatus('Grouping deleted.', 'success');
                 setTimeout(function() { location.reload(); }, 800);
             } else {
                 const data = await response.json();

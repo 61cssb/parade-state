@@ -14,21 +14,21 @@ This document clarifies the different types of endpoints in the Parade State app
 - `GET /auth/logout` - Logout handler (clears cookies, redirects to login)
 
 **User-Facing View Routes (Phase 9D / 9F):**
-- `GET /deployment` - Deployment summary (today's AM/PM session counts, unit breakdown) — deployment selector dropdown
-- `GET /attendance` - Attendance marking table (inline status/remarks editing) — deployment + session selector
+- `GET /grouping` - Grouping summary (today's AM/PM session counts, unit breakdown) — grouping selector dropdown
+- `GET /attendance` - Attendance marking table (inline status/remarks editing) — grouping + session selector
 - `GET /nominal-roll` - Nominal Roll browser (row-numbered roster table with unit/sub-unit columns, search, unit filter) — nominal roll selector dropdown
 
 **Admin Interface Routes:**
 - `GET /admin` - Admin dashboard
-- `GET /admin/deployments` - Deployments + sessions management page (combined master-detail view)
-- `GET /admin/deployments/{id}/personnel` - Deployment personnel management (checkbox-based include/exclude, draft-only editing)
+- `GET /admin/groupings` - Groupings + sessions management page (combined master-detail view)
+- `GET /admin/groupings/{id}/personnel` - Grouping personnel management (checkbox-based include/exclude, draft-only editing)
 - `GET /admin/users` - Users management page
 - `GET /admin/csv-upload` - CSV upload page
 - `GET /admin/nominal-rolls` - Nominal Roll management page (CAA date, label, source file, personnel count, status filter, confirm/unconfirm/delete actions)
 - `GET /admin/settings` - Settings page
 - `GET /admin/audit` - Audit log page
 
-**Note:** Sessions are managed within the deployments page (expandable per-deployment section). The REST APIs `/api/v1/deployments/*` and `/api/v1/sessions/*` remain separate.
+**Note:** Sessions are managed within the groupings page (expandable per-grouping section). The REST APIs `/api/v1/groupings/*` and `/api/v1/sessions/*` remain separate.
 
 **Characteristics:**
 - Return HTML responses (Jinja2 templates)
@@ -52,7 +52,7 @@ This document clarifies the different types of endpoints in the Parade State app
 - `DELETE /api/v1/users/{id}` - Delete user
 
 **Other APIs:**
-- `/api/v1/deployments/*` - Deployment management (CRUD, lifecycle transitions, personnel exclusions, overrides, notes, status export)
+- `/api/v1/groupings/*` - Grouping management (CRUD, lifecycle transitions, personnel exclusions, overrides, notes, status export)
 - `/api/v1/sessions/*` - Session management
 - `/api/v1/attendance/*` - Attendance records
 - `/api/v1/personnel/*` - Personnel management
@@ -93,7 +93,7 @@ This document clarifies the different types of endpoints in the Parade State app
 
 **Response:** Paginated list with `user_name` and `user_email` resolved via left outer join on User. System-generated entries (null `user_id`) return `user_name: null`.
 
-**Entity types:** attendance, deployment, session, user, csv_upload, nominal roll, personnel, access_level, column_mapping
+**Entity types:** attendance, grouping, session, user, csv_upload, nominal roll, personnel, access_level, column_mapping
 
 **Actions:** create, update, delete, archive, close, finalize
 
@@ -113,7 +113,7 @@ This document clarifies the different types of endpoints in the Parade State app
 5. Server: Redirects to Google OAuth
 6. User: Completes Google OAuth
 7. Google: Redirects to /auth/callback?code=xxx
-8. Server: Creates session, sets httponly cookie, redirects to /admin (admins) or /deployment (regular users)
+8. Server: Creates session, sets httponly cookie, redirects to /admin (admins) or /grouping (regular users)
 9. Browser: Accesses page with cookie
 10. Server: Validates cookie, returns appropriate view (HTML)
 ```
@@ -133,7 +133,7 @@ In `main.py`:
 ```python
 # Web routes (HTML responses)
 app.include_router(web_auth_router, prefix="/auth", tags=["web-auth"])
-app.include_router(web_deployment_router, tags=["web-deployment"])
+app.include_router(web_grouping_router, tags=["web-grouping"])
 app.include_router(web_attendance_router, tags=["web-attendance"])
 app.include_router(admin_router, tags=["admin"])
 
@@ -167,7 +167,7 @@ app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 
 **Web Routes:**
 - `src/parade_state/web/auth.py` - Authentication web views
-- `src/parade_state/web/deployment.py` - Deployment summary view (non-admin)
+- `src/parade_state/web/grouping.py` - Grouping summary view (non-admin)
 - `src/parade_state/web/attendance.py` - Attendance marking view (non-admin)
 - `src/parade_state/web/nominal-roll.py` - Nominal Roll browser view (non-admin)
 - `src/parade_state/admin_routes.py` - Admin interface routes

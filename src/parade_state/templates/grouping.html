@@ -1,26 +1,26 @@
 {% extends "base.html" %}
 
-{% block title %}Deployment Summary - Parade State{% endblock %}
+{% block title %}Grouping Summary - Parade State{% endblock %}
 
-{% block page_title %}Deployment Summary{% endblock %}
+{% block page_title %}Grouping Summary{% endblock %}
 
 {% block content %}
-<!-- Deployment selector -->
+<!-- Grouping selector -->
 <div class="card">
-    <form method="get" action="/deployment" style="display: flex; gap: 0.5rem; align-items: center;">
-        <label for="deployment_id" style="font-weight: bold;">Deployment:</label>
-        <select name="deployment_id" id="deployment_id" onchange="this.form.submit()"
+    <form method="get" action="/grouping" style="display: flex; gap: 0.5rem; align-items: center;">
+        <label for="grouping_id" style="font-weight: bold;">Grouping:</label>
+        <select name="grouping_id" id="grouping_id" onchange="this.form.submit()"
                 style="flex: 1; max-width: 400px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
-            {% for d in deployments %}
-            <option value="{{ d.id }}" {% if selected_deployment and d.id == selected_deployment.id %}selected{% endif %}>
-                {{ d.name }} ({{ d.status }})
+            {% for g in groupings %}
+            <option value="{{ g.id }}" {% if selected_grouping and g.id == selected_grouping.id %}selected{% endif %}>
+                {{ g.name }} ({{ g.status }})
             </option>
             {% endfor %}
         </select>
     </form>
 </div>
 
-{% if selected_deployment %}
+{% if selected_grouping %}
 <p style="color: #6b7280; margin-bottom: 1rem;">
     Showing attendance for {{ today }}.
 </p>
@@ -83,7 +83,7 @@
 {% endif %}
 {% else %}
 <div class="card">
-    <p style="color: #6b7280;">No deployments available. Contact an administrator to get access.</p>
+    <p style="color: #6b7280;">No groupings available. Contact an administrator to get access.</p>
 </div>
 {% endif %}
 {% endblock %}

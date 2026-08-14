@@ -9,11 +9,11 @@ from parade_state.db import get_db_session
 from parade_state.models import (
     PRESENT_LIKE_STATUSES,
     Attendance,
-    Deployment,
-    DeploymentNotes,
-    DeploymentPersonnelExclusion,
-    DeploymentPersonnelOverride,
-    DeploymentUserAccess,
+    Grouping,
+    GroupingNotes,
+    GroupingPersonnelExclusion,
+    GroupingPersonnelOverride,
+    GroupingUserAccess,
     Personnel,
 )
 from parade_state.models.schemas import (
@@ -21,7 +21,7 @@ from parade_state.models.schemas import (
     PersonnelAttendanceHistoryResponse,
     PersonnelAttendanceHistoryStats,
     PersonnelListParams,
-    PersonnelResponseWithDeployment,
+    PersonnelResponseWithGrouping,
     PersonnelUpdate,
 )
 from parade_state.utils import ranks, utc_dt
@@ -34,59 +34,59 @@ router = APIRouter()
 # ============================================================================
 
 
-async def verify_deployment_access(
-    deployment_id: str,
+async def verify_grouping_access(
+    grouping_id: str,
     user_id: str,
     user_role: str,
     db: AsyncSession,
-) -> Deployment:
-    """Verify user has access to deployment and return it.
+) -> Grouping:
+    """Verify user has access to grouping and return it.
 
-    Super admins have full access to all deployments.
-    Admins need explicit deployment access.
-    Regular users need explicit deployment access.
+    Super admins have full access to all groupings.
+    Admins need explicit grouping access.
+    Regular users need explicit grouping access.
     """
-    # Get deployment
-    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
-    deployment = result.scalar_one_or_none()
+    # Get grouping
+    result = await db.execute(select(Grouping).where(Grouping.id == grouping_id))
+    grouping = result.scalar_one_or_none()
 
-    if not deployment:
+    if not grouping:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="Deployment not found",
+            detail="Grouping not found",
         )
 
     # Super admins have full access
     if user_role == "super_admin":
-        return deployment
+        return grouping
 
-    # Check for explicit deployment access
+    # Check for explicit grouping access
     access_result = await db.execute(
-        select(DeploymentUserAccess).where(
+        select(GroupingUserAccess).where(
             and_(
-                DeploymentUserAccess.user_id == user_id,
-                DeploymentUserAccess.deployment_id == deployment_id,
-                DeploymentUserAccess.revoked_at.is_(None),
+                GroupingUserAccess.user_id == user_id,
+                GroupingUserAccess.grouping_id == grouping_id,
+                GroupingUserAccess.revoked_at.is_(None),
             )
         )
     )
     access = access_result.scalar_one_or_none()
 
-    # Both admins and regular users need explicit deployment access
+    # Both admins and regular users need explicit grouping access
     if access:
-        return deployment
+        return grouping
 
     # No access found
     raise HTTPException(
         status_code=http_status.HTTP_403_FORBIDDEN,
-        detail="Insufficient permissions to access this deployment",
+        detail="Insufficient permissions to access this grouping",
     )
 
 
 def apply_personnel_filters(query, params: PersonnelListParams):
     """Apply filters to personnel query.
 
-    Handles deployment-specific filtering and search functionality.
+    Handles grouping-specific filtering and search functionality.
     """
     # Filter by nominal_roll_id
     if params.nominal_roll_id:
@@ -147,34 +147,34 @@ def apply_personnel_filters(query, params: PersonnelListParams):
     return query
 
 
-async def get_deployment_personnel_with_overrides(
-    deployment_id: str,
+async def get_grouping_personnel_with_overrides(
+    grouping_id: str,
     params: PersonnelListParams,
     user_id: str,
     user_role: str,
     db: AsyncSession,
 ):
-    """Get personnel list for a deployment with override-aware filtering.
+    """Get personnel list for a grouping with override-aware filtering.
 
-    This is the core function for deployment-based personnel listing.
+    This is the core function for grouping-based personnel listing.
     It handles:
-    - Deployment-specific personnel (from nominal roll)
-    - Personnel overrides for this deployment
+    - Grouping-specific personnel (from nominal roll)
+    - Personnel overrides for this grouping
     - Unit hierarchy filtering
     - Search functionality
-    - Deployment notes integration
+    - Grouping notes integration
     """
-    # Verify deployment exists and user has access
-    deployment = await verify_deployment_access(deployment_id, user_id, user_role, db)
+    # Verify grouping exists and user has access
+    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
 
     # Get base personnel query
     query = select(Personnel).where(
-        Personnel.nominal_roll_id == deployment.nominal_roll_id
+        Personnel.nominal_roll_id == grouping.nominal_roll_id
     )
 
-    # Exclude personnel filtered out for this deployment
-    excluded_subq = select(DeploymentPersonnelExclusion.personnel_id).where(
-        DeploymentPersonnelExclusion.deployment_id == deployment_id
+    # Exclude personnel filtered out for this grouping
+    excluded_subq = select(GroupingPersonnelExclusion.personnel_id).where(
+        GroupingPersonnelExclusion.grouping_id == grouping_id
     )
     query = query.where(~Personnel.id.in_(excluded_subq))
 
@@ -193,9 +193,9 @@ async def get_deployment_personnel_with_overrides(
     result = await db.execute(query)
     personnel_list = result.scalars().all()
 
-    # Get all personnel overrides for this deployment
-    override_query = select(DeploymentPersonnelOverride).where(
-        DeploymentPersonnelOverride.deployment_id == deployment_id
+    # Get all personnel overrides for this grouping
+    override_query = select(GroupingPersonnelOverride).where(
+        GroupingPersonnelOverride.grouping_id == grouping_id
     )
     override_result = await db.execute(override_query)
     overrides = override_result.scalars().all()
@@ -203,9 +203,9 @@ async def get_deployment_personnel_with_overrides(
     # Create override lookup dictionary
     override_dict = {override.personnel_id: override for override in overrides}
 
-    # Get deployment notes for all personnel
-    notes_query = select(DeploymentNotes).where(
-        DeploymentNotes.deployment_id == deployment_id
+    # Get grouping notes for all personnel
+    notes_query = select(GroupingNotes).where(
+        GroupingNotes.grouping_id == grouping_id
     )
     notes_result = await db.execute(notes_query)
     notes = notes_result.scalars().all()
@@ -213,11 +213,11 @@ async def get_deployment_personnel_with_overrides(
     # Create notes lookup dictionary
     notes_dict = {note.personnel_id: note.notes for note in notes}
 
-    # Build response with deployment-specific information
+    # Build response with grouping-specific information
     personnel_responses = []
     for personnel in personnel_list:
         override = override_dict.get(personnel.id)
-        deployment_notes = notes_dict.get(personnel.id)
+        grouping_notes = notes_dict.get(personnel.id)
 
         # Determine effective unit assignment (overrides take precedence)
         effective_unit = override.unit if override else personnel.unit
@@ -235,7 +235,7 @@ async def get_deployment_personnel_with_overrides(
         if params.sub_unit_3 and effective_sub_unit_3 != params.sub_unit_3:
             continue
 
-        response = PersonnelResponseWithDeployment(
+        response = PersonnelResponseWithGrouping(
             id=personnel.id,
             nominal_roll_id=personnel.nominal_roll_id,
             short_id=personnel.short_id,
@@ -251,28 +251,28 @@ async def get_deployment_personnel_with_overrides(
             updated_at=personnel.updated_at,
             created_by=personnel.created_by,
             updated_by=personnel.updated_by,
-            deployment_id=deployment_id,
+            grouping_id=grouping_id,
             has_override=override is not None,
-            deployment_notes=deployment_notes,
+            grouping_notes=grouping_notes,
         )
         personnel_responses.append(response)
 
-    return personnel_responses, total_count, deployment
+    return personnel_responses, total_count, grouping
 
 
-async def get_personnel_by_id_with_deployment_context(
+async def get_personnel_by_id_with_grouping_context(
     personnel_id: str,
-    deployment_id: str,
+    grouping_id: str,
     user_id: str,
     user_role: str,
     db: AsyncSession,
-) -> tuple[Personnel, DeploymentPersonnelOverride | None, DeploymentNotes | None]:
-    """Get personnel by ID with deployment context.
+) -> tuple[Personnel, GroupingPersonnelOverride | None, GroupingNotes | None]:
+    """Get personnel by ID with grouping context.
 
-    Returns personnel record, override (if any), and deployment notes (if any).
+    Returns personnel record, override (if any), and grouping notes (if any).
     """
-    # Verify deployment exists and user has access
-    deployment = await verify_deployment_access(deployment_id, user_id, user_role, db)
+    # Verify grouping exists and user has access
+    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
 
     # Get personnel record
     result = await db.execute(select(Personnel).where(Personnel.id == personnel_id))
@@ -284,30 +284,30 @@ async def get_personnel_by_id_with_deployment_context(
             detail="Personnel not found",
         )
 
-    # Verify personnel belongs to deployment's nominal roll
-    if personnel.nominal_roll_id != deployment.nominal_roll_id:
+    # Verify personnel belongs to grouping's nominal roll
+    if personnel.nominal_roll_id != grouping.nominal_roll_id:
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail="Personnel does not belong to this deployment's nominal roll",
+            detail="Personnel does not belong to this grouping's nominal roll",
         )
 
     # Get override if exists
     override_result = await db.execute(
-        select(DeploymentPersonnelOverride).where(
+        select(GroupingPersonnelOverride).where(
             and_(
-                DeploymentPersonnelOverride.deployment_id == deployment_id,
-                DeploymentPersonnelOverride.personnel_id == personnel_id,
+                GroupingPersonnelOverride.grouping_id == grouping_id,
+                GroupingPersonnelOverride.personnel_id == personnel_id,
             )
         )
     )
     override = override_result.scalar_one_or_none()
 
-    # Get deployment notes if exists
+    # Get grouping notes if exists
     notes_result = await db.execute(
-        select(DeploymentNotes).where(
+        select(GroupingNotes).where(
             and_(
-                DeploymentNotes.deployment_id == deployment_id,
-                DeploymentNotes.personnel_id == personnel_id,
+                GroupingNotes.grouping_id == grouping_id,
+                GroupingNotes.personnel_id == personnel_id,
             )
         )
     )
@@ -321,9 +321,9 @@ async def get_personnel_by_id_with_deployment_context(
 # ============================================================================
 
 
-@router.get("/personnel", response_model=list[PersonnelResponseWithDeployment])
+@router.get("/personnel", response_model=list[PersonnelResponseWithGrouping])
 async def list_personnel(
-    deployment_id: str | None = Query(None, description="Filter by deployment ID"),
+    grouping_id: str | None = Query(None, description="Filter by grouping ID"),
     nominal_roll_id: str | None = Query(
         None, description="Filter by nominal roll ID"
     ),
@@ -347,17 +347,17 @@ async def list_personnel(
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """List personnel with optional deployment context and filtering.
+    """List personnel with optional grouping context and filtering.
 
-    When deployment_id is provided:
-    - Returns personnel scoped to that deployment
-    - Includes deployment-specific information (overrides, notes)
-    - Respects deployment access control
+    When grouping_id is provided:
+    - Returns personnel scoped to that grouping
+    - Includes grouping-specific information (overrides, notes)
+    - Respects grouping access control
     - Filters apply to effective unit assignments (overrides take precedence)
 
-    When deployment_id is not provided:
+    When grouping_id is not provided:
     - Returns all personnel (admin/super_admin only)
-    - No deployment-specific information included
+    - No grouping-specific information included
 
     Sorting:
     - Can sort by: name, rank, unit, status, created_at, updated_at
@@ -365,7 +365,7 @@ async def list_personnel(
     - Default: No sorting (returns in natural order)
     """
     params = PersonnelListParams(
-        deployment_id=deployment_id,
+        grouping_id=grouping_id,
         nominal_roll_id=nominal_roll_id,
         unit=unit,
         sub_unit_1=sub_unit_1,
@@ -380,25 +380,25 @@ async def list_personnel(
         offset=offset,
     )
 
-    # Deployment-scoped query
-    if params.deployment_id:
+    # Grouping-scoped query
+    if params.grouping_id:
         (
             personnel_list,
             _,
             _,
-        ) = await get_deployment_personnel_with_overrides(
-            params.deployment_id, params, user_id, user_role, db
+        ) = await get_grouping_personnel_with_overrides(
+            params.grouping_id, params, user_id, user_role, db
         )
         return personnel_list
 
-    # Non-deployment query (admin/super_admin only)
+    # Non-grouping query (admin/super_admin only)
     if user_role not in ["admin", "super_admin"]:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="Only admins can list personnel without deployment context",
+            detail="Only admins can list personnel without grouping context",
         )
 
-    # Build query without deployment context
+    # Build query without grouping context
     query = select(Personnel)
     query = apply_personnel_filters(query, params)
 
@@ -409,9 +409,9 @@ async def list_personnel(
     result = await db.execute(query)
     personnel_list = result.scalars().all()
 
-    # Build response without deployment context
+    # Build response without grouping context
     personnel_responses = [
-        PersonnelResponseWithDeployment(
+        PersonnelResponseWithGrouping(
             id=p.id,
             nominal_roll_id=p.nominal_roll_id,
             short_id=p.short_id,
@@ -427,9 +427,9 @@ async def list_personnel(
             updated_at=p.updated_at,
             created_by=p.created_by,
             updated_by=p.updated_by,
-            deployment_id=None,
+            grouping_id=None,
             has_override=False,
-            deployment_notes=None,
+            grouping_notes=None,
         )
         for p in personnel_list
     ]
@@ -437,26 +437,26 @@ async def list_personnel(
     return personnel_responses
 
 
-@router.get("/personnel/{personnel_id}", response_model=PersonnelResponseWithDeployment)
+@router.get("/personnel/{personnel_id}", response_model=PersonnelResponseWithGrouping)
 async def get_personnel(
     personnel_id: str,
-    deployment_id: str | None = Query(None, description="Deployment ID for context"),
+    grouping_id: str | None = Query(None, description="Grouping ID for context"),
     user_id: str = Query(..., description="User ID for authorization"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Get personnel by ID, optionally with deployment context.
+    """Get personnel by ID, optionally with grouping context.
 
-    When deployment_id is provided, includes deployment-specific information
-    such as overrides and deployment notes.
+    When grouping_id is provided, includes grouping-specific information
+    such as overrides and grouping notes.
     """
-    if deployment_id:
-        # Get personnel with deployment context
-        personnel, override, notes = await get_personnel_by_id_with_deployment_context(
-            personnel_id, deployment_id, user_id, user_role, db
+    if grouping_id:
+        # Get personnel with grouping context
+        personnel, override, notes = await get_personnel_by_id_with_grouping_context(
+            personnel_id, grouping_id, user_id, user_role, db
         )
 
-        return PersonnelResponseWithDeployment(
+        return PersonnelResponseWithGrouping(
             id=personnel.id,
             nominal_roll_id=personnel.nominal_roll_id,
             short_id=personnel.short_id,
@@ -472,16 +472,16 @@ async def get_personnel(
             updated_at=personnel.updated_at,
             created_by=personnel.created_by,
             updated_by=personnel.updated_by,
-            deployment_id=deployment_id,
+            grouping_id=grouping_id,
             has_override=override is not None,
-            deployment_notes=notes.notes if notes else None,
+            grouping_notes=notes.notes if notes else None,
         )
     else:
-        # Get personnel without deployment context (admin/super_admin only)
+        # Get personnel without grouping context (admin/super_admin only)
         if user_role not in ["admin", "super_admin"]:
             raise HTTPException(
                 status_code=http_status.HTTP_403_FORBIDDEN,
-                detail="Only admins can view personnel without deployment context",
+                detail="Only admins can view personnel without grouping context",
             )
 
         result = await db.execute(select(Personnel).where(Personnel.id == personnel_id))
@@ -493,7 +493,7 @@ async def get_personnel(
                 detail="Personnel not found",
             )
 
-        return PersonnelResponseWithDeployment(
+        return PersonnelResponseWithGrouping(
             id=personnel.id,
             nominal_roll_id=personnel.nominal_roll_id,
             short_id=personnel.short_id,
@@ -509,19 +509,19 @@ async def get_personnel(
             updated_at=personnel.updated_at,
             created_by=personnel.created_by,
             updated_by=personnel.updated_by,
-            deployment_id=None,
+            grouping_id=None,
             has_override=False,
-            deployment_notes=None,
+            grouping_notes=None,
         )
 
 
 @router.patch(
-    "/personnel/{personnel_id}", response_model=PersonnelResponseWithDeployment
+    "/personnel/{personnel_id}", response_model=PersonnelResponseWithGrouping
 )
 async def update_personnel(
     personnel_id: str,
     personnel_update: PersonnelUpdate,
-    deployment_id: str | None = Query(None, description="Deployment ID for context"),
+    grouping_id: str | None = Query(None, description="Grouping ID for context"),
     user_id: str = Query(..., description="User ID for authorization"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
@@ -537,10 +537,10 @@ async def update_personnel(
             detail="Only admins can update personnel records",
         )
 
-    if deployment_id:
-        # Get personnel with deployment context
-        personnel, override, notes = await get_personnel_by_id_with_deployment_context(
-            personnel_id, deployment_id, user_id, user_role, db
+    if grouping_id:
+        # Get personnel with grouping context
+        personnel, override, notes = await get_personnel_by_id_with_grouping_context(
+            personnel_id, grouping_id, user_id, user_role, db
         )
 
         # Update personnel fields
@@ -566,7 +566,7 @@ async def update_personnel(
         await db.commit()
         await db.refresh(personnel)
 
-        return PersonnelResponseWithDeployment(
+        return PersonnelResponseWithGrouping(
             id=personnel.id,
             nominal_roll_id=personnel.nominal_roll_id,
             short_id=personnel.short_id,
@@ -582,12 +582,12 @@ async def update_personnel(
             updated_at=personnel.updated_at,
             created_by=personnel.created_by,
             updated_by=personnel.updated_by,
-            deployment_id=deployment_id,
+            grouping_id=grouping_id,
             has_override=override is not None,
-            deployment_notes=notes.notes if notes else None,
+            grouping_notes=notes.notes if notes else None,
         )
     else:
-        # Update personnel without deployment context
+        # Update personnel without grouping context
         result = await db.execute(select(Personnel).where(Personnel.id == personnel_id))
         personnel = result.scalar_one_or_none()
 
@@ -620,7 +620,7 @@ async def update_personnel(
         await db.commit()
         await db.refresh(personnel)
 
-        return PersonnelResponseWithDeployment(
+        return PersonnelResponseWithGrouping(
             id=personnel.id,
             nominal_roll_id=personnel.nominal_roll_id,
             short_id=personnel.short_id,
@@ -636,9 +636,9 @@ async def update_personnel(
             updated_at=personnel.updated_at,
             created_by=personnel.created_by,
             updated_by=personnel.updated_by,
-            deployment_id=None,
+            grouping_id=None,
             has_override=False,
-            deployment_notes=None,
+            grouping_notes=None,
         )
 
 

@@ -21,7 +21,7 @@ from ..db import Base
 if TYPE_CHECKING:
     from .access import AccessLevel, UserSubunitAssignment
     from .attendance import AttendanceScope
-    from .deployment import Deployment
+    from .grouping import Grouping
     from .personnel import Personnel
     from .tagging import Tagging
 
@@ -61,7 +61,7 @@ class NominalRoll(Base):
     personnel: Mapped[list["Personnel"]] = relationship(
         back_populates="nominal_roll", cascade="all, delete-orphan"
     )
-    deployments: Mapped[list["Deployment"]] = relationship(
+    groupings: Mapped[list["Grouping"]] = relationship(
         back_populates="nominal_roll", cascade="all, delete-orphan"
     )
     taggings: Mapped[list["Tagging"]] = relationship(

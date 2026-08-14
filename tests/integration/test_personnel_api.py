@@ -6,10 +6,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from parade_state.models.deployment import (
-    Deployment,
-    DeploymentNotes,
-    DeploymentPersonnelOverride,
+from parade_state.models.grouping import (
+    Grouping,
+    GroupingNotes,
+    GroupingPersonnelOverride,
 )
 from parade_state.models.personnel import Personnel
 from tests.test_utils import (
@@ -20,22 +20,22 @@ from tests.test_utils import (
 
 
 @pytest.mark.asyncio
-async def test_list_personnel_with_deployment_context(
+async def test_list_personnel_with_grouping_context(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
     sample_users,
 ):
-    """Test listing personnel with deployment context."""
+    """Test listing personnel with grouping context."""
     admin_id = str(sample_users["admin"].id)
 
     response = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": admin_id,
             "user_role": "admin",
         },
@@ -46,25 +46,25 @@ async def test_list_personnel_with_deployment_context(
     assert isinstance(data, list)
     assert len(data) > 0
 
-    # Check first personnel has deployment context
+    # Check first personnel has grouping context
     first_personnel = data[0]
     assert "id" in first_personnel
     assert "name" in first_personnel
     assert "short_id" in first_personnel
-    assert "deployment_id" in first_personnel
-    assert first_personnel["deployment_id"] == str(sample_deployment.id)
+    assert "grouping_id" in first_personnel
+    assert first_personnel["grouping_id"] == str(sample_grouping.id)
     assert "has_override" in first_personnel
-    assert "deployment_notes" in first_personnel
+    assert "grouping_notes" in first_personnel
 
 
 @pytest.mark.asyncio
-async def test_list_personnel_without_deployment_context_as_admin(
+async def test_list_personnel_without_grouping_context_as_admin(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_personnel,
     sample_users,
 ):
-    """Test listing personnel without deployment context as admin."""
+    """Test listing personnel without grouping context as admin."""
     response = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
@@ -79,27 +79,27 @@ async def test_list_personnel_without_deployment_context_as_admin(
     assert isinstance(data, list)
     assert len(data) > 0
 
-    # Check personnel don't have deployment context
+    # Check personnel don't have grouping context
     first_personnel = data[0]
     assert "id" in first_personnel
     assert "name" in first_personnel
-    assert first_personnel["deployment_id"] is None
+    assert first_personnel["grouping_id"] is None
     assert first_personnel["has_override"] is False
-    assert first_personnel["deployment_notes"] is None
+    assert first_personnel["grouping_notes"] is None
 
 
 @pytest.mark.asyncio
-async def test_list_personnel_without_deployment_context_as_user_forbidden(
+async def test_list_personnel_without_grouping_context_as_user_forbidden(
     client: TestClient,
     user_token_headers: dict[str, str],
 ):
-    """Test that regular users cannot list personnel without deployment context."""
+    """Test that regular users cannot list personnel without grouping context."""
     assert_permission_denied(
         client,
         "get",
         "/api/v1/personnel",
         user_token_headers,
-        expected_detail="Only admins can list personnel without deployment context",
+        expected_detail="Only admins can list personnel without grouping context",
         params={
             "user_id": "user-id",
             "user_role": "user",
@@ -113,7 +113,7 @@ async def test_list_personnel_with_unit_filter(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test listing personnel with unit filter."""
@@ -124,7 +124,7 @@ async def test_list_personnel_with_unit_filter(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "unit": first_unit,
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
@@ -146,7 +146,7 @@ async def test_list_personnel_with_sub_unit_filter(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test listing personnel with sub-unit filter."""
@@ -162,7 +162,7 @@ async def test_list_personnel_with_sub_unit_filter(
             "/api/v1/personnel",
             headers=admin_token_headers,
             params={
-                "deployment_id": str(sample_deployment.id),
+                "grouping_id": str(sample_grouping.id),
                 "sub_unit_1": sub_unit,
                 "user_id": str(sample_users["admin"].id),
                 "user_role": "admin",
@@ -184,7 +184,7 @@ async def test_list_personnel_with_search(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test listing personnel with search functionality."""
@@ -195,7 +195,7 @@ async def test_list_personnel_with_search(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "search": search_term,
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
@@ -222,7 +222,7 @@ async def test_list_personnel_with_search_by_short_id(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test listing personnel with search by short_id."""
@@ -233,7 +233,7 @@ async def test_list_personnel_with_search_by_short_id(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "search": search_term,
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
@@ -259,14 +259,14 @@ async def test_list_personnel_with_overrides(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
     sample_users,
 ):
-    """Test listing personnel with deployment overrides."""
+    """Test listing personnel with grouping overrides."""
     # Create override for first personnel
-    override = DeploymentPersonnelOverride(
-        deployment_id=str(sample_deployment.id),
+    override = GroupingPersonnelOverride(
+        grouping_id=str(sample_grouping.id),
         personnel_id=str(sample_personnel[0].id),
         unit="Override Unit",
         sub_unit_1="Override Subunit",
@@ -280,7 +280,7 @@ async def test_list_personnel_with_overrides(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -301,18 +301,18 @@ async def test_list_personnel_with_overrides(
 
 
 @pytest.mark.asyncio
-async def test_list_personnel_with_deployment_notes(
+async def test_list_personnel_with_grouping_notes(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
     sample_users,
 ):
-    """Test listing personnel with deployment notes."""
-    # Create deployment notes for first personnel
-    notes = DeploymentNotes(
-        deployment_id=str(sample_deployment.id),
+    """Test listing personnel with grouping notes."""
+    # Create grouping notes for first personnel
+    notes = GroupingNotes(
+        grouping_id=str(sample_grouping.id),
         personnel_id=str(sample_personnel[0].id),
         notes="Medical exemption granted",
         created_by=str(sample_users["admin"].id),
@@ -326,7 +326,7 @@ async def test_list_personnel_with_deployment_notes(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -343,24 +343,24 @@ async def test_list_personnel_with_deployment_notes(
             break
 
     assert personnel_with_notes is not None
-    assert personnel_with_notes["deployment_notes"] == "Medical exemption granted"
+    assert personnel_with_notes["grouping_notes"] == "Medical exemption granted"
 
 
 @pytest.mark.asyncio
-async def test_get_personnel_by_id_with_deployment_context(
+async def test_get_personnel_by_id_with_grouping_context(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
-    """Test getting personnel by ID with deployment context."""
+    """Test getting personnel by ID with grouping context."""
     response = client.get(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -370,19 +370,19 @@ async def test_get_personnel_by_id_with_deployment_context(
     data = response.json()
     assert data["id"] == str(sample_personnel[0].id)
     assert data["name"] == sample_personnel[0].full_name
-    assert data["deployment_id"] == str(sample_deployment.id)
+    assert data["grouping_id"] == str(sample_grouping.id)
     assert "has_override" in data
-    assert "deployment_notes" in data
+    assert "grouping_notes" in data
 
 
 @pytest.mark.asyncio
-async def test_get_personnel_by_id_without_deployment_context_as_admin(
+async def test_get_personnel_by_id_without_grouping_context_as_admin(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     sample_personnel,
 ):
-    """Test getting personnel by ID without deployment context as admin."""
+    """Test getting personnel by ID without grouping context as admin."""
     response = client.get(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
@@ -396,23 +396,23 @@ async def test_get_personnel_by_id_without_deployment_context_as_admin(
     data = response.json()
     assert data["id"] == str(sample_personnel[0].id)
     assert data["name"] == sample_personnel[0].full_name
-    assert data["deployment_id"] is None
+    assert data["grouping_id"] is None
     assert data["has_override"] is False
-    assert data["deployment_notes"] is None
+    assert data["grouping_notes"] is None
 
 
-async def test_get_personnel_by_id_without_deployment_context_as_user_forbidden(
+async def test_get_personnel_by_id_without_grouping_context_as_user_forbidden(
     client: TestClient,
     user_token_headers: dict[str, str],
     sample_personnel,
 ):
-    """Test that regular users cannot get personnel without deployment context."""
+    """Test that regular users cannot get personnel without grouping context."""
     assert_permission_denied(
         client,
         "get",
         f"/api/v1/personnel/{sample_personnel[0].id}",
         user_token_headers,
-        expected_detail="Only admins can view personnel without deployment context",
+        expected_detail="Only admins can view personnel without grouping context",
         params={
             "user_id": "user-id",
             "user_role": "user",
@@ -425,14 +425,14 @@ async def test_get_personnel_by_id_with_override_and_notes(
     client: TestClient,
     admin_token_headers: dict[str, str],
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
     sample_users,
 ):
     """Test getting personnel by ID with override and notes."""
     # Create override
-    override = DeploymentPersonnelOverride(
-        deployment_id=str(sample_deployment.id),
+    override = GroupingPersonnelOverride(
+        grouping_id=str(sample_grouping.id),
         personnel_id=str(sample_personnel[0].id),
         unit="Override Unit",
         sub_unit_1="Override Subunit",
@@ -442,8 +442,8 @@ async def test_get_personnel_by_id_with_override_and_notes(
     db_session.add(override)
 
     # Create notes
-    notes = DeploymentNotes(
-        deployment_id=str(sample_deployment.id),
+    notes = GroupingNotes(
+        grouping_id=str(sample_grouping.id),
         personnel_id=str(sample_personnel[0].id),
         notes="Medical exemption granted",
         created_by=str(sample_users["admin"].id),
@@ -457,7 +457,7 @@ async def test_get_personnel_by_id_with_override_and_notes(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -467,7 +467,7 @@ async def test_get_personnel_by_id_with_override_and_notes(
     data = response.json()
     assert data["id"] == str(sample_personnel[0].id)
     assert data["has_override"] is True
-    assert data["deployment_notes"] == "Medical exemption granted"
+    assert data["grouping_notes"] == "Medical exemption granted"
 
 
 @pytest.mark.asyncio
@@ -476,7 +476,7 @@ async def test_update_personnel_as_admin(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test updating personnel as admin."""
@@ -488,7 +488,7 @@ async def test_update_personnel_as_admin(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -560,7 +560,7 @@ async def test_list_personnel_with_status_filter(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test listing personnel with status filter."""
@@ -572,7 +572,7 @@ async def test_list_personnel_with_status_filter(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "status": "archived",
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
@@ -594,7 +594,7 @@ async def test_list_personnel_with_category_filter(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test listing personnel filtered by category (Officer / WOSE).
@@ -606,7 +606,7 @@ async def test_list_personnel_with_category_filter(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "category": "Officer",
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
@@ -623,7 +623,7 @@ async def test_list_personnel_with_category_filter(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "category": "WOSE",
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
@@ -640,7 +640,7 @@ async def test_list_personnel_with_category_filter(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -656,7 +656,7 @@ async def test_update_personnel_recomputes_category(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Changing rank across corps recomputes the inferred category."""
@@ -665,7 +665,7 @@ async def test_update_personnel_recomputes_category(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -683,7 +683,7 @@ async def test_update_personnel_invalid_rank_rejected(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Patching to an unrecognized rank is rejected with 400."""
@@ -691,7 +691,7 @@ async def test_update_personnel_invalid_rank_rejected(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -705,7 +705,7 @@ async def test_list_personnel_with_pagination(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
 ):
     """Test listing personnel with pagination."""
     assert_pagination_works(
@@ -713,26 +713,26 @@ async def test_list_personnel_with_pagination(
         "/api/v1/personnel",
         admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
     )
 
 
-async def test_list_personnel_invalid_deployment_id(
+async def test_list_personnel_invalid_grouping_id(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
 ):
-    """Test listing personnel with invalid deployment ID."""
+    """Test listing personnel with invalid grouping ID."""
     assert_404_response(
         client,
         "get",
         "/api/v1/personnel",
         admin_token_headers,
         params={
-            "deployment_id": "invalid-deployment-id",
+            "grouping_id": "invalid-grouping-id",
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -786,7 +786,7 @@ async def test_list_personnel_from_different_nominal_roll_forbidden(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_nominal_roll,
 ):
     """Test that personnel from different nominal_roll are not returned."""
@@ -807,7 +807,7 @@ async def test_list_personnel_from_different_nominal_roll_forbidden(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -832,7 +832,7 @@ async def test_get_personnel_from_different_nominal_roll_forbidden(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_nominal_roll,
 ):
     """Test that getting personnel from different nominal_roll returns error."""
@@ -853,7 +853,7 @@ async def test_get_personnel_from_different_nominal_roll_forbidden(
         f"/api/v1/personnel/{other_personnel.id}",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -861,7 +861,7 @@ async def test_get_personnel_from_different_nominal_roll_forbidden(
 
     assert response.status_code == 400
     assert (
-        "does not belong to this deployment's nominal roll"
+        "does not belong to this grouping's nominal roll"
         in response.json()["detail"]
     )
 
@@ -877,7 +877,7 @@ async def test_update_personnel_sets_audit_trail(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test that updating personnel sets audit trail fields."""
@@ -888,7 +888,7 @@ async def test_update_personnel_sets_audit_trail(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -910,7 +910,7 @@ async def test_update_personnel_sets_audit_trail(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -935,7 +935,7 @@ async def test_list_personnel_sort_by_name_asc(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test sorting personnel by name ascending."""
@@ -943,7 +943,7 @@ async def test_list_personnel_sort_by_name_asc(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
             "sort_by": "name",
@@ -965,7 +965,7 @@ async def test_list_personnel_sort_by_name_desc(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test sorting personnel by name descending."""
@@ -973,7 +973,7 @@ async def test_list_personnel_sort_by_name_desc(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
             "sort_by": "name",
@@ -995,7 +995,7 @@ async def test_list_personnel_sort_by_rank(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test sorting personnel by rank."""
@@ -1003,7 +1003,7 @@ async def test_list_personnel_sort_by_rank(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
             "sort_by": "rank",
@@ -1025,7 +1025,7 @@ async def test_list_personnel_sort_by_status(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test sorting personnel by status."""
@@ -1033,7 +1033,7 @@ async def test_list_personnel_sort_by_status(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
             "sort_by": "status",
@@ -1055,7 +1055,7 @@ async def test_list_personnel_invalid_sort_field_ignored(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test that invalid sort field is ignored (doesn't cause error)."""
@@ -1063,7 +1063,7 @@ async def test_list_personnel_invalid_sort_field_ignored(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
             "sort_by": "invalid_field",  # Invalid field
@@ -1082,7 +1082,7 @@ async def test_update_personnel_invalid_status(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test that updating personnel with invalid status fails validation."""
@@ -1094,7 +1094,7 @@ async def test_update_personnel_invalid_status(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -1111,7 +1111,7 @@ async def test_update_personnel_empty_rank(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test that updating personnel with empty rank fails validation."""
@@ -1123,7 +1123,7 @@ async def test_update_personnel_empty_rank(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -1140,7 +1140,7 @@ async def test_update_personnel_too_long_name(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test that updating personnel with too long name fails validation."""
@@ -1152,7 +1152,7 @@ async def test_update_personnel_too_long_name(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -1169,7 +1169,7 @@ async def test_personnel_response_includes_audit_fields(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test that personnel responses include audit trail fields."""
@@ -1177,7 +1177,7 @@ async def test_personnel_response_includes_audit_fields(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -1199,7 +1199,7 @@ async def test_list_personnel_with_filters_and_sorting(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test combining filters with sorting."""
@@ -1211,7 +1211,7 @@ async def test_list_personnel_with_filters_and_sorting(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
             "status": "archived",

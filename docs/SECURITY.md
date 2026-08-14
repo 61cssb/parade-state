@@ -130,7 +130,7 @@ async def update_personnel(
 # User roles
 class UserRole:
     SUPER_ADMIN = "super_admin"  # Full system access
-    ADMIN = "admin"              # Can manage deployments and users
+    ADMIN = "admin"              # Can manage groupings and users
     USER = "user"                # Can record attendance
 
 # Permission checks
@@ -138,53 +138,53 @@ def can_update_personnel(user_role: str) -> bool:
     """Check if user can update personnel records."""
     return user_role in ["admin", "super_admin"]
 
-def can_delete_deployment(user_role: str) -> bool:
-    """Check if user can delete deployments."""
+def can_delete_grouping(user_role: str) -> bool:
+    """Check if user can delete groupings."""
     return user_role == "super_admin"
 ```
 
-### Deployment-Based Access Control
+### Grouping-Based Access Control
 
-**Ensure users can only access deployments they're assigned to:**
+**Ensure users can only access groupings they're assigned to:**
 
 ```python
-async def verify_deployment_access(
-    deployment_id: str,
+async def verify_grouping_access(
+    grouping_id: str,
     user_id: str,
     user_role: str,
     db: AsyncSession,
-) -> Deployment:
-    """Verify user has access to deployment and return it."""
+) -> Grouping:
+    """Verify user has access to grouping and return it."""
 
-    # Super admins have full access to all deployments
+    # Super admins have full access to all groupings
     if user_role == "super_admin":
-        result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
-        deployment = result.scalar_one_or_none()
-        if not deployment:
-            raise HTTPException(status_code=404, detail="Deployment not found")
-        return deployment
+        result = await db.execute(select(Grouping).where(grouping_id == grouping_id))
+        grouping = result.scalar_one_or_none()
+        if not grouping:
+            raise HTTPException(status_code=404, detail="Grouping not found")
+        return grouping
 
-    # Check for explicit deployment access
+    # Check for explicit grouping access
     access_result = await db.execute(
-        select(DeploymentUserAccess).where(
+        select(GroupingUserAccess).where(
             and_(
-                DeploymentUserAccess.user_id == user_id,
-                DeploymentUserAccess.deployment_id == deployment_id,
-                DeploymentUserAccess.revoked_at.is_(None),
+                GroupingUserAccess.user_id == user_id,
+                GroupingUserAccess.grouping_id == grouping_id,
+                GroupingUserAccess.revoked_at.is_(None),
             )
         )
     )
     access = access_result.scalar_one_or_none()
 
-    # Both admins and regular users need explicit deployment access
+    # Both admins and regular users need explicit grouping access
     if access:
-        result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+        result = await db.execute(select(Grouping).where(grouping_id == grouping_id))
         return result.scalar_one_or_none()
 
     # No access found
     raise HTTPException(
         status_code=403,
-        detail="Insufficient permissions to access this deployment"
+        detail="Insufficient permissions to access this grouping"
     )
 ```
 
@@ -192,43 +192,43 @@ async def verify_deployment_access(
 
 **Data Isolation Strategy:**
 
-1. **Automatic Filtering:** All data queries automatically filter by deployment access
-2. **Explicit Grants:** Users must be explicitly granted access to deployments
-3. **Scope Enforcement:** Subunit-level filtering within deployments
+1. **Automatic Filtering:** All data queries automatically filter by grouping access
+2. **Explicit Grants:** Users must be explicitly granted access to groupings
+3. **Scope Enforcement:** Subunit-level filtering within groupings
 4. **Audit Trail:** All access grants and revocations are logged
 
 **Implementation Across APIs:**
 
 ✅ **Personnel API:**
 ```python
-# Filter personnel by deployment access
-async def list_personnel(deployment_id: str, user_id: str, user_role: str):
-    # Verify deployment access first
-    deployment = await verify_deployment_access(deployment_id, user_id, user_role, db)
+# Filter personnel by grouping access
+async def list_personnel(grouping_id: str, user_id: str, user_role: str):
+    # Verify grouping access first
+    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
     
-    # Return personnel only from accessible deployment
-    return await get_personnel_for_deployment(deployment.id)
+    # Return personnel only from accessible grouping
+    return await get_personnel_for_grouping(grouping.id)
 ```
 
 ✅ **Sessions API:**
 ```python
-# Create sessions only for accessible deployments
+# Create sessions only for accessible groupings
 async def create_session(session_data: SessionCreate, user_id: str, user_role: str):
-    # Verify deployment access
-    deployment = await verify_deployment_access(
-        session_data.deployment_id, user_id, user_role, db
+    # Verify grouping access
+    grouping = await verify_grouping_access(
+        session_data.grouping_id, user_id, user_role, db
     )
     
     # Create session with access verified
-    return await create_session_for_deployment(session_data, deployment)
+    return await create_session_for_grouping(session_data, grouping)
 ```
 
 ✅ **Attendance API:**
 ```python
-# Record attendance only for accessible deployments
+# Record attendance only for accessible groupings
 async def create_attendance(attendance_data: AttendanceCreate, user_id: str, user_role: str):
-    # Verify session and deployment access
-    session = await verify_session_and_deployment_access(
+    # Verify session and grouping access
+    session = await verify_session_and_grouping_access(
         attendance_data.session_id, user_id, user_role, db
     )
     
@@ -238,24 +238,24 @@ async def create_attendance(attendance_data: AttendanceCreate, user_id: str, use
 
 ### Subunit Scope Filtering
 
-**Hierarchical access control within deployments:**
+**Hierarchical access control within groupings:**
 
 ```python
 async def check_subunit_access(
     user_id: str,
-    deployment_id: str,
+    grouping_id: str,
     unit: str | None = None,
     sub_unit_1: str | None = None,
     sub_unit_2: str | None = None,
     sub_unit_3: str | None = None,
     db: AsyncSession,
 ) -> bool:
-    """Check if user has access to specific subunit within deployment."""
+    """Check if user has access to specific subunit within grouping."""
 
-    # Get user's subunit scopes for this deployment
-    scopes = await get_user_subunit_scopes(user_id, deployment_id, db)
+    # Get user's subunit scopes for this grouping
+    scopes = await get_user_subunit_scopes(user_id, grouping_id, db)
 
-    # If no scopes defined, user has deployment-wide access
+    # If no scopes defined, user has grouping-wide access
     if not scopes:
         return True
 
@@ -285,8 +285,8 @@ async def check_subunit_access(
 ### Access Control Best Practices
 
 **✅ DO:**
-- Verify deployment access at the beginning of each endpoint
-- Filter all data queries by deployment scope
+- Verify grouping access at the beginning of each endpoint
+- Filter all data queries by grouping scope
 - Use dependency injection for authentication
 - Implement audit trails for access changes
 - Test access control with multiple user roles
@@ -302,7 +302,7 @@ async def check_subunit_access(
 - Return 404 for access denied (use 403)
 - Forget to log access control decisions
 
-    return await get_deployment(deployment_id, db)
+    return await get_grouping(grouping_id, db)
 ```
 
 ### Row-Level Security

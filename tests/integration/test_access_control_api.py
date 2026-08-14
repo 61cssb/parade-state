@@ -5,22 +5,22 @@ from datetime import datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from parade_state.models import Deployment, DeploymentUserAccess, User, UserSubunitScope
+from parade_state.models import Grouping, GroupingUserAccess, User, UserSubunitScope
 from tests.test_utils import assert_permission_denied
 
 
 @pytest.mark.asyncio
-async def test_grant_user_deployment_access_as_admin(
+async def test_grant_user_grouping_access_as_admin(
     client: TestClient,
     admin_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_users,
 ):
-    """Test that admins can grant deployment access to users."""
+    """Test that admins can grant grouping access to users."""
     target_user_id = str(sample_users["user"].id)
 
     response = client.post(
-        f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/access",
+        f"/api/v1/access-control/groupings/{sample_grouping.id}/users/{target_user_id}/access",
         headers=admin_token_headers,
         params={
             "granted_by": str(sample_users["admin"].id),
@@ -34,24 +34,24 @@ async def test_grant_user_deployment_access_as_admin(
     # Check response structure
     assert "id" in data
     assert data["user_id"] == target_user_id
-    assert data["deployment_id"] == str(sample_deployment.id)
+    assert data["grouping_id"] == str(sample_grouping.id)
     assert data["granted_by"] == str(sample_users["admin"].id)
     assert "granted_at" in data
     assert data["revoked_at"] is None
 
 
 @pytest.mark.asyncio
-async def test_grant_user_deployment_access_as_super_admin(
+async def test_grant_user_grouping_access_as_super_admin(
     client: TestClient,
     super_admin_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_users,
 ):
-    """Test that super admins can grant deployment access."""
+    """Test that super admins can grant grouping access."""
     target_user_id = str(sample_users["user"].id)
 
     response = client.post(
-        f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/access",
+        f"/api/v1/access-control/groupings/{sample_grouping.id}/users/{target_user_id}/access",
         headers=super_admin_token_headers,
         params={
             "granted_by": "super-admin-id",
@@ -63,25 +63,25 @@ async def test_grant_user_deployment_access_as_super_admin(
     data = response.json()
 
     assert data["user_id"] == target_user_id
-    assert data["deployment_id"] == str(sample_deployment.id)
+    assert data["grouping_id"] == str(sample_grouping.id)
 
 
 @pytest.mark.asyncio
-async def test_grant_user_deployment_access_as_user_forbidden(
+async def test_grant_user_grouping_access_as_user_forbidden(
     client: TestClient,
     user_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_users,
 ):
-    """Test that regular users cannot grant deployment access."""
+    """Test that regular users cannot grant grouping access."""
     target_user_id = str(sample_users["user"].id)
 
     assert_permission_denied(
         client,
         "post",
-        f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/access",
+        f"/api/v1/access-control/groupings/{sample_grouping.id}/users/{target_user_id}/access",
         user_token_headers,
-        expected_detail="Only admins can grant deployment access",
+        expected_detail="Only admins can grant grouping access",
         params={
             "granted_by": str(sample_users["user"].id),
             "user_role": "user",
@@ -90,21 +90,21 @@ async def test_grant_user_deployment_access_as_user_forbidden(
 
 
 @pytest.mark.asyncio
-async def test_grant_duplicate_deployment_access(
+async def test_grant_duplicate_grouping_access(
     client: TestClient,
     admin_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_users,
     db_session,
 ):
-    """Test that duplicate deployment access grants are rejected."""
+    """Test that duplicate grouping access grants are rejected."""
     target_user_id = str(sample_users["user"].id)
     admin_id = str(sample_users["admin"].id)
 
     # Create first access grant
-    first_access = DeploymentUserAccess(
+    first_access = GroupingUserAccess(
         user_id=target_user_id,
-        deployment_id=str(sample_deployment.id),
+        grouping_id=str(sample_grouping.id),
         granted_by=admin_id,
     )
     db_session.add(first_access)
@@ -112,7 +112,7 @@ async def test_grant_duplicate_deployment_access(
 
     # Try to create duplicate access grant
     response = client.post(
-        f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/access",
+        f"/api/v1/access-control/groupings/{sample_grouping.id}/users/{target_user_id}/access",
         headers=admin_token_headers,
         params={
             "granted_by": admin_id,
@@ -121,25 +121,25 @@ async def test_grant_duplicate_deployment_access(
     )
 
     assert response.status_code == 400
-    assert "already has access to this deployment" in response.json()["detail"]
+    assert "already has access to this grouping" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_revoke_user_deployment_access(
+async def test_revoke_user_grouping_access(
     client: TestClient,
     admin_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_users,
     db_session,
 ):
-    """Test revoking user deployment access."""
+    """Test revoking user grouping access."""
     target_user_id = str(sample_users["user"].id)
     admin_id = str(sample_users["admin"].id)
 
     # Create access grant first
-    access = DeploymentUserAccess(
+    access = GroupingUserAccess(
         user_id=target_user_id,
-        deployment_id=str(sample_deployment.id),
+        grouping_id=str(sample_grouping.id),
         granted_by=admin_id,
     )
     db_session.add(access)
@@ -147,7 +147,7 @@ async def test_revoke_user_deployment_access(
 
     # Revoke access
     response = client.delete(
-        f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/access",
+        f"/api/v1/access-control/groupings/{sample_grouping.id}/users/{target_user_id}/access",
         headers=admin_token_headers,
         params={
             "revoked_by": admin_id,
@@ -163,14 +163,14 @@ async def test_revoke_user_deployment_access(
 async def test_revoke_nonexistent_access(
     client: TestClient,
     admin_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_users,
 ):
     """Test revoking non-existent access."""
     target_user_id = str(sample_users["user"].id)
 
     response = client.delete(
-        f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/access",
+        f"/api/v1/access-control/groupings/{sample_grouping.id}/users/{target_user_id}/access",
         headers=admin_token_headers,
         params={
             "revoked_by": str(sample_users["admin"].id),
@@ -183,21 +183,21 @@ async def test_revoke_nonexistent_access(
 
 
 @pytest.mark.asyncio
-async def test_list_user_deployment_accesses_own(
+async def test_list_user_grouping_accesses_own(
     client: TestClient,
     user_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_users,
     db_session,
 ):
-    """Test user can list their own deployment accesses."""
+    """Test user can list their own grouping accesses."""
     target_user_id = str(sample_users["user"].id)
     admin_id = str(sample_users["admin"].id)
 
     # Create access grants
-    access1 = DeploymentUserAccess(
+    access1 = GroupingUserAccess(
         user_id=target_user_id,
-        deployment_id=str(sample_deployment.id),
+        grouping_id=str(sample_grouping.id),
         granted_by=admin_id,
     )
     db_session.add(access1)
@@ -205,7 +205,7 @@ async def test_list_user_deployment_accesses_own(
 
     # List own accesses
     response = client.get(
-        f"/api/v1/access-control/users/{target_user_id}/deployments",
+        f"/api/v1/access-control/users/{target_user_id}/groupings",
         headers=user_token_headers,
         params={
             "requesting_user_id": target_user_id,
@@ -221,25 +221,25 @@ async def test_list_user_deployment_accesses_own(
     # Check first access
     first_access = data[0]
     assert first_access["user_id"] == target_user_id
-    assert first_access["deployment_id"] == str(sample_deployment.id)
+    assert first_access["grouping_id"] == str(sample_grouping.id)
 
 
 @pytest.mark.asyncio
 async def test_list_other_user_accesses_as_admin(
     client: TestClient,
     admin_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_users,
     db_session,
 ):
-    """Test admin can list other users' deployment accesses."""
+    """Test admin can list other users' grouping accesses."""
     target_user_id = str(sample_users["user"].id)
     admin_id = str(sample_users["admin"].id)
 
     # Create access grant
-    access = DeploymentUserAccess(
+    access = GroupingUserAccess(
         user_id=target_user_id,
-        deployment_id=str(sample_deployment.id),
+        grouping_id=str(sample_grouping.id),
         granted_by=admin_id,
     )
     db_session.add(access)
@@ -247,7 +247,7 @@ async def test_list_other_user_accesses_as_admin(
 
     # List user's accesses as admin
     response = client.get(
-        f"/api/v1/access-control/users/{target_user_id}/deployments",
+        f"/api/v1/access-control/users/{target_user_id}/groupings",
         headers=admin_token_headers,
         params={
             "requesting_user_id": admin_id,
@@ -264,17 +264,17 @@ async def test_list_other_user_accesses_as_admin(
 async def test_list_other_user_accesses_as_user_forbidden(
     client: TestClient,
     user_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_users,
 ):
-    """Test regular users cannot list other users' deployment accesses."""
+    """Test regular users cannot list other users' grouping accesses."""
     admin_user_id = str(sample_users["admin"].id)
     regular_user_id = str(sample_users["user"].id)
 
     assert_permission_denied(
         client,
         "get",
-        f"/api/v1/access-control/users/{admin_user_id}/deployments",
+        f"/api/v1/access-control/users/{admin_user_id}/groupings",
         user_token_headers,
         expected_detail="can only view your own",
         params={
@@ -285,30 +285,30 @@ async def test_list_other_user_accesses_as_user_forbidden(
 
 
 @pytest.mark.asyncio
-async def test_list_deployment_users(
+async def test_list_grouping_users(
     client: TestClient,
     admin_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_users,
     db_session,
 ):
-    """Test listing users with access to a deployment."""
+    """Test listing users with access to a grouping."""
     admin_id = str(sample_users["admin"].id)
     user_id = str(sample_users["user"].id)
 
-    # Grant user access to deployment
-    # Note: Admin access is already granted by sample_deployment fixture
-    user_access = DeploymentUserAccess(
+    # Grant user access to grouping
+    # Note: Admin access is already granted by sample_grouping fixture
+    user_access = GroupingUserAccess(
         user_id=user_id,
-        deployment_id=str(sample_deployment.id),
+        grouping_id=str(sample_grouping.id),
         granted_by=admin_id,
     )
     db_session.add(user_access)
     await db_session.commit()
 
-    # List deployment users
+    # List grouping users
     response = client.get(
-        f"/api/v1/access-control/deployments/{sample_deployment.id}/users",
+        f"/api/v1/access-control/groupings/{sample_grouping.id}/users",
         headers=admin_token_headers,
         params={
             "requesting_user_id": admin_id,
@@ -330,7 +330,7 @@ async def test_list_deployment_users(
 async def test_create_user_subunit_scope(
     client: TestClient,
     admin_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_users,
     db_session,
 ):
@@ -338,9 +338,9 @@ async def test_create_user_subunit_scope(
     target_user_id = str(sample_users["user"].id)
     admin_id = str(sample_users["admin"].id)
 
-    # Note: Admin access already granted by sample_deployment fixture
+    # Note: Admin access already granted by sample_grouping fixture
     response = client.post(
-        f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/scopes",
+        f"/api/v1/access-control/groupings/{sample_grouping.id}/users/{target_user_id}/scopes",
         headers=admin_token_headers,
         params={
             "created_by": admin_id,
@@ -359,7 +359,7 @@ async def test_create_user_subunit_scope(
     # Check response structure
     assert "id" in data
     assert data["user_id"] == target_user_id
-    assert data["deployment_id"] == str(sample_deployment.id)
+    assert data["grouping_id"] == str(sample_grouping.id)
     assert data["unit"] == "Coy A"
     assert data["sub_unit_1"] == "Platoon 1"
     assert data["sub_unit_2"] == "Section 1"
@@ -370,7 +370,7 @@ async def test_create_user_subunit_scope(
 async def test_create_duplicate_subunit_scope(
     client: TestClient,
     admin_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_users,
     db_session,
 ):
@@ -378,11 +378,11 @@ async def test_create_duplicate_subunit_scope(
     target_user_id = str(sample_users["user"].id)
     admin_id = str(sample_users["admin"].id)
 
-    # Note: Admin access already granted by sample_deployment fixture
+    # Note: Admin access already granted by sample_grouping fixture
     # Create first scope
     scope = UserSubunitScope(
         user_id=target_user_id,
-        deployment_id=str(sample_deployment.id),
+        grouping_id=str(sample_grouping.id),
         unit="Coy A",
         sub_unit_1="Platoon 1",
         created_by=admin_id,
@@ -392,7 +392,7 @@ async def test_create_duplicate_subunit_scope(
 
     # Try to create duplicate scope
     response = client.post(
-        f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/scopes",
+        f"/api/v1/access-control/groupings/{sample_grouping.id}/users/{target_user_id}/scopes",
         headers=admin_token_headers,
         params={
             "created_by": admin_id,
@@ -412,7 +412,7 @@ async def test_create_duplicate_subunit_scope(
 async def test_delete_user_subunit_scope(
     client: TestClient,
     admin_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_users,
     db_session,
 ):
@@ -420,11 +420,11 @@ async def test_delete_user_subunit_scope(
     target_user_id = str(sample_users["user"].id)
     admin_id = str(sample_users["admin"].id)
 
-    # Note: Admin access already granted by sample_deployment fixture
+    # Note: Admin access already granted by sample_grouping fixture
     # Create scope
     scope = UserSubunitScope(
         user_id=target_user_id,
-        deployment_id=str(sample_deployment.id),
+        grouping_id=str(sample_grouping.id),
         unit="Coy A",
         created_by=admin_id,
     )
@@ -434,7 +434,7 @@ async def test_delete_user_subunit_scope(
 
     # Delete scope
     response = client.delete(
-        f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/scopes/{scope_id}",
+        f"/api/v1/access-control/groupings/{sample_grouping.id}/users/{target_user_id}/scopes/{scope_id}",
         headers=admin_token_headers,
         params={
             "deleted_by": admin_id,
@@ -450,7 +450,7 @@ async def test_delete_user_subunit_scope(
 async def test_list_user_subunit_scopes(
     client: TestClient,
     admin_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_users,
     db_session,
 ):
@@ -458,18 +458,18 @@ async def test_list_user_subunit_scopes(
     target_user_id = str(sample_users["user"].id)
     admin_id = str(sample_users["admin"].id)
 
-    # Note: Admin access already granted by sample_deployment fixture
+    # Note: Admin access already granted by sample_grouping fixture
     # Create scopes
     scope1 = UserSubunitScope(
         user_id=target_user_id,
-        deployment_id=str(sample_deployment.id),
+        grouping_id=str(sample_grouping.id),
         unit="Coy A",
         sub_unit_1="Platoon 1",
         created_by=admin_id,
     )
     scope2 = UserSubunitScope(
         user_id=target_user_id,
-        deployment_id=str(sample_deployment.id),
+        grouping_id=str(sample_grouping.id),
         unit="Coy A",
         sub_unit_1="Platoon 2",
         created_by=admin_id,
@@ -479,7 +479,7 @@ async def test_list_user_subunit_scopes(
 
     # List scopes
     response = client.get(
-        f"/api/v1/access-control/deployments/{sample_deployment.id}/users/{target_user_id}/scopes",
+        f"/api/v1/access-control/groupings/{sample_grouping.id}/users/{target_user_id}/scopes",
         headers=admin_token_headers,
         params={
             "requesting_user_id": admin_id,
@@ -498,67 +498,67 @@ async def test_list_user_subunit_scopes(
 
 
 @pytest.mark.asyncio
-async def test_access_control_enforcement_deployment_access(
+async def test_access_control_enforcement_grouping_access(
     client: TestClient,
     user_token_headers: dict[str, str],
     admin_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_users,
     db_session,
 ):
-    """Test that users without deployment access are blocked."""
+    """Test that users without grouping access are blocked."""
     user_id = str(sample_users["user"].id)
 
-    # Try to access deployment personnel without access grant
+    # Try to access grouping personnel without access grant
     response = client.get(
         "/api/v1/personnel",
         headers=user_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": user_id,
             "user_role": "user",
         },
     )
 
-    # Should be blocked (403) because user doesn't have deployment access
+    # Should be blocked (403) because user doesn't have grouping access
     assert response.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_access_control_with_deployment_access_grant(
+async def test_access_control_with_grouping_access_grant(
     client: TestClient,
     user_token_headers: dict[str, str],
     admin_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
     sample_users,
     sample_personnel,
     db_session,
 ):
-    """Test that users with deployment access can access deployment data."""
+    """Test that users with grouping access can access grouping data."""
     user_id = str(sample_users["user"].id)
     admin_id = str(sample_users["admin"].id)
 
-    # Grant user access to deployment
-    access = DeploymentUserAccess(
+    # Grant user access to grouping
+    access = GroupingUserAccess(
         user_id=user_id,
-        deployment_id=str(sample_deployment.id),
+        grouping_id=str(sample_grouping.id),
         granted_by=admin_id,
     )
     db_session.add(access)
     await db_session.commit()
 
-    # Try to access deployment personnel with access grant
+    # Try to access grouping personnel with access grant
     response = client.get(
         "/api/v1/personnel",
         headers=user_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": user_id,
             "user_role": "user",
         },
     )
 
-    # Should succeed now (200) because user has deployment access
+    # Should succeed now (200) because user has grouping access
     assert response.status_code == 200
 
 
@@ -566,14 +566,14 @@ async def test_access_control_with_deployment_access_grant(
 async def test_super_admin_full_access(
     client: TestClient,
     super_admin_token_headers: dict[str, str],
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
 ):
     """Test that super admins have full access without explicit grants."""
     response = client.get(
         "/api/v1/personnel",
         headers=super_admin_token_headers,
         params={
-            "deployment_id": str(sample_deployment.id),
+            "grouping_id": str(sample_grouping.id),
             "user_id": "super-admin-id",
             "user_role": "super_admin",
         },

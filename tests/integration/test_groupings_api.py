@@ -1,4 +1,4 @@
-"""Tests for deployment API endpoints."""
+"""Tests for grouping API endpoints."""
 
 from datetime import date, datetime, timedelta
 
@@ -8,13 +8,13 @@ from sqlalchemy import select
 
 from parade_state.models.attendance import Attendance
 from parade_state.models.csv_ingestion import NominalRoll
-from parade_state.models.deployment import (
-    Deployment,
-    DeploymentNotes,
-    DeploymentPersonnelOverride,
+from parade_state.models.grouping import (
+    Grouping,
+    GroupingNotes,
+    GroupingPersonnelOverride,
 )
 from parade_state.models.personnel import Personnel
-from parade_state.models.schemas import DeploymentCreate, DeploymentUpdate
+from parade_state.models.schemas import GroupingCreate, GroupingUpdate
 from parade_state.utils import utc_dt
 from tests.test_utils import (
     assert_404_response,
@@ -24,42 +24,44 @@ from tests.test_utils import (
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_as_admin(
+async def test_create_grouping_as_admin(
     client: TestClient, admin_token_headers: dict[str, str], db_session,
     sample_nominal_roll,
 ):
-    """Test deployment creation by admin."""
-    deployment_data = {
-        "name": "Test Deployment",
+    """Test grouping creation by admin."""
+    grouping_data = {
+        "name": "Test Grouping",
         "nominal_roll_id": str(sample_nominal_roll.id),
+        "mode": "standard",
         "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
         "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
         "status": "draft",
-        "notes": "Test deployment notes",
+        "notes": "Test grouping notes",
     }
 
     response = client.post(
-        "/api/v1/deployments/",
-        json=deployment_data,
+        "/api/v1/groupings/",
+        json=grouping_data,
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
 
     assert response.status_code == 201
     data = response.json()
-    assert data["name"] == "Test Deployment"
+    assert data["name"] == "Test Grouping"
     assert data["status"] == "draft"
     assert data["nominal_roll_id"] == str(sample_nominal_roll.id)
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_as_regular_user_forbidden(
+async def test_create_grouping_as_regular_user_forbidden(
     client: TestClient, user_token_headers: dict[str, str], db_session
 ):
-    """Test that regular users cannot create deployments."""
-    deployment_data = {
-        "name": "Test Deployment",
+    """Test that regular users cannot create groupings."""
+    grouping_data = {
+        "name": "Test Grouping",
         "nominal_roll_id": "test-nominal_roll-123",
+        "mode": "standard",
         "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
         "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
     }
@@ -67,30 +69,31 @@ async def test_create_deployment_as_regular_user_forbidden(
     assert_permission_denied(
         client,
         "post",
-        "/api/v1/deployments/",
+        "/api/v1/groupings/",
         user_token_headers,
         expected_detail="Only admins and super admins",
         params={"user_id": "regular-user-id", "user_role": "user"},
-        json_data=deployment_data,
+        json_data=grouping_data,
     )
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_invalid_date_range(
+async def test_create_grouping_invalid_date_range(
     client: TestClient, admin_token_headers: dict[str, str], db_session,
     sample_nominal_roll,
 ):
-    """Test deployment creation with invalid date range."""
-    deployment_data = {
-        "name": "Test Deployment",
+    """Test grouping creation with invalid date range."""
+    grouping_data = {
+        "name": "Test Grouping",
         "nominal_roll_id": str(sample_nominal_roll.id),
+        "mode": "standard",
         "valid_from": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
         "valid_until": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
     }
 
     response = client.post(
-        "/api/v1/deployments/",
-        json=deployment_data,
+        "/api/v1/groupings/",
+        json=grouping_data,
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
@@ -100,20 +103,21 @@ async def test_create_deployment_invalid_date_range(
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_non_existent_nominal_roll(
+async def test_create_grouping_non_existent_nominal_roll(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test deployment creation fails when nominal_roll does not exist."""
-    deployment_data = {
-        "name": "Test Deployment",
+    """Test grouping creation fails when nominal_roll does not exist."""
+    grouping_data = {
+        "name": "Test Grouping",
         "nominal_roll_id": "does-not-exist",
+        "mode": "standard",
         "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
         "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
     }
 
     response = client.post(
-        "/api/v1/deployments/",
-        json=deployment_data,
+        "/api/v1/groupings/",
+        json=grouping_data,
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
@@ -123,11 +127,11 @@ async def test_create_deployment_non_existent_nominal_roll(
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_draft_nominal_roll(
+async def test_create_grouping_draft_nominal_roll(
     client: TestClient, admin_token_headers: dict[str, str], db_session,
     sample_users,
 ):
-    """Test deployment creation fails when nominal_roll is not confirmed."""
+    """Test grouping creation fails when nominal_roll is not confirmed."""
     draft_nominal_roll = NominalRoll(
         caa=date(2024, 3, 1),
         csv_hash="draft-hash",
@@ -137,16 +141,17 @@ async def test_create_deployment_draft_nominal_roll(
     db_session.add(draft_nominal_roll)
     await db_session.commit()
 
-    deployment_data = {
-        "name": "Test Deployment",
+    grouping_data = {
+        "name": "Test Grouping",
         "nominal_roll_id": str(draft_nominal_roll.id),
+        "mode": "standard",
         "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
         "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
     }
 
     response = client.post(
-        "/api/v1/deployments/",
-        json=deployment_data,
+        "/api/v1/groupings/",
+        json=grouping_data,
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
@@ -156,11 +161,11 @@ async def test_create_deployment_draft_nominal_roll(
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_archived_nominal_roll(
+async def test_create_grouping_archived_nominal_roll(
     client: TestClient, admin_token_headers: dict[str, str], db_session,
     sample_users,
 ):
-    """Test deployment creation fails when nominal_roll is archived."""
+    """Test grouping creation fails when nominal_roll is archived."""
     archived_nominal_roll = NominalRoll(
         caa=date(2023, 6, 1),
         csv_hash="archived-hash",
@@ -170,16 +175,17 @@ async def test_create_deployment_archived_nominal_roll(
     db_session.add(archived_nominal_roll)
     await db_session.commit()
 
-    deployment_data = {
-        "name": "Test Deployment",
+    grouping_data = {
+        "name": "Test Grouping",
         "nominal_roll_id": str(archived_nominal_roll.id),
+        "mode": "standard",
         "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
         "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
     }
 
     response = client.post(
-        "/api/v1/deployments/",
-        json=deployment_data,
+        "/api/v1/groupings/",
+        json=grouping_data,
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
@@ -189,22 +195,24 @@ async def test_create_deployment_archived_nominal_roll(
 
 
 @pytest.mark.asyncio
-async def test_list_deployments(
+async def test_list_groupings(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test listing deployments."""
-    # Create some test deployments
-    deployment1 = Deployment(
-        name="Deployment 1",
+    """Test listing groupings."""
+    # Create some test groupings
+    grouping1 = Grouping(
+        name="Grouping 1",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
-    deployment2 = Deployment(
-        name="Deployment 2",
+    grouping2 = Grouping(
+        name="Grouping 2",
         nominal_roll_id="nominal_roll-2",
+        mode="standard",
         status="active",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
@@ -212,12 +220,12 @@ async def test_list_deployments(
         activated_at=utc_dt.utcnow(),
     )
 
-    db_session.add(deployment1)
-    db_session.add(deployment2)
+    db_session.add(grouping1)
+    db_session.add(grouping2)
     await db_session.commit()
 
     response = client.get(
-        "/api/v1/deployments/",
+        "/api/v1/groupings/",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
@@ -225,40 +233,42 @@ async def test_list_deployments(
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2
-    assert any(d["name"] == "Deployment 1" for d in data)
-    assert any(d["name"] == "Deployment 2" for d in data)
+    assert any(d["name"] == "Grouping 1" for d in data)
+    assert any(d["name"] == "Grouping 2" for d in data)
 
 
 @pytest.mark.asyncio
-async def test_list_deployments_with_status_filter(
+async def test_list_groupings_with_status_filter(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test listing deployments with status filter."""
-    # Create test deployments with different statuses
-    deployment1 = Deployment(
-        name="Active Deployment",
+    """Test listing groupings with status filter."""
+    # Create test groupings with different statuses
+    grouping1 = Grouping(
+        name="Active Grouping",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="active",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
         activated_at=utc_dt.utcnow(),
     )
-    deployment2 = Deployment(
-        name="Draft Deployment",
+    grouping2 = Grouping(
+        name="Draft Grouping",
         nominal_roll_id="nominal_roll-2",
+        mode="standard",
         status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
-    db_session.add(deployment1)
-    db_session.add(deployment2)
+    db_session.add(grouping1)
+    db_session.add(grouping2)
     await db_session.commit()
 
     response = client.get(
-        "/api/v1/deployments/",
+        "/api/v1/groupings/",
         headers=admin_token_headers,
         params={
             "user_id": "admin-user-id",
@@ -270,74 +280,76 @@ async def test_list_deployments_with_status_filter(
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 1
-    assert data[0]["name"] == "Active Deployment"
+    assert data[0]["name"] == "Active Grouping"
     assert data[0]["status"] == "active"
 
 
 @pytest.mark.asyncio
-async def test_get_deployment(
+async def test_get_grouping(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test getting a specific deployment."""
-    deployment = Deployment(
-        name="Test Deployment",
+    """Test getting a specific grouping."""
+    grouping = Grouping(
+        name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
-    db_session.add(deployment)
+    db_session.add(grouping)
     await db_session.commit()
 
     response = client.get(
-        f"/api/v1/deployments/{deployment.id}",
+        f"/api/v1/groupings/{grouping.id}",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
 
     assert response.status_code == 200
     data = response.json()
-    assert data["id"] == str(deployment.id)
-    assert data["name"] == "Test Deployment"
+    assert data["id"] == str(grouping.id)
+    assert data["name"] == "Test Grouping"
 
 
 @pytest.mark.asyncio
-async def test_get_deployment_not_found(
+async def test_get_grouping_not_found(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test getting a non-existent deployment."""
+    """Test getting a non-existent grouping."""
     assert_404_response(
         client,
         "get",
-        "/api/v1/deployments/non-existent-id",
+        "/api/v1/groupings/non-existent-id",
         admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
 
 
 @pytest.mark.asyncio
-async def test_update_deployment(
+async def test_update_grouping(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test updating a deployment."""
-    deployment = Deployment(
+    """Test updating a grouping."""
+    grouping = Grouping(
         name="Original Name",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
-    db_session.add(deployment)
+    db_session.add(grouping)
     await db_session.commit()
 
     update_data = {"name": "Updated Name", "notes": "Updated notes"}
 
     response = client.patch(
-        f"/api/v1/deployments/{deployment.id}",
+        f"/api/v1/groupings/{grouping.id}",
         json=update_data,
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -350,26 +362,27 @@ async def test_update_deployment(
 
 
 @pytest.mark.asyncio
-async def test_update_deployment_status_transition(
+async def test_update_grouping_status_transition(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test updating deployment status."""
-    deployment = Deployment(
-        name="Test Deployment",
+    """Test updating grouping status."""
+    grouping = Grouping(
+        name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
-    db_session.add(deployment)
+    db_session.add(grouping)
     await db_session.commit()
 
     update_data = {"status": "active"}
 
     response = client.patch(
-        f"/api/v1/deployments/{deployment.id}",
+        f"/api/v1/groupings/{grouping.id}",
         json=update_data,
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -382,26 +395,27 @@ async def test_update_deployment_status_transition(
 
 
 @pytest.mark.asyncio
-async def test_update_deployment_invalid_status_transition(
+async def test_update_grouping_invalid_status_transition(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test updating deployment status with invalid transition."""
-    deployment = Deployment(
-        name="Test Deployment",
+    """Test updating grouping status with invalid transition."""
+    grouping = Grouping(
+        name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="finalized",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
-    db_session.add(deployment)
+    db_session.add(grouping)
     await db_session.commit()
 
     update_data = {"status": "active"}
 
     response = client.patch(
-        f"/api/v1/deployments/{deployment.id}",
+        f"/api/v1/groupings/{grouping.id}",
         json=update_data,
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -412,24 +426,25 @@ async def test_update_deployment_invalid_status_transition(
 
 
 @pytest.mark.asyncio
-async def test_activate_deployment(
+async def test_activate_grouping(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test activating a deployment."""
-    deployment = Deployment(
-        name="Test Deployment",
+    """Test activating a grouping."""
+    grouping = Grouping(
+        name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
-    db_session.add(deployment)
+    db_session.add(grouping)
     await db_session.commit()
 
     response = client.post(
-        f"/api/v1/deployments/{deployment.id}/activate",
+        f"/api/v1/groupings/{grouping.id}/activate",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
@@ -441,13 +456,14 @@ async def test_activate_deployment(
 
 
 @pytest.mark.asyncio
-async def test_activate_deployment_already_active(
+async def test_activate_grouping_already_active(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test activating an already active deployment."""
-    deployment = Deployment(
-        name="Test Deployment",
+    """Test activating an already active grouping."""
+    grouping = Grouping(
+        name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="active",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
@@ -455,11 +471,11 @@ async def test_activate_deployment_already_active(
         activated_at=utc_dt.utcnow(),
     )
 
-    db_session.add(deployment)
+    db_session.add(grouping)
     await db_session.commit()
 
     response = client.post(
-        f"/api/v1/deployments/{deployment.id}/activate",
+        f"/api/v1/groupings/{grouping.id}/activate",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
@@ -469,13 +485,14 @@ async def test_activate_deployment_already_active(
 
 
 @pytest.mark.asyncio
-async def test_deactivate_deployment(
+async def test_deactivate_grouping(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test deactivating a deployment."""
-    deployment = Deployment(
-        name="Test Deployment",
+    """Test deactivating a grouping."""
+    grouping = Grouping(
+        name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="active",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
@@ -483,11 +500,11 @@ async def test_deactivate_deployment(
         activated_at=utc_dt.utcnow(),
     )
 
-    db_session.add(deployment)
+    db_session.add(grouping)
     await db_session.commit()
 
     response = client.post(
-        f"/api/v1/deployments/{deployment.id}/deactivate",
+        f"/api/v1/groupings/{grouping.id}/deactivate",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
@@ -499,58 +516,60 @@ async def test_deactivate_deployment(
 
 
 @pytest.mark.asyncio
-async def test_delete_deployment_as_super_admin(
+async def test_delete_grouping_as_super_admin(
     client: TestClient, super_admin_token_headers: dict[str, str], db_session
 ):
-    """Test deployment deletion by super admin."""
-    deployment = Deployment(
-        name="Test Deployment",
+    """Test grouping deletion by super admin."""
+    grouping = Grouping(
+        name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="super-admin-user-id",
     )
 
-    db_session.add(deployment)
+    db_session.add(grouping)
     await db_session.commit()
 
     response = client.delete(
-        f"/api/v1/deployments/{deployment.id}",
+        f"/api/v1/groupings/{grouping.id}",
         headers=super_admin_token_headers,
         params={"user_id": "super-admin-user-id", "user_role": "super_admin"},
     )
 
     assert response.status_code == 204
 
-    # Verify deployment was deleted
+    # Verify grouping was deleted
     result = await db_session.execute(
-        select(Deployment).where(Deployment.id == deployment.id)
+        select(Grouping).where(Grouping.id == grouping.id)
     )
     assert result.scalar_one_or_none() is None
 
 
 @pytest.mark.asyncio
-async def test_delete_deployment_as_admin_forbidden(
+async def test_delete_grouping_as_admin_forbidden(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test that regular admins cannot delete deployments."""
-    deployment = Deployment(
-        name="Test Deployment",
+    """Test that regular admins cannot delete groupings."""
+    grouping = Grouping(
+        name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
-    db_session.add(deployment)
+    db_session.add(grouping)
     await db_session.commit()
 
     assert_permission_denied(
         client,
         "delete",
-        f"/api/v1/deployments/{deployment.id}",
+        f"/api/v1/groupings/{grouping.id}",
         admin_token_headers,
         expected_detail="Only super admins",
         params={"user_id": "admin-user-id", "user_role": "admin"},
@@ -558,13 +577,14 @@ async def test_delete_deployment_as_admin_forbidden(
 
 
 @pytest.mark.asyncio
-async def test_delete_active_deployment_forbidden(
+async def test_delete_active_grouping_forbidden(
     client: TestClient, super_admin_token_headers: dict[str, str], db_session
 ):
-    """Test that active deployments cannot be deleted."""
-    deployment = Deployment(
-        name="Test Deployment",
+    """Test that active groupings cannot be deleted."""
+    grouping = Grouping(
+        name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="active",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
@@ -572,47 +592,49 @@ async def test_delete_active_deployment_forbidden(
         activated_at=utc_dt.utcnow(),
     )
 
-    db_session.add(deployment)
+    db_session.add(grouping)
     await db_session.commit()
 
     response = client.delete(
-        f"/api/v1/deployments/{deployment.id}",
+        f"/api/v1/groupings/{grouping.id}",
         headers=super_admin_token_headers,
         params={"user_id": "super-admin-user-id", "user_role": "super_admin"},
     )
 
     assert response.status_code == 400
-    assert "Cannot delete deployment" in response.json()["detail"]
+    assert "Cannot delete grouping" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_search_deployments(
+async def test_search_groupings(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test searching deployments by name."""
-    deployment1 = Deployment(
-        name="Alpha Deployment",
+    """Test searching groupings by name."""
+    grouping1 = Grouping(
+        name="Alpha Grouping",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
-    deployment2 = Deployment(
-        name="Bravo Deployment",
+    grouping2 = Grouping(
+        name="Bravo Grouping",
         nominal_roll_id="nominal_roll-2",
+        mode="standard",
         status="draft",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
-    db_session.add(deployment1)
-    db_session.add(deployment2)
+    db_session.add(grouping1)
+    db_session.add(grouping2)
     await db_session.commit()
 
     response = client.get(
-        "/api/v1/deployments/",
+        "/api/v1/groupings/",
         headers=admin_token_headers,
         params={
             "user_id": "admin-user-id",
@@ -624,31 +646,32 @@ async def test_search_deployments(
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 1
-    assert data[0]["name"] == "Alpha Deployment"
+    assert data[0]["name"] == "Alpha Grouping"
 
 
 @pytest.mark.asyncio
-async def test_list_deployments_pagination(
+async def test_list_groupings_pagination(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test deployment list pagination."""
-    # Create multiple deployments
+    """Test grouping list pagination."""
+    # Create multiple groupings
     for i in range(5):
-        deployment = Deployment(
-            name=f"Deployment {i}",
+        grouping = Grouping(
+            name=f"Grouping {i}",
             nominal_roll_id=f"nominal_roll-{i}",
+            mode="standard",
             status="draft",
             valid_from=utc_dt.utcnow(),
             valid_until=utc_dt.utcnow() + timedelta(days=30),
             created_by="admin-user-id",
         )
-        db_session.add(deployment)
+        db_session.add(grouping)
 
     await db_session.commit()
 
     assert_pagination_works(
         client,
-        "/api/v1/deployments/",
+        "/api/v1/groupings/",
         admin_token_headers,
         params={
             "user_id": "admin-user-id",
@@ -658,61 +681,63 @@ async def test_list_deployments_pagination(
 
 
 # ============================================================================
-# Deployment Status Tests
+# Grouping Status Tests
 # ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_get_deployment_status_no_sessions(
+async def test_get_grouping_status_no_sessions(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test getting deployment status when no sessions exist."""
-    deployment = Deployment(
-        name="Test Deployment",
+    """Test getting grouping status when no sessions exist."""
+    grouping = Grouping(
+        name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="active",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
-    db_session.add(deployment)
+    db_session.add(grouping)
     await db_session.commit()
 
     response = client.get(
-        f"/api/v1/deployments/{deployment.id}/status",
+        f"/api/v1/groupings/{grouping.id}/status",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
 
     assert response.status_code == 200
     data = response.json()
-    assert data["deployment_id"] == deployment.id
-    assert data["deployment_name"] == "Test Deployment"
-    assert data["deployment_status"] == "active"
+    assert data["grouping_id"] == grouping.id
+    assert data["grouping_name"] == "Test Grouping"
+    assert data["grouping_status"] == "active"
     assert data["am_session"] is None
     assert data["pm_session"] is None
     assert len(data["units"]) == 0
 
 
 @pytest.mark.asyncio
-async def test_get_deployment_status_with_sessions(
+async def test_get_grouping_status_with_sessions(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test getting deployment status with sessions and attendance."""
+    """Test getting grouping status with sessions and attendance."""
     from datetime import date
 
-    # Create deployment
-    deployment = Deployment(
-        name="Test Deployment",
+    # Create grouping
+    grouping = Grouping(
+        name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="active",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
-    db_session.add(deployment)
+    db_session.add(grouping)
     await db_session.commit()
 
     # Create personnel
@@ -771,15 +796,15 @@ async def test_get_deployment_status_with_sessions(
     await db_session.commit()
 
     response = client.get(
-        f"/api/v1/deployments/{deployment.id}/status",
+        f"/api/v1/groupings/{grouping.id}/status",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
 
     assert response.status_code == 200
     data = response.json()
-    assert data["deployment_id"] == deployment.id
-    assert data["deployment_name"] == "Test Deployment"
+    assert data["grouping_id"] == grouping.id
+    assert data["grouping_name"] == "Test Grouping"
     assert data["am_session"] is not None
     assert data["am_session"]["present"] == 1
     assert data["am_session"]["absent"] == 1
@@ -792,21 +817,22 @@ async def test_get_deployment_status_with_sessions(
 
 
 @pytest.mark.asyncio
-async def test_export_deployment_csv(
+async def test_export_grouping_csv(
     client: TestClient, admin_token_headers: dict[str, str], db_session
 ):
-    """Test exporting deployment data to CSV."""
-    # Create deployment
-    deployment = Deployment(
-        name="Test Deployment",
+    """Test exporting grouping data to CSV."""
+    # Create grouping
+    grouping = Grouping(
+        name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="active",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
-    db_session.add(deployment)
+    db_session.add(grouping)
     await db_session.commit()
 
     # Create personnel
@@ -823,9 +849,9 @@ async def test_export_deployment_csv(
     db_session.add(personnel)
     await db_session.commit()
 
-    # Create deployment override
-    override = DeploymentPersonnelOverride(
-        deployment_id=str(deployment.id),
+    # Create grouping override
+    override = GroupingPersonnelOverride(
+        grouping_id=str(grouping.id),
         personnel_id=str(personnel.id),
         unit="Override Unit",
         sub_unit_1="Override Platoon",
@@ -835,9 +861,9 @@ async def test_export_deployment_csv(
     db_session.add(override)
     await db_session.commit()
 
-    # Create deployment notes
-    notes = DeploymentNotes(
-        deployment_id=str(deployment.id),
+    # Create grouping notes
+    notes = GroupingNotes(
+        grouping_id=str(grouping.id),
         personnel_id=str(personnel.id),
         notes="Test notes",
         created_by="admin-user-id",
@@ -848,7 +874,7 @@ async def test_export_deployment_csv(
     await db_session.commit()
 
     response = client.get(
-        f"/api/v1/deployments/{deployment.id}/export",
+        f"/api/v1/groupings/{grouping.id}/export",
         headers=admin_token_headers,
         params={"user_id": "admin-user-id", "user_role": "admin"},
     )
@@ -856,7 +882,7 @@ async def test_export_deployment_csv(
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/csv; charset=utf-8"
     assert "attachment" in response.headers["content-disposition"]
-    assert "Test_Deployment" in response.headers["content-disposition"]
+    assert "Test_Grouping" in response.headers["content-disposition"]
 
     # Verify CSV content
     csv_content = response.content.decode("utf-8")
@@ -868,28 +894,29 @@ async def test_export_deployment_csv(
 
 
 @pytest.mark.asyncio
-async def test_export_deployment_csv_unauthorized(
+async def test_export_grouping_csv_unauthorized(
     client: TestClient, user_token_headers: dict[str, str], db_session
 ):
-    """Test that regular users cannot export deployment data without access."""
-    # Note: This test assumes the user doesn't have access to this deployment
+    """Test that regular users cannot export grouping data without access."""
+    # Note: This test assumes the user doesn't have access to this grouping
     # The access control logic will need to be implemented based on user scopes
-    deployment = Deployment(
-        name="Test Deployment",
+    grouping = Grouping(
+        name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
+        mode="standard",
         status="active",
         valid_from=utc_dt.utcnow(),
         valid_until=utc_dt.utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
-    db_session.add(deployment)
+    db_session.add(grouping)
     await db_session.commit()
 
     # For now, this test just checks the endpoint works
     # Once proper access control is implemented, this should return 403
     response = client.get(
-        f"/api/v1/deployments/{deployment.id}/export",
+        f"/api/v1/groupings/{grouping.id}/export",
         headers=user_token_headers,
         params={"user_id": "user-id", "user_role": "user"},
     )
@@ -900,23 +927,23 @@ async def test_export_deployment_csv_unauthorized(
 
 
 # ============================================================================
-# Deployment date editing validation tests
+# Grouping date editing validation tests
 # ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_update_deployment_dates_widens_range(
+async def test_update_grouping_dates_widens_range(
     client: TestClient,
     admin_token_headers: dict[str, str],
     admin_id: str,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
 ):
     """Widening the valid date range succeeds (sessions check removed)."""
     new_valid_from = (date.today() - timedelta(days=10)).isoformat() + "T00:00:00"
     new_valid_until = (date.today() + timedelta(days=60)).isoformat() + "T23:59:59"
 
     response = client.patch(
-        f"/api/v1/deployments/{sample_deployment.id}",
+        f"/api/v1/groupings/{sample_grouping.id}",
         json={"valid_from": new_valid_from, "valid_until": new_valid_until},
         headers=admin_token_headers,
         params={"user_id": admin_id, "user_role": "admin"},
@@ -929,17 +956,17 @@ async def test_update_deployment_dates_widens_range(
 
 
 @pytest.mark.asyncio
-async def test_update_deployment_dates_no_sessions_succeeds(
+async def test_update_grouping_dates_no_sessions_succeeds(
     client: TestClient,
     admin_token_headers: dict[str, str],
     admin_id: str,
-    sample_deployment: Deployment,
+    sample_grouping: Grouping,
 ):
-    """Updating dates on a deployment always succeeds now (no session check)."""
+    """Updating dates on a grouping always succeeds now (no session check)."""
     new_valid_from = (date.today() - timedelta(days=5)).isoformat() + "T00:00:00"
 
     response = client.patch(
-        f"/api/v1/deployments/{sample_deployment.id}",
+        f"/api/v1/groupings/{sample_grouping.id}",
         json={"valid_from": new_valid_from},
         headers=admin_token_headers,
         params={"user_id": admin_id, "user_role": "admin"},

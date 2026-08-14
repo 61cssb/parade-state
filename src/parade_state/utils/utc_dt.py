@@ -45,8 +45,8 @@ across the application and eliminate timezone confusion.
         pass
 
 *Expiration checking:*
-    if utc_dt.is_expired(deployment.valid_until):
-        # Deployment is expired
+    if utc_dt.is_expired(grouping.valid_until):
+        # Grouping is expired
         pass
 
 **Key Functions:**

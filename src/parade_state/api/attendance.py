@@ -491,7 +491,7 @@ async def _accessible_pids(
 
 
 # ============================================================================
-# Aggregate stats helper (reused by deployment summary view)
+# Aggregate stats helper (reused by grouping summary view)
 # ============================================================================
 
 

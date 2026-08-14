@@ -23,7 +23,7 @@ from parade_state.api import (
     auth,
     csv_upload,
     deferments,
-    deployments,
+    groupings,
     nominal_rolls,
     personnel,
     sessions,
@@ -35,7 +35,7 @@ from parade_state.db import init_database
 from parade_state.utils import env
 from parade_state.web.auth import router as web_auth_router
 from parade_state.web.attendance import router as web_attendance_router
-from parade_state.web.deployment import router as web_deployment_router
+from parade_state.web.grouping import router as web_grouping_router
 from parade_state.web.nominal_roll import router as web_nominal_roll_router
 
 
@@ -100,7 +100,7 @@ async def health_check():
 app.include_router(web_auth_router, prefix="/auth", tags=["web-auth"])
 
 # User-facing web routes (non-admin views)
-app.include_router(web_deployment_router, tags=["web-deployment"])
+app.include_router(web_grouping_router, tags=["web-grouping"])
 app.include_router(web_attendance_router, tags=["web-attendance"])
 app.include_router(web_nominal_roll_router, tags=["web-nominal-roll"])
 
@@ -111,7 +111,7 @@ app.include_router(admin_router, tags=["admin"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["api-auth"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 app.include_router(
-    deployments.router, prefix="/api/v1/deployments", tags=["deployments"]
+    groupings.router, prefix="/api/v1/groupings", tags=["groupings"]
 )
 app.include_router(sessions.router, prefix="/api/v1/sessions", tags=["sessions"])
 app.include_router(attendance.router, prefix="/api/v1/attendance", tags=["attendance"])

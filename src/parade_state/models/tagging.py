@@ -73,7 +73,7 @@ class TaggingEntry(Base):
     """A single person → subunit remap within a Tagging.
 
     Mirrors the 4-string unit hierarchy used by ``Personnel`` and
-    ``DeploymentPersonnelOverride``. ``from_*`` is an optional snapshot of the
+    ``GroupingPersonnelOverride``. ``from_*`` is an optional snapshot of the
     person's canonical subunit on the parent NR (inferred at creation time if
     omitted); ``to_*`` is the remap target. ``to_unit`` is always required.
 

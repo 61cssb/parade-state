@@ -235,7 +235,7 @@ class TestDomainBehavior:
 - **`test_db`** - Database engine and session factory with tables created
 - **`db_session`** - Database session for database operations
 - **`admin_token_headers`** - Authentication headers for admin user
-- **`sample_deployment`** - Sample deployment entity
+- **`sample_grouping`** - Sample grouping entity
 - **`sample_personnel`** - Sample personnel entities
 - **`sample_users`** - Sample user entities
 - **`sample_nominal_roll`** - Sample nominal_rolllishment entity
@@ -339,7 +339,7 @@ Write descriptive test names that explain **what** is being tested:
 
 ```python
 ✅ Good:
-def test_create_attendance_record_with_deployment_notes_snapshot()
+def test_create_attendance_record_with_grouping_notes_snapshot()
 def test_user_cannot_delete_themselves()
 def test_expired_session_returns_401()
 

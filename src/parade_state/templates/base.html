@@ -476,9 +476,9 @@
             <span class="brand-text">Parade State</span>
         </a>
         <nav class="sidebar-nav">
-            <a href="/deployment" title="Deployment"
-               class="{% if active_page == 'deployment' %}active{% endif %}">
-                <span class="icon">📊</span><span>Deployment</span>
+            <a href="/grouping" title="Grouping"
+               class="{% if active_page == 'grouping' %}active{% endif %}">
+                <span class="icon">📊</span><span>Grouping</span>
             </a>
             <a href="/attendance" title="Attendance"
                class="{% if active_page == 'attendance' %}active{% endif %}">
@@ -498,9 +498,9 @@
                class="{% if active_page == 'nominal-rolls' %}active{% endif %}">
                 <span class="icon">📋</span><span>Nominal Rolls</span>
             </a>
-            <a href="/admin/deployments" title="Deployments"
-               class="{% if active_page == 'deployments' %}active{% endif %}">
-                <span class="icon">🎖️</span><span>Deployments</span>
+            <a href="/admin/groupings" title="Groupings"
+               class="{% if active_page == 'groupings' %}active{% endif %}">
+                <span class="icon">🎖️</span><span>Groupings</span>
             </a>
             {% if user.role == 'super_admin' %}
             <a href="/admin/deferments" title="Deferments"

@@ -1,7 +1,7 @@
 """Parade State Management System.
 
 This module implements a battalion parade state management system with access control,
-attendance tracking, and deployment management capabilities.
+attendance tracking, and grouping management capabilities.
 
 ## Module Architecture
 
