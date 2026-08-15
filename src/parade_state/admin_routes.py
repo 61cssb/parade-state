@@ -13,7 +13,6 @@ from parade_state.db import get_session_maker
 from parade_state.models import (
     AccessLevel,
     Attendance,
-    AttendanceScope,
     AuditLog,
     CsvUpload,
     Deferment,
@@ -118,9 +117,11 @@ async def admin_dashboard(
             )
         ).scalar_one()
 
-        active_scopes = (
+        active_attendance_nrs = (
             await db.execute(
-                select(func.count(AttendanceScope.nominal_roll_id))
+                select(func.count(NominalRoll.id)).where(
+                    NominalRoll.attendance_active.is_(True)
+                )
             )
         ).scalar_one()
 
@@ -169,7 +170,7 @@ async def admin_dashboard(
         },
         active_page="dashboard",
         active_groupings=active_groupings,
-        active_scopes=active_scopes,
+        active_scopes=active_attendance_nrs,
         total_personnel=total_personnel,
         active_users=active_users,
         recent_activity=recent_activity,
@@ -423,9 +424,41 @@ async def admin_csv_upload(
                     CsvUpload.status,
                     CsvUpload.uploaded_at,
                     CsvUpload.nominal_roll_id,
+                    CsvUpload.original_filename,
                 )
                 .order_by(CsvUpload.uploaded_at.desc())
                 .limit(20)
+            )
+        ).all()
+
+        # Processable uploads (no NR yet) + source NRs (have at least one
+        # tagging entry). Both feed the Step 2 form.
+        processable_uploads_rows = (
+            await db.execute(
+                select(
+                    CsvUpload.id,
+                    CsvUpload.original_filename,
+                    CsvUpload.line_count,
+                    CsvUpload.uploaded_at,
+                )
+                .where(CsvUpload.nominal_roll_id.is_(None))
+                .order_by(CsvUpload.uploaded_at.desc())
+                .limit(20)
+            )
+        ).all()
+
+        source_nr_rows = (
+            await db.execute(
+                select(
+                    NominalRoll.id,
+                    NominalRoll.caa,
+                    func.count(TaggingEntry.id).label("entry_count"),
+                )
+                .join(Tagging, Tagging.nominal_roll_id == NominalRoll.id)
+                .outerjoin(TaggingEntry, TaggingEntry.tagging_id == Tagging.id)
+                .group_by(NominalRoll.id, NominalRoll.caa)
+                .having(func.count(TaggingEntry.id) > 0)
+                .order_by(NominalRoll.caa.desc())
             )
         ).all()
 
@@ -437,8 +470,24 @@ async def admin_csv_upload(
             "status": row.status,
             "uploaded_at": row.uploaded_at,
             "nominal_roll_id": row.nominal_roll_id,
+            "original_filename": row.original_filename,
         }
         for row in recent_uploads_rows
+    ]
+
+    processable_uploads = [
+        {
+            "id": row.id,
+            "original_filename": row.original_filename or "(no filename)",
+            "line_count": row.line_count,
+            "uploaded_at": row.uploaded_at,
+        }
+        for row in processable_uploads_rows
+    ]
+
+    source_nominal_rolls = [
+        {"id": row.id, "caa": row.caa, "entry_count": row.entry_count}
+        for row in source_nr_rows
     ]
 
     env = get_templates(request)
@@ -454,6 +503,8 @@ async def admin_csv_upload(
         },
         active_page="csv-upload",
         recent_uploads=recent_uploads,
+        processable_uploads=processable_uploads,
+        source_nominal_rolls=source_nominal_rolls,
     )
 
     return HTMLResponse(content=html_content)
@@ -462,9 +513,12 @@ async def admin_csv_upload(
 @router.get("/admin/nominal-rolls", response_class=HTMLResponse)
 async def admin_nominal_rolls(
     request: Request,
-    status_filter: str | None = None,
 ):
-    """Render the nominal rolls management page."""
+    """Render the nominal rolls management page.
+
+    Highlights the NR currently active for attendance; super-admins can
+    toggle "Use for Attendance" / "Deactivate Attendance" per row.
+    """
     current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
@@ -486,7 +540,8 @@ async def admin_nominal_rolls(
             select(
                 NominalRoll.id,
                 NominalRoll.caa,
-                NominalRoll.status,
+                NominalRoll.attendance_active,
+                NominalRoll.attendance_activated_at,
                 NominalRoll.personnel_count,
                 NominalRoll.uploaded_at,
                 NominalRoll.csv_hash,
@@ -501,8 +556,6 @@ async def admin_nominal_rolls(
             .order_by(NominalRoll.uploaded_at.desc())
             .limit(100)
         )
-        if status_filter:
-            query = query.where(NominalRoll.status == status_filter)
 
         rows = (await db.execute(query)).all()
 
@@ -510,7 +563,8 @@ async def admin_nominal_rolls(
         {
             "id": str(row.id),
             "caa": row.caa,
-            "status": row.status,
+            "attendance_active": bool(row.attendance_active),
+            "attendance_activated_at": row.attendance_activated_at,
             "personnel_count": row.personnel_count,
             "uploaded_at": row.uploaded_at,
             "csv_hash": row.csv_hash[:12] + "...",
@@ -534,8 +588,6 @@ async def admin_nominal_rolls(
         },
         active_page="nominal-rolls",
         nominal_rolls=nominal_rolls,
-        status_filter=status_filter or "",
-        nominal_roll_statuses=["draft", "confirmed", "archived"],
     )
 
     return HTMLResponse(content=html_content)
@@ -648,7 +700,12 @@ async def admin_taggings(
     request: Request,
     nominal_roll_id: str | None = None,
 ):
-    """Render the tagging overlay management page (super-admin only)."""
+    """Render the tagging overlay management page (super-admin only).
+
+    Under the 1:1 model, each NR has exactly one tagging. This page shows
+    the entries of the selected NR's tagging (the remap list) and offers
+    edit/clone-into actions.
+    """
     current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
@@ -678,38 +735,70 @@ async def admin_taggings(
             nominal_roll_options[0]["id"] if nominal_roll_options else None
         )
 
-        # Taggings for the selected NR with entry counts (correlated subquery).
-        entry_count = (
-            select(func.count())
-            .select_from(TaggingEntry)
-            .where(TaggingEntry.tagging_id == Tagging.id)
-            .correlate(Tagging)
-            .scalar_subquery()
-        )
-        query = (
-            select(Tagging, entry_count, NominalRoll.caa)
-            .outerjoin(NominalRoll, Tagging.nominal_roll_id == NominalRoll.id)
-            .order_by(Tagging.created_at.desc())
-            .limit(200)
-        )
+        # The selected NR's single tagging (1:1) + entries joined to Personnel.
+        tagging_data = None
+        entries_data: list[dict] = []
         if resolved_nominal_roll_id:
-            query = query.where(Tagging.nominal_roll_id == resolved_nominal_roll_id)
+            tagging_row = (
+                await db.execute(
+                    select(Tagging).where(
+                        Tagging.nominal_roll_id == resolved_nominal_roll_id
+                    )
+                )
+            ).scalar_one_or_none()
 
-        rows = (await db.execute(query)).all()
+            if tagging_row is not None:
+                entry_rows = (
+                    await db.execute(
+                        select(
+                            TaggingEntry.id,
+                            TaggingEntry.personnel_id,
+                            Personnel.short_id,
+                            Personnel.rank,
+                            Personnel.full_name,
+                            TaggingEntry.from_unit,
+                            TaggingEntry.from_sub_unit_1,
+                            TaggingEntry.from_sub_unit_2,
+                            TaggingEntry.from_sub_unit_3,
+                            TaggingEntry.to_unit,
+                            TaggingEntry.to_sub_unit_1,
+                            TaggingEntry.to_sub_unit_2,
+                            TaggingEntry.to_sub_unit_3,
+                        )
+                        .outerjoin(Personnel, Personnel.id == TaggingEntry.personnel_id)
+                        .where(TaggingEntry.tagging_id == tagging_row.id)
+                        .order_by(Personnel.rank, Personnel.full_name)
+                    )
+                ).all()
 
-    taggings_data = [
-        {
-            "id": str(t.id),
-            "label": t.label,
-            "nominal_roll_id": t.nominal_roll_id,
-            "nominal_roll_caa": caa.isoformat() if caa else None,
-            "remarks": t.remarks or "",
-            "entry_count": count or 0,
-            "created_at": t.created_at,
-            "updated_at": t.updated_at,
-        }
-        for t, count, caa in rows
-    ]
+                entries_data = [
+                    {
+                        "id": str(row.id),
+                        "personnel_id": row.personnel_id,
+                        "short_id": row.short_id,
+                        "label": f"{row.rank} {row.full_name}".strip()
+                        if row.rank
+                        else "(unknown)",
+                        "from_unit": row.from_unit,
+                        "from_sub_unit_1": row.from_sub_unit_1,
+                        "from_sub_unit_2": row.from_sub_unit_2,
+                        "from_sub_unit_3": row.from_sub_unit_3,
+                        "to_unit": row.to_unit,
+                        "to_sub_unit_1": row.to_sub_unit_1,
+                        "to_sub_unit_2": row.to_sub_unit_2,
+                        "to_sub_unit_3": row.to_sub_unit_3,
+                    }
+                    for row in entry_rows
+                ]
+
+                tagging_data = {
+                    "id": str(tagging_row.id),
+                    "label": tagging_row.label,
+                    "remarks": tagging_row.remarks or "",
+                    "entry_count": len(entries_data),
+                    "created_at": tagging_row.created_at,
+                    "updated_at": tagging_row.updated_at,
+                }
 
     env = get_templates(request)
     template = env.get_template("admin/taggings.html")
@@ -728,7 +817,8 @@ async def admin_taggings(
             "role": current_admin.role,
         },
         active_page="taggings",
-        taggings=taggings_data,
+        tagging=tagging_data,
+        entries=entries_data,
         nominal_roll_options=nominal_roll_options,
         nominal_roll_filter=resolved_nominal_roll_id or "",
         active_nominal_roll_caa=active_nominal_roll_caa,
@@ -736,194 +826,6 @@ async def admin_taggings(
 
     return HTMLResponse(content=html_content)
 
-
-@router.get("/admin/attendance", response_class=HTMLResponse)
-async def admin_attendance(
-    request: Request,
-    nominal_roll_id: str | None = None,
-    date: utc_dt.date | None = None,
-    sub_unit_1: str | None = None,
-):
-    """Render the admin attendance page (super-admin only).
-
-    Super-admin control center: activate the NR's attendance scope (NR itself
-    or a Tagging), filter the roster by sub_unit_1, edit AM/PM status +
-    remarks, and trigger Copy Remarks. Copy Remarks is disabled on the NR's
-    first day (no prior attendance).
-    """
-    current_admin = await get_current_admin_user_optional(request)
-    if not current_admin:
-        return RedirectResponse(url="/auth/login", status_code=302)
-    if current_admin.role != "super_admin":
-        return RedirectResponse(url="/admin", status_code=302)
-
-    target_date = date or utc_dt.utcnow().date()
-
-    session_maker = get_session_maker()
-    async with session_maker() as db:
-        # NR selector options (most recent first).
-        roll_rows = (
-            await db.execute(
-                select(NominalRoll.id, NominalRoll.caa)
-                .order_by(NominalRoll.caa.desc())
-                .limit(50)
-            )
-        ).all()
-        nominal_roll_options = [
-            {
-                "id": str(row.id),
-                "caa": row.caa.isoformat() if row.caa else str(row.id)[:8],
-            }
-            for row in roll_rows
-        ]
-        resolved_nr_id = nominal_roll_id or (
-            nominal_roll_options[0]["id"] if nominal_roll_options else None
-        )
-
-        active_scope = None
-        scope_taggings = []
-        subunit_options: list[str] = []
-        roster_rows: list[dict] = []
-        has_prior_attendance = False
-        counts = {"am": {"present": 0, "absent": 0, "total": 0},
-                  "pm": {"present": 0, "absent": 0, "total": 0}}
-
-        if resolved_nr_id:
-            # Active scope for this NR.
-            scope_result = await db.execute(
-                select(AttendanceScope).where(
-                    AttendanceScope.nominal_roll_id == resolved_nr_id
-                )
-            )
-            active_scope = scope_result.scalar_one_or_none()
-
-            # Taggings on this NR (for the scope-activation dropdown).
-            tagging_rows = (
-                await db.execute(
-                    select(Tagging).where(
-                        Tagging.nominal_roll_id == resolved_nr_id
-                    ).order_by(Tagging.label)
-                )
-            ).scalars().all()
-            scope_taggings = [
-                {"id": str(t.id), "label": t.label} for t in tagging_rows
-            ]
-
-            # Distinct sub_unit_1 values on the NR (for the filter dropdown).
-            sub_rows = (
-                await db.execute(
-                    select(Personnel.sub_unit_1)
-                    .where(
-                        Personnel.nominal_roll_id == resolved_nr_id,
-                        Personnel.status == "active",
-                        Personnel.sub_unit_1.is_not(None),
-                    )
-                    .distinct()
-                    .order_by(Personnel.sub_unit_1)
-                )
-            ).all()
-            subunit_options = [r[0] for r in sub_rows if r[0]]
-
-            # Roster (optionally filtered by sub_unit_1).
-            roster_query = (
-                select(Personnel).where(
-                    Personnel.nominal_roll_id == resolved_nr_id,
-                    Personnel.status == "active",
-                ).order_by(
-                    Personnel.unit,
-                    Personnel.sub_unit_1,
-                    Personnel.rank,
-                    Personnel.full_name,
-                )
-            )
-            if sub_unit_1:
-                roster_query = roster_query.where(
-                    Personnel.sub_unit_1 == sub_unit_1
-                )
-            roster = (await db.execute(roster_query)).scalars().all()
-
-            # Today's attendance for these personnel.
-            att_rows = (
-                await db.execute(
-                    select(Attendance).where(
-                        Attendance.nominal_roll_id == resolved_nr_id,
-                        Attendance.date == target_date,
-                    )
-                )
-            ).scalars().all()
-            att_by_pid = {a.personnel_id: a for a in att_rows}
-
-            from parade_state.models.attendance import PRESENT_LIKE_STATUSES
-
-            for person in roster:
-                record = att_by_pid.get(str(person.id))
-                for slot, status_val in (
-                    ("am", record.status_am if record else "absent"),
-                    ("pm", record.status_pm if record else "absent"),
-                ):
-                    counts[slot]["total"] += 1
-                    if status_val in PRESENT_LIKE_STATUSES:
-                        counts[slot]["present"] += 1
-                    else:
-                        counts[slot]["absent"] += 1
-                roster_rows.append({
-                    "id": str(record.id) if record else "",
-                    "personnel_id": str(person.id),
-                    "rank": person.rank,
-                    "category": person.category,
-                    "full_name": person.full_name,
-                    "unit": person.unit,
-                    "sub_unit_1": person.sub_unit_1,
-                    "status_am": record.status_am if record else "absent",
-                    "remarks_am": record.remarks_am if record else "",
-                    "status_pm": record.status_pm if record else "absent",
-                    "remarks_pm": record.remarks_pm if record else "",
-                })
-
-            # Has any attendance before today? (drives Copy Remarks day-1 disable)
-            has_prior_attendance = (
-                await db.execute(
-                    select(func.count())
-                    .select_from(Attendance)
-                    .where(
-                        Attendance.nominal_roll_id == resolved_nr_id,
-                        Attendance.date < target_date,
-                    )
-                )
-            ).scalar_one() > 0
-
-    env = get_templates(request)
-    template = env.get_template("admin/attendance.html")
-
-    html_content = template.render(
-        request=request,
-        user={
-            "id": current_admin.id,
-            "name": current_admin.name,
-            "email": current_admin.email,
-            "role": current_admin.role,
-        },
-        active_page="attendance-admin",
-        nominal_roll_options=nominal_roll_options,
-        nominal_roll_filter=resolved_nr_id or "",
-        target_date=target_date,
-        sub_unit_1_filter=sub_unit_1 or "",
-        subunit_options=subunit_options,
-        active_scope=(
-            {
-                "tagging_id": active_scope.tagging_id,
-                "activated_at": active_scope.activated_at,
-            }
-            if active_scope
-            else None
-        ),
-        scope_taggings=scope_taggings,
-        roster_rows=roster_rows,
-        has_prior_attendance=has_prior_attendance,
-        counts=counts,
-    )
-
-    return HTMLResponse(content=html_content)
 
 
 @router.get("/admin/settings", response_class=HTMLResponse)

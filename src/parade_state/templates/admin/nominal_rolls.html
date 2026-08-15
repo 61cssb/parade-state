@@ -30,17 +30,16 @@
 
 <div class="card">
     <h3>Nominal Rolls</h3>
-    <form method="get" style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
-        <label for="status_filter" style="font-size: 0.875rem; color: #374151;">Status:</label>
-        <select name="status_filter" id="status_filter" onchange="this.form.submit()" style="padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
-            <option value="" {% if not status_filter %}selected{% endif %}>All</option>
-            {% for s in nominal_roll_statuses %}
-            <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>{{ s }}</option>
-            {% endfor %}
-        </select>
-    </form>
+    <p style="color: #6b7280; font-size: 0.85rem; margin-top: 0.5rem;">
+        The highlighted row is the nominal roll currently active for attendance.
+        Marking another roll "Use for Attendance" switches activity to it immediately.
+    </p>
 
     {% if nominal_rolls %}
+    <style>
+        .active-row { background: #d1fae5 !important; }
+        .active-row td { background: #d1fae5 !important; }
+    </style>
     <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
         <thead>
             <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
@@ -49,7 +48,7 @@
                 <th style="padding: 0.5rem;">Remarks</th>
                 <th style="padding: 0.5rem;">Source File</th>
                 <th style="padding: 0.5rem;">Personnel</th>
-                <th style="padding: 0.5rem;">Status</th>
+                <th style="padding: 0.5rem;">Attendance</th>
                 <th style="padding: 0.5rem;">Uploaded At</th>
                 <th style="padding: 0.5rem;">CSV Hash</th>
                 <th style="padding: 0.5rem;">Actions</th>
@@ -57,18 +56,14 @@
         </thead>
         <tbody>
             {% for nr in nominal_rolls %}
-            <tr style="border-bottom: 1px solid #e5e7eb;">
+            <tr class="{% if nr.attendance_active %}active-row{% endif %}" style="border-bottom: 1px solid #e5e7eb;">
                 <td style="padding: 0.5rem;">{{ nr.caa }}</td>
                 <td style="padding: 0.5rem;" id="label-cell-{{ nr.id }}">
-                    {% if nr.status == 'draft' %}
                     <span id="label-display-{{ nr.id }}"
                           class="inline-edit-chip"
                           data-value="{{ nr.label or '' }}"
                           onclick="editLabel('{{ nr.id }}')"
                           title="Click to edit label">{{ nr.label or '—' }}</span>
-                    {% else %}
-                    {{ nr.label or '—' }}
-                    {% endif %}
                 </td>
                 <td style="padding: 0.5rem; max-width: 18rem;" id="remarks-cell-{{ nr.id }}">
                     <span id="remarks-display-{{ nr.id }}"
@@ -81,27 +76,30 @@
                 <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ nr.original_filename }}</td>
                 <td style="padding: 0.5rem;">{{ nr.personnel_count }}</td>
                 <td style="padding: 0.5rem;">
-                    <span class="btn {% if nr.status == 'confirmed' %}btn-success{% elif nr.status == 'archived' %}btn-primary{% else %}btn-primary{% endif %}" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">{{ nr.status }}</span>
+                    {% if nr.attendance_active %}
+                    <span class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                          title="{% if nr.attendance_activated_at %}Activated {{ nr.attendance_activated_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}">
+                        Active for attendance
+                    </span>
+                    {% else %}
+                    <span style="font-size: 0.75rem; color: #9ca3af;">—</span>
+                    {% endif %}
                 </td>
                 <td style="padding: 0.5rem;">{{ nr.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
                 <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ nr.csv_hash }}</td>
                 <td style="padding: 0.5rem; white-space: nowrap;">
-                    {% if nr.status == 'draft' %}
-                    <button class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                            onclick="confirmNominalRoll('{{ nr.id }}', '{{ nr.caa }}')">Confirm</button>
-                    {% endif %}
-                    {% if nr.status == 'confirmed' %}
                     <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
                             onclick="openCreateModal('{{ nr.id }}', '{{ nr.caa }}', {{ nr.personnel_count }})">Create Grouping</button>
+                    {% if user.role == 'super_admin' %}
+                    {% if nr.attendance_active %}
                     <button class="btn" style="background: #f59e0b; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
-                            onclick="unconfirmNominalRoll('{{ nr.id }}', '{{ nr.caa }}')">Unconfirm</button>
+                            onclick="deactivateAttendance('{{ nr.id }}', '{{ nr.caa }}')">Deactivate Attendance</button>
+                    {% else %}
+                    <button class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
+                            onclick="useForAttendance('{{ nr.id }}', '{{ nr.caa }}')">Use for Attendance</button>
                     {% endif %}
-                    {% if nr.status in ['draft', 'confirmed'] and user.role == 'super_admin' %}
                     <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
                             onclick="deleteNominalRoll('{{ nr.id }}', '{{ nr.caa }}')">Delete</button>
-                    {% endif %}
-                    {% if nr.status not in ['draft', 'confirmed'] %}
-                    <span style="font-size: 0.75rem; color: #9ca3af;">—</span>
                     {% endif %}
                 </td>
             </tr>
@@ -235,52 +233,38 @@
         div.innerHTML = '<p style="color: ' + color + '; font-weight: bold;">' + message + '</p>';
     }
 
-    async function confirmNominalRoll(nominalRollId, caa) {
-        if (!confirm('Confirm nominal roll with CAA date ' + caa + '?')) return;
+    async function useForAttendance(nominalRollId, caa) {
+        if (!confirm('Mark the nominal roll with CAA date ' + caa + ' as active for attendance?\n\nAny currently active nominal roll is deactivated automatically.')) return;
         try {
             const response = await fetch(
-                '/api/v1/nominal-rolls/' + nominalRollId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
-                {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: 'confirmed' }),
-                }
+                '/api/v1/nominal-rolls/' + nominalRollId + '/activate-attendance?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                { method: 'POST' }
             );
             if (response.ok) {
-                showPageStatus('Nominal roll confirmed.', 'success');
+                showPageStatus('Nominal roll is now active for attendance.', 'success');
                 setTimeout(function() { location.reload(); }, 800);
             } else {
                 const data = await response.json();
-                showPageStatus('Confirm failed: ' + (data.detail || 'Unknown error'), 'error');
+                showPageStatus('Activate failed: ' + (data.detail || 'Unknown error'), 'error');
             }
         } catch (error) {
             showPageStatus('Network error: ' + error.message, 'error');
         }
     }
 
-    async function unconfirmNominalRoll(nominalRollId, caa) {
-        const message =
-            'Revert nominal roll with CAA date ' + caa + ' back to draft status?\n\n' +
-            'This will clear confirmation metadata (confirmed_at, confirmed_by).\n' +
-            'The "Create Grouping" button will be hidden until re-confirmed.\n' +
-            'Existing groupings based on this nominal roll are NOT affected.\n\n' +
-            'Intended for testing/maintenance only.';
-        if (!confirm(message)) return;
+    async function deactivateAttendance(nominalRollId, caa) {
+        if (!confirm('Deactivate attendance for the nominal roll with CAA date ' + caa + '?\n\nAttendance is inactive until another roll is marked "Use for Attendance".')) return;
         try {
             const response = await fetch(
-                '/api/v1/nominal-rolls/' + nominalRollId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
-                {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: 'draft' }),
-                }
+                '/api/v1/nominal-rolls/' + nominalRollId + '/deactivate-attendance?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                { method: 'POST' }
             );
             if (response.ok) {
-                showPageStatus('Nominal roll reverted to draft.', 'success');
+                showPageStatus('Attendance deactivated.', 'success');
                 setTimeout(function() { location.reload(); }, 800);
             } else {
                 const data = await response.json();
-                showPageStatus('Unconfirm failed: ' + (data.detail || 'Unknown error'), 'error');
+                showPageStatus('Deactivate failed: ' + (data.detail || 'Unknown error'), 'error');
             }
         } catch (error) {
             showPageStatus('Network error: ' + error.message, 'error');

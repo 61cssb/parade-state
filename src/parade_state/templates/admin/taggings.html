@@ -5,104 +5,93 @@
 {% block page_title %}Taggings{% endblock %}
 
 {% block content %}
+<style>
+    .changed-row { background: #fef3c7 !important; }
+    .changed-row td { background: #fef3c7 !important; }
+</style>
+
 <p style="color: #6b7280; margin-bottom: 1.5rem;">
-    Taggings are overlays of person &rarr; subunit remappings applied on top of a Nominal Roll. They never mutate the NR — downstream views (attendance / groupings) read the remapped structure from here.
+    Under the 1:1 model, each Nominal Roll has a single Tagging. Pick an NR to view its remap entries (overlay on top of the NR's personnel).
 </p>
 
 <div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <h3 style="margin: 0;">Taggings</h3>
-        <button class="btn btn-primary" onclick="openCreateModal()">+ New Tagging</button>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; gap: 0.75rem; flex-wrap: wrap;">
+        <form method="get" style="display: flex; gap: 0.5rem; align-items: center;">
+            <label style="font-size: 0.875rem; color: #374151;">Nominal Roll:</label>
+            <select name="nominal_roll_id" onchange="this.form.submit()" style="padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                {% for e in nominal_roll_options %}
+                <option value="{{ e.id }}" {% if nominal_roll_filter == e.id %}selected{% endif %}>CAA {{ e.caa }}</option>
+                {% endfor %}
+            </select>
+        </form>
+        {% if tagging %}
+        <div style="display: flex; gap: 0.5rem;">
+            <button class="btn btn-primary" onclick="openEditModal('{{ tagging.id }}')">Edit entries</button>
+            <button class="btn" style="background: #2563eb; color: white;" onclick="openImportModal()">Import from NR…</button>
+        </div>
+        {% endif %}
     </div>
 
-    <form method="get" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
-        <label style="font-size: 0.875rem; color: #374151;">Nominal Roll:</label>
-        <select name="nominal_roll_id" onchange="this.form.submit()" style="padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
-            {% for e in nominal_roll_options %}
-            <option value="{{ e.id }}" {% if nominal_roll_filter == e.id %}selected{% endif %}>CAA {{ e.caa }}</option>
-            {% endfor %}
-        </select>
-    </form>
-
-    {% if taggings %}
-    <table style="width: 100%; border-collapse: collapse; margin-top: 0.5rem;">
+    {% if not nominal_roll_options %}
+    <p style="color: #6b7280;">No nominal rolls exist yet — upload a CSV first.</p>
+    {% elif not tagging %}
+    <p style="color: #6b7280;">
+        The selected nominal roll has no tagging. Under the 1:1 model every NR should have one;
+        if it was created before the auto-creation flow, use the API (<code>POST /api/v1/taggings</code>) to backfill.
+    </p>
+    {% elif entries %}
+    <div style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
         <thead>
             <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
-                <th style="padding: 0.5rem;">Label</th>
-                <th style="padding: 0.5rem;">Nominal Roll</th>
-                <th style="padding: 0.5rem;">Entries</th>
-                <th style="padding: 0.5rem;">Remarks</th>
-                <th style="padding: 0.5rem;">Updated</th>
-                <th style="padding: 0.5rem;">Actions</th>
+                <th style="padding: 0.5rem;">Personnel</th>
+                <th style="padding: 0.5rem;">From unit</th>
+                <th style="padding: 0.5rem;">From sub 1</th>
+                <th style="padding: 0.5rem;">From sub 2</th>
+                <th style="padding: 0.5rem;">From sub 3</th>
+                <th style="padding: 0.5rem;">To unit</th>
+                <th style="padding: 0.5rem;">To sub 1</th>
+                <th style="padding: 0.5rem;">To sub 2</th>
+                <th style="padding: 0.5rem;">To sub 3</th>
             </tr>
         </thead>
         <tbody>
-            {% for t in taggings %}
-            <tr style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 0.5rem;"><strong>{{ t.label }}</strong></td>
-                <td style="padding: 0.5rem; font-size: 0.8rem; color: #6b7280;">{% if t.nominal_roll_caa %}CAA {{ t.nominal_roll_caa }}{% else %}—{% endif %}</td>
-                <td style="padding: 0.5rem;">{{ t.entry_count }}</td>
-                <td style="padding: 0.5rem; font-size: 0.85rem; max-width: 18rem; white-space: pre-wrap; overflow: hidden; text-overflow: ellipsis;">{{ t.remarks or '—' }}</td>
-                <td style="padding: 0.5rem; font-size: 0.8rem; color: #6b7280;">{% if t.updated_at %}{{ t.updated_at.strftime('%Y-%m-%d %H:%M') }}{% else %}{{ t.created_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}</td>
-                <td style="padding: 0.5rem; white-space: nowrap;">
-                    <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                            onclick="openEditModal('{{ t.id }}')">Edit</button>
-                    <button class="btn" style="background: #2563eb; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
-                            onclick="openCloneModal('{{ t.id }}', '{{ t.label }}')">Clone</button>
-                    <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
-                            onclick="deleteTagging('{{ t.id }}', '{{ t.label }}')">Delete</button>
-                </td>
+            {% for e in entries %}
+            <tr class="changed-row" style="border-bottom: 1px solid #f3e8c7;">
+                <td style="padding: 0.5rem;"><strong>{{ e.label }}</strong> <span style="font-family: monospace; font-size: 0.75rem; color: #6b7280;">{{ e.short_id }}</span></td>
+                <td style="padding: 0.5rem;">{{ e.from_unit or '—' }}</td>
+                <td style="padding: 0.5rem;">{{ e.from_sub_unit_1 or '—' }}</td>
+                <td style="padding: 0.5rem;">{{ e.from_sub_unit_2 or '—' }}</td>
+                <td style="padding: 0.5rem;">{{ e.from_sub_unit_3 or '—' }}</td>
+                <td style="padding: 0.5rem;"><strong>{{ e.to_unit }}</strong></td>
+                <td style="padding: 0.5rem;">{{ e.to_sub_unit_1 or '—' }}</td>
+                <td style="padding: 0.5rem;">{{ e.to_sub_unit_2 or '—' }}</td>
+                <td style="padding: 0.5rem;">{{ e.to_sub_unit_3 or '—' }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+    </div>
+    <p style="color: #6b7280; font-size: 0.8rem; margin-top: 0.75rem;">
+        {{ entries|length }} entr{{ entries|length == 1 and 'y' or 'ies' }}.
+        {% if tagging.updated_at %} Last updated {{ tagging.updated_at.strftime('%Y-%m-%d %H:%M') }}.{% endif %}
+    </p>
     {% else %}
-    <p style="color: #6b7280; margin-top: 1rem;">No taggings on this nominal roll. Click "New Tagging" to create one.</p>
+    <p style="color: #6b7280;">
+        Tagging exists but has no entries. Use "Edit entries" to add remaps, or "Import from NR…" to copy entries from another NR.
+    </p>
     {% endif %}
 </div>
 
-{# Create modal #}
-<div id="create-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeCreateModal()"></div>
-<div id="create-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 560px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <h3 style="margin: 0;">New Tagging</h3>
-        <button type="button" onclick="closeCreateModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
-    </div>
-
-    <div style="background: #f9fafb; border-radius: 0.375rem; padding: 0.6rem 0.75rem; margin-bottom: 1rem; font-size: 0.875rem; color: #374151;">
-        Creating tagging on <strong>CAA {{ active_nominal_roll_caa }}</strong>
-    </div>
-
-    <form id="create-tagging-form" onsubmit="event.preventDefault(); submitCreate();">
-        <div style="margin-bottom: 0.75rem;">
-            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Label <span style="color: #ef4444;">*</span></label>
-            <input type="text" id="create-label" required maxlength="100" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" placeholder="Globally unique label (e.g. 'ICT-15 cross-attach')">
-        </div>
-        <div style="margin-bottom: 0.75rem;">
-            <label for="create-remarks" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Remarks</label>
-            <textarea id="create-remarks" rows="2" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-family: inherit;" placeholder="Optional"></textarea>
-        </div>
-        <div id="create-status" style="margin-bottom: 0.75rem;"></div>
-        <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
-            <button type="button" onclick="closeCreateModal()" style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: white; cursor: pointer;">Cancel</button>
-            <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1rem;">Create</button>
-        </div>
-    </form>
-</div>
-
-{# Edit modal #}
+{# Edit modal — manages entries of the selected NR's tagging #}
 <div id="edit-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeEditModal()"></div>
 <div id="edit-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 900px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <h3 style="margin: 0;">Edit Tagging</h3>
+        <h3 style="margin: 0;">Edit Tagging Entries — CAA {{ active_nominal_roll_caa }}</h3>
         <button type="button" onclick="closeEditModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
     </div>
 
     <form id="edit-tagging-form" onsubmit="event.preventDefault(); submitEdit();">
-        <div style="margin-bottom: 0.75rem;">
-            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Label <span style="color: #ef4444;">*</span></label>
-            <input type="text" id="edit-label" required maxlength="100" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
-        </div>
         <div style="margin-bottom: 0.75rem;">
             <label for="edit-remarks" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Remarks</label>
             <textarea id="edit-remarks" rows="2" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-family: inherit;"></textarea>
@@ -112,7 +101,14 @@
 
         <h4 style="margin: 0 0 0.5rem; font-size: 0.95rem;">Per-person remaps</h4>
 
-        {# Personnel picker: search by name + cascading unit/subunit filters scoped to this NR #}
+        {# Suggestion datalists for the remap inputs (populated from the NR's
+           personnel). Datalist inputs also accept any typed value — remap
+           targets may be units/subunits that don't exist on this NR yet. #}
+        <datalist id="dl-to-unit"></datalist>
+        <datalist id="dl-to-s1"></datalist>
+        <datalist id="dl-to-s2"></datalist>
+        <datalist id="dl-to-s3"></datalist>
+
         <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0.375rem; padding: 0.6rem; margin-bottom: 0.75rem;">
             <p style="font-size: 0.75rem; color: #6b7280; margin: 0 0 0.4rem;">Find personnel to add as remap rows. Personnel already in the table are hidden from the list.</p>
             <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 0.4rem; margin-bottom: 0.4rem;">
@@ -154,33 +150,31 @@
     </form>
 </div>
 
-{# Clone modal #}
-<div id="clone-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeCloneModal()"></div>
-<div id="clone-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 480px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;">
+{# Import-from-NR modal #}
+<div id="import-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeImportModal()"></div>
+<div id="import-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 480px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <h3 style="margin: 0;">Clone Tagging</h3>
-        <button type="button" onclick="closeCloneModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
+        <h3 style="margin: 0;">Import entries from another NR</h3>
+        <button type="button" onclick="closeImportModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
     </div>
     <p style="font-size: 0.85rem; color: #374151; margin-bottom: 1rem;">
-        Cloning <strong id="clone-source-label"></strong> to a different nominal roll. Personnel are matched by their cross-roll <em>short_id</em>; unmatched personnel are skipped and surfaced in the result.
+        Merges the source NR's tagging entries into <strong>CAA {{ active_nominal_roll_caa }}</strong> by matching personnel across NRs on <em>short_id</em>. Entries that already exist on the target are skipped; unmatched source personnel are surfaced in the result.
     </p>
-    <form id="clone-tagging-form" onsubmit="event.preventDefault(); submitClone();">
+    <form id="import-form" onsubmit="event.preventDefault(); submitImport();">
         <div style="margin-bottom: 0.75rem;">
-            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Target nominal roll <span style="color: #ef4444;">*</span></label>
-            <select id="clone-target" required style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Source nominal roll <span style="color: #ef4444;">*</span></label>
+            <select id="import-source-nr" required style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
                 {% for e in nominal_roll_options %}
+                {% if e.id != nominal_roll_filter %}
                 <option value="{{ e.id }}">CAA {{ e.caa }}</option>
+                {% endif %}
                 {% endfor %}
             </select>
         </div>
-        <div style="margin-bottom: 0.75rem;">
-            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">New label <span style="color: #ef4444;">*</span></label>
-            <input type="text" id="clone-label" required maxlength="100" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
-        </div>
-        <div id="clone-status-msg" style="margin-bottom: 0.75rem;"></div>
+        <div id="import-status-msg" style="margin-bottom: 0.75rem;"></div>
         <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
-            <button type="button" onclick="closeCloneModal()" style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: white; cursor: pointer;">Cancel</button>
-            <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1rem;">Clone</button>
+            <button type="button" onclick="closeImportModal()" style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: white; cursor: pointer;">Cancel</button>
+            <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1rem;">Import</button>
         </div>
     </form>
 </div>
@@ -193,7 +187,9 @@
     const ADMIN_USER_ID = "{{ user.id }}";
     const ADMIN_USER_ROLE = "{{ user.role }}";
     const ACTIVE_NOMINAL_ROLL_ID = "{{ nominal_roll_filter }}";
+    const ACTIVE_TAGGING_ID = "{{ tagging.id if tagging else '' }}";
     let editId = null;
+    let cloneId = null;
 
     function showMsg(elId, msg, type) {
         const div = document.getElementById(elId);
@@ -213,47 +209,9 @@
         });
     }
 
-    // ----- Create modal -----
-    function openCreateModal() {
-        document.getElementById('create-tagging-form').reset();
-        document.getElementById('create-status').innerHTML = '';
-        document.getElementById('create-backdrop').style.display = 'block';
-        document.getElementById('create-modal').style.display = 'block';
-        document.getElementById('create-label').focus();
-    }
-
-    function closeCreateModal() {
-        document.getElementById('create-backdrop').style.display = 'none';
-        document.getElementById('create-modal').style.display = 'none';
-    }
-
-    async function submitCreate() {
-        const label = document.getElementById('create-label').value.trim();
-        const remarks = document.getElementById('create-remarks').value.trim();
-        if (!label) { showMsg('create-status', 'Label is required.', 'error'); return; }
-        const payload = { label: label, nominal_roll_id: ACTIVE_NOMINAL_ROLL_ID, entries: [] };
-        if (remarks) payload.remarks = remarks;
-        try {
-            const res = await fetch(
-                '/api/v1/taggings?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
-                { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) }
-            );
-            if (res.ok) {
-                const data = await res.json();
-                showMsg('create-status', 'Tagging created. Opening editor…', 'success');
-                setTimeout(function() { closeCreateModal(); openEditModal(data.id); }, 500);
-            } else {
-                const data = await res.json();
-                showMsg('create-status', 'Create failed: ' + (data.detail || 'Unknown error'), 'error');
-            }
-        } catch (err) {
-            showMsg('create-status', 'Network error: ' + err.message, 'error');
-        }
-    }
-
     // ----- Edit modal -----
-    let personnelCache = [];   // [{id, short_id, rank, name, unit, sub_unit_1, ...}]
-    let entryCache = [];        // [{personnel_id, to_unit, to_sub_unit_1..3}]
+    let personnelCache = [];
+    let entryCache = [];
 
     async function loadPersonnel() {
         const params = new URLSearchParams({
@@ -267,68 +225,22 @@
         return res.json();
     }
 
-    // ----- "To" subunit dropdown option builders (cascading per row) -----
-    // Options are derived from the active NR's personnel so users can't typo values.
-    function buildOptionList(values, selected, optional) {
-        let html = optional ? '<option value="">—</option>' : '';
-        // Preserve an existing value that isn't in the distinct list (e.g. an
-        // older remap pointing at a since-renamed unit) so it doesn't vanish.
-        if (selected && values.indexOf(selected) === -1) {
-            html += '<option value="' + escapeHtml(selected) + '" selected>' + escapeHtml(selected) + '</option>';
+    // Populate the remap suggestion datalists from the cached NR personnel.
+    // Datalist inputs accept any typed value, so remap targets may point at
+    // units/subunits that don't exist on this NR yet.
+    function fillRemapDatalists() {
+        const lists = { 'dl-to-unit': 'unit', 'dl-to-s1': 'sub_unit_1', 'dl-to-s2': 'sub_unit_2', 'dl-to-s3': 'sub_unit_3' };
+        for (const [dlId, field] of Object.entries(lists)) {
+            const values = [];
+            const seen = new Set();
+            for (const p of personnelCache) {
+                if (p[field] && !seen.has(p[field])) { seen.add(p[field]); values.push(p[field]); }
+            }
+            values.sort();
+            document.getElementById(dlId).innerHTML = values
+                .map(function(v) { return '<option value="' + escapeHtml(v) + '"></option>'; })
+                .join('');
         }
-        for (const v of values) {
-            html += '<option value="' + escapeHtml(v) + '"' + (v === selected ? ' selected' : '') + '>'
-                + escapeHtml(v) + '</option>';
-        }
-        return html;
-    }
-
-    function buildToUnitOptions(selected) {
-        const values = [];
-        const seen = new Set();
-        for (const p of personnelCache) {
-            if (p.unit && !seen.has(p.unit)) { seen.add(p.unit); values.push(p.unit); }
-        }
-        values.sort();
-        return buildOptionList(values, selected, false);
-    }
-
-    function buildToSubOptions(field, parents, selected) {
-        let filtered = personnelCache;
-        if (parents.unit) filtered = filtered.filter(function(p) { return p.unit === parents.unit; });
-        if (parents.sub_unit_1) filtered = filtered.filter(function(p) { return p.sub_unit_1 === parents.sub_unit_1; });
-        if (parents.sub_unit_2) filtered = filtered.filter(function(p) { return p.sub_unit_2 === parents.sub_unit_2; });
-        const values = [];
-        const seen = new Set();
-        for (const p of filtered) {
-            if (p[field] && !seen.has(p[field])) { seen.add(p[field]); values.push(p[field]); }
-        }
-        values.sort();
-        return buildOptionList(values, selected, true);
-    }
-
-    function onToUnitChange(sel) {
-        const tr = sel.closest('tr');
-        const unit = sel.value;
-        tr.querySelector('.remap-s1').innerHTML = buildToSubOptions('sub_unit_1', {unit: unit}, null);
-        tr.querySelector('.remap-s2').innerHTML = buildToSubOptions('sub_unit_2', {unit: unit}, null);
-        tr.querySelector('.remap-s3').innerHTML = buildToSubOptions('sub_unit_3', {unit: unit}, null);
-    }
-
-    function onToS1Change(sel) {
-        const tr = sel.closest('tr');
-        const unit = tr.querySelector('.remap-unit').value;
-        const s1 = sel.value;
-        tr.querySelector('.remap-s2').innerHTML = buildToSubOptions('sub_unit_2', {unit: unit, sub_unit_1: s1}, null);
-        tr.querySelector('.remap-s3').innerHTML = buildToSubOptions('sub_unit_3', {unit: unit, sub_unit_1: s1}, null);
-    }
-
-    function onToS2Change(sel) {
-        const tr = sel.closest('tr');
-        const unit = tr.querySelector('.remap-unit').value;
-        const s1 = tr.querySelector('.remap-s1').value;
-        const s2 = sel.value;
-        tr.querySelector('.remap-s3').innerHTML = buildToSubOptions('sub_unit_3', {unit: unit, sub_unit_1: s1, sub_unit_2: s2}, null);
     }
 
     function addRemapRow(entry) {
@@ -336,7 +248,6 @@
         const body = document.getElementById('remap-body');
         const tr = document.createElement('tr');
         tr.style.borderTop = '1px solid #f3f4f6';
-        // Personnel shown read-only (the picker chooses them); id carried in a hidden input.
         const labelHtml = entry.personnel_label
             ? '<strong>' + escapeHtml(entry.personnel_label) + '</strong>'
             : '<strong style="color:#ef4444;">Unknown personnel</strong>';
@@ -346,26 +257,26 @@
                 + (entry.from_sub_unit_1 ? ' / ' + escapeHtml(entry.from_sub_unit_1) : '')
                 + '</span>'
             : '';
-        const selectStyle = 'width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;';
+        const inputStyle = 'width: 100%; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;';
+        function cell(listId, cls, value, required) {
+            return '<td style="padding: 0.35rem;">'
+                + '<input type="text" list="' + listId + '" class="' + cls + '" value="' + escapeHtml(value || '') + '"'
+                + (required ? ' required' : '') + ' style="' + inputStyle + '"></td>';
+        }
         tr.innerHTML = [
             '<td style="padding: 0.35rem;">'
                 + '<input type="hidden" class="remap-person-id" value="' + escapeHtml(entry.personnel_id || '') + '">'
                 + labelHtml + fromLine
                 + '</td>',
-            '<td style="padding: 0.35rem;"><select class="remap-unit" required onchange="onToUnitChange(this)" style="' + selectStyle + '">'
-                + buildToUnitOptions(entry.to_unit) + '</select></td>',
-            '<td style="padding: 0.35rem;"><select class="remap-s1" onchange="onToS1Change(this)" style="' + selectStyle + '">'
-                + buildToSubOptions('sub_unit_1', {unit: entry.to_unit}, entry.to_sub_unit_1) + '</select></td>',
-            '<td style="padding: 0.35rem;"><select class="remap-s2" onchange="onToS2Change(this)" style="' + selectStyle + '">'
-                + buildToSubOptions('sub_unit_2', {unit: entry.to_unit, sub_unit_1: entry.to_sub_unit_1}, entry.to_sub_unit_2) + '</select></td>',
-            '<td style="padding: 0.35rem;"><select class="remap-s3" style="' + selectStyle + '">'
-                + buildToSubOptions('sub_unit_3', {unit: entry.to_unit, sub_unit_1: entry.to_sub_unit_1, sub_unit_2: entry.to_sub_unit_2}, entry.to_sub_unit_3) + '</select></td>',
+            cell('dl-to-unit', 'remap-unit', entry.to_unit, true),
+            cell('dl-to-s1', 'remap-s1', entry.to_sub_unit_1, false),
+            cell('dl-to-s2', 'remap-s2', entry.to_sub_unit_2, false),
+            cell('dl-to-s3', 'remap-s3', entry.to_sub_unit_3, false),
             '<td style="padding: 0.35rem;"><button type="button" class="btn" style="background: #ef4444; color: white; font-size: 0.7rem; padding: 0.2rem 0.4rem;" onclick="this.closest(\'tr\').remove(); updatePickerList();">Remove</button></td>',
         ].join('');
         body.appendChild(tr);
     }
 
-    // ----- Personnel picker (search + cascading unit/subunit filters) -----
     function personnelInRemapRows() {
         return new Set(
             Array.from(document.querySelectorAll('#remap-body input.remap-person-id'))
@@ -374,7 +285,6 @@
     }
 
     function buildPickerOptions() {
-        // Distinct units and sub-units derived from the cached NR personnel.
         const units = [];
         const seen = new Set();
         for (const p of personnelCache) {
@@ -454,7 +364,6 @@
             from_unit: person.unit,
             from_sub_unit_1: person.sub_unit_1,
         });
-        // Refresh picker to drop the just-added person and reset selection.
         list.value = '';
         updatePickerList();
     }
@@ -463,7 +372,6 @@
         editId = id;
         document.getElementById('edit-status-msg').innerHTML = '';
         try {
-            // Load personnel and tagging in parallel.
             const [personnel, taggingRes] = await Promise.all([
                 loadPersonnel(),
                 fetch('/api/v1/taggings/' + id + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE),
@@ -473,13 +381,11 @@
             personnelCache = personnel;
             entryCache = tagging.entries || [];
 
-            document.getElementById('edit-label').value = tagging.label;
             document.getElementById('edit-remarks').value = tagging.remarks || '';
 
             const body = document.getElementById('remap-body');
             body.innerHTML = '';
             entryCache.forEach(function(e) {
-                // Find the personnel in cache for friendly display.
                 const p = personnelCache.find(function(pp) { return pp.id === e.personnel_id; });
                 addRemapRow({
                     personnel_id: e.personnel_id,
@@ -495,11 +401,11 @@
                 });
             });
 
-            // Reset and build the picker.
             document.getElementById('picker-search').value = '';
             document.getElementById('picker-unit').value = '';
             document.getElementById('picker-subunit').value = '';
             buildPickerOptions();
+            fillRemapDatalists();
             updatePickerList();
 
             document.getElementById('edit-backdrop').style.display = 'block';
@@ -517,9 +423,7 @@
 
     async function submitEdit() {
         if (!editId) return;
-        const label = document.getElementById('edit-label').value.trim();
         const remarks = document.getElementById('edit-remarks').value.trim();
-        if (!label) { showMsg('edit-status-msg', 'Label is required.', 'error'); return; }
 
         const rows = document.querySelectorAll('#remap-body tr');
         const entries = [];
@@ -546,8 +450,8 @@
             });
         }
 
-        const payload = { label: label, entries: entries };
-        if (remarks) payload.remarks = remarks; else payload.remarks = null;
+        const payload = { entries: entries };
+        payload.remarks = remarks || null;
 
         try {
             const res = await fetch(
@@ -566,79 +470,63 @@
         }
     }
 
-    // ----- Clone modal -----
-    function openCloneModal(id, label) {
-        cloneId = id;
-        document.getElementById('clone-source-label').textContent = label;
-        document.getElementById('clone-status-msg').innerHTML = '';
-        // Default the new label to "<source> (clone)".
-        document.getElementById('clone-label').value = label + ' (clone)';
-        // Pre-select first non-active target.
-        const select = document.getElementById('clone-target');
-        for (const opt of select.options) {
-            if (opt.value !== ACTIVE_NOMINAL_ROLL_ID) { opt.selected = true; break; }
+    // ----- Import-from-NR modal (uses the clone-as-merge endpoint) -----
+    function openImportModal() {
+        if (!ACTIVE_TAGGING_ID) {
+            showPage('No active tagging to import into.', 'error');
+            return;
         }
-        document.getElementById('clone-backdrop').style.display = 'block';
-        document.getElementById('clone-modal').style.display = 'block';
+        document.getElementById('import-status-msg').innerHTML = '';
+        document.getElementById('import-backdrop').style.display = 'block';
+        document.getElementById('import-modal').style.display = 'block';
     }
 
-    function closeCloneModal() {
-        document.getElementById('clone-backdrop').style.display = 'none';
-        document.getElementById('clone-modal').style.display = 'none';
-        cloneId = null;
+    function closeImportModal() {
+        document.getElementById('import-backdrop').style.display = 'none';
+        document.getElementById('import-modal').style.display = 'none';
     }
 
-    let cloneId = null;
+    async function submitImport() {
+        if (!ACTIVE_TAGGING_ID) return;
+        const sourceNr = document.getElementById('import-source-nr').value;
+        if (!sourceNr) { showMsg('import-status-msg', 'Select a source NR.', 'error'); return; }
 
-    async function submitClone() {
-        if (!cloneId) return;
-        const target = document.getElementById('clone-target').value;
-        const label = document.getElementById('clone-label').value.trim();
-        if (!target) { showMsg('clone-status-msg', 'Select a target nominal roll.', 'error'); return; }
-        if (!label) { showMsg('clone-status-msg', 'New label is required.', 'error'); return; }
+        // We need the source tagging id — load via list endpoint filtered by NR.
         try {
+            const listRes = await fetch(
+                '/api/v1/taggings?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE +
+                '&nominal_roll_id=' + encodeURIComponent(sourceNr)
+            );
+            if (!listRes.ok) throw new Error('Failed to load source taggings');
+            const list = await listRes.json();
+            if (!list.length) {
+                showMsg('import-status-msg', 'Source NR has no tagging.', 'error');
+                return;
+            }
+            const sourceTaggingId = list[0].id;
+
             const res = await fetch(
-                '/api/v1/taggings/' + cloneId + '/clone?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
-                { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ target_nominal_roll_id: target, label: label }) }
+                '/api/v1/taggings/' + sourceTaggingId + '/clone?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ target_nominal_roll_id: ACTIVE_NOMINAL_ROLL_ID }) }
             );
             if (res.ok) {
                 const data = await res.json();
-                const summary = 'Cloned: ' + data.matched_count + ' matched, ' + data.unmatched.length + ' unmatched (of ' + data.source_count + ' source entries).';
-                showMsg('clone-status-msg', summary, 'success');
+                const summary = 'Imported: ' + data.matched_count + ' matched, ' + data.unmatched.length + ' unmatched (of ' + data.source_count + ' source entries).';
+                showMsg('import-status-msg', summary, 'success');
                 setTimeout(function() { location.reload(); }, 1500);
             } else {
                 const data = await res.json();
-                showMsg('clone-status-msg', 'Clone failed: ' + (data.detail || 'Unknown error'), 'error');
+                showMsg('import-status-msg', 'Import failed: ' + (data.detail || 'Unknown error'), 'error');
             }
         } catch (err) {
-            showMsg('clone-status-msg', 'Network error: ' + err.message, 'error');
-        }
-    }
-
-    async function deleteTagging(id, label) {
-        if (!confirm('Delete tagging "' + label + '"? Entries are removed. The nominal roll is not affected.')) return;
-        try {
-            const res = await fetch(
-                '/api/v1/taggings/' + id + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
-                { method: 'DELETE' }
-            );
-            if (res.ok) {
-                showPage('Tagging deleted.', 'success');
-                setTimeout(function() { location.reload(); }, 700);
-            } else {
-                const data = await res.json();
-                showPage('Delete failed: ' + (data.detail || 'Unknown error'), 'error');
-            }
-        } catch (err) {
-            showPage('Network error: ' + err.message, 'error');
+            showMsg('import-status-msg', 'Network error: ' + err.message, 'error');
         }
     }
 
     document.addEventListener('keydown', function(e) {
         if (e.key !== 'Escape') return;
-        if (document.getElementById('create-modal').style.display === 'block') closeCreateModal();
-        else if (document.getElementById('edit-modal').style.display === 'block') closeEditModal();
-        else if (document.getElementById('clone-modal').style.display === 'block') closeCloneModal();
+        if (document.getElementById('edit-modal').style.display === 'block') closeEditModal();
+        else if (document.getElementById('import-modal').style.display === 'block') closeImportModal();
     });
 </script>
 {% endblock %}

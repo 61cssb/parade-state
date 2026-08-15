@@ -1,8 +1,10 @@
 """Attendance management API endpoints.
 
-Attendance is taken against an NR/Tagging scope (one row per person/day, AM and
-PM slots). Before any write, the NR must have an active ``AttendanceScope``
-(super-admin activates it). Updates are upserts keyed on (personnel_id, date).
+Attendance is taken against the Nominal Roll that is currently **active for
+attendance** (one row per person/day, AM and PM slots), always with the NR's
+1:1 tagging overlay applied. Writes are only permitted against the active NR
+(a super-admin marks an NR "Use for Attendance" on the nominal-rolls API).
+Updates are upserts keyed on (personnel_id, date).
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -10,19 +12,18 @@ from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from parade_state.db import get_db_session
-from parade_state.models import Attendance, AttendanceScope, Personnel
 from parade_state.api.subunit_access import (
     assert_can_update_attendance,
     get_assigned_subunit_1s,
     resolve_effective_subunit_1_map,
 )
+from parade_state.api.tagging import _load_nr_tagging
+from parade_state.db import get_db_session
+from parade_state.models import Attendance, NominalRoll, Personnel
 from parade_state.models.attendance import ATTENDANCE_STATUSES, PRESENT_LIKE_STATUSES
 from parade_state.models.schemas import (
     AttendanceBulkUpsert,
     AttendanceResponse,
-    AttendanceScopeActivate,
-    AttendanceScopeResponse,
     AttendanceUpsert,
     CopyRemarksResponse,
 )
@@ -36,32 +37,36 @@ router = APIRouter()
 # ============================================================================
 
 
-async def get_active_scope(
+async def require_attendance_active(
     nominal_roll_id: str,
     db: AsyncSession,
-) -> AttendanceScope | None:
-    """Return the active attendance scope for an NR, or None."""
-    result = await db.execute(
-        select(AttendanceScope).where(
-            AttendanceScope.nominal_roll_id == nominal_roll_id
+) -> NominalRoll:
+    """Load the NR; 400 unless it is the NR currently active for attendance."""
+    nr = (
+        await db.execute(
+            select(NominalRoll).where(NominalRoll.id == nominal_roll_id)
         )
-    )
-    return result.scalar_one_or_none()
-
-
-async def require_active_scope(
-    nominal_roll_id: str,
-    db: AsyncSession,
-) -> AttendanceScope:
-    """Return the active scope for an NR, 400 if attendance not activated."""
-    scope = await get_active_scope(nominal_roll_id, db)
-    if scope is None:
+    ).scalar_one_or_none()
+    if nr is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Nominal roll not found: {nominal_roll_id}",
+        )
+    if not nr.attendance_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Attendance is not activated for this nominal roll. "
-            "A super-admin must activate a scope first.",
+            detail=(
+                "Attendance is not active for this nominal roll. "
+                "A super-admin must mark it 'Use for Attendance' first."
+            ),
         )
-    return scope
+    return nr
+
+
+async def applied_tagging_id(db: AsyncSession, nr: NominalRoll) -> str | None:
+    """The id of the NR's 1:1 tagging (the overlay always applied)."""
+    tagging = await _load_nr_tagging(db, str(nr.id), with_entries=False)
+    return str(tagging.id) if tagging else None
 
 
 def is_retroactive(target_date: utc_dt.date) -> bool:
@@ -81,86 +86,6 @@ async def get_roster_for_scope(
         )
     )
     return list(result.scalars().all())
-
-
-# ============================================================================
-# Attendance scope endpoints
-# ============================================================================
-
-
-@router.put(
-    "/scope/{nominal_roll_id}",
-    response_model=AttendanceScopeResponse,
-)
-async def activate_attendance_scope(
-    nominal_roll_id: str,
-    payload: AttendanceScopeActivate,
-    user_id: str = Query(..., description="User ID activating the scope"),
-    user_role: str = Query(..., description="User role"),
-    db: AsyncSession = Depends(get_db_session),
-):
-    """Activate (or change) the attendance scope for a nominal roll.
-
-    Super-admin only. ``tagging_id`` omitted/None → the NR itself is the scope;
-    otherwise the given Tagging overlay is. The tagging must belong to this NR.
-    """
-    if user_role != "super_admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only super-admins can activate the attendance scope",
-        )
-
-    # Validate tagging belongs to this NR if provided.
-    if payload.tagging_id:
-        from parade_state.models import Tagging
-
-        tagging_result = await db.execute(
-            select(Tagging).where(Tagging.id == payload.tagging_id)
-        )
-        tagging = tagging_result.scalar_one_or_none()
-        if not tagging or tagging.nominal_roll_id != nominal_roll_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Tagging does not belong to this nominal roll",
-            )
-
-    existing = await get_active_scope(nominal_roll_id, db)
-    if existing is None:
-        existing = AttendanceScope(
-            nominal_roll_id=nominal_roll_id,
-            tagging_id=payload.tagging_id,
-            activated_by=user_id,
-        )
-        db.add(existing)
-    else:
-        existing.tagging_id = payload.tagging_id
-        existing.activated_by = user_id
-        existing.activated_at = utc_dt.ensure_naive(utc_dt.utcnow())
-
-    try:
-        await db.commit()
-        await db.refresh(existing)
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to activate attendance scope",
-        ) from None
-
-    return existing
-
-
-@router.get(
-    "/scope/{nominal_roll_id}",
-    response_model=AttendanceScopeResponse | None,
-)
-async def get_scope(
-    nominal_roll_id: str,
-    db: AsyncSession = Depends(get_db_session),
-):
-    """Return the active scope for an NR (null if not activated)."""
-    scope = await get_active_scope(nominal_roll_id, db)
-    return scope
 
 
 # ============================================================================
@@ -200,13 +125,14 @@ async def bulk_upsert_attendance(
 ):
     """Bulk upsert attendance rows for an NR's roster.
 
-    Enforces that the NR's attendance scope is active AND that the caller has
-    Subunit-1 assignment for each target personnel's effective sub_unit_1
-    (403 otherwise; super_admin bypasses). Each entry is keyed on
+    Enforces that the NR is the one currently active for attendance AND that
+    the caller has Subunit-1 assignment for each target personnel's effective
+    sub_unit_1 (403 otherwise; super_admin bypasses). Each entry is keyed on
     (personnel_id, date); existing rows are updated, new rows are created with
     snapshot data from Personnel.
     """
-    scope = await require_active_scope(payload.nominal_roll_id, db)
+    nr = await require_attendance_active(payload.nominal_roll_id, db)
+    tagging_id = await applied_tagging_id(db, nr)
 
     # Subunit-1 access enforcement (issue #4 PR 2).
     personnel_ids = [r.personnel_id for r in payload.records]
@@ -216,7 +142,7 @@ async def bulk_upsert_attendance(
         user_id,
         user_role,
         personnel_ids,
-        scope.tagging_id,
+        tagging_id,
     )
 
     # Index existing rows for this NR + date set.
@@ -258,7 +184,6 @@ async def bulk_upsert_attendance(
             record = Attendance(
                 personnel_id=entry.personnel_id,
                 nominal_roll_id=payload.nominal_roll_id,
-                tagging_id=scope.tagging_id,
                 date=entry.date,
                 status_am=entry.status_am,
                 remarks_am=entry.remarks_am,
@@ -333,7 +258,8 @@ async def copy_remarks(
     effective sub_unit_1 the caller is assigned to are affected (super_admin
     bypasses; deny-by-default: no assignments → 403). Returns counts.
     """
-    scope = await require_active_scope(nominal_roll_id, db)
+    nr = await require_attendance_active(nominal_roll_id, db)
+    tagging_id = await applied_tagging_id(db, nr)
 
     # Resolve accessible personnel set (Subunit-1 enforcement).
     now = utc_dt.utcnow()
@@ -355,7 +281,7 @@ async def copy_remarks(
 
         all_pids = {k[0] for k in by_key.keys()}
         accessible_pids = await _accessible_pids(
-            db, nominal_roll_id, user_id, user_role, scope.tagging_id, all_pids
+            db, nominal_roll_id, user_id, user_role, tagging_id, all_pids
         )
 
         updated = 0
@@ -384,7 +310,6 @@ async def copy_remarks(
                 target = Attendance(
                     personnel_id=pid,
                     nominal_roll_id=nominal_roll_id,
-                    tagging_id=None,
                     date=date,
                     status_am="absent",
                     status_pm="absent",
@@ -427,7 +352,7 @@ async def copy_remarks(
     all_rows = list(rows.scalars().all())
     all_pids = {r.personnel_id for r in all_rows}
     accessible_pids = await _accessible_pids(
-        db, nominal_roll_id, user_id, user_role, scope.tagging_id, all_pids
+        db, nominal_roll_id, user_id, user_role, tagging_id, all_pids
     )
 
     now_naive = utc_dt.ensure_naive(utc_dt.utcnow())

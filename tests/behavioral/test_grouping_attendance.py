@@ -70,7 +70,6 @@ class TestAttendanceSnapshotRules:
         attendance = Attendance(
             personnel_id=personnel.id,
             nominal_roll_id=sample_nominal_roll.id,
-            tagging_id=None,
             date=date.today(),
             status_am="present",
             status_pm="absent",
@@ -101,7 +100,6 @@ class TestAttendanceSnapshotRules:
         attendance = Attendance(
             personnel_id=personnel.id,
             nominal_roll_id=sample_nominal_roll.id,
-            tagging_id=None,
             date=date.today(),
             status_am="present",
             status_pm="present",
@@ -188,7 +186,6 @@ class TestGroupingNotes:
         attendance = Attendance(
             personnel_id=personnel.id,
             nominal_roll_id=grouping.nominal_roll_id,
-            tagging_id=None,
             date=date.today(),
             status_am="present",
             status_pm="present",

@@ -1,26 +1,30 @@
 """User-facing attendance marking view.
 
-Shows an inline-editable attendance table for the active scope (NR or a
-Tagging) on the current day, with AM/PM status + remarks columns.
+Attendance is always taken against the Nominal Roll that is currently
+**active for attendance** (with its 1:1 tagging applied) — never against a
+Grouping. When no NR is active, the page shows an inactive message instead
+of the marking table.
 """
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 
-from parade_state.api.access_control import (
-    get_user_accessible_groupings,
-    verify_grouping_access_or_admin,
-)
 from parade_state.api.attendance import attendance_counts_for_date
 from parade_state.api.subunit_access import (
     get_assigned_subunit_1s,
     resolve_effective_subunit_1_map,
 )
+from parade_state.api.tagging import _load_nr_tagging
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
-from parade_state.models import Attendance, AttendanceScope, Personnel
+from parade_state.models import (
+    Attendance,
+    NominalRoll,
+    Personnel,
+    TaggingEntry,
+)
 from parade_state.utils import utc_dt
 
 router = APIRouter()
@@ -31,12 +35,16 @@ async def attendance_view(
     request: Request,
     nominal_roll_id: str | None = None,
     date: utc_dt.date | None = None,
+    sub_unit_1: str | None = None,
 ):
-    """Render the attendance marking page for non-admin users.
+    """Render the attendance marking page.
 
-    Lists the active roster joined to today's attendance rows (AM/PM columns).
-    Attendance scope must be activated for the NR before rows can be edited.
-    Full polish (Subunit-1 scoping, Copy Remarks button) lands in PR 3.
+    Defaults to the NR currently active for attendance (if any). Lists the
+    roster with the NR's 1:1 tagging overlay applied, joined to the selected
+    day's attendance rows (AM/PM columns). Editing is enabled only when the
+    selected NR is the active one. Non-super-admins only see personnel whose
+    effective sub_unit_1 matches one of their UserSubunitAssignment rows on
+    the NR.
     """
     current_user = await get_current_user_optional(request)
     if not current_user:
@@ -46,28 +54,42 @@ async def attendance_view(
 
     session_maker = get_session_maker()
     async with session_maker() as db:
-        # Resolve the NR via the user's accessible groupings if not given.
-        accessible = await get_user_accessible_groupings(
-            str(current_user.id), current_user.role, db
-        )
-
-        selected_nr_id = nominal_roll_id
-        if not selected_nr_id and accessible:
-            selected_nr_id = accessible[0].nominal_roll_id
-
-        scope: AttendanceScope | None = None
-        if selected_nr_id:
-            scope_result = await db.execute(
-                select(AttendanceScope).where(
-                    AttendanceScope.nominal_roll_id == selected_nr_id
+        # All NRs for the selector. Attendance is NR-scoped — groupings
+        # play no part in choosing or accessing the roster.
+        all_rolls = (
+            (
+                await db.execute(
+                    select(NominalRoll).order_by(NominalRoll.caa.desc())
                 )
             )
-            scope = scope_result.scalar_one_or_none()
+            .scalars()
+            .all()
+        )
+        active_nr = next((r for r in all_rolls if r.attendance_active), None)
+
+        # Resolve the selected NR (default: the active one, else newest).
+        selected = None
+        if nominal_roll_id:
+            for r in all_rolls:
+                if str(r.id) == nominal_roll_id:
+                    selected = r
+                    break
+        if selected is None:
+            selected = active_nr or (all_rolls[0] if all_rolls else None)
+
+        selected_nr_id = str(selected.id) if selected else None
+        attendance_active = bool(selected and selected.attendance_active)
 
         # Build roster + attendance rows.
         attendance_rows = []
+        subunit_options: list[str] = []
         has_prior_attendance = False
+        no_assignments = False
+        applied_tagging_id: str | None = None
         if selected_nr_id:
+            tagging = await _load_nr_tagging(db, selected_nr_id, with_entries=False)
+            applied_tagging_id = str(tagging.id) if tagging else None
+
             roster_result = await db.execute(
                 select(Personnel).where(
                     and_(
@@ -77,11 +99,26 @@ async def attendance_view(
                 ).order_by(
                     Personnel.unit,
                     Personnel.sub_unit_1,
+                    Personnel.sub_unit_2,
+                    Personnel.sub_unit_3,
                     Personnel.rank,
                     Personnel.full_name,
                 )
             )
             roster = roster_result.scalars().all()
+
+            # Tagging overlay: effective unit/sub_unit_1 come from the NR's
+            # tagging entries when present.
+            entry_by_person: dict[str, TaggingEntry] = {}
+            if applied_tagging_id:
+                entries = (
+                    await db.execute(
+                        select(TaggingEntry).where(
+                            TaggingEntry.tagging_id == applied_tagging_id
+                        )
+                    )
+                ).scalars().all()
+                entry_by_person = {str(e.personnel_id): e for e in entries}
 
             # Filter roster to the user's assigned subunits (tagging-aware).
             # super_admin sees the whole roster.
@@ -91,7 +128,7 @@ async def attendance_view(
                 eff_map = await resolve_effective_subunit_1_map(
                     db,
                     all_pids,
-                    scope.tagging_id if scope else None,
+                    applied_tagging_id,
                 )
                 allowed = await get_assigned_subunit_1s(
                     db, str(current_user.id), selected_nr_id
@@ -99,6 +136,7 @@ async def attendance_view(
                 accessible_pids = {
                     pid for pid, sub in eff_map.items() if sub in allowed
                 }
+                no_assignments = not allowed
 
             att_result = await db.execute(
                 select(Attendance).where(
@@ -116,6 +154,8 @@ async def attendance_view(
                 if accessible_pids is not None and str(person.id) not in accessible_pids:
                     continue
                 record = att_by_person.get(str(person.id))
+                entry = entry_by_person.get(str(person.id))
+                eff_sub1 = entry.to_sub_unit_1 if entry else person.sub_unit_1
                 attendance_rows.append(
                     {
                         "id": str(record.id) if record else "",
@@ -123,8 +163,15 @@ async def attendance_view(
                         "rank": person.rank,
                         "category": person.category,
                         "full_name": person.full_name,
-                        "unit": person.unit,
-                        "sub_unit_1": person.sub_unit_1,
+                        "unit": entry.to_unit if entry else person.unit,
+                        "sub_unit_1": eff_sub1,
+                        "sub_unit_2": (
+                            entry.to_sub_unit_2 if entry else person.sub_unit_2
+                        ),
+                        "sub_unit_3": (
+                            entry.to_sub_unit_3 if entry else person.sub_unit_3
+                        ),
+                        "is_changed": entry is not None,
                         "status_am": record.status_am if record else "absent",
                         "remarks_am": record.remarks_am if record else "",
                         "status_pm": record.status_pm if record else "absent",
@@ -132,11 +179,23 @@ async def attendance_view(
                     }
                 )
 
-            from sqlalchemy import func as sa_func
+            # Filter dropdown options: distinct effective sub_unit_1 across
+            # the user's whole visible roster (before the filter is applied).
+            subunit_options = sorted(
+                {
+                    r["sub_unit_1"]
+                    for r in attendance_rows
+                    if r["sub_unit_1"]
+                }
+            )
+            if sub_unit_1:
+                attendance_rows = [
+                    r for r in attendance_rows if r["sub_unit_1"] == sub_unit_1
+                ]
 
             has_prior_attendance = (
                 await db.execute(
-                    select(sa_func.count())
+                    select(func.count())
                     .select_from(Attendance)
                     .where(
                         Attendance.nominal_roll_id == selected_nr_id,
@@ -159,17 +218,25 @@ async def attendance_view(
         request=request,
         user=_user_dict(current_user),
         active_page="attendance",
-        groupings=[
-            {"id": str(g.id), "name": g.name, "status": g.status}
-            for g in accessible
+        nominal_rolls=[
+            {
+                "id": str(r.id),
+                "caa": r.caa,
+                "attendance_active": bool(r.attendance_active),
+                "personnel_count": r.personnel_count,
+            }
+            for r in all_rolls
         ],
         selected_nominal_roll_id=selected_nr_id or "",
-        scope_activated=scope is not None,
-        scope_tagging_id=(scope.tagging_id if scope else None),
+        any_active_nr=active_nr is not None,
+        attendance_active=attendance_active,
         target_date=target_date,
+        sub_unit_1_filter=sub_unit_1 or "",
+        subunit_options=subunit_options,
         attendance_rows=attendance_rows,
         counts=counts,
         has_prior_attendance=has_prior_attendance,
+        no_assignments=no_assignments,
     )
 
     return HTMLResponse(content=html_content)

@@ -27,28 +27,26 @@ The personnel branch currently manages battalion parade state through a manual m
 ### 1.2 Core Entity Hierarchy
 
 ```
-Nominal Roll (CAA-pinned, CSV-sourced, immutable)
- ├── Tagging (named overlay of person → subunit remaps; never mutates the NR)
- └── Attendance Scope (1:1 with NR; the active NR-or-Tagging scope)
-      └── Attendance (one row per personnel/day; carries AM and PM status + remarks)
+Nominal Roll (CAA-pinned, CSV-sourced, read-only; one NR is active for attendance)
+ ├── Tagging (1:1 with NR; the overlay of person → subunit remaps; never mutates the NR)
+ └── Attendance (one row per personnel/day on the active NR; AM and PM status + remarks)
 
 Grouping (remaps personnel unit+subunit; has date+time validity range) —
-  retained for overrides/exclusions/notes but is no longer the attendance anchor.
+  a separate feature, not linked to attendance.
 ```
 
 **Key Concepts:**
-- **Nominal Roll**: Base source of truth, uploaded from CSV, pinned by CAA date, immutable after confirmation
-- **Tagging**: A named overlay of person → subunit remaps on a single NR; never mutates the NR; consumed by attendance to render a remapped structure
-- **Attendance Scope**: 1:1 with an NR; the active scope (NR itself or a Tagging) that attendance is taken against. A super-admin must activate a scope before attendance can be recorded.
-- **Attendance**: One row per `(personnel, date)`, carrying `status_am`/`remarks_am` and `status_pm`/`remarks_pm` (statuses from the nine-value operational enum). AM and PM are hardcoded — there is no longer a user-managed Session model.
-- **Grouping**: Based on a nominal roll, remaps personnel assignments, valid for date+time range. Retained for overrides/exclusions/notes but no longer anchors attendance.
+- **Nominal Roll**: Base source of truth, uploaded from CSV, pinned by CAA date, read-only — unit/subunit edits are recorded on the NR's Tagging. Exactly one NR is **active for attendance** at a time (super-admin toggles "Use for Attendance" / "Deactivate Attendance" on the admin Nominal Rolls page; activating another NR auto-switches).
+- **Tagging**: 1:1 with an NR; the overlay of person → subunit remaps; never mutates the NR; always applied when attendance is taken against the active NR.
+- **Attendance**: One row per `(personnel, date)`, carrying `status_am`/`remarks_am` and `status_pm`/`remarks_pm` (statuses from the nine-value operational enum). AM and PM are hardcoded — there is no longer a user-managed Session model. Writes are only permitted against the active NR.
+- **Grouping**: Based on a nominal roll, remaps personnel assignments, valid for date+time range. A separate feature — the grouping view's checkbox/remarks never interact with attendance.
 
 ### 1.3 Scope
 
 **In Scope (v1):**
 - CSV ingestion with CAA versioning, column mapping, diff detection
 - Grouping management: create, clone (same-roll), migrate (cross-roll), scheduled activation
-- Attendance taking: AM/PM (hardcoded), nine-status operational reporting enum, NR/Tagging-scoped, active-scope gating
+- Attendance taking: AM/PM (hardcoded), nine-status operational reporting enum, NR-scoped with the 1:1 Tagging overlay applied, active-NR gating
 - Row access control (access level + subunit scope) and column sensitivity control
 - Parade state table view scoped to user access with inline editing
 - Admin UI: enums, users, column sensitivity, column mapping, grouping/tagging/attendance management
@@ -73,25 +71,40 @@ Grouping (remaps personnel unit+subunit; has date+time validity range) —
 ```
 Nominal Roll
 ├── id: UUID (PK)
-├── caa: date (Complement As At; must be unique among confirmed nominal rolls)
+├── caa: date (Complement As At; UNIQUE)
 ├── csv_hash: str (SHA-256 of raw CSV)
-├── status: str ENUM ['draft', 'confirmed', 'archived']
-├── personnel_count: int (snapshot at confirmation)
+├── attendance_active: bool (exactly one NR active at a time; application-enforced)
+├── attendance_activated_at: datetime (nullable; last activation, kept as history)
+├── attendance_activated_by: UUID (FK User, nullable)
+├── personnel_count: int
 ├── uploaded_at: datetime
 ├── uploaded_by: UUID (FK User)
-├── confirmed_at: datetime (nullable)
-├── confirmed_by: UUID (FK User, nullable)
 ├── created_at: datetime
 ├── notes: str (nullable; admin notes on this nominal roll)
 └── label: str (nullable; UNIQUE; human-readable name, max 100 chars)
 ```
 
 **Constraints:**
-- UNIQUE(caa) among non-archived nominal rolls
+- UNIQUE(caa)
 - UNIQUE(label) across all nominal rolls (NULLs allowed; enforced on non-null values)
-- Status transition: draft → confirmed → archived (one-way)
+- **No status workflow** — all NRs are equal; the confirm/unconfirm lifecycle is removed
+- **Attendance activation**: `POST /nominal-rolls/{id}/activate-attendance`
+  (super-admin; auto-deactivates the previously active NR) and
+  `POST /nominal-rolls/{id}/deactivate-attendance`. With no active NR,
+  the attendance view shows an inactive message and writes are refused.
 - Raw CSV stored immutably in csv_uploads (append-only; SHA-256 hash recorded)
 - Parsed personnel in personnel_snapshots: required columns as typed fields; all others in extra_fields JSON
+- **Read-only after ingestion** — unit/subunit edits are recorded on the NR's 1:1 Tagging, never on personnel rows
+
+**CSV → NR processing flow (app-side):**
+1. `POST /api/v1/csv/upload` — stores raw bytes in `CsvUpload` (SHA-256 dedup)
+2. `POST /api/v1/csv/{upload_id}/process` — parses the stored upload (CAA date
+   from the `caaYYMMDD` filename token) and inserts NominalRoll +
+   ColumnMetadata + Personnel + an auto-created empty Tagging; links the
+   upload via `CsvUpload.nominal_roll_id`. Optional
+   `source_nominal_roll_id` copies the source NR's tagging entries across
+   by `short_id` matching instead of starting empty (unmatched source
+   personnel are surfaced in the response).
 
 ### 2.2 Grouping
 
@@ -124,24 +137,18 @@ Grouping
 - Only one grouping can have status = 'active' (enforced at application layer)
 - Validity range overlaps with existing draft/active grouping → hard reject
 
-### 2.3 Attendance Scope & Attendance (AM/PM hardcoded)
+### 2.3 Attendance (AM/PM hardcoded, active-NR model)
 
-**AM and PM are hardcoded; there is no longer a user-managed Session model.**
-Attendance attaches to a Nominal Roll / Tagging scope (see issue #4).
+**AM and PM are hardcoded; there is no user-managed Session model and no
+separate scope table.** Attendance is taken against the one Nominal Roll
+currently **active for attendance** (`NominalRoll.attendance_active`), with
+the NR's 1:1 Tagging overlay always applied.
 
 ```
-AttendanceScope (1:1 with NR)
-├── id: UUID (PK)
-├── nominal_roll_id: UUID (FK NominalRoll, UNIQUE — one row per NR)
-├── tagging_id: UUID (FK Tagging, nullable; null → the NR itself is the scope)
-├── activated_at: datetime
-└── activated_by: UUID (FK User)
-
 Attendance (one row per personnel/day)
 ├── id: UUID (PK)
 ├── personnel_id: UUID (FK Personnel, on_delete=CASCADE)
 ├── nominal_roll_id: UUID (FK NominalRoll, on_delete=CASCADE)
-├── tagging_id: UUID (FK Tagging, nullable; snapshots the active scope at creation)
 ├── date: date
 ├── status_am / remarks_am: attendance_status enum + text
 ├── status_pm / remarks_pm: attendance_status enum + text
@@ -151,8 +158,19 @@ Attendance (one row per personnel/day)
 
 **Constraints:**
 - UNIQUE(personnel_id, date) — one attendance row per person per day
-- Attendance writes are refused (400) until the NR's scope is activated
-- A Tagging linked to any attendance row, or set as an NR's active scope, cannot be deleted (409)
+- Attendance writes (upsert / copy-remarks) are refused (400) unless the
+  target NR is the one active for attendance
+- A Tagging whose NR has any attendance rows cannot be deleted (409) —
+  deleting would orphan the recorded history
+- **Attendance is always taken against a Nominal Roll** (with its Tagging
+  applied) — never against a Grouping. Groupings are a separate feature and
+  play no part in attendance access or scoping. The user-facing marking view
+  (`/attendance`) defaults to the active NR and shows the tagging-overlaid
+  roster — Unit, Sub-unit 1, Sub-unit 2, and Sub-unit 3 columns all display
+  effective (overlay) values, and tagged rows are highlighted; with no
+  active NR it shows an inactive message instead of the marking table. Write
+  access is gated per-NR by `UserSubunitAssignment` on the effective
+  `sub_unit_1`.
 
 **"Copy Remarks" semantics (issue #4 Q3):**
 - Before 12pm: copy previous day's `remarks_pm` → today's `remarks_am`
@@ -311,17 +329,22 @@ Deferment
   scoping to be tightened in a later phase.
 - See §4.6 for the callup_status transition rule driven by `status` changes.
 
-### 3.4 Tagging Overlay
+### 3.4 Tagging Overlay (1:1 with Nominal Roll)
 
 #### 3.4.1 Tagging
 
-**A named overlay of person → subunit remappings on a single nominal roll.**
+**The single overlay of person → subunit remappings on a Nominal Roll — strictly 1:1.**
+
+CSV-sourced NRs are read-only: all unit/subunit edits land on the NR's
+Tagging as TaggingEntry rows. A Tagging is auto-created (empty) on NR
+ingestion; downstream views overlay `to_*` values on top of the canonical
+personnel rows.
 
 ```
 Tagging
 ├── id: UUID (PK)
-├── label: str (globally unique; user-specified)
-├── nominal_roll_id: UUID (FK NominalRoll, on_delete=CASCADE)
+├── label: str (nullable; informational — the NR identity is the natural key)
+├── nominal_roll_id: UUID (FK NominalRoll, on_delete=CASCADE; UNIQUE — 1:1)
 ├── remarks: text (nullable)
 ├── created_at: datetime
 ├── created_by: UUID (FK User)
@@ -330,13 +353,14 @@ Tagging
 ```
 
 **Constraints:**
-- `label` is **globally unique** (server-enforced — 409 on duplicate).
-- Linked to exactly one NominalRoll; deleting the NR cascades to its taggings.
+- UNIQUE(nominal_roll_id) — exactly one tagging per NR (server-enforced).
+- `label` is optional and no longer globally unique.
+- Deleting the NR cascades to its tagging.
 - Visible to **super_admin only** (admin role gets 403).
 - **Overlay semantics:** creating, editing, or deleting a Tagging must not
   mutate the underlying NR's personnel or their canonical subunit. Downstream
-  consumers (attendance / groupings, issues #4/#5) read the remapped structure
-  from the tagging without modifying the NR.
+  consumers (attendance / groupings / the NR browser) read the remapped
+  structure from the tagging without modifying the NR.
 
 #### 3.4.2 TaggingEntry
 
@@ -365,23 +389,37 @@ TaggingEntry
 - `from_*` is optional. When omitted at create/edit time, the server
   snapshots the linked personnel's canonical subunit (mirrors Deferment's
   `rank_name`/`sub_unit` snapshot pattern).
-- On clone, `from_*` is re-snapshotted from the **target NR** personnel (the
-  source NR's subunit layout may differ).
+- On merge/import, `from_*` is re-snapshotted from the **target NR** personnel
+  (the source NR's subunit layout may differ).
 
-#### 3.4.3 Clone Semantics
+#### 3.4.3 Merge Semantics (clone endpoint)
 
-`POST /api/v1/taggings/{id}/clone` clones a tagging to a different NR:
+`POST /api/v1/taggings/{id}/clone` merges the source tagging's entries into
+the target NR's **existing** tagging (under 1:1 the target always has one):
 
 - For each source TaggingEntry, look up the target-NR Personnel row by
   `Personnel.short_id` (the cross-roll person identifier — `Personnel.id` is
   per-roll and will not match across NRs).
-- Matched: a new TaggingEntry is created on the target NR pointing at the
-  target-NR personnel row, preserving the source's `to_*` and re-snapshotting
-  `from_*` from the target personnel.
+- Matched: a new TaggingEntry is appended to the target tagging pointing at
+  the target-NR personnel row, preserving the source's `to_*` and
+  re-snapshotting `from_*` from the target personnel.
+- Personnel already on the target tagging are **skipped** (no clobber).
 - Unmatched (source `short_id` not present on target NR): skipped and
   surfaced in the response as `{short_id, name}`.
 - Target NR must differ from the source NR (400 otherwise).
-- Always creates a new tagging; up to the user to delete the old one.
+
+#### 3.4.4 Read-Only NR + PATCH Redirect
+
+The NR personnel row is immutable for unit/subunit fields:
+
+- `PATCH /api/v1/personnel/{id}` with `unit`/`sub_unit_1/2/3` upserts a
+  TaggingEntry on the personnel's NR tagging (existing entry values are
+  merged — unmentioned fields preserved). The personnel row is not mutated.
+- `PATCH` with identity fields (`rank`, `name`) → 409 (NR is read-only).
+- `PATCH` with `status` alone → still mutates the personnel row.
+- The response returns **effective** values (`to_*` if tagged, else canonical).
+- The public NR browser (`/nominal-roll`) shows effective values with a
+  yellow row background (`.changed-row`) for tagged personnel.
 
 ### 3.5 Attendance Tracking
 
@@ -394,7 +432,6 @@ Attendance
 ├── id: UUID (PK)
 ├── personnel_id: UUID (FK Personnel, on_delete=CASCADE)
 ├── nominal_roll_id: UUID (FK NominalRoll, on_delete=CASCADE)
-├── tagging_id: UUID (FK Tagging, nullable; snapshots the active scope)
 ├── date: date
 ├── status_am / remarks_am: attendance_status enum + text (default 'absent')
 ├── status_pm / remarks_pm: attendance_status enum + text (default 'absent')
@@ -409,7 +446,7 @@ Attendance
 
 **Constraints:**
 - UNIQUE(personnel_id, date) — one row per person per day
-- Writes are refused (400) until the NR's `AttendanceScope` is activated
+- Writes are refused (400) unless the NR is the one active for attendance
 - AM/PM slots are counted independently toward attendance-rate totals
 
 ---
@@ -461,23 +498,29 @@ Grouping created (draft)
 
 > **Removed in issue #4:** the user-managed Session model (open/closed/finalized).
 > AM and PM are now hardcoded. The `/api/v1/sessions/*` routes return 410 Gone.
+>
+> **Removed in the active-NR model:** the per-NR `AttendanceScope` table and
+> the NR confirm/unconfirm workflow. Exactly one NR is active for attendance
+> at a time; attendance is taken against it with its 1:1 tagging applied.
 
-**Activation gate** — Attendance writes are refused (HTTP 400) until a
-super-admin activates the NR's `AttendanceScope`. The scope is either the NR
-itself (`tagging_id = null`) or a Tagging overlay on it. The active scope is
-shown at the top of the attendance view. There is exactly one active scope per
-NR.
+**Activation gate** — Attendance writes are refused (HTTP 400) unless the
+target NR is the one currently active for attendance. A super-admin toggles
+this on the admin Nominal Rolls page (or via
+`POST /api/v1/nominal-rolls/{id}/activate-attendance` /
+`deactivate-attendance`); activating another NR auto-switches activity.
+Deactivating leaves attendance inactive — the user-facing `/attendance` view
+then shows an inactive message instead of the marking table.
 
-**Attendance editability** — Once the scope is activated, attendance rows can
+**Attendance editability** — With the NR active, attendance rows can
 be created and updated (upsert semantics on `(personnel_id, date)`).
 Retroactive edits (target date in the past) set `is_retroactive_edit = true`.
 
 **Subunit-1 access (issue #4 PR 2)** — Attendance writes are gated per NR by
 the caller's `UserSubunitAssignment` rows. A user may only upsert attendance
 for personnel whose **effective** `sub_unit_1` matches one of their
-assignments on that NR. The effective `sub_unit_1` is the active Tagging
-overlay's `to_sub_unit_1` when a tagging is the active scope (taggings are
-"remappings already in use"), falling back to the personnel's canonical
+assignments on that NR. The effective `sub_unit_1` is the NR's 1:1 Tagging
+overlay's `to_sub_unit_1` when an entry exists for that person (taggings are
+"remappings already applied"), falling back to the personnel's canonical
 `sub_unit_1`. `super_admin` bypasses entirely. **Deny-by-default**: a user
 with no assignments on an NR has no attendance-write access there (HTTP 403,
 listing the offending sub_unit_1s). `copy-remarks` only affects personnel in
@@ -528,22 +571,28 @@ Auto-match headers against ColumnMapping
   ↓
 Check CAA uniqueness
   ├─ CAA new → proceed
-  └─ CAA exists (confirmed Nominal Roll) → prompt admin for replacement
+  └─ CAA exists (existing Nominal Roll) → prompt admin for replacement
       ├─ Admin rejects → stop
       └─ Admin confirms replacement
           → Archive prior Nominal Roll+related entities
           → Proceed with new Nominal Roll
   ↓
-Compute diff (current CSV vs prior confirmed CSV)
+Compute diff (current CSV vs prior CSV)
   ↓
 [Admin reviews & confirms diff]
   ↓
 [CsvUpload.status = 'diff_confirmed']
   ↓
-Populate NominalRoll.status = 'confirmed'
+[Admin processes the upload into a Nominal Roll ("Process into Nominal Roll"
+ in the admin CSV upload view)]
+  ↓
+Create NominalRoll (CAA parsed from the filename, e.g. caaYYMMDD; no status
+workflow — every NR is equal)
 Populate Personnel records (callup_status defaults to 'Called Up')
-Auto-create initial Grouping (status=draft)
-Transfer notes from prior grouping (by Personnel.id match)
+Persist ColumnMetadata for the source columns
+Auto-create the NR's empty 1:1 Tagging
+Optionally import taggings from another NR (chosen by the admin; entries
+copied across by `short_id` match, no-clobber)
 ```
 
 ### 4.6 Deferment Callup-Status Transition
@@ -572,11 +621,10 @@ callup transitions.
 | User | (email) | (email) | Login |
 | User | - | (access_level_id) | Access lookup |
 | AccessLevel | (name), (level_order) | - | Vocab uniqueness |
-| Nominal Roll | (caa) among non-archived | (caa) | CAA uniqueness |
+| Nominal Roll | (caa) | (caa) | CAA uniqueness; application-level: only one `attendance_active` |
 | ColumnMapping | (canonical_name) among non-deprecated | (canonical_name) | Mapping uniqueness |
 | Grouping | Application-level: only one active | (status) | Active grouping enforcement |
 | UserSubunitScope | (user_id, grouping_id, unit, sub_unit_1-3) | (user_id, grouping_id) | Scope lookup |
-| AttendanceScope | (nominal_roll_id) | (nominal_roll_id) | One active scope per NR |
 | Attendance | (personnel_id, date) | (personnel_id, date) | One row per person per day |
 | UserSubunitAssignment | (user_id, nominal_roll_id, sub_unit_1) | (user_id, nominal_roll_id, sub_unit_1) | One grant per user/NR/subunit |
 | Personnel | — | (callup_status) | Callup status filter |

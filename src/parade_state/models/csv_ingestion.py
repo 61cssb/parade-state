@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    Boolean,
     Date,
     Enum,
     ForeignKey,
@@ -20,30 +21,34 @@ from ..db import Base
 
 if TYPE_CHECKING:
     from .access import AccessLevel, UserSubunitAssignment
-    from .attendance import AttendanceScope
     from .grouping import Grouping
     from .personnel import Personnel
     from .tagging import Tagging
 
 
 class NominalRoll(Base):
-    """Base personnel roster, sourced from CSV, pinned by CAA date."""
+    """Base personnel roster, sourced from CSV, pinned by CAA date.
+
+    Exactly one NR is "active for attendance" at a time
+    (``attendance_active``; application-enforced on activate). Attendance
+    writes are only permitted against the active NR, always with its 1:1
+    tagging applied.
+    """
 
     __tablename__ = "nominal_rolls"
 
     caa: Mapped[utc_dt.date] = mapped_column(Date, unique=True, index=True)
     csv_hash: Mapped[str] = mapped_column(String(64), index=True)
-    status: Mapped[str] = mapped_column(
-        Enum("draft", "confirmed", "archived", name="nominal_roll_status"),
-        default="draft",
+    attendance_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    attendance_activated_at: Mapped[utc_dt.datetime | None] = mapped_column(
+        nullable=True
+    )
+    attendance_activated_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True
     )
     personnel_count: Mapped[int] = mapped_column(Integer, default=0)
     uploaded_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     uploaded_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
-    confirmed_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True)
-    confirmed_by: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("users.id"), nullable=True
-    )
     created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     label: Mapped[str | None] = mapped_column(
@@ -64,10 +69,7 @@ class NominalRoll(Base):
     groupings: Mapped[list["Grouping"]] = relationship(
         back_populates="nominal_roll", cascade="all, delete-orphan"
     )
-    taggings: Mapped[list["Tagging"]] = relationship(
-        back_populates="nominal_roll", cascade="all, delete-orphan"
-    )
-    attendance_scope: Mapped["AttendanceScope | None"] = relationship(
+    tagging: Mapped["Tagging | None"] = relationship(
         back_populates="nominal_roll", cascade="all, delete-orphan", uselist=False
     )
     subunit_assignments: Mapped[list["UserSubunitAssignment"]] = relationship(
@@ -75,7 +77,10 @@ class NominalRoll(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<NominalRoll(caa={self.caa!r}, status={self.status!r}, label={self.label!r})>"
+        return (
+            f"<NominalRoll(caa={self.caa!r}, "
+            f"attendance_active={self.attendance_active!r}, label={self.label!r})>"
+        )
 
 
 class CsvUpload(Base):
@@ -107,7 +112,7 @@ class CsvUpload(Base):
     )
 
     # Relationships
-    nominal_roll: Mapped[NominalRoll | None] = relationship(back_populates="csv_uploads")
+    nominal_roll: Mapped["NominalRoll | None"] = relationship(back_populates="csv_uploads")
 
     def __repr__(self) -> str:
         return f"<CsvUpload(hash={self.sha256_hash[:8]}..., status={self.status!r})>"
@@ -179,7 +184,7 @@ class ColumnMetadata(Base):
     updated_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
 
     # Relationships
-    nominal_roll: Mapped[NominalRoll] = relationship(back_populates="column_metadata")
+    nominal_roll: Mapped["NominalRoll"] = relationship(back_populates="column_metadata")
     sensitivity_level: Mapped["AccessLevel"] = relationship(
         back_populates="column_metadata"
     )

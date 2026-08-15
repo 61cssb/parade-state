@@ -101,11 +101,77 @@
 - [x] Action badges colored by type (red=delete, green=create, yellow=update, purple=archive, blue=close, pink=finalize) — ready for Phase 9C-3 operations
 
 #### Deferred CSV Pipeline Steps (Future Sessions)
-- **Step 2:** Column mapping UI (map raw CSV columns to canonical names)
+- **Step 2:** Column mapping UI (map raw CSV columns to canonical names) — the current
+  process endpoint uses the fixed canonical map from the WY2627 ICT fixture
+  (`parade_state.utils.csv_constants`); generalizing to arbitrary fixtures is future work
 - **Step 3:** Diff confirmation (compare new upload vs current active Nominal Roll)
-- ColumnMetadata record creation
-- Nominal Roll creation from CSV data
-- Personnel record generation from mapped CSV rows
+- ~~ColumnMetadata record creation~~ ✅ (created by `POST /api/v1/csv/{id}/process`)
+- ~~Nominal Roll creation from CSV data~~ ✅ (`POST /api/v1/csv/{id}/process`)
+- ~~Personnel record generation from mapped CSV rows~~ ✅ (same endpoint)
+
+### Phase 9X: Tagging 1:1 Model Simplification — COMPLETED (2026-08-14)
+
+**Goal:** Every NominalRoll has exactly one Tagging. CSV-sourced NRs are
+read-only; unit/subunit edits land on the Tagging overlay.
+
+**Completed:**
+- [x] Migration `m3b4c5d6e7f8`: dedup safety → backfill empty taggings → drop global
+  label uniqueness → `UNIQUE(nominal_roll_id)` (1:1, mirrors `AttendanceScope`)
+- [x] `Tagging.label` now optional/informational; NR identity is the natural key
+- [x] `PATCH /api/v1/personnel/{id}` redirects unit/subunit edits to a TaggingEntry
+  upsert (merge semantics); identity fields (rank/name) → 409; response returns
+  effective (`to_*`-overlaid) values
+- [x] `POST /api/v1/csv/{upload_id}/process` — app-side CSV→NR pipeline (NR +
+  Personnel + ColumnMetadata + auto-tagging), with optional "import taggings from
+  another NR" via short_id matching (reuses the extracted
+  `copy_entries_by_short_id` helper)
+- [x] Clone endpoint repurposed to merge-into-target-tagging (no new tagging;
+  skips existing entries)
+- [x] Admin Taggings page → entries-only view (from→to, yellow rows) with
+  edit/import-from-NR modals; create/clone modals removed
+- [x] CSV upload page → Step 2 "Process into Nominal Roll" form with the
+  import-taggings dropdown
+- [x] Public NR browser overlays effective unit/subunit; tagged rows render
+  yellow (`.changed-row`)
+- [x] Canonical CSV column map lifted into `parade_state.utils.csv_constants`
+  (shared by `experiments/csv_to_nr/ingest.py` and the process endpoint)
+- [x] Demo ingest (`ingest.py`) auto-creates the empty tagging per run
+
+### Phase 9Y: Active-NR Attendance Model — COMPLETED (2026-08-14)
+
+**Goal:** Replace the per-NR AttendanceScope activation and the NR
+confirm/unconfirm workflow with a single system-wide "active for attendance"
+Nominal Roll.
+
+**Completed:**
+- [x] Migration `n4c5d6e7f8a9`: `nominal_rolls.attendance_active/_activated_at/
+  _activated_by` added (backfilled from the most recently activated scope
+  row); `attendance_scope` table dropped; `attendance.tagging_id` dropped
+  (derivable from `nominal_roll_id` under 1:1); NR `status`/`confirmed_at`/
+  `confirmed_by` dropped
+- [x] `POST /nominal-rolls/{id}/activate-attendance` (auto-switches; stamps
+  at/by) and `deactivate-attendance` (keeps stamp as history); super-admin
+  only; audit logged
+- [x] Attendance writes gated to the active NR only (400 otherwise); the NR's
+  1:1 tagging is always applied (no more NR-vs-tagging scope choice)
+- [x] Admin Nominal Rolls page: active row highlighted (green) + badge;
+  "Use for Attendance" / "Deactivate Attendance" buttons; status column,
+  filter and Confirm/Unconfirm removed; "Create Grouping" on every row
+  (groupings no longer require a confirmed NR)
+- [x] Admin attendance page: scope-activation control removed; editing
+  enabled only for the active NR
+- [x] User `/attendance`: defaults to the active NR; shows an inactive
+  message instead of the marking table when no NR is active
+- [x] Tagging delete guard: 409 when the tagging's NR has attendance rows
+- [x] NR browsers drop status labels; default to the active NR
+- [x] Follow-up: `/admin/attendance` page removed (duplicated `/attendance`);
+  Copy Remarks moved to `/attendance` (super-admin-only) and the
+  effective-aware sub-unit-1 filter ported over
+- [x] Follow-up: remap editing via comboboxes — super-admin click-to-edit
+  cells in the NR browser (PATCH → tagging overlay; custom suggestion panel
+  anchored under the cell, with a "leave blank" pick for sub-units 2/3) and
+  free-typable datalist inputs in the Taggings modal (targets may be values
+  not yet on the NR)
 
 ### Phase 9C-3: Grouping + Session Management — COMPLETED
 

@@ -236,6 +236,109 @@ async def _load_tagging_or_404(
     return tagging
 
 
+async def _load_nr_tagging(
+    db: AsyncSession, nominal_roll_id: str, *, with_entries: bool = True
+) -> Tagging | None:
+    """Fetch the 1:1 tagging for ``nominal_roll_id`` (or None)."""
+    stmt = select(Tagging).where(Tagging.nominal_roll_id == nominal_roll_id)
+    if with_entries:
+        stmt = stmt.options(selectinload(Tagging.entries))
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def copy_entries_by_short_id(
+    db: AsyncSession,
+    source_tagging: Tagging,
+    target_tagging: Tagging,
+    target_nominal_roll_id: str,
+) -> tuple[int, list[TaggingCloneUnmatchedItem]]:
+    """Copy ``source_tagging.entries`` into ``target_tagging`` by ``short_id``.
+
+    Used by the clone endpoint and the CSV-process "import taggings" flow.
+    Matches each source entry's personnel ``short_id`` against target-NR
+    personnel. Matched personnel get a new entry on the target tagging
+    pointing at the target-NR personnel row; ``from_*`` is re-snapshotted
+    from the target personnel. Personnel that already have an entry on the
+    target tagging are skipped (no clobber). Source personnel with no
+    ``short_id`` match in the target NR are surfaced in the return value.
+
+    Returns ``(matched_count, unmatched)``.
+    """
+    source_entries = list(source_tagging.entries)
+    if not source_entries:
+        return 0, []
+
+    # Load source personnel rows (for short_id lookup + naming unmatched).
+    source_personnel = await _load_personnel_map(
+        db, [e.personnel_id for e in source_entries]
+    )
+    entry_short_ids: list[str | None] = [
+        source_personnel[e.personnel_id].short_id
+        if e.personnel_id in source_personnel
+        else None
+        for e in source_entries
+    ]
+
+    # Load target-NR personnel keyed by short_id.
+    valid_short_ids = [sid for sid in entry_short_ids if sid]
+    target_lookup: dict[str, Personnel] = {}
+    if valid_short_ids:
+        target_rows = (
+            await db.execute(
+                select(Personnel).where(
+                    Personnel.nominal_roll_id == target_nominal_roll_id,
+                    Personnel.short_id.in_(valid_short_ids),
+                )
+            )
+        ).scalars().all()
+        target_lookup = {p.short_id: p for p in target_rows}
+
+    # Load personnel_ids already on the target tagging (skip to avoid clobber).
+    existing_target_personnel_ids = {
+        e.personnel_id for e in target_tagging.entries
+    }
+
+    matched_count = 0
+    unmatched: list[TaggingCloneUnmatchedItem] = []
+    for entry, short_id in zip(source_entries, entry_short_ids, strict=True):
+        target_person = target_lookup.get(short_id) if short_id else None
+        if target_person is None:
+            source_p = source_personnel.get(entry.personnel_id)
+            unmatched.append(
+                TaggingCloneUnmatchedItem(
+                    short_id=short_id or "",
+                    name=(
+                        f"{source_p.rank} {source_p.full_name}".strip()
+                        if source_p
+                        else None
+                    ),
+                )
+            )
+            continue
+        if target_person.id in existing_target_personnel_ids:
+            # Target tagging already has an entry for this person — skip.
+            continue
+
+        target_snapshot = _snapshot_from_personnel(target_person)
+        target_tagging.entries.append(
+            TaggingEntry(
+                personnel_id=target_person.id,
+                from_unit=target_snapshot["from_unit"],
+                from_sub_unit_1=target_snapshot["from_sub_unit_1"],
+                from_sub_unit_2=target_snapshot["from_sub_unit_2"],
+                from_sub_unit_3=target_snapshot["from_sub_unit_3"],
+                to_unit=entry.to_unit,
+                to_sub_unit_1=entry.to_sub_unit_1,
+                to_sub_unit_2=entry.to_sub_unit_2,
+                to_sub_unit_3=entry.to_sub_unit_3,
+            )
+        )
+        existing_target_personnel_ids.add(target_person.id)
+        matched_count += 1
+
+    return matched_count, unmatched
+
+
 # ============================================================================
 # Endpoints
 # ============================================================================
@@ -302,7 +405,12 @@ async def create_tagging(
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ) -> TaggingResponse:
-    """Create a tagging with optional initial entries."""
+    """Create a tagging with optional initial entries.
+
+    Under the 1:1 model taggings are auto-created on NR ingestion — this
+    endpoint exists to backfill NRs that predate the auto-creation flow.
+    A 409 is returned if the NR already has a tagging.
+    """
     _require_super_admin(user_role)
 
     # Validate NR exists.
@@ -317,12 +425,22 @@ async def create_tagging(
             detail=f"Nominal roll not found: {payload.nominal_roll_id}",
         )
 
+    existing = await _load_nr_tagging(db, payload.nominal_roll_id, with_entries=False)
+    if existing is not None:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                "Nominal roll already has a tagging (1:1). "
+                "Use PATCH /taggings/{id} to update it."
+            ),
+        )
+
     entry_payloads, _ = await _validate_entries_for_nr(
         db, payload.nominal_roll_id, payload.entries
     )
 
     tagging = Tagging(
-        label=payload.label.strip(),
+        label=payload.label.strip() if payload.label is not None else None,
         nominal_roll_id=payload.nominal_roll_id,
         remarks=payload.remarks,
         created_by=user_id,
@@ -335,14 +453,9 @@ async def create_tagging(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        detail_msg = (
-            f"A tagging with label '{payload.label}' already exists."
-            if "label" in str(exc).lower() or "unique" in str(exc).lower()
-            else "Tagging could not be created (constraint violation)."
-        )
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
-            detail=detail_msg,
+            detail="Tagging could not be created (constraint violation).",
         ) from exc
 
     # Re-fetch with entries eager-loaded (avoid lazy-load outside async ctx).
@@ -404,11 +517,7 @@ async def update_tagging(
         await db.rollback()
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
-            detail=(
-                f"A tagging with label '{payload.label}' already exists."
-                if payload.label is not None
-                else "Tagging could not be updated (constraint violation)."
-            ),
+            detail="Tagging could not be updated (constraint violation).",
         ) from exc
 
     # Re-fetch with entries eager-loaded (avoid lazy-load outside async ctx).
@@ -426,44 +535,28 @@ async def delete_tagging(
 ) -> dict:
     """Delete a tagging. Cascades to entries. Does not mutate the NR.
 
-    Refuses (409) if the tagging is linked to any attendance rows or is the
-    active attendance scope for its NR — callers must clone + re-activate
-    instead (per issue #4 Q5).
+    Refuses (409) if the tagging's NR has any attendance rows — deleting
+    would orphan the recorded history (per issue #4 Q5; under the 1:1 model
+    the NR's attendance rows are the linkage).
     """
     _require_super_admin(user_role)
     tagging = await _load_tagging_or_404(db, tagging_id, with_entries=False)
 
-    from parade_state.models import Attendance, AttendanceScope
+    from parade_state.models import Attendance
 
     linked_attendance = (
         await db.execute(
             select(func.count())
             .select_from(Attendance)
-            .where(Attendance.tagging_id == tagging_id)
+            .where(Attendance.nominal_roll_id == tagging.nominal_roll_id)
         )
     ).scalar_one()
     if linked_attendance:
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail=(
-                f"Tagging is linked to {linked_attendance} attendance row(s). "
-                "Remove the linkage or clone the tagging instead."
-            ),
-        )
-
-    linked_scope = (
-        await db.execute(
-            select(func.count())
-            .select_from(AttendanceScope)
-            .where(AttendanceScope.tagging_id == tagging_id)
-        )
-    ).scalar_one()
-    if linked_scope:
-        raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT,
-            detail=(
-                "Tagging is the active attendance scope for its nominal roll. "
-                "Re-activate a different scope before deleting."
+                f"The tagging's nominal roll has {linked_attendance} "
+                "attendance row(s). Deleting would orphan that history."
             ),
         )
 
@@ -480,18 +573,19 @@ async def clone_tagging(
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ) -> TaggingCloneResponse:
-    """Clone a tagging to a different nominal roll.
+    """Merge source tagging's entries into a target NR's existing tagging.
 
-    For each source entry, look up the target-NR Personnel row by
-    ``short_id`` (the cross-roll person identifier). Matched personnel get a
-    new entry on the target NR pointing at the target-NR personnel row;
-    unmatched source personnel are surfaced in the response.
+    Under the 1:1 model every NR already has a tagging, so "clone" no longer
+    creates a new tagging — it merges the source's entries into the target
+    NR's tagging by ``short_id`` matching. Personnel already on the target
+    tagging are skipped (no clobber); source personnel with no short_id
+    match in the target NR are surfaced in the response.
     """
     _require_super_admin(user_role)
 
     source = await _load_tagging_or_404(db, tagging_id, with_entries=True)
 
-    # Validate target NR exists and is distinct.
+    # Validate target NR exists and is distinct from the source.
     target_nr = (
         await db.execute(
             select(NominalRoll).where(
@@ -510,111 +604,45 @@ async def clone_tagging(
             detail="Target nominal roll must differ from the source nominal roll.",
         )
 
-    # Check label uniqueness up-front for a cleaner error than IntegrityError.
-    existing = (
-        await db.execute(
-            select(Tagging.id).where(Tagging.label == payload.label.strip())
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
+    # Load the target NR's existing tagging (auto-created on ingest; if
+    # missing, treat that as a 404 — the NR predates auto-creation and
+    # needs its tagging backfilled via POST /taggings first).
+    target_tagging = await _load_nr_tagging(db, target_nr.id, with_entries=True)
+    if target_tagging is None:
         raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT,
-            detail=f"A tagging with label '{payload.label}' already exists.",
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Target nominal roll {target_nr.id} has no tagging. "
+                "Create one via POST /taggings first."
+            ),
         )
 
-    # Collect source entries and their personnel rows (for short_id lookup
-    # and for naming unmatched personnel in the response).
-    source_entries = list(source.entries)
-    source_personnel_rows_by_id: dict[str, Personnel] = {}
-    if source_entries:
-        source_personnel_rows_by_id = await _load_personnel_map(
-            db, [e.personnel_id for e in source_entries]
-        )
-
-    # Build the map of source_entry → short_id (for matching).
-    entry_short_ids: list[str | None] = []
-    for entry in source_entries:
-        p = source_personnel_rows_by_id.get(entry.personnel_id)
-        entry_short_ids.append(p.short_id if p else None)
-
-    # Load target-NR personnel by short_id.
-    target_lookup: dict[str, Personnel] = {}
-    if entry_short_ids:
-        target_rows = (
-            await db.execute(
-                select(Personnel).where(
-                    Personnel.nominal_roll_id == target_nr.id,
-                    Personnel.short_id.in_(
-                        [sid for sid in entry_short_ids if sid]
-                    ),
-                )
-            )
-        ).scalars().all()
-        target_lookup = {p.short_id: p for p in target_rows}
-
-    new_tagging = Tagging(
-        label=payload.label.strip(),
-        nominal_roll_id=target_nr.id,
-        remarks=source.remarks,
-        created_by=user_id,
+    source_count = len(source.entries)
+    matched_count, unmatched = await copy_entries_by_short_id(
+        db, source, target_tagging, target_nr.id
     )
 
-    matched_count = 0
-    unmatched: list[TaggingCloneUnmatchedItem] = []
-    for entry, short_id in zip(source_entries, entry_short_ids, strict=True):
-        target_person = target_lookup.get(short_id) if short_id else None
-        if target_person is None:
-            source_p = source_personnel_rows_by_id.get(entry.personnel_id)
-            unmatched.append(
-                TaggingCloneUnmatchedItem(
-                    short_id=short_id or "",
-                    name=(
-                        f"{source_p.rank} {source_p.full_name}".strip()
-                        if source_p
-                        else None
-                    ),
-                )
-            )
-            continue
+    if matched_count:
+        target_tagging.updated_at = utc_dt.ensure_naive(utc_dt.utcnow())
+        target_tagging.updated_by = user_id
 
-        # Re-snapshot from_* from the TARGET personnel (the source NR's
-        # from_* may differ from how the person sits on the target NR).
-        target_snapshot = _snapshot_from_personnel(target_person)
-        new_tagging.entries.append(
-            TaggingEntry(
-                personnel_id=target_person.id,
-                from_unit=target_snapshot["from_unit"],
-                from_sub_unit_1=target_snapshot["from_sub_unit_1"],
-                from_sub_unit_2=target_snapshot["from_sub_unit_2"],
-                from_sub_unit_3=target_snapshot["from_sub_unit_3"],
-                to_unit=entry.to_unit,
-                to_sub_unit_1=entry.to_sub_unit_1,
-                to_sub_unit_2=entry.to_sub_unit_2,
-                to_sub_unit_3=entry.to_sub_unit_3,
-            )
-        )
-        matched_count += 1
-
-    db.add(new_tagging)
     try:
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
-            detail=(
-                f"A tagging with label '{payload.label}' already exists."
-            ),
+            detail="Tagging merge failed (constraint violation).",
         ) from exc
 
     # Re-fetch with entries eager-loaded (avoid lazy-load outside async ctx).
-    new_tagging = await _load_tagging_or_404(
-        db, new_tagging.id, with_entries=True
+    target_tagging = await _load_tagging_or_404(
+        db, target_tagging.id, with_entries=True
     )
-    entries_resp = await _build_entries_response(db, new_tagging.entries)
+    entries_resp = await _build_entries_response(db, target_tagging.entries)
     return TaggingCloneResponse(
-        tagging=_tagging_to_response(new_tagging, entries_resp),
-        source_count=len(source_entries),
+        tagging=_tagging_to_response(target_tagging, entries_resp),
+        source_count=source_count,
         matched_count=matched_count,
         unmatched=unmatched,
     )

@@ -14,7 +14,10 @@ from parade_state.models import (
     GroupingPersonnelExclusion,
     GroupingPersonnelOverride,
     GroupingUserAccess,
+    NominalRoll,
     Personnel,
+    Tagging,
+    TaggingEntry,
 )
 from parade_state.models.schemas import (
     PersonnelAttendanceHistoryItem,
@@ -24,14 +27,137 @@ from parade_state.models.schemas import (
     PersonnelResponseWithGrouping,
     PersonnelUpdate,
 )
-from parade_state.utils import ranks, utc_dt
+from parade_state.utils import utc_dt
 
 router = APIRouter()
+
+
+# Fields in PersonnelUpdate that move with the person (identity). The NR is
+# read-only under the 1:1 tagging model — these cannot be edited via PATCH.
+_IDENTITY_FIELDS: frozenset[str] = frozenset({"rank", "name"})
+
+# Fields in PersonnelUpdate that represent a unit/subunit remap. These are
+# redirected to a TaggingEntry on the personnel's NR tagging.
+_REMAP_FIELDS: frozenset[str] = frozenset(
+    {"unit", "sub_unit_1", "sub_unit_2", "sub_unit_3"}
+)
 
 
 # ============================================================================
 # Helper Functions
 # ============================================================================
+
+
+# Maps PersonnelUpdate field names to TaggingEntry "to_*" columns.
+_REMAP_FIELD_TO_ENTRY_COLUMN: dict[str, str] = {
+    "unit": "to_unit",
+    "sub_unit_1": "to_sub_unit_1",
+    "sub_unit_2": "to_sub_unit_2",
+    "sub_unit_3": "to_sub_unit_3",
+}
+
+
+def _apply_remap_to_existing_entry(
+    entry: TaggingEntry, remap_updates: dict[str, str | None]
+) -> None:
+    """Merge ``remap_updates`` into an existing entry's ``to_*`` columns.
+
+    Only fields present in ``remap_updates`` are touched; existing values
+    for unmentioned fields are preserved. ``None`` clears the target field.
+    """
+    for field, column in _REMAP_FIELD_TO_ENTRY_COLUMN.items():
+        if field in remap_updates:
+            setattr(entry, column, remap_updates[field])
+
+
+async def _redirect_remap_to_tagging_entry(
+    db: AsyncSession,
+    personnel: Personnel,
+    remap_updates: dict[str, str | None],
+    user_id: str,
+) -> None:
+    """Upsert a TaggingEntry on the personnel's NR tagging for the given remap.
+
+    The NR is read-only — unit/subunit edits are recorded as a tagging entry
+    overlay. If an entry already exists for this person, the new remap fields
+    are merged into it (unmentioned fields preserved). If the NR has no
+    tagging yet (legacy data), one is auto-created.
+
+    ``to_unit`` is required on TaggingEntry; when the caller doesn't supply
+    a unit, the entry's existing ``to_unit`` (or the personnel's canonical
+    unit) is used as the starting point.
+    """
+    if not remap_updates:
+        return
+
+    # Load (or auto-create) the NR's 1:1 tagging.
+    tagging = (
+        await db.execute(
+            select(Tagging).where(Tagging.nominal_roll_id == personnel.nominal_roll_id)
+        )
+    ).scalar_one_or_none()
+    if tagging is None:
+        tagging = Tagging(
+            nominal_roll_id=personnel.nominal_roll_id,
+            created_by=user_id,
+        )
+        db.add(tagging)
+        await db.flush()
+
+    # Load existing entry for this person (if any).
+    entry = (
+        await db.execute(
+            select(TaggingEntry).where(
+                TaggingEntry.tagging_id == tagging.id,
+                TaggingEntry.personnel_id == personnel.id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if entry is None:
+        # Seed to_* from canonical personnel values, then apply requested updates.
+        to_unit = personnel.unit
+        to_sub_1 = personnel.sub_unit_1
+        to_sub_2 = personnel.sub_unit_2
+        to_sub_3 = personnel.sub_unit_3
+        if "unit" in remap_updates:
+            to_unit = remap_updates["unit"]
+        if "sub_unit_1" in remap_updates:
+            to_sub_1 = remap_updates["sub_unit_1"]
+        if "sub_unit_2" in remap_updates:
+            to_sub_2 = remap_updates["sub_unit_2"]
+        if "sub_unit_3" in remap_updates:
+            to_sub_3 = remap_updates["sub_unit_3"]
+
+        entry = TaggingEntry(
+            tagging_id=tagging.id,
+            personnel_id=personnel.id,
+            from_unit=personnel.unit,
+            from_sub_unit_1=personnel.sub_unit_1,
+            from_sub_unit_2=personnel.sub_unit_2,
+            from_sub_unit_3=personnel.sub_unit_3,
+            to_unit=to_unit,
+            to_sub_unit_1=to_sub_1,
+            to_sub_unit_2=to_sub_2,
+            to_sub_unit_3=to_sub_3,
+        )
+        db.add(entry)
+    else:
+        _apply_remap_to_existing_entry(entry, remap_updates)
+
+    tagging.updated_at = utc_dt.ensure_naive(utc_dt.utcnow())
+    tagging.updated_by = user_id
+
+
+async def _load_effective_remap_for_personnel(
+    db: AsyncSession, personnel: Personnel
+) -> TaggingEntry | None:
+    """Return the TaggingEntry overlaying this person, if any."""
+    return (
+        await db.execute(
+            select(TaggingEntry).where(TaggingEntry.personnel_id == personnel.id)
+        )
+    ).scalar_one_or_none()
 
 
 async def verify_grouping_access(
@@ -528,7 +654,12 @@ async def update_personnel(
 ):
     """Update personnel information.
 
-    Only admins and super admins can update personnel records.
+    Under the 1:1 tagging model the NominalRoll is read-only. Identity
+    fields (``rank``, ``name``) are rejected with 409. Unit/subunit edits
+    are recorded as a TaggingEntry overlay on the personnel's NR tagging.
+    ``status`` is still applied directly to the personnel row. Response
+    fields return the **effective** values (``to_*`` if tagged else
+    canonical).
     """
     # Check permissions
     if user_role not in ["admin", "super_admin"]:
@@ -537,109 +668,80 @@ async def update_personnel(
             detail="Only admins can update personnel records",
         )
 
+    update_data = personnel_update.model_dump(exclude_unset=True)
+
+    # Reject identity fields — the NR is read-only.
+    identity_present = _IDENTITY_FIELDS & update_data.keys()
+    if identity_present:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                "NominalRoll is read-only; identity fields cannot be edited: "
+                + ", ".join(sorted(identity_present))
+            ),
+        )
+
+    # Partition the remaining update into remap (-> tagging) vs status (-> personnel).
+    remap_updates = {
+        field: value
+        for field, value in update_data.items()
+        if field in _REMAP_FIELDS
+    }
+    status_update = update_data.get("status")
+
+    # Load the personnel (with optional grouping context for the response shape).
+    override = None
+    notes = None
     if grouping_id:
-        # Get personnel with grouping context
         personnel, override, notes = await get_personnel_by_id_with_grouping_context(
             personnel_id, grouping_id, user_id, user_role, db
         )
-
-        # Update personnel fields
-        update_data = personnel_update.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
-            if hasattr(personnel, field):
-                setattr(personnel, field, value)
-
-        # Category is always inferred from rank; recompute if rank changed.
-        if "rank" in update_data:
-            try:
-                personnel.category = ranks.category_for_rank(personnel.rank)
-            except ValueError as e:
-                raise HTTPException(
-                    status_code=http_status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid rank {personnel.rank!r}: cannot infer category",
-                ) from e
-
-        # Set audit trail fields
-        personnel.updated_at = utc_dt.utcnow()
-        personnel.updated_by = user_id
-
-        await db.commit()
-        await db.refresh(personnel)
-
-        return PersonnelResponseWithGrouping(
-            id=personnel.id,
-            nominal_roll_id=personnel.nominal_roll_id,
-            short_id=personnel.short_id,
-            rank=personnel.rank,
-            category=personnel.category,
-            name=personnel.full_name,
-            unit=personnel.unit,
-            sub_unit_1=personnel.sub_unit_1,
-            sub_unit_2=personnel.sub_unit_2,
-            sub_unit_3=personnel.sub_unit_3,
-            status=personnel.status,
-            created_at=personnel.created_at,
-            updated_at=personnel.updated_at,
-            created_by=personnel.created_by,
-            updated_by=personnel.updated_by,
-            grouping_id=grouping_id,
-            has_override=override is not None,
-            grouping_notes=notes.notes if notes else None,
-        )
     else:
-        # Update personnel without grouping context
-        result = await db.execute(select(Personnel).where(Personnel.id == personnel_id))
+        result = await db.execute(
+            select(Personnel).where(Personnel.id == personnel_id)
+        )
         personnel = result.scalar_one_or_none()
-
         if not personnel:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Personnel not found",
             )
 
-        # Update personnel fields
-        update_data = personnel_update.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
-            if hasattr(personnel, field):
-                setattr(personnel, field, value)
-
-        # Category is always inferred from rank; recompute if rank changed.
-        if "rank" in update_data:
-            try:
-                personnel.category = ranks.category_for_rank(personnel.rank)
-            except ValueError as e:
-                raise HTTPException(
-                    status_code=http_status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid rank {personnel.rank!r}: cannot infer category",
-                ) from e
-
-        # Set audit trail fields
+    # Apply status directly to the personnel row (still allowed).
+    if status_update is not None:
+        personnel.status = status_update
         personnel.updated_at = utc_dt.utcnow()
         personnel.updated_by = user_id
 
-        await db.commit()
-        await db.refresh(personnel)
+    # Redirect unit/subunit edits to the tagging entry overlay.
+    await _redirect_remap_to_tagging_entry(db, personnel, remap_updates, user_id)
 
-        return PersonnelResponseWithGrouping(
-            id=personnel.id,
-            nominal_roll_id=personnel.nominal_roll_id,
-            short_id=personnel.short_id,
-            rank=personnel.rank,
-            category=personnel.category,
-            name=personnel.full_name,
-            unit=personnel.unit,
-            sub_unit_1=personnel.sub_unit_1,
-            sub_unit_2=personnel.sub_unit_2,
-            sub_unit_3=personnel.sub_unit_3,
-            status=personnel.status,
-            created_at=personnel.created_at,
-            updated_at=personnel.updated_at,
-            created_by=personnel.created_by,
-            updated_by=personnel.updated_by,
-            grouping_id=None,
-            has_override=False,
-            grouping_notes=None,
-        )
+    await db.commit()
+    await db.refresh(personnel)
+
+    # Compute effective values for the response.
+    entry = await _load_effective_remap_for_personnel(db, personnel)
+
+    return PersonnelResponseWithGrouping(
+        id=personnel.id,
+        nominal_roll_id=personnel.nominal_roll_id,
+        short_id=personnel.short_id,
+        rank=personnel.rank,
+        category=personnel.category,
+        name=personnel.full_name,
+        unit=entry.to_unit if entry else personnel.unit,
+        sub_unit_1=entry.to_sub_unit_1 if entry else personnel.sub_unit_1,
+        sub_unit_2=entry.to_sub_unit_2 if entry else personnel.sub_unit_2,
+        sub_unit_3=entry.to_sub_unit_3 if entry else personnel.sub_unit_3,
+        status=personnel.status,
+        created_at=personnel.created_at,
+        updated_at=personnel.updated_at,
+        created_by=personnel.created_by,
+        updated_by=personnel.updated_by,
+        grouping_id=grouping_id,
+        has_override=override is not None,
+        grouping_notes=notes.notes if notes else None,
+    )
 
 
 @router.get(
@@ -720,7 +822,6 @@ async def get_personnel_attendance_history(
             PersonnelAttendanceHistoryItem(
                 id=record.id,
                 nominal_roll_id=record.nominal_roll_id,
-                tagging_id=record.tagging_id,
                 date=record.date,
                 status_am=record.status_am,
                 remarks_am=record.remarks_am,

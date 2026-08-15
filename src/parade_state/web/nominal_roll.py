@@ -13,7 +13,7 @@ from sqlalchemy import ColumnElement, func, or_, select
 
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
-from parade_state.models import NominalRoll, Personnel
+from parade_state.models import NominalRoll, Personnel, TaggingEntry
 
 router = APIRouter()
 
@@ -143,6 +143,8 @@ async def nominal_roll_view(
                 rolls=[], selected=None,
                 units=[], sub_unit_1_options=[], sub_unit_2_options=[],
                 rank_options=[],
+                edit_unit_options=[], edit_sub1_options=[],
+                edit_sub2_options=[], edit_sub3_options=[],
                 personnel=[], search=search or "",
                 unit=unit or "", sub_unit_1=sub_unit_1 or "",
                 sub_unit_2=sub_unit_2 or "", category=category or "",
@@ -150,7 +152,9 @@ async def nominal_roll_view(
                 total_count=0,
             )
 
-        # Resolve selected nominal roll (default to most recent)
+        # Resolve selected nominal roll (default to the one active for
+        # attendance, else most recent)
+        active_nr = next((r for r in all_rolls if r.attendance_active), None)
         selected = None
         if nominal_roll_id:
             for r in all_rolls:
@@ -158,11 +162,7 @@ async def nominal_roll_view(
                     selected = r
                     break
         if not selected:
-            # Prefer confirmed, then draft, else most recent
-            non_archived = [r for r in all_rolls if r.status != "archived"]
-            pool = non_archived if non_archived else all_rolls
-            confirmed = [r for r in pool if r.status == "confirmed"]
-            selected = confirmed[0] if confirmed else pool[0]
+            selected = active_nr or (all_rolls[0] if all_rolls else None)
 
         base = _base_conditions(str(selected.id))
         filters = _optional_conditions(
@@ -210,20 +210,44 @@ async def nominal_roll_view(
             ),
         )
 
-    personnel_data = [
-        {
-            "rank": p.rank,
-            "category": p.category,
-            "full_name": p.full_name,
-            "short_id": p.short_id,
-            "unit": p.unit,
-            "sub_unit_1": p.sub_unit_1,
-            "sub_unit_2": p.sub_unit_2,
-            "sub_unit_3": p.sub_unit_3,
-            "remarks": (p.extra_fields or {}).get("remarks"),
-        }
-        for p in personnel
-    ]
+        # Unscoped suggestion lists for the super-admin cell editor
+        # (datalist inputs also accept values not present on the NR).
+        edit_unit_options = units
+        edit_sub1_options = await _distinct_values(db, Personnel.sub_unit_1, base)
+        edit_sub2_options = await _distinct_values(db, Personnel.sub_unit_2, base)
+        edit_sub3_options = await _distinct_values(db, Personnel.sub_unit_3, base)
+
+        # Load the NR's 1:1 tagging entries (overlay). The entry map is
+        # keyed by personnel_id; each entry's ``to_*`` values override the
+        # personnel's canonical unit/subunit when computing effective values.
+        entry_rows = (
+            await db.execute(
+                select(TaggingEntry).where(
+                    TaggingEntry.personnel_id.in_([p.id for p in personnel])
+                )
+            )
+        ).scalars().all()
+        entry_by_personnel = {str(e.personnel_id): e for e in entry_rows}
+
+    personnel_data = []
+    for p in personnel:
+        entry = entry_by_personnel.get(str(p.id))
+        is_changed = entry is not None
+        personnel_data.append(
+            {
+                "id": str(p.id),
+                "rank": p.rank,
+                "category": p.category,
+                "full_name": p.full_name,
+                "short_id": p.short_id,
+                "unit": entry.to_unit if entry else p.unit,
+                "sub_unit_1": entry.to_sub_unit_1 if entry else p.sub_unit_1,
+                "sub_unit_2": entry.to_sub_unit_2 if entry else p.sub_unit_2,
+                "sub_unit_3": entry.to_sub_unit_3 if entry else p.sub_unit_3,
+                "remarks": (p.extra_fields or {}).get("remarks"),
+                "is_changed": is_changed,
+            }
+        )
 
     return _render(
         request, current_user,
@@ -231,7 +255,7 @@ async def nominal_roll_view(
             {
                 "id": str(r.id),
                 "caa": r.caa,
-                "status": r.status,
+                "attendance_active": bool(r.attendance_active),
                 "personnel_count": r.personnel_count,
             }
             for r in all_rolls
@@ -239,7 +263,7 @@ async def nominal_roll_view(
         selected={
             "id": str(selected.id),
             "caa": selected.caa,
-            "status": selected.status,
+            "attendance_active": bool(selected.attendance_active),
             "personnel_count": selected.personnel_count,
             "remarks": selected.remarks,
         },
@@ -247,6 +271,10 @@ async def nominal_roll_view(
         sub_unit_1_options=sub_unit_1_options,
         sub_unit_2_options=sub_unit_2_options,
         rank_options=rank_options,
+        edit_unit_options=edit_unit_options,
+        edit_sub1_options=edit_sub1_options,
+        edit_sub2_options=edit_sub2_options,
+        edit_sub3_options=edit_sub3_options,
         personnel=personnel_data,
         search=search or "",
         unit=unit or "",
@@ -268,6 +296,10 @@ def _render(
     sub_unit_1_options: list,
     sub_unit_2_options: list,
     rank_options: list,
+    edit_unit_options: list,
+    edit_sub1_options: list,
+    edit_sub2_options: list,
+    edit_sub3_options: list,
     personnel: list,
     search: str,
     unit: str,
@@ -299,6 +331,10 @@ def _render(
         sub_unit_1_options=sub_unit_1_options,
         sub_unit_2_options=sub_unit_2_options,
         rank_options=rank_options,
+        edit_unit_options=edit_unit_options,
+        edit_sub1_options=edit_sub1_options,
+        edit_sub2_options=edit_sub2_options,
+        edit_sub3_options=edit_sub3_options,
         personnel=personnel,
         search=search,
         unit=unit,

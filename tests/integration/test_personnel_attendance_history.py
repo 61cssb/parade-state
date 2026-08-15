@@ -51,7 +51,6 @@ async def test_history_basic_stats(
     for key in (
         "id",
         "nominal_roll_id",
-        "tagging_id",
         "date",
         "status_am",
         "remarks_am",

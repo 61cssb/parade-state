@@ -100,7 +100,7 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 - `tests/integration/test_deferments_api.py` - Deferment CRUD, callup_status transitions, super_admin auth (15 tests)
 - `tests/integration/test_groupings_api.py` - Grouping lifecycle, CRUD operations (18 tests)
 - `tests/integration/test_grouping_exclusions_api.py` - Personnel exclusion management (9 tests)
-- `tests/integration/test_nominal_rolls_api.py` - Nominal Roll lifecycle (confirm/unconfirm/delete, label updates) (18 tests)
+- `tests/integration/test_nominal_rolls_api.py` - Nominal Roll lifecycle (attendance activation auto-switch/deactivate, delete, label updates)
 - `tests/integration/test_personnel_api.py` - Personnel management, search, filtering (12 tests)
 - `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (NR/Tagging-scoped, AM/PM slots)
 - `tests/integration/test_sessions_410.py` - Sessions endpoints return 410 Gone (sessions removed in issue #4)
@@ -201,20 +201,24 @@ async def test_example(client, sample_users, sample_grouping):
 - Historical reporting views that depended on sessions are broken (see issue #4
   "Out of scope") and need separate consideration.
 
-**Attendance Management (✅ Reworked in issue #4 PR 1)**
-- NR/Tagging-scoped attendance: one `Attendance` row per `(personnel, date)`
-  carrying `status_am`/`remarks_am` and `status_pm`/`remarks_pm`.
-- Active-scope gating: a super-admin activates an `AttendanceScope` per NR
-  (NR itself or a Tagging) before attendance can be recorded.
+**Attendance Management (✅ Active-NR model)**
+- Attendance is taken against the one Nominal Roll currently **active for
+  attendance** (`NominalRoll.attendance_active`), with its 1:1 tagging
+  applied: one `Attendance` row per `(personnel, date)` carrying
+  `status_am`/`remarks_am` and `status_pm`/`remarks_pm`.
+- The per-NR `AttendanceScope` table and the NR confirm/unconfirm workflow
+  are **removed** (migration `n4c5d6e7f8a9`): super-admins toggle
+  "Use for Attendance" / "Deactivate Attendance" on the admin Nominal Rolls
+  page (`POST /api/v1/nominal-rolls/{id}/activate-attendance` /
+  `deactivate-attendance`); activating another NR auto-switches. With no
+  active NR the user view shows an inactive message and writes are refused.
 - Bulk upsert endpoint (`PUT /api/v1/attendance/upsert`) with snapshot capture.
 - "Copy Remarks" endpoint (`POST /api/v1/attendance/copy-remarks`): before 12pm
   copies previous day's `remarks_pm` → today's `remarks_am`; after 12pm copies
   today's `remarks_am` → `remarks_pm`.
-- Tagging delete guarded (409) when linked to attendance or set as active scope.
+- Tagging delete guarded (409) when its NR has attendance rows.
 - Attendance status enum: present, absent, time_off, mc, yet_to_inpro, outpro,
   reporting_sick, late, att_out (default: absent).
-- **Forthcoming (PR 3):** admin attendance page with scope-activation UI and
-  Copy Remarks button.
 
 **Subunit-1 Attendance Access (✅ Reworked in issue #4 PR 2)**
 - New `UserSubunitAssignment(user_id, nominal_roll_id, sub_unit_1)` model —
@@ -222,7 +226,7 @@ async def test_example(client, sample_users, sample_grouping):
 - Server-enforced 403 on `PUT /api/v1/attendance/upsert` and
   `POST /api/v1/attendance/copy-remarks` when the caller lacks an assignment
   for a target personnel's effective sub_unit_1. Effective sub_unit_1 follows
-  the active Tagging overlay's `to_sub_unit_1` (tagging-aware), falling back
+  the NR's tagging overlay's `to_sub_unit_1` (tagging-aware), falling back
   to the personnel's canonical `sub_unit_1`.
 - `super_admin` bypasses entirely; **deny-by-default** (no assignments = 403).
 - Super-admin CRUD API:
@@ -232,18 +236,34 @@ async def test_example(client, sample_users, sample_grouping):
   `GET .../users/{user_id}/subunit-assignments`.
 - Migration `k1f2a3b4c5d6`. 332 tests passing.
 
-**Attendance Admin UI (✅ Complete in issue #4 PR 3)**
-- New super-admin page at `/admin/attendance`: NR/date/subunit-1 selectors,
-  inline scope-activation control (NR or a Tagging on it), roster editor with
-  AM/PM status + remarks, and a Copy Remarks button (disabled on the NR's
-  first day). Nav link added under the super-admin section.
-- User-facing `/attendance` polished: roster is filtered to the caller's
-  assigned subunits (tagging-aware effective sub_unit_1; super_admin sees all),
-  Copy Remarks button wired up, active-scope banner shown.
-- Copy Remarks UX: before noon → previous day's PM remarks into today's AM;
-  after noon → today's AM into PM; client disables the AM copy on the NR's
-  first day (no prior attendance).
-- 336 tests passing.
+**Attendance UI (✅ Active-NR model)**
+- The separate super-admin `/admin/attendance` page is **removed** — it
+  duplicated `/attendance`. All marking happens on `/attendance`: NR + date +
+  effective sub-unit-1 filters, roster editor with AM/PM status + remarks.
+- User-facing `/attendance`: defaults to the active NR; roster is filtered to
+  the caller's assigned subunits (tagging-aware effective sub_unit_1;
+  super_admin sees all) and shows the tagging overlay (yellow rows). With no
+  active NR it shows an inactive message instead of the marking table.
+- **Copy Remarks** lives on `/attendance`, visible to **super-admins only**
+  (before noon → previous day's PM remarks into today's AM; after noon →
+  today's AM into PM; the AM copy is disabled on the NR's first day).
+- Admin Nominal Rolls page: the active-for-attendance row is highlighted
+  (green) with an "Active for attendance" badge; super-admins see
+  "Use for Attendance" (auto-switch) / "Deactivate Attendance" buttons. The
+  status column, filter, and Confirm/Unconfirm buttons are removed;
+  "Create Grouping" is available on every row.
+
+**Remap Editing (✅ comboboxes)**
+- Public NR browser: super-admins click a unit / sub-unit cell to remap it —
+  the cell becomes an input with a custom suggestion panel anchored under
+  the cell (the native datalist popup was replaced because its placement is
+  browser-controlled); pick an existing value or type a new one, Enter saves
+  via `PATCH /api/v1/personnel/{id}` (recorded on the tagging overlay; row
+  turns yellow on reload). Sub-unit 2/3 panels offer a "leave blank" pick
+  that clears the value. Regular users see the read-only table.
+- Taggings edit modal: the cascading to-unit/to-sub selects are replaced by
+  datalist inputs — remap targets may be values that don't exist on
+  the NR yet (e.g. standing up a new subunit).
 
 **Personnel Management (✅ Session 1 Complete)**
 - Grouping-based personnel listing with filtering
@@ -271,26 +291,39 @@ async def test_example(client, sample_users, sample_grouping):
 - **Endpoints:** 5 deferment endpoints under `/api/v1/deferments`
 - **Tests:** 15 behavioral tests
 
-**Taggings (✅ Super-admin MVP)**
-- Tagging overlay CRUD: a named overlay of person → subunit remappings on a
-  single Nominal Roll. Taggings never mutate the underlying NR's personnel
-  or subunit data — downstream views (attendance / groupings, issues #4/#5)
-  consume the remapped structure from here.
-- Two entities: `Tagging` (globally-unique label, NR FK CASCADE, audit fields)
-  and `TaggingEntry` (one remap per person per tagging; 4-string `from_*` /
-  `to_*` subunit tuple mirroring `GroupingPersonnelOverride`).
+**Taggings (✅ 1:1 with Nominal Roll — model simplification)**
+- Tagging overlay: **exactly one Tagging per Nominal Roll** (DB unique
+  constraint on `nominal_roll_id`, mirroring `AttendanceScope`). Auto-created
+  (empty) on NR ingestion; all unit/subunit edits land on the Tagging as
+  `TaggingEntry` rows — the NR itself is read-only.
+- Two entities: `Tagging` (optional informational label, NR FK CASCADE,
+  audit fields) and `TaggingEntry` (one remap per person per tagging;
+  4-string `from_*` / `to_*` subunit tuple mirroring
+  `GroupingPersonnelOverride`).
 - `from_*` auto-snapshotted from the linked personnel when omitted at
   create/edit time.
-- Clone-to-NR: `POST /api/v1/taggings/{id}/clone` matches source personnel
-  to target-NR rows by `Personnel.short_id` (the cross-roll person
-  identifier); unmatched source personnel are surfaced in the response.
-- Label uniqueness is server-enforced (409 on duplicate). Personnel must
-  belong to the parent tagging's NR (400 on cross-NR contamination).
-- Super-admin-only: API and admin UI enforce `role == "super_admin"`.
-- Admin UI under `/admin/taggings` (nav link gated by super_admin role) with
-  create/edit (per-person remap picker) and clone modals.
-- **Endpoints:** 6 tagging endpoints under `/api/v1/taggings`
-- **Tests:** 20 behavioral tests
+- `PATCH /api/v1/personnel/{id}` redirects unit/subunit edits to a
+  TaggingEntry upsert (merged with existing entry values); identity fields
+  (rank/name) are rejected with 409; `status` still mutates the personnel
+  row; the response returns effective (`to_*`-overlaid) values.
+- Merge-into-target: `POST /api/v1/taggings/{id}/clone` merges the source's
+  entries into the target NR's existing tagging by `Personnel.short_id`;
+  already-present personnel are skipped (no clobber); unmatched source
+  personnel are surfaced in the response.
+- `POST /api/v1/csv/{upload_id}/process` turns a stored CSV upload into a
+  full NR pipeline (NR + Personnel + ColumnMetadata + auto-tagging), with an
+  optional "import taggings from another NR" source.
+- The public NR browser (`/nominal-roll`) overlays effective unit/subunit
+  values with a yellow row background (`.changed-row`) for tagged personnel.
+- Personnel must belong to the parent tagging's NR (400 on cross-NR
+  contamination). Super-admin-only: API and admin UI enforce
+  `role == "super_admin"`.
+- Admin UI under `/admin/taggings` (nav link gated by super_admin role):
+  NR dropdown → entries-only view (from→to) with edit (per-person remap
+  picker) and import-from-NR modals.
+- **Endpoints:** 6 tagging endpoints under `/api/v1/taggings` + 1 CSV
+  process endpoint under `/api/v1/csv/{id}/process`
+- **Tests:** tagging (24) + personnel remap/409 + CSV process (7)
 
 **Total API Endpoints:** 63 fully implemented and tested endpoints ✨ UPDATED
 
