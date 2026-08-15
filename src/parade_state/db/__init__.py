@@ -1,6 +1,7 @@
 """Database configuration and session management."""
 
 from collections.abc import AsyncGenerator
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy import String
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -25,12 +26,61 @@ _engine = None
 _async_session_maker = None
 
 
+def normalize_database_url(database_url: str) -> str:
+    """Normalize a DATABASE_URL for the async SQLAlchemy engine.
+
+    Platform-provided Postgres URLs (Railway, Heroku) use the sync
+    ``postgresql://`` or ``postgres://`` scheme, but ``create_async_engine``
+    requires an explicit async driver. This translates such URLs to
+    ``postgresql+asyncpg://`` in one place so neither the application
+    lifespan nor the Alembic environment needs to care which form the
+    platform injects.
+
+    Query parameters are preserved. ``sslmode=`` (libpq spelling, used by
+    e.g. Railway's public connection URL) is translated to ``ssl=``
+    (asyncpg's connect argument spelling).
+
+    Args:
+        database_url: Raw database URL from the environment.
+
+    Returns:
+        URL usable by ``create_async_engine`` / Alembic's async engine.
+
+    Example:
+        ```python
+        normalize_database_url("postgresql://u:p@host:5432/db")
+        'postgresql+asyncpg://u:p@host:5432/db'
+
+        normalize_database_url("postgresql://u:p@host:5432/db?sslmode=require")
+        'postgresql+asyncpg://u:p@host:5432/db?ssl=require'
+        ```
+    """
+    parts = urlsplit(database_url)
+    scheme = parts.scheme.lower()
+    query = parse_qsl(parts.query, keep_blank_values=True)
+
+    # Only rewrite URLs that need it; everything else passes through
+    # byte-identical (urlunsplit would otherwise collapse empty netlocs,
+    # e.g. sqlite+aiosqlite:///:memory:)
+    needs_scheme = scheme in ("postgresql", "postgres")
+    needs_sslmode = any(key == "sslmode" for key, _ in query)
+    if not needs_scheme and not needs_sslmode:
+        return database_url
+
+    if needs_scheme:
+        scheme = "postgresql+asyncpg"
+    query = [
+        ("ssl", value) if key == "sslmode" else (key, value) for key, value in query
+    ]
+    return urlunsplit(parts._replace(scheme=scheme, query=urlencode(query)))
+
+
 def init_database(database_url: str) -> None:
     """Initialize the database engine and session factory."""
     global _engine, _async_session_maker
 
     _engine = create_async_engine(
-        database_url,
+        normalize_database_url(database_url),
         echo=False,  # Set to True for SQL logging in development
         pool_pre_ping=True,
     )

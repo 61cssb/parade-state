@@ -47,6 +47,9 @@
 **Database:**
 ```bash
 # Production database connection (PostgreSQL recommended)
+# Both spellings work: the app normalizes sync-style URLs to the asyncpg
+# driver at startup (postgresql:// and postgres:// → postgresql+asyncpg://),
+# and translates ?sslmode=... to asyncpg's ?ssl=...
 DATABASE_URL="postgresql://user:password@host:5432/dbname"
 ```
 
@@ -96,6 +99,11 @@ python -c "import secrets; print(secrets.token_urlsafe(16))"
 ### Alembic Migration System
 
 The application uses **Alembic** for database migrations.
+
+**URL scheme note:** Alembic's `env.py` reads `DATABASE_URL` and applies the
+same normalization as the application engine (`postgresql://` →
+`postgresql+asyncpg://`, `sslmode` → `ssl`), so one environment variable
+works for both migrations and the app.
 
 **Migration Files Location:**
 ```
@@ -229,7 +237,7 @@ uv run alembic upgrade head
 
 3. **Set Environment Variables:**
    ```
-   DATABASE_URL           # Auto-injected by Railway
+   DATABASE_URL           # Auto-injected by Railway (internal URL, no SSL needed)
    SUPER_ADMIN_EMAIL      # Your admin email
    GOOGLE_CLIENT_ID       # Google OAuth client ID
    GOOGLE_CLIENT_SECRET   # Google OAuth client secret
@@ -237,11 +245,11 @@ uv run alembic upgrade head
    APP_BASE_URL           # Railway provides this
    ```
 
-4. **Configure Start Command:**
-   ```bash
-   # Railway detects Python app automatically
-   # Start command: uvicorn src.parade_state.main:app --host 0.0.0.0 --port $PORT
-   ```
+4. **Build and Start:**
+   - Railway detects the [Dockerfile](../Dockerfile) at the repo root and builds it
+   - The image's start command runs `alembic upgrade head` (migrations) and
+     then serves uvicorn on the platform-injected `$PORT`
+   - No start-command override is needed in the Railway dashboard
 
 5. **Deploy:**
    - Push to main branch
@@ -260,26 +268,18 @@ uv run alembic upgrade head
 
 **Docker Deployment:**
 
-```dockerfile
-# Dockerfile
-FROM python:3.12-slim
-
-WORKDIR /app
-COPY pyproject.toml ./
-COPY README.md ./
-COPY src/ ./src/
-
-RUN pip install uv
-RUN uv sync --frozen
-
-EXPOSE 8000
-CMD ["uv", "run", "uvicorn", "src.parade_state.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
+The repo root ships the production [Dockerfile](../Dockerfile). It installs
+dependencies with uv (pinned, `--frozen --no-dev`), copies the source, and
+runs as an unprivileged user. The start command runs migrations before
+serving:
 
 ```bash
-# Build and run
+# Build and run (migrations run automatically, then uvicorn on port 8000)
 docker build -t parade-state .
 docker run -p 8000:8000 --env-file .env parade-state
+
+# To use a different port (e.g. Railway's injected PORT)
+docker run -p 8000:8000 -e PORT=8000 --env-file .env parade-state
 ```
 
 **Traditional VPS (DigitalOcean, AWS, etc.):**
