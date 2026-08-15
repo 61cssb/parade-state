@@ -46,7 +46,7 @@ Grouping (remaps personnel unit+subunit; has date+time validity range) —
 **In Scope (v1):**
 - CSV ingestion with CAA versioning, column mapping, diff detection
 - Grouping management: create, clone (same-roll), migrate (cross-roll), scheduled activation
-- Attendance taking: AM/PM (hardcoded), nine-status operational reporting enum, NR/Tagging-scoped, active-scope gating
+- Attendance taking: AM/PM (hardcoded), nine-status operational reporting enum, NR-scoped with the 1:1 Tagging overlay applied, active-NR gating
 - Row access control (access level + subunit scope) and column sensitivity control
 - Parade state table view scoped to user access with inline editing
 - Admin UI: enums, users, column sensitivity, column mapping, grouping/tagging/attendance management
@@ -166,9 +166,11 @@ Attendance (one row per personnel/day)
   applied) — never against a Grouping. Groupings are a separate feature and
   play no part in attendance access or scoping. The user-facing marking view
   (`/attendance`) defaults to the active NR and shows the tagging-overlaid
-  roster (tagged rows highlighted); with no active NR it shows an inactive
-  message instead of the marking table. Write access is gated per-NR by
-  `UserSubunitAssignment` on the effective `sub_unit_1`.
+  roster — Unit, Sub-unit 1, Sub-unit 2, and Sub-unit 3 columns all display
+  effective (overlay) values, and tagged rows are highlighted; with no
+  active NR it shows an inactive message instead of the marking table. Write
+  access is gated per-NR by `UserSubunitAssignment` on the effective
+  `sub_unit_1`.
 
 **"Copy Remarks" semantics (issue #4 Q3):**
 - Before 12pm: copy previous day's `remarks_pm` → today's `remarks_am`
@@ -430,7 +432,6 @@ Attendance
 ├── id: UUID (PK)
 ├── personnel_id: UUID (FK Personnel, on_delete=CASCADE)
 ├── nominal_roll_id: UUID (FK NominalRoll, on_delete=CASCADE)
-├── tagging_id: UUID (FK Tagging, nullable; snapshots the active scope)
 ├── date: date
 ├── status_am / remarks_am: attendance_status enum + text (default 'absent')
 ├── status_pm / remarks_pm: attendance_status enum + text (default 'absent')
@@ -570,22 +571,28 @@ Auto-match headers against ColumnMapping
   ↓
 Check CAA uniqueness
   ├─ CAA new → proceed
-  └─ CAA exists (confirmed Nominal Roll) → prompt admin for replacement
+  └─ CAA exists (existing Nominal Roll) → prompt admin for replacement
       ├─ Admin rejects → stop
       └─ Admin confirms replacement
           → Archive prior Nominal Roll+related entities
           → Proceed with new Nominal Roll
   ↓
-Compute diff (current CSV vs prior confirmed CSV)
+Compute diff (current CSV vs prior CSV)
   ↓
 [Admin reviews & confirms diff]
   ↓
 [CsvUpload.status = 'diff_confirmed']
   ↓
-Populate NominalRoll.status = 'confirmed'
+[Admin processes the upload into a Nominal Roll ("Process into Nominal Roll"
+ in the admin CSV upload view)]
+  ↓
+Create NominalRoll (CAA parsed from the filename, e.g. caaYYMMDD; no status
+workflow — every NR is equal)
 Populate Personnel records (callup_status defaults to 'Called Up')
-Auto-create initial Grouping (status=draft)
-Transfer notes from prior grouping (by Personnel.id match)
+Persist ColumnMetadata for the source columns
+Auto-create the NR's empty 1:1 Tagging
+Optionally import taggings from another NR (chosen by the admin; entries
+copied across by `short_id` match, no-clobber)
 ```
 
 ### 4.6 Deferment Callup-Status Transition
