@@ -25,7 +25,7 @@ CANONICAL_MAP: list[tuple[int, str, str | None, bool]] = [
     (4, "Rank", "rank", False),
     (5, "Full Name", "full_name", False),
     (6, "Rank-Name", None, False),  # redundant composite, dropped
-    (7, "Pers", None, False),       # dropped per Personnel model (short_id replaces pers_no)
+    (7, "Pers", "pers_no", False),  # external personnel number — canonical person identifier
     (8, "Callup Decision", None, True),
     (9, "Reason", None, True),
     (10, "Remarks", None, True),   # first Remarks column
@@ -49,6 +49,7 @@ CORE_ATTRS: dict[str, str] = {
     "sub_unit_3": "sub_unit_3",
     "rank": "rank",
     "full_name": "full_name",
+    "pers_no": "pers_no",
 }
 
 # Inferred data types per column — used to populate ColumnMetadata.inferred_type.
@@ -59,6 +60,7 @@ INFERRED_TYPES: dict[str, str] = {
     "sub_unit_3": "string",
     "rank": "string",
     "full_name": "string",
+    "Pers": "string",
     "Rank-Name": "string",
     "Callup Decision": "string",
     "Reason": "string",

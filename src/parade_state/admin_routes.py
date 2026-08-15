@@ -287,7 +287,7 @@ async def admin_grouping_personnel(
             included_count += 1
         personnel_rows.append({
             "id": str(p.id),
-            "short_id": p.short_id,
+            "pers_no": p.pers_no,
             "rank": p.rank,
             "category": p.category,
             "full_name": p.full_name,
@@ -753,7 +753,7 @@ async def admin_taggings(
                         select(
                             TaggingEntry.id,
                             TaggingEntry.personnel_id,
-                            Personnel.short_id,
+                            Personnel.pers_no,
                             Personnel.rank,
                             Personnel.full_name,
                             TaggingEntry.from_unit,
@@ -775,7 +775,7 @@ async def admin_taggings(
                     {
                         "id": str(row.id),
                         "personnel_id": row.personnel_id,
-                        "short_id": row.short_id,
+                        "pers_no": row.pers_no,
                         "label": f"{row.rank} {row.full_name}".strip()
                         if row.rank
                         else "(unknown)",

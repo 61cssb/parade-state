@@ -320,7 +320,7 @@ class CopyRemarksResponse(BaseModel):
 class PersonnelBase(BaseModel):
     """Base personnel schema."""
 
-    short_id: str = Field(..., min_length=1)
+    pers_no: str | None = Field(None, min_length=1)
     rank: str = Field(..., min_length=1)
     category: Literal["Officer", "WOSE"] = Field(
         ..., description="Operational corps, inferred from rank"
@@ -586,8 +586,8 @@ class CsvUploadProcessRequest(BaseModel):
 
     ``source_nominal_roll_id`` (optional): when set, copy the source NR's
     tagging entries into the new NR's auto-created tagging by matching
-    personnel across NRs on ``short_id``. Personnel in the source tagging
-    with no short_id match in the new NR are surfaced in the response.
+    personnel across NRs on ``pers_no``. Personnel in the source tagging
+    with no pers_no match in the new NR are surfaced in the response.
     """
 
     source_nominal_roll_id: str | None = Field(None, min_length=1)
@@ -597,7 +597,7 @@ class CsvUploadProcessRequest(BaseModel):
 class CsvUploadProcessUnmatchedItem(BaseModel):
     """Schema for an unmatched personnel row surfaced during tagging import."""
 
-    short_id: str
+    pers_no: str
     name: str | None = None
 
 
@@ -800,7 +800,7 @@ class TaggingEntryResponse(BaseModel):
     id: str
     tagging_id: str
     personnel_id: str
-    personnel_short_id: str | None = None
+    personnel_pers_no: str | None = None
     personnel_label: str | None = None
     from_unit: str | None
     from_sub_unit_1: str | None
@@ -884,7 +884,7 @@ class TaggingCloneCreate(BaseModel):
 class TaggingCloneUnmatchedItem(BaseModel):
     """Schema for an unmatched personnel row surfaced by clone."""
 
-    short_id: str
+    pers_no: str
     name: str | None = None
 
 

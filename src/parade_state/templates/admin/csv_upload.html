@@ -21,7 +21,7 @@
     <h3>Step 2: Process Upload into Nominal Roll</h3>
     <p style="color: #6b7280; font-size: 0.85rem; margin-top: 0.5rem;">
         Pick an uploaded CSV (not yet processed) to build a NominalRoll + Personnel + auto-created empty Tagging.
-        Optionally import taggings from another NR (personnel matched by <em>short_id</em>).
+        Optionally import taggings from another NR (personnel matched by <em>pers_no</em>).
     </p>
     {% if processable_uploads %}
     <form id="process-form" onsubmit="event.preventDefault(); processUpload();" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.75rem;">
@@ -197,7 +197,7 @@
                 if (data.unmatched && data.unmatched.length > 0) {
                     html += '<p style="margin: 0.75rem 0 0.25rem; font-weight: bold;">Unmatched source personnel (' + data.unmatched.length + '):</p><ul style="margin: 0; padding-left: 1.25rem; font-size: 0.8rem;">';
                     data.unmatched.forEach(function(u) {
-                        html += '<li>' + u.short_id + (u.name ? ' — ' + u.name : '') + '</li>';
+                        html += '<li>' + u.pers_no + (u.name ? ' — ' + u.name : '') + '</li>';
                     });
                     html += '</ul>';
                 }

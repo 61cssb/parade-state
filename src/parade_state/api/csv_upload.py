@@ -37,7 +37,7 @@ from parade_state.utils.csv_constants import (
     parse_caa_date,
     snake,
 )
-from parade_state.api.tagging import _load_nr_tagging, copy_entries_by_short_id
+from parade_state.api.tagging import _load_nr_tagging, copy_entries_by_pers_no
 
 router = APIRouter()
 
@@ -307,8 +307,8 @@ async def process_csv_upload(
     ``CsvUpload.nominal_roll_id``.
 
     When ``source_nominal_roll_id`` is provided, copies the source NR's
-    tagging entries into the new NR's tagging by ``short_id`` matching.
-    Personnel in the source tagging with no short_id match in the new NR
+    tagging entries into the new NR's tagging by ``pers_no`` matching.
+    Personnel in the source tagging with no pers_no match in the new NR
     are surfaced in the response.
 
     Requires admin or super_admin role.
@@ -439,6 +439,7 @@ async def process_csv_upload(
         db.add(
             Personnel(
                 nominal_roll_id=nominal_roll.id,
+                pers_no=core_values.get("pers_no") or None,
                 rank=rank_value,
                 category=category,
                 full_name=core_values.get("full_name") or "",
@@ -485,7 +486,7 @@ async def process_csv_upload(
                 ),
             )
         # Re-load the new tagging with the entries collection materialized
-        # (db.refresh does not populate relationships; copy_entries_by_short_id
+        # (db.refresh does not populate relationships; copy_entries_by_pers_no
         # reads .entries which would otherwise lazy-load outside async ctx).
         tagging = (
             await db.execute(
@@ -494,11 +495,11 @@ async def process_csv_upload(
                 .options(selectinload(Tagging.entries))
             )
         ).scalar_one()
-        matched_count, raw_unmatched = await copy_entries_by_short_id(
+        matched_count, raw_unmatched = await copy_entries_by_pers_no(
             db, source_tagging, tagging, nominal_roll.id
         )
         unmatched = [
-            CsvUploadProcessUnmatchedItem(short_id=u.short_id, name=u.name)
+            CsvUploadProcessUnmatchedItem(pers_no=u.pers_no, name=u.name)
             for u in raw_unmatched
         ]
         if matched_count:

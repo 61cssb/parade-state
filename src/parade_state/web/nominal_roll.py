@@ -30,11 +30,11 @@ def _search_condition(search: str | None) -> ColumnElement[bool] | None:
     if not search:
         return None
     pattern = f"%{search}%"
-    # Search matches name and pers no (short_id) only — never rank, unit,
+    # Search matches name and pers no only — never rank, unit,
     # sub-unit, or category (those have their own dedicated filters).
     return or_(
         Personnel.full_name.ilike(pattern),
-        Personnel.short_id.ilike(pattern),
+        Personnel.pers_no.ilike(pattern),
     )
 
 
@@ -239,7 +239,7 @@ async def nominal_roll_view(
                 "rank": p.rank,
                 "category": p.category,
                 "full_name": p.full_name,
-                "short_id": p.short_id,
+                "pers_no": p.pers_no,
                 "unit": entry.to_unit if entry else p.unit,
                 "sub_unit_1": entry.to_sub_unit_1 if entry else p.sub_unit_1,
                 "sub_unit_2": entry.to_sub_unit_2 if entry else p.sub_unit_2,

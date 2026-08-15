@@ -239,13 +239,13 @@ def apply_personnel_filters(query, params: PersonnelListParams):
     if params.category:
         query = query.where(Personnel.category == params.category)
 
-    # Search across name and short_id
+    # Search across name and pers_no
     if params.search:
         search_term = f"%{params.search}%"
         query = query.where(
             or_(
                 Personnel.full_name.ilike(search_term),
-                Personnel.short_id.ilike(search_term),
+                Personnel.pers_no.ilike(search_term),
             )
         )
 
@@ -364,7 +364,7 @@ async def get_grouping_personnel_with_overrides(
         response = PersonnelResponseWithGrouping(
             id=personnel.id,
             nominal_roll_id=personnel.nominal_roll_id,
-            short_id=personnel.short_id,
+            pers_no=personnel.pers_no,
             rank=personnel.rank,
             category=personnel.category,
             name=personnel.full_name,
@@ -540,7 +540,7 @@ async def list_personnel(
         PersonnelResponseWithGrouping(
             id=p.id,
             nominal_roll_id=p.nominal_roll_id,
-            short_id=p.short_id,
+            pers_no=p.pers_no,
             rank=p.rank,
             category=p.category,
             name=p.full_name,
@@ -585,7 +585,7 @@ async def get_personnel(
         return PersonnelResponseWithGrouping(
             id=personnel.id,
             nominal_roll_id=personnel.nominal_roll_id,
-            short_id=personnel.short_id,
+            pers_no=personnel.pers_no,
             rank=personnel.rank,
             category=personnel.category,
             name=personnel.full_name,
@@ -622,7 +622,7 @@ async def get_personnel(
         return PersonnelResponseWithGrouping(
             id=personnel.id,
             nominal_roll_id=personnel.nominal_roll_id,
-            short_id=personnel.short_id,
+            pers_no=personnel.pers_no,
             rank=personnel.rank,
             category=personnel.category,
             name=personnel.full_name,
@@ -725,7 +725,7 @@ async def update_personnel(
     return PersonnelResponseWithGrouping(
         id=personnel.id,
         nominal_roll_id=personnel.nominal_roll_id,
-        short_id=personnel.short_id,
+        pers_no=personnel.pers_no,
         rank=personnel.rank,
         category=personnel.category,
         name=personnel.full_name,
