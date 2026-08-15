@@ -28,29 +28,36 @@
         border-radius: 0.25rem;
         font-size: 0.875rem;
     }
+    /* Custom suggestion panel — replaces the native datalist popup so the
+       list anchors under the cell instead of over it (native popup placement
+       is browser-controlled and unusable inside tables). */
+    .suggest-panel {
+        position: absolute;
+        z-index: 50;
+        background: #fff;
+        border: 1px solid #d1d5db;
+        border-radius: 0.375rem;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        max-height: 240px;
+        overflow-y: auto;
+        font-size: 0.875rem;
+    }
+    .suggest-item {
+        padding: 0.35rem 0.6rem;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+    .suggest-item:hover, .suggest-item.active { background: #eff6ff; }
+    .suggest-item.blank { color: #6b7280; font-style: italic; }
+    .suggest-empty { padding: 0.35rem 0.6rem; color: #9ca3af; }
 </style>
 
 {# Super-admin click-to-edit cell for unit/subunit values. Edits are sent to
    PATCH /api/v1/personnel/{id}, which records them as a tagging overlay —
    the NR itself stays read-only and the row turns yellow on reload. #}
-{% macro editable_cell(pid, field, value, list_id) -%}
-<span class="cell-edit" data-pid="{{ pid }}" data-field="{{ field }}" data-list="{{ list_id }}" data-value="{{ value or '' }}" title="Click to edit">{{ value or '—' }}</span>
+{% macro editable_cell(pid, field, value) -%}
+<span class="cell-edit" data-pid="{{ pid }}" data-field="{{ field }}" data-value="{{ value or '' }}" title="Click to edit">{{ value or '—' }}</span>
 {%- endmacro %}
-
-{% if user.role == 'super_admin' %}
-<datalist id="dl-edit-unit">
-    {% for v in edit_unit_options %}<option value="{{ v }}"></option>{% endfor %}
-</datalist>
-<datalist id="dl-edit-s1">
-    {% for v in edit_sub1_options %}<option value="{{ v }}"></option>{% endfor %}
-</datalist>
-<datalist id="dl-edit-s2">
-    {% for v in edit_sub2_options %}<option value="{{ v }}"></option>{% endfor %}
-</datalist>
-<datalist id="dl-edit-s3">
-    {% for v in edit_sub3_options %}<option value="{{ v }}"></option>{% endfor %}
-</datalist>
-{% endif %}
 
 {% if nominal_rolls %}
 <!-- Nominal roll selector -->
@@ -133,8 +140,9 @@
         Yellow rows carry a tagging overlay. As super-admin you can click a
         unit / sub-unit cell to remap it — the current value shows as the
         placeholder; pick from the suggestion list or type a new value
-        (Enter saves, Esc cancels, an emptied sub-unit clears it). Edits are
-        recorded on the tagging, never on the nominal roll.
+        (Enter saves, Esc cancels). Sub Unit 2/3 lists offer a "leave blank"
+        option that clears the value. Edits are recorded on the tagging,
+        never on the nominal roll.
     </p>
     {% endif %}
 
@@ -159,10 +167,10 @@
             {% for p in personnel %}
             <tr class="{% if p.is_changed %}changed-row{% endif %}" style="border-bottom: 1px solid #e5e7eb;">
                 <td style="padding: 0.5rem; color: #9ca3af; font-variant-numeric: tabular-nums;">{{ loop.index }}</td>
-                <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'unit', p.unit, 'dl-edit-unit') if user.role == 'super_admin' else (p.unit or '—') }}</td>
-                <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_1', p.sub_unit_1, 'dl-edit-s1') if user.role == 'super_admin' else (p.sub_unit_1 or '—') }}</td>
-                <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_2', p.sub_unit_2, 'dl-edit-s2') if user.role == 'super_admin' else (p.sub_unit_2 or '—') }}</td>
-                <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_3', p.sub_unit_3, 'dl-edit-s3') if user.role == 'super_admin' else (p.sub_unit_3 or '—') }}</td>
+                <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'unit', p.unit) if user.role == 'super_admin' else (p.unit or '—') }}</td>
+                <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_1', p.sub_unit_1) if user.role == 'super_admin' else (p.sub_unit_1 or '—') }}</td>
+                <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_2', p.sub_unit_2) if user.role == 'super_admin' else (p.sub_unit_2 or '—') }}</td>
+                <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_3', p.sub_unit_3) if user.role == 'super_admin' else (p.sub_unit_3 or '—') }}</td>
                 <td style="padding: 0.5rem; white-space: nowrap;">{{ p.category }}</td>
                 <td style="padding: 0.5rem; white-space: nowrap;">{{ p.rank }}</td>
                 <td style="padding: 0.5rem;">{{ p.full_name }}</td>
@@ -196,37 +204,129 @@
     const USER_ID = "{{ user.id }}";
     const USER_ROLE = "{{ user.role }}";
 
+    // Suggestion lists for the cell editor (unscoped NR values; typed
+    // values outside these lists are accepted too).
+    const EDIT_OPTIONS = {
+        unit: {{ edit_unit_options | tojson }},
+        sub_unit_1: {{ edit_sub1_options | tojson }},
+        sub_unit_2: {{ edit_sub2_options | tojson }},
+        sub_unit_3: {{ edit_sub3_options | tojson }},
+    };
+    // Sub-units 2/3 may be cleared; unit is required, sub-unit 1 keeps a value.
+    const BLANK_FIELDS = new Set(['sub_unit_2', 'sub_unit_3']);
+
+    let panelEl = null;    // the open suggestion panel (appended to <body>)
+    let panelInput = null; // the editor input it belongs to
+    let panelField = null;
+    let panelItems = [];   // item divs in display order
+    let activeIndex = -1;  // keyboard-highlighted item
+
     document.addEventListener('click', function(e) {
         const span = e.target.closest('.cell-edit');
         if (!span || span.querySelector('input')) return;
         startCellEdit(span);
     });
 
+    function closeSuggest() {
+        if (panelEl) { panelEl.remove(); panelEl = null; }
+        panelInput = null;
+        panelField = null;
+        panelItems = [];
+        activeIndex = -1;
+    }
+    // The panel is absolutely positioned; any scroll/resize invalidates it.
+    window.addEventListener('scroll', closeSuggest, true);
+    window.addEventListener('resize', closeSuggest);
+
+    function makeItem(value, label, isBlank) {
+        const item = document.createElement('div');
+        item.className = 'suggest-item' + (isBlank ? ' blank' : '');
+        item.dataset.value = value;
+        item.textContent = label;
+        if (isBlank) item.title = 'Set this sub-unit to blank';
+        // mousedown + preventDefault keeps focus on the input (no blur-cancel)
+        // so the pick applies before the click would blur.
+        item.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            panelInput.value = value;
+            closeSuggest();
+        });
+        panelItems.push(item);
+        return item;
+    }
+
+    function renderSuggestItems() {
+        if (!panelEl) return;
+        const q = (panelInput.value || '').trim().toLowerCase();
+        panelEl.innerHTML = '';
+        panelItems = [];
+        activeIndex = -1;
+        if (BLANK_FIELDS.has(panelField)) {
+            panelEl.appendChild(makeItem('', '— leave blank —', true));
+        }
+        for (const v of (EDIT_OPTIONS[panelField] || [])) {
+            if (!q || v.toLowerCase().includes(q)) {
+                panelEl.appendChild(makeItem(v, v, false));
+            }
+        }
+        if (!panelItems.length) {
+            const none = document.createElement('div');
+            none.className = 'suggest-empty';
+            none.textContent = 'No match — your typed value will be used';
+            panelEl.appendChild(none);
+        }
+    }
+
+    function positionSuggest() {
+        const rect = panelInput.getBoundingClientRect();
+        panelEl.style.minWidth = Math.max(rect.width, 180) + 'px';
+        panelEl.style.left = (rect.left + window.scrollX) + 'px';
+        let top = rect.bottom + window.scrollY;
+        // Flip above the cell if the panel would run past the viewport bottom.
+        if (rect.bottom + panelEl.offsetHeight > window.innerHeight &&
+            rect.top > panelEl.offsetHeight) {
+            top = rect.top + window.scrollY - panelEl.offsetHeight - 4;
+        }
+        panelEl.style.top = top + 'px';
+    }
+
+    function openSuggest(input, field) {
+        closeSuggest();
+        panelInput = input;
+        panelField = field;
+        panelEl = document.createElement('div');
+        panelEl.className = 'suggest-panel';
+        document.body.appendChild(panelEl);  // escape table/overflow clipping
+        renderSuggestItems();
+        positionSuggest();
+    }
+
+    function moveActive(delta) {
+        if (!panelItems.length) return;
+        activeIndex = (activeIndex + delta + panelItems.length) % panelItems.length;
+        panelItems.forEach((el, i) => el.classList.toggle('active', i === activeIndex));
+        panelItems[activeIndex].scrollIntoView({ block: 'nearest' });
+    }
+
     function startCellEdit(span) {
         const input = document.createElement('input');
         input.type = 'text';
         input.className = 'cell-edit-input';
-        input.setAttribute('list', span.dataset.list);
-        // Open EMPTY: browsers filter the datalist popup against the
-        // input's current text, so pre-filling the old value would hide
-        // most/all suggestions. The placeholder keeps the context.
+        // Open EMPTY: the panel filters against the input's current text, so
+        // pre-filling the old value would hide most/all suggestions. The
+        // placeholder keeps the context.
         input.value = '';
         input.placeholder = span.dataset.value || '';
         span.textContent = '';
         span.appendChild(input);
         input.focus();
-        // Nudge browsers that only open the datalist on key interaction
-        // (untrusted events are best-effort; typing also opens it).
-        input.dispatchEvent(
-            new KeyboardEvent('keydown', {
-                key: 'ArrowDown', keyCode: 40, bubbles: true, cancelable: true,
-            })
-        );
+        openSuggest(input, span.dataset.field);
 
         let done = false;
         function finish(save) {
             if (done) return;
             done = true;
+            closeSuggest();
             if (save) {
                 saveCellEdit(span, input.value.trim());
             } else {
@@ -234,9 +334,27 @@
             }
         }
 
+        input.addEventListener('input', function() {
+            if (panelEl) { renderSuggestItems(); positionSuggest(); }
+        });
         input.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') { e.preventDefault(); finish(true); }
-            else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (!panelEl) openSuggest(input, span.dataset.field);
+                moveActive(e.key === 'ArrowDown' ? 1 : -1);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (panelEl && activeIndex >= 0) {
+                    input.value = panelItems[activeIndex].dataset.value;
+                    closeSuggest();
+                } else {
+                    finish(true);
+                }
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                if (panelEl) closeSuggest();  // first Esc: dismiss panel only
+                else finish(false);           // second Esc: cancel the edit
+            }
         });
         input.addEventListener('blur', function() { finish(false); });
     }

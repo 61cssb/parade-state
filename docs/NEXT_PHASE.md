@@ -167,10 +167,11 @@ Nominal Roll.
 - [x] Follow-up: `/admin/attendance` page removed (duplicated `/attendance`);
   Copy Remarks moved to `/attendance` (super-admin-only) and the
   effective-aware sub-unit-1 filter ported over
-- [x] Follow-up: remap editing via native datalist comboboxes — super-admin
-  click-to-edit cells in the NR browser (PATCH → tagging overlay) and
-  free-typable inputs in the Taggings modal (targets may be values not yet
-  on the NR)
+- [x] Follow-up: remap editing via comboboxes — super-admin click-to-edit
+  cells in the NR browser (PATCH → tagging overlay; custom suggestion panel
+  anchored under the cell, with a "leave blank" pick for sub-units 2/3) and
+  free-typable datalist inputs in the Taggings modal (targets may be values
+  not yet on the NR)
 
 ### Phase 9C-3: Grouping + Session Management — COMPLETED
 

@@ -253,14 +253,16 @@ async def test_example(client, sample_users, sample_grouping):
   status column, filter, and Confirm/Unconfirm buttons are removed;
   "Create Grouping" is available on every row.
 
-**Remap Editing (✅ datalist comboboxes)**
+**Remap Editing (✅ comboboxes)**
 - Public NR browser: super-admins click a unit / sub-unit cell to remap it —
-  the cell becomes a `<datalist>`-backed input (pick an existing value or
-  type a new one); Enter saves via `PATCH /api/v1/personnel/{id}` (recorded
-  on the tagging overlay; row turns yellow on reload). Regular users see the
-  read-only table.
+  the cell becomes an input with a custom suggestion panel anchored under
+  the cell (the native datalist popup was replaced because its placement is
+  browser-controlled); pick an existing value or type a new one, Enter saves
+  via `PATCH /api/v1/personnel/{id}` (recorded on the tagging overlay; row
+  turns yellow on reload). Sub-unit 2/3 panels offer a "leave blank" pick
+  that clears the value. Regular users see the read-only table.
 - Taggings edit modal: the cascading to-unit/to-sub selects are replaced by
-  the same datalist inputs — remap targets may be values that don't exist on
+  datalist inputs — remap targets may be values that don't exist on
   the NR yet (e.g. standing up a new subunit).
 
 **Personnel Management (✅ Session 1 Complete)**
