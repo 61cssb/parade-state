@@ -52,13 +52,13 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(
         Enum(
-            "pending",
+            "pending",  # legacy value, unused (kept for the DB enum)
             "active",
             "suspended",
             "unrecognised",
             name="user_status",
         ),
-        default="pending",
+        default="unrecognised",
     )
     role: Mapped[str] = mapped_column(
         Enum("super_admin", "admin", "user", name="user_role"),

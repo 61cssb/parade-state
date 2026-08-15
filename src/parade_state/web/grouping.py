@@ -37,6 +37,11 @@ async def grouping_view(
     if not current_user:
         return RedirectResponse(url="/auth/login", status_code=302)
 
+    # Admin-only system: the viewer role is deferred, so gate the viewer
+    # surface on admin role until it exists.
+    if current_user.role not in ("admin", "super_admin"):
+        return RedirectResponse(url="/auth/no-access", status_code=302)
+
     session_maker = get_session_maker()
     async with session_maker() as db:
         # Get groupings the user can access

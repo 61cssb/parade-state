@@ -213,6 +213,9 @@ User
 ├── email: str (unique)
 ├── name: str
 ├── status: str ENUM ['pending', 'active', 'suspended', 'unrecognised']
+│    ('pending' is a legacy value — unused by application logic; new sign-ins
+│     register as 'unrecognised'. Kept in the enum because Postgres cannot
+│     drop enum values without a type rebuild.)
 ├── role: str ENUM ['super_admin', 'admin', 'user']
 ├── access_level_id: UUID (FK AccessLevel; null for admins)
 ├── first_sign_in_at: datetime (nullable)
@@ -652,6 +655,7 @@ callup transitions.
 - All structural operations are admin-only
 
 **Scoped User:**
+- Deferred (planned viewer role — see future issues). Not currently usable: non-admin sign-ins get the no-access page and viewer-facing routes are gated on admin role.
 - Google-authenticated
 - Has access level: single admin-assigned label from ordered vocabulary
 - Has subunit scope: one or more (grouping, subunit) pairs
@@ -659,9 +663,11 @@ callup transitions.
 
 ### 5.2 Account Lifecycle
 
-1. Admin preregisters account by email with access level, subunit scope, and grouping grants assigned upfront. Account created in pending state.
-2. On first Google sign-in, if email matches a pending account → activated. If no match → held as unrecognised (no access); auth event written to audit log.
-3. Admin may suspend at any time. Suspension immediately invalidates active sessions.
+The system is admin-only: only `super_admin` and `admin` accounts can sign in and use it. The non-admin viewer role is deferred to a future issue.
+
+1. On first Google sign-in, an unknown email is auto-registered as `unrecognised` with role `user`; the visitor sees a "no access" page and receives no session. The SUPER_ADMIN_EMAIL bootstrap account is created `active`/`super_admin` instead.
+2. A super-admin promotes `unrecognised` users to `admin` (and `active`) via `/admin/users`; the user can then sign in normally.
+3. Admin may suspend at any time (403 at sign-in). Suspension immediately invalidates active sessions.
 
 ### 5.3 Row Visibility Rules
 

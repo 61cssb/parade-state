@@ -37,19 +37,20 @@ async def test_user_attendance_filters_roster_to_assigned_subunits(
     sample_users,
     monkeypatch,
 ):
-    """A regular user's /attendance roster only shows their assigned subunits.
+    """A non-super-admin's /attendance roster only shows their assigned subunits.
 
     No assignments → empty roster (deny-by-default at the view layer).
-    Granting Platoon 1 shows only Platoon 1 personnel.
+    Granting Platoon 1 shows only Platoon 1 personnel. (The viewer role is
+    deferred, so the filtered user here is a plain admin.)
     """
     from parade_state.web import attendance as web_attendance
     from parade_state.models import UserSubunitAssignment
     from parade_state.db import get_session_maker
 
-    regular = sample_users["user"]
+    admin = sample_users["admin"]
 
     async def _fake_current_user(_request):
-        return regular
+        return admin
 
     monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
 
@@ -65,7 +66,7 @@ async def test_user_attendance_filters_roster_to_assigned_subunits(
     async with sm() as db:
         db.add(
             UserSubunitAssignment(
-                user_id=str(regular.id),
+                user_id=str(admin.id),
                 nominal_roll_id=str(sample_nominal_roll.id),
                 sub_unit_1="Platoon 1",
                 created_by=str(sample_users["admin"].id),
@@ -90,13 +91,14 @@ async def test_user_attendance_shows_nr_picker_without_grouping_access(
     sample_users,
     monkeypatch,
 ):
-    """Attendance is NR-scoped, not grouping-scoped: a user with no grouping
-    access and no subunit assignments still gets the NR picker (and the
-    no-assignments hint), never the old "No accessible groupings" dead end."""
+    """Attendance is NR-scoped, not grouping-scoped: a non-super-admin with
+    no grouping access and no subunit assignments still gets the NR picker
+    (and the no-assignments hint), never the old "No accessible groupings"
+    dead end."""
     from parade_state.web import attendance as web_attendance
 
     async def _fake_current_user(_request):
-        return sample_users["user"]
+        return sample_users["admin"]
 
     monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
 
@@ -184,7 +186,7 @@ async def test_user_attendance_overlays_active_tagging_values(
 
 
 @pytest.mark.asyncio
-async def test_user_attendance_copy_remarks_hidden_for_regular_users(
+async def test_user_attendance_copy_remarks_hidden_for_non_super_admins(
     client: TestClient,
     sample_nominal_roll,
     sample_personnel,
@@ -192,14 +194,14 @@ async def test_user_attendance_copy_remarks_hidden_for_regular_users(
     sample_users,
     monkeypatch,
 ):
-    """Copy Remarks is super-admin-only; regular users get Save alone."""
+    """Copy Remarks is super-admin-only; other admins get Save alone."""
     from parade_state.web import attendance as web_attendance
     from parade_state.models import UserSubunitAssignment
 
-    regular = sample_users["user"]
+    admin = sample_users["admin"]
 
     async def _fake_current_user(_request):
-        return regular
+        return admin
 
     monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
 
@@ -210,7 +212,7 @@ async def test_user_attendance_copy_remarks_hidden_for_regular_users(
     async with sm() as db:
         db.add(
             UserSubunitAssignment(
-                user_id=str(regular.id),
+                user_id=str(admin.id),
                 nominal_roll_id=str(sample_nominal_roll.id),
                 sub_unit_1="Platoon 1",
                 created_by=str(sample_users["admin"].id),

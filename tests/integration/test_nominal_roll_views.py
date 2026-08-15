@@ -71,7 +71,7 @@ async def test_nominal_roll_super_admin_cell_editor_wiring(
 
 
 @pytest.mark.asyncio
-async def test_nominal_roll_read_only_for_regular_users(
+async def test_nominal_roll_read_only_for_non_super_admins(
     client: TestClient,
     sample_nominal_roll,
     sample_personnel,
@@ -83,7 +83,7 @@ async def test_nominal_roll_read_only_for_regular_users(
     from parade_state.web import nominal_roll as web_nominal_roll
 
     async def _fake_current_user(_request):
-        return sample_users["user"]
+        return sample_users["admin"]
 
     monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
 
