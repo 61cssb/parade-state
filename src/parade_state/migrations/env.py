@@ -14,15 +14,18 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 load_dotenv()
 
 # Import Base and models
-from parade_state.db import Base
+from parade_state.db import Base, normalize_database_url
 from parade_state.models import *  # noqa: F401, F403
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
-# Override database URL from environment
-database_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+# Override database URL from environment.
+# Platform URLs may use the sync postgresql:// scheme; normalize for asyncpg.
+database_url = normalize_database_url(
+    os.getenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+)
 config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.
