@@ -50,7 +50,7 @@ async def test_list_personnel_with_grouping_context(
     first_personnel = data[0]
     assert "id" in first_personnel
     assert "name" in first_personnel
-    assert "short_id" in first_personnel
+    assert "pers_no" in first_personnel
     assert "grouping_id" in first_personnel
     assert first_personnel["grouping_id"] == str(sample_grouping.id)
     assert "has_override" in first_personnel
@@ -217,7 +217,7 @@ async def test_list_personnel_with_search(
 
 
 @pytest.mark.asyncio
-async def test_list_personnel_with_search_by_short_id(
+async def test_list_personnel_with_search_by_pers_no(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
@@ -225,9 +225,9 @@ async def test_list_personnel_with_search_by_short_id(
     sample_grouping: Grouping,
     sample_personnel,
 ):
-    """Test listing personnel with search by short_id."""
-    # Search for first personnel's short_id (first 5 chars)
-    search_term = sample_personnel[0].short_id[:5]
+    """Test listing personnel with search by pers_no."""
+    # Search for first personnel's pers_no (first 5 chars)
+    search_term = sample_personnel[0].pers_no[:5]
 
     response = client.get(
         "/api/v1/personnel",
@@ -245,13 +245,13 @@ async def test_list_personnel_with_search_by_short_id(
     assert isinstance(data, list)
     assert len(data) > 0
 
-    # Check that search term matches short_id
+    # Check that search term matches pers_no
     found = False
     for personnel in data:
-        if search_term.lower() in personnel["short_id"].lower():
+        if search_term.lower() in personnel["pers_no"].lower():
             found = True
             break
-    assert found, "Search term should match at least one personnel short_id"
+    assert found, "Search term should match at least one personnel pers_no"
 
 
 @pytest.mark.asyncio

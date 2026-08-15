@@ -184,9 +184,12 @@ async def sample_personnel(db_session: AsyncSession, sample_nominal_roll, sample
     admin_id = str(sample_users["admin"].id)
     nominal_roll_id = str(sample_nominal_roll.id)
 
+    # pers_no values are numeric so they never collide with the p001/p002
+    # pers_no values carried by the test CSV fixture (test_csv_process_api).
     personnel = [
         Personnel(
             nominal_roll_id=nominal_roll_id,
+            pers_no="10000001",
             rank="PTE",
             category="WOSE",
             full_name="John Doe",
@@ -197,6 +200,7 @@ async def sample_personnel(db_session: AsyncSession, sample_nominal_roll, sample
         ),
         Personnel(
             nominal_roll_id=nominal_roll_id,
+            pers_no="10000002",
             rank="CPL",
             category="WOSE",
             full_name="Jane Smith",
@@ -207,6 +211,7 @@ async def sample_personnel(db_session: AsyncSession, sample_nominal_roll, sample
         ),
         Personnel(
             nominal_roll_id=nominal_roll_id,
+            pers_no="10000003",
             rank="CPT",
             category="Officer",
             full_name="Bob Johnson",
