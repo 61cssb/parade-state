@@ -103,7 +103,7 @@ Nominal Roll
    ColumnMetadata + Personnel + an auto-created empty Tagging; links the
    upload via `CsvUpload.nominal_roll_id`. Optional
    `source_nominal_roll_id` copies the source NR's tagging entries across
-   by `short_id` matching instead of starting empty (unmatched source
+   by `pers_no` matching instead of starting empty (unmatched source
    personnel are surfaced in the response).
 
 ### 2.2 Grouping
@@ -257,10 +257,12 @@ UserSubunitScope
 ```
 Personnel
 ├── id: UUID (PK) ← Row identity; one row per (nominal roll, person)
-├── short_id: str (8-char base62) ← Cross-roll PERSON identity
-│   └── Shared by every row belonging to the same individual, across all nominal rolls.
-│       Generated server-side; globally unique per person (application-enforced
-│       via match-then-generate with collision retry). Human-facing identifier.
+├── pers_no: str | null (max 20 chars) ← Cross-roll PERSON identity
+│   └── The external personnel number from the CSV `Pers` column. Shared by
+│       every row belonging to the same individual, across all nominal rolls.
+│       One pers_no is one person globally — no two distinct persons ever share
+│       one (guaranteed by the external system that mints the numbers). NULL
+│       when the CSV row omitted it; never an empty string. Human-facing identifier.
 ├── nominal_roll_id: UUID (FK Nominal Roll, on_delete=CASCADE)
 ├── rank: str
 ├── category: str ENUM ['Officer', 'WOSE']  ← inferred from rank at ingest; never manually set
@@ -280,16 +282,18 @@ Personnel
 ```
 
 **Constraints:**
-- UNIQUE(nominal_roll_id, short_id): at most one row per person per nominal roll
-- `short_id` is globally unique per *person* (application-enforced). All rows for the same
-  individual share one `short_id`; no two distinct persons ever share one.
-- Cross-roll person recognition on ingest matches on `full_name` (rank disambiguates duplicate
-  names); matches are confirmed by the admin during CSV diff review.
-- `pers_no` is **never imported or stored**. It is an opaque, sensitive primary key from an
-  external system. If present in an uploaded CSV/XLSX it is silently dropped during parsing —
-  it is not mapped to a canonical column and is not written to `extra_fields`.
+- UNIQUE(nominal_roll_id, pers_no): at most one row per person per nominal roll
+- `pers_no` is globally unique per *person*: all rows for the same individual share one
+  `pers_no`; no two distinct persons ever share one (a property of the external numbering
+  system, not DB-enforced across rolls).
+- NULL `pers_no` (blank CSV `Pers` cell): multiple NULL rows coexist — a NULL never matches
+  another NULL in cross-roll flows. Re-issuing pers_nos for such rows is a separate
+  data-quality concern.
+- Cross-roll person recognition on ingest matches on `pers_no`.
+- A duplicate `pers_no` within one CSV violates UNIQUE(nominal_roll_id, pers_no) and fails
+  the process request (IntegrityError).
 - Notes, overrides, and attendance link to `Personnel.id` (the row PK). Cross-roll continuity
-  (notes transfer, history) follows the person via `short_id`.
+  (tagging transfer, history) follows the person via `pers_no`.
 
 ### 3.3 Deferments
 
@@ -398,14 +402,15 @@ TaggingEntry
 the target NR's **existing** tagging (under 1:1 the target always has one):
 
 - For each source TaggingEntry, look up the target-NR Personnel row by
-  `Personnel.short_id` (the cross-roll person identifier — `Personnel.id` is
+  `Personnel.pers_no` (the cross-roll person identifier — `Personnel.id` is
   per-roll and will not match across NRs).
 - Matched: a new TaggingEntry is appended to the target tagging pointing at
   the target-NR personnel row, preserving the source's `to_*` and
   re-snapshotting `from_*` from the target personnel.
 - Personnel already on the target tagging are **skipped** (no clobber).
-- Unmatched (source `short_id` not present on target NR): skipped and
-  surfaced in the response as `{short_id, name}`.
+- Unmatched (source `pers_no` not present on target NR — includes NULL
+  `pers_no`, which never matches): skipped and surfaced in the response as
+  `{pers_no, name}`.
 - Target NR must differ from the source NR (400 otherwise).
 
 #### 3.4.4 Read-Only NR + PATCH Redirect
@@ -540,9 +545,9 @@ CSV1.raw_columns    ColumnMapping              App.canonical
 "Unit" ────────────→ confirmed mapping ────→ unit
 (unmapped columns: stored in extra_fields JSON)
 
-"PersonalNumber" ──→ NEVER MAPPED. pers_no is an opaque external primary key and is
-                     dropped during parsing. It is not a canonical column and is never
-                     stored (not even in extra_fields).
+"PersonalNumber" ──→ mapped to the canonical `pers_no` column (the external
+                     personnel number; the cross-roll person identity, see §3.2.1).
+                     Blank cells are stored as NULL, never empty strings.
 
 CSV2 (later upload)
 "Employee No" ────→ auto-detected mapping ─→ (conflicts with full_name ← "Name")
@@ -552,9 +557,8 @@ Result: each canonical name receives from at most ONE raw column per CSV,
         but different CSVs can use different raw names for the same canonical.
 ```
 
-**Person identity is not sourced from the CSV.** There is no canonical column for personnel
-identity. The cross-roll person key (`short_id`) is minted server-side and attached during
-ingest via name+rank matching (see §3.2.1).
+**Person identity is sourced from the CSV.** The canonical `pers_no` column carries the
+external personnel number; the cross-roll person key is `pers_no` (see §3.2.1).
 
 ### 4.5 CSV Upload Pipeline
 
@@ -592,7 +596,7 @@ Populate Personnel records (callup_status defaults to 'Called Up')
 Persist ColumnMetadata for the source columns
 Auto-create the NR's empty 1:1 Tagging
 Optionally import taggings from another NR (chosen by the admin; entries
-copied across by `short_id` match, no-clobber)
+copied across by `pers_no` match, no-clobber)
 ```
 
 ### 4.6 Deferment Callup-Status Transition
@@ -702,11 +706,12 @@ Declared in app.config.json (deployment-time change, not admin UI):
 | sub_unit_1 | Subunit level 1 |
 | sub_unit_2 | Subunit level 2 |
 | sub_unit_3 | Subunit level 3 |
-| rank | Display; also used to disambiguate duplicate names during cross-roll matching |
-| full_name | Display; primary key for cross-roll person matching |
+| rank | Display; used to infer `category` |
+| full_name | Display |
+| pers_no | The external personnel number; the cross-roll person identity |
 
-**Note:** There is **no** `pers_no` canonical column. Personnel identity (`short_id`) is generated
-by the application, not imported from the CSV.
+**Note:** `pers_no` is imported from the CSV `Pers` column and is the canonical personnel
+identity (see §3.2.1). Blank cells store NULL.
 
 ### 6.3 Grouping Operations
 

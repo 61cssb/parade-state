@@ -683,9 +683,9 @@ paths:
       description: |
         Step 3 of 3. Admin confirms the diff.
         - Populates personnel_snapshots from parsed CSV.
-        - Archives leavers (persons present in the prior estab but not in the new one, matched by short_id).
+        - Archives leavers (persons present in the prior estab but not in the new one, matched by pers_no).
         - Creates estab grouping linked to this CSV.
-        - Transfers notes from the prior active grouping by following each person across estabs via short_id (persons are matched on full_name, disambiguated by rank, and confirmed by the admin during diff review).
+        - Transfers notes from the prior active grouping by following each person across estabs via pers_no (persons are matched on pers_no, the external personnel number).
         - Marks prior confirmed CSV as `superseded`.
         - Sets this upload status to `confirmed`.
         Writes `csv.diff_confirmed` and `grouping.created` to audit log.
@@ -1910,11 +1910,12 @@ paths:
       description: |
         Super-admin only. Under the 1:1 model the target NR already has a
         tagging — this merges the source's entries into it. For each source
-        entry, look up the target-NR Personnel row by `short_id` (the
+        entry, look up the target-NR Personnel row by `pers_no` (the
         cross-roll person identifier). Matched personnel get a new entry on
         the target tagging (with `from_*` re-snapshotted from the target
         personnel); personnel already on the target tagging are skipped (no
-        clobber); unmatched source personnel are surfaced in the response.
+        clobber); unmatched source personnel (including NULL pers_no, which
+        never matches) are surfaced in the response.
         Target NR must differ from source.
       parameters:
         - name: taggingId
@@ -1954,7 +1955,7 @@ paths:
                     items:
                       type: object
                       properties:
-                        short_id: { type: string }
+                        pers_no: { type: string }
                         name: { type: string, nullable: true }
         '400': { description: Target NR same as source, or invalid }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -1973,7 +1974,7 @@ paths:
         upload is linked via `CsvUpload.nominal_roll_id` (already-processed
         uploads → 409; duplicate CAA → 409). Optional
         `source_nominal_roll_id` copies the source NR's tagging entries
-        across by `short_id` matching instead of starting empty; unmatched
+        across by `pers_no` matching instead of starting empty; unmatched
         source personnel are surfaced in the response.
       parameters:
         - name: uploadId
@@ -2011,7 +2012,7 @@ paths:
                     items:
                       type: object
                       properties:
-                        short_id: { type: string }
+                        pers_no: { type: string }
                         name: { type: string, nullable: true }
         '400': { description: Unparseable filename or column count mismatch }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -2177,7 +2178,7 @@ components:
               id: { type: string, format: uuid }
               tagging_id: { type: string, format: uuid }
               personnel_id: { type: string, format: uuid }
-              personnel_short_id: { type: string, nullable: true }
+              personnel_pers_no: { type: string, nullable: true }
               personnel_label: { type: string, nullable: true }
               from_unit: { type: string, nullable: true }
               from_sub_unit_1: { type: string, nullable: true }

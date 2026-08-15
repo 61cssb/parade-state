@@ -7,11 +7,11 @@
 **Amended 2026-07-02:** §8 Session — session creation restricted to `active` groupings (was: draft or active); session status lifecycle rewritten to reflect individual close/reopen (was: cascade-only via grouping). §9.1 — `excused` added to status enum; closed/finalized session read-only rule noted. See [SPECIFICATION.md](SPECIFICATION.md) for the authoritative current behavior.
 
 > ⚠️ **SUPERSEDED — personnel identity sections.** This is a historical document.
-> References to `pers_no` as an imported/used identifier are **obsolete**. `pers_no` is no
-> longer imported or stored (it is an opaque, sensitive external primary key and is dropped on
-> parse). Personnel are now identified by a server-generated 8-char base62 `short_id` that is
-> stable across nominal rolls; cross-roll matching uses `full_name` (rank disambiguates). See
-> [SPECIFICATION.md §3.2.1](SPECIFICATION.md) for the current model.
+> References to `short_id` (a server-generated 8-char base62 identifier) are **historical**;
+> `short_id` has been removed. Personnel are now identified by `pers_no` — the external
+> personnel number imported from the CSV `Pers` column, shared by every row belonging to the
+> same person across nominal rolls (policy change 2026-08-15: `pers_no` is no longer treated
+> as sensitive). See [SPECIFICATION.md §3.2.1](SPECIFICATION.md) for the current model.
 
 ---
 
