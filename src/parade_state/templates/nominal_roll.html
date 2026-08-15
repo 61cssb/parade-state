@@ -21,8 +21,7 @@
         border-color: #2563eb;
     }
     .cell-edit-input {
-        width: 100%;
-        min-width: 6rem;
+        box-sizing: border-box;  /* JS sets width = cell width: no layout shift */
         padding: 0.2rem 0.3rem;
         border: 1px solid #2563eb;
         border-radius: 0.25rem;
@@ -138,11 +137,12 @@
     {% if user.role == 'super_admin' %}
     <p style="margin: 0.5rem 0 0; font-size: 0.8rem; color: #6b7280;">
         Yellow rows carry a tagging overlay. As super-admin you can click a
-        unit / sub-unit cell to remap it — the current value shows as the
-        placeholder; pick from the suggestion list or type a new value
-        (Enter saves, Esc cancels). Sub Unit 2/3 lists offer a "leave blank"
-        option that clears the value. Edits are recorded on the tagging,
-        never on the nominal roll.
+        unit / sub-unit cell to remap it — the cell keeps its current text
+        and cursor so you can edit it directly, or pick from the suggestion
+        list (picking saves immediately; Enter saves typed text, Esc
+        cancels). Sub Unit 2/3 lists offer a "leave blank" option that
+        clears the value. Edits are recorded on the tagging, never on the
+        nominal roll.
     </p>
     {% endif %}
 
@@ -215,15 +215,23 @@
     // Sub-units 2/3 may be cleared; unit is required, sub-unit 1 keeps a value.
     const BLANK_FIELDS = new Set(['sub_unit_2', 'sub_unit_3']);
 
-    let panelEl = null;    // the open suggestion panel (appended to <body>)
-    let panelInput = null; // the editor input it belongs to
+    let panelEl = null;     // the open suggestion panel (appended to <body>)
+    let panelInput = null;  // the editor input it belongs to
     let panelField = null;
-    let panelItems = [];   // item divs in display order
-    let activeIndex = -1;  // keyboard-highlighted item
+    let panelItems = [];    // item divs in display order
+    let activeIndex = -1;   // keyboard-highlighted item
+    let activeFinish = null; // finish() of the open editor (pick-to-save)
 
-    document.addEventListener('click', function(e) {
+    // Open the editor on MOUSEDOWN: the target is fixed at press time, so a
+    // layout shift from the previous editor's teardown can't redirect the
+    // event onto a neighbouring cell. preventDefault suppresses the focus
+    // change, so the previous editor is closed here — not via blur — before
+    // the new one opens.
+    document.addEventListener('mousedown', function(e) {
         const span = e.target.closest('.cell-edit');
         if (!span || span.querySelector('input')) return;
+        e.preventDefault();
+        if (activeFinish) activeFinish(false);
         startCellEdit(span);
     });
 
@@ -234,8 +242,15 @@
         panelItems = [];
         activeIndex = -1;
     }
-    // The panel is absolutely positioned; any scroll/resize invalidates it.
-    window.addEventListener('scroll', closeSuggest, true);
+    // The panel is absolutely positioned; close it on scrolls that actually
+    // move the input (scrollers containing it). Capture-phase is required to
+    // see them — but the input's own text-overflow scrolls and the panel's
+    // list scrolling must NOT close it, hence the containment check.
+    window.addEventListener('scroll', function(e) {
+        if (panelEl && e.target !== panelInput && e.target.contains(panelInput)) {
+            closeSuggest();
+        }
+    }, true);
     window.addEventListener('resize', closeSuggest);
 
     function makeItem(value, label, isBlank) {
@@ -245,19 +260,20 @@
         item.textContent = label;
         if (isBlank) item.title = 'Set this sub-unit to blank';
         // mousedown + preventDefault keeps focus on the input (no blur-cancel)
-        // so the pick applies before the click would blur.
+        // so the pick applies before the click would blur. Picking an option
+        // finalizes the edit immediately.
         item.addEventListener('mousedown', function(e) {
             e.preventDefault();
             panelInput.value = value;
-            closeSuggest();
+            if (activeFinish) activeFinish(true);
         });
         panelItems.push(item);
         return item;
     }
 
-    function renderSuggestItems() {
+    function renderSuggestItems(query) {
         if (!panelEl) return;
-        const q = (panelInput.value || '').trim().toLowerCase();
+        const q = (query || '').trim().toLowerCase();
         panelEl.innerHTML = '';
         panelItems = [];
         activeIndex = -1;
@@ -297,7 +313,7 @@
         panelEl = document.createElement('div');
         panelEl.className = 'suggest-panel';
         document.body.appendChild(panelEl);  // escape table/overflow clipping
-        renderSuggestItems();
+        renderSuggestItems('');  // unfiltered: the prefilled text is context
         positionSuggest();
     }
 
@@ -312,30 +328,34 @@
         const input = document.createElement('input');
         input.type = 'text';
         input.className = 'cell-edit-input';
-        // Open EMPTY: the panel filters against the input's current text, so
-        // pre-filling the old value would hide most/all suggestions. The
-        // placeholder keeps the context.
-        input.value = '';
-        input.placeholder = span.dataset.value || '';
+        // Keep the current text with the cursor at its end — the panel opens
+        // unfiltered, so the prefill doesn't hide the suggestions.
+        input.value = span.dataset.value || '';
+        // Match the cell's current width so opening/closing the editor never
+        // shifts the table layout (a shift would redirect later clicks).
+        input.style.width = Math.ceil(span.getBoundingClientRect().width) + 'px';
         span.textContent = '';
         span.appendChild(input);
         input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
         openSuggest(input, span.dataset.field);
 
         let done = false;
-        function finish(save) {
+        const finish = function(save) {
             if (done) return;
             done = true;
+            activeFinish = null;
             closeSuggest();
             if (save) {
                 saveCellEdit(span, input.value.trim());
             } else {
                 span.textContent = span.dataset.value || '—';
             }
-        }
+        };
+        activeFinish = finish;
 
         input.addEventListener('input', function() {
-            if (panelEl) { renderSuggestItems(); positionSuggest(); }
+            if (panelEl) { renderSuggestItems(input.value); positionSuggest(); }
         });
         input.addEventListener('keydown', function(e) {
             if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -346,10 +366,8 @@
                 e.preventDefault();
                 if (panelEl && activeIndex >= 0) {
                     input.value = panelItems[activeIndex].dataset.value;
-                    closeSuggest();
-                } else {
-                    finish(true);
                 }
+                finish(true);  // picking via Enter finalizes too
             } else if (e.key === 'Escape') {
                 e.preventDefault();
                 if (panelEl) closeSuggest();  // first Esc: dismiss panel only
