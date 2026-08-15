@@ -50,6 +50,11 @@ async def attendance_view(
     if not current_user:
         return RedirectResponse(url="/auth/login", status_code=302)
 
+    # Admin-only system: the viewer role is deferred, so gate the viewer
+    # surface on admin role until it exists.
+    if current_user.role not in ("admin", "super_admin"):
+        return RedirectResponse(url="/auth/no-access", status_code=302)
+
     target_date = date or utc_dt.utcnow().date()
 
     session_maker = get_session_maker()

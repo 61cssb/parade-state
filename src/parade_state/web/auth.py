@@ -29,25 +29,21 @@ the user-facing web interface, not the REST API.
 1. Frontend redirects browser to `/auth/login`
 2. User authorizes with Google
 3. Google redirects to `/auth/callback?code=xxx&state=xxx`
-4. Server creates session and redirects to frontend with token
-5. Frontend stores token for API calls
+4. Server creates a session (admin-only) and sets the session cookie
+5. Browser is redirected to `/admin`; the cookie authenticates API calls
+
+Non-admin sign-ins get the no-access page and no session cookie.
 
 ### Example Frontend Code
 ```javascript
 // Step 1: Redirect to login
 window.location.href = '/auth/login';
 
-// Step 2: Handle callback (frontend receives ?token=xxx)
-const urlParams = new URLSearchParams(window.location.search);
-const token = urlParams.get('token');
-localStorage.setItem('auth_token', token);
+// Step 2: The callback sets the session cookie server-side and
+// redirects to /admin — no client-side token handling needed.
 
-// Step 3: Use token for API calls
-fetch('/api/v1/users/me', {
-    headers: {
-        'Authorization': `Bearer ${token}`
-    }
-})
+// Step 3: Use the cookie for API calls (sent automatically)
+fetch('/api/v1/users/me')
 ```
 
 ## Dependencies
@@ -61,6 +57,9 @@ This module depends on:
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import HTMLResponse
+from jinja2 import Environment, FileSystemLoader
+from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import RedirectResponse
@@ -72,6 +71,26 @@ from parade_state.models import User
 from parade_state.utils import cookies, env, utc_dt
 
 router = APIRouter()
+
+ADMIN_ROLES = ("admin", "super_admin")
+
+
+def _render_no_access(user_email: str | None = None) -> HTMLResponse:
+    """Render the 'no access' page shown to non-admin sign-ins.
+
+    The system is admin-only: sign-ins that are not active admins get this
+    page and no session. Status 403 tells browsers (and tests) the account
+    is authenticated-but-forbidden rather than merely lost.
+    """
+    templates_dir = Path(__file__).parent.parent / "templates"
+    template_env = Environment(
+        loader=FileSystemLoader(str(templates_dir)), cache_size=0
+    )
+    template = template_env.get_template("no_access.html")
+    return HTMLResponse(
+        content=template.render(user_email=user_email),
+        status_code=status.HTTP_403_FORBIDDEN,
+    )
 
 
 @router.get("/login")
@@ -100,23 +119,20 @@ async def login(request: Request):
 
     current_admin = await get_current_admin_user_optional(request)
     if current_admin:
-        from fastapi.responses import RedirectResponse
         return RedirectResponse(url="/admin", status_code=302)
 
-    # Check if a regular (non-admin) user is already authenticated
+    # Authenticated but not an admin: admin-only system, so no surface to
+    # send them to.
     current_user = await get_current_user_optional(request)
     if current_user:
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse(url="/grouping", status_code=302)
+        return RedirectResponse(url="/auth/no-access", status_code=302)
 
     # Show login page
-    from jinja2 import Environment, FileSystemLoader
-    from fastapi.responses import HTMLResponse
-    from pathlib import Path
-
     templates_dir = Path(__file__).parent.parent / "templates"
-    env = Environment(loader=FileSystemLoader(str(templates_dir)), cache_size=0)
-    template = env.get_template("login.html")
+    template_env = Environment(
+        loader=FileSystemLoader(str(templates_dir)), cache_size=0
+    )
+    template = template_env.get_template("login.html")
 
     html_content = template.render(request=request)
     return HTMLResponse(content=html_content)
@@ -155,6 +171,18 @@ async def logout(request: Request):
     return response
 
 
+@router.get("/no-access")
+async def no_access():
+    """Render the 'no access' page for non-admin users.
+
+    Reached via redirects from viewer-facing routes (gated on admin role)
+    and from the login page for authenticated non-admins. The OAuth
+    callback renders this page directly (with the sign-in email) instead
+    of redirecting.
+    """
+    return _render_no_access()
+
+
 @router.get("/callback")
 async def auth_callback(
     request: Request,
@@ -163,16 +191,21 @@ async def auth_callback(
     """Handle Google OAuth callback and create user session.
 
     Processes OAuth callback from Google, creates or updates user record,
-    generates session token, and redirects to frontend with token.
+    and — for active admins — generates a session token and redirects to
+    the admin dashboard. The system is admin-only: unknown sign-ins are
+    auto-registered as `unrecognised` and shown the no-access page without
+    receiving a session.
 
     Args:
         request: FastAPI Request object
         db: Database session
 
     Returns:
-        RedirectResponse to frontend with session token in URL
+        RedirectResponse to /admin with the session cookie set, or the
+        no-access page (403) for sign-ins that are not active admins
 
     Raises:
+        HTTPException 403: If the account is suspended
         HTTPException 500: If OAuth callback fails
 
     Example:
@@ -181,7 +214,7 @@ async def auth_callback(
         # /auth/callback?code=xxx&state=xxx
 
         # Server creates session and redirects to:
-        # http://localhost:3000/auth/callback?token=abc123...
+        # http://localhost:8000/admin
         ```
     """
     try:
@@ -210,13 +243,15 @@ async def auth_callback(
         super_admin_email = env.get("SUPER_ADMIN_EMAIL")
 
         if not user:
-            # Auto-register user
+            # Auto-register user. Unknown sign-ins are unrecognised until a
+            # super-admin promotes them via /admin/users; only the bootstrap
+            # super-admin account is created ready-to-use.
             is_super_admin = super_admin_email == email
 
             user = User(
                 email=email,
                 name=name or email.split("@")[0],
-                status="active" if is_super_admin else "pending",
+                status="active" if is_super_admin else "unrecognised",
                 role="super_admin" if is_super_admin else "user",
                 first_sign_in_at=utc_dt.utcnow(),
                 last_sign_in_at=utc_dt.utcnow(),
@@ -243,6 +278,12 @@ async def auth_callback(
                 detail="Account suspended",
             )
 
+        # Admin-only system: anyone who is not an active admin gets the
+        # no-access page and no session (so they cannot reach any
+        # authenticated page until promoted).
+        if user.status != "active" or user.role not in ADMIN_ROLES:
+            return _render_no_access(user_email=user.email)
+
         # Create session
         user_session = await create_user_session(
             db,
@@ -258,15 +299,17 @@ async def auth_callback(
         base_url = f"{request.url.scheme}://{request.url.netloc}"
 
         # Create redirect response with authentication cookie
-        # Redirect admins to admin dashboard, regular users to grouping view
-        redirect_path = "/admin" if user.role in ["admin", "super_admin"] else "/grouping"
-        response = RedirectResponse(url=f"{base_url}{redirect_path}", status_code=302)
+        response = RedirectResponse(url=f"{base_url}/admin", status_code=302)
 
         # Set the authentication cookie using centralized cookie utility
         cookies.set_auth_cookie(response, user_session.token, expires_hours=24)
 
         return response
 
+    except HTTPException:
+        # Deliberate error responses (e.g. suspended accounts) must keep
+        # their status code instead of being masked as a 500 below.
+        raise
     except Exception as e:
         # Log error and return friendly message
         print(f"OAuth callback error: {str(e)}")

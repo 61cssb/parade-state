@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>No Access - Parade State Admin</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .no-access-container {
+            background: white;
+            border-radius: 1rem;
+            padding: 2.5rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+        }
+
+        .logo {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        h1 {
+            color: #1f2937;
+            margin-bottom: 0.5rem;
+            font-size: 1.5rem;
+        }
+
+        .subtitle {
+            color: #6b7280;
+            margin-bottom: 1rem;
+            font-size: 0.875rem;
+        }
+
+        .signed-in-as {
+            color: #374151;
+            font-size: 0.875rem;
+            margin-bottom: 1.5rem;
+            padding: 0.5rem 1rem;
+            background-color: #f3f4f6;
+            border-radius: 0.5rem;
+            display: inline-block;
+        }
+
+        .info {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            background-color: #f3f4f6;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            color: #6b7280;
+        }
+
+        .info p {
+            margin-bottom: 0.5rem;
+        }
+
+        .info p:last-child {
+            margin-bottom: 0;
+        }
+
+        .logout-button {
+            display: inline-block;
+            background-color: #6b7280;
+            color: white;
+            text-decoration: none;
+            padding: 0.5rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+
+        .logout-button:hover {
+            background-color: #4b5563;
+        }
+    </style>
+</head>
+<body>
+    <div class="no-access-container">
+        <div class="logo">🔒</div>
+        <h1>No Access</h1>
+        <p class="subtitle">Your account has not been granted access to Parade State.</p>
+
+        {% if user_email %}
+        <p class="signed-in-as">Signed in as <strong>{{ user_email }}</strong></p>
+        {% endif %}
+
+        <a href="/auth/logout" class="logout-button">Sign out</a>
+
+        <div class="info">
+            <p>Contact your system administrator to request access.</p>
+        </div>
+    </div>
+</body>
+</html>
