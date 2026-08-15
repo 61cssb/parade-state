@@ -1,6 +1,6 @@
 # Next Implementation Phase
 
-**Last Updated:** 2026-08-15 (pers_no as canonical personnel identifier)
+**Last Updated:** 2026-08-16 (admin-only authentication)
 **Status:** Production-Ready Backend with User-Facing Views
 
 ---
@@ -8,7 +8,7 @@
 ## Current System Status
 
 ### Production-Ready Metrics
-- 292 tests passing (100% pass rate)
+- 385 tests passing (100% pass rate)
 - 57 API endpoints fully implemented and tested
 - Enterprise-grade security with multi-tenant access control
 - Comprehensive documentation (architecture, security, deployment, testing)
@@ -27,12 +27,13 @@
 - **User management admin page** (inline role/status editing, search/filter, audit logging)
 - **Audit log API + admin page** (filterable, paginated, colored action badges)
 - **Combined grouping + session admin page** (master-detail with status transitions, session creation)
-- **Non-admin grouping summary view** (AM/PM session counts, unit breakdown)
-- **Non-admin attendance marking view** (inline status/remarks editing, role-aware nav)
+- **Non-admin grouping summary view** (AM/PM session counts, unit breakdown) — admin-gated pending the viewer role
+- **Non-admin attendance marking view** (inline status/remarks editing, role-aware nav) — admin-gated pending the viewer role
 - **Nominal Roll admin view** (`/admin/nominal-rolls`) with CAA date, source filename, personnel count, status
 - **`CsvUpload.original_filename`** — upload-time filename now stored (was only in audit log)
 - **Nominal Roll API** (`GET /api/v1/nominal-rolls`, `GET /api/v1/nominal-rolls/{id}`) — list/detail with latest CsvUpload join
-- **Non-admin nominal roll browser** (`/nominal-roll`) — roster table with nominal roll selector, search, unit filter; row-numbered for easy counting
+- **Non-admin nominal roll browser** (`/nominal-roll`) — roster table with nominal roll selector, search, unit filter; row-numbered for easy counting — admin-gated pending the viewer role
+- **Admin-only authentication (Issue 12)** (2026-08-16) — Only `super_admin`/`admin` can sign in. Unknown Google sign-ins auto-register as `unrecognised` (was `pending`) and get a "no access" page with no session; the `user_status` DB enum is untouched (`pending` stays as a legacy value). Suspended accounts get a real 403 at the callback (the `except Exception` that masked it as a 500 is fixed). Viewer-facing routes (`/grouping`, `/attendance`, `/nominal-roll`) are gated on admin role; promotion of `unrecognised` users happens via the existing `/admin/users` page.
 - **`short_id` personnel identity** (2026-06-29) — `pers_no` dropped entirely (no longer imported or stored); replaced with server-minted 8-char base62 `short_id` as the cross-roll person identifier. Migration `c3d4e5f6a7b8` (batch-mode for SQLite). See [docs/SPECIFICATION.md](SPECIFICATION.md) §3.2.1.
 - **Grouping creation from nominal roll** (2026-07-01) — GUI modal on `/admin/nominal-rolls` for confirmed nominal rolls; API validates nominal roll existence + confirmed status (400 on failure). UI uses military date/time format (YYYYMMDD HHMM) with hardcoded Singapore timezone (+08:00).
 - **Nominal Roll lifecycle management** (2026-07-01) — `PATCH /api/v1/nominal-rolls/{id}` for draft↔confirmed transitions (confirm/unconfirm); `DELETE /api/v1/nominal-rolls/{id}` for super_admin-only cascade deletion (draft/confirmed only). Migration `d4e5f6a7b8c9`.
@@ -341,6 +342,7 @@ git log --oneline --all
 ```
 
 **Recent Major Completions:**
+- **Admin-only Authentication (Issue 12)** (2026-08-16) - Removed the pending-user flow from application logic: unknown Google sign-ins auto-register as `unrecognised` and see a no-access page (403) with no session; only active admins get sessions. Fixed the swallowed-status bug in the OAuth callback (`except Exception` turned the suspended 403 into a 500). Viewer-facing routes (`/grouping`, `/attendance`, `/nominal-roll`) now require admin role; `/auth/login` no longer redirects non-admins to `/grouping`. New `no_access.html` template + `/auth/no-access` route. `user_status` DB enum untouched (`pending` kept as legacy value — Postgres cannot drop enum values without a type rebuild); Python model default is now `unrecognised`. Super-admins promote users via the existing `/admin/users` page. No schema change. 385 tests passing.
 - **pers_no as Canonical Personnel Identifier (Issue 09)** (2026-08-15) - Policy change: `pers_no` (the external personnel number from the CSV `Pers` column) is no longer sensitive and becomes the canonical cross-roll person identifier, replacing the server-minted 8-char base62 `short_id`. `Personnel.pers_no` (String(20), nullable — blank Pers cells store NULL, never empty strings; UNIQUE(nominal_roll_id, pers_no); all rows for the same person across rolls share one value; one pers_no = one person globally). `short_id` fully removed: model, `ids.short_id()`/`ids.mint_unique_short_id()` utilities, schemas (`short_id` → `pers_no`, `personnel_short_id` → `personnel_pers_no` — API-breaking renames), tagging clone/CSV-import matching (`copy_entries_by_pers_no`; NULL pers_no never matches), search filters, groupings CSV export, admin + user-facing UI, and all docs. Migration `o5d6e7f8a9b0` (batch-mode for SQLite; fresh-install stance — pers_no added nullable with no backfill, populate by re-ingesting). Demo `nr_demo.db` regenerated via the ingest script (which now self-stamps `alembic_version` at head); stale `nr_demo.db.bak` removed. 344 tests passing.
 - **Attendance Model Rework — PR 3 (Issue #4)** (2026-08-14) - Attendance admin UI + user-view polish. New super-admin page at `/admin/attendance` with NR/date/subunit-1 selectors, inline scope-activation control (NR or a Tagging), roster editor (AM/PM status + remarks), and a Copy Remarks button (disabled on the NR's first day). User-facing `/attendance` now filters its roster to the caller's assigned subunits (tagging-aware effective sub_unit_1; super_admin sees all), shows the active-scope banner, and wires up Copy Remarks. **Issue #4 complete.** 336 tests passing.
 - **Attendance Model Rework — PR 2 (Issue #4)** (2026-08-14) - Added NR-scoped Subunit-1 attendance access: new `UserSubunitAssignment(user_id, nominal_roll_id, sub_unit_1)` model. Server-enforced 403 on attendance upsert and copy-remarks when the caller lacks an assignment for a target personnel's *effective* sub_unit_1 (tagging-aware — follows the active Tagging's `to_sub_unit_1`, falling back to canonical). `super_admin` bypasses; deny-by-default. Super-admin CRUD API under `/api/v1/access-control/...`. Reusable enforcement helper in `api/subunit_access.py`. Migration `k1f2a3b4c5d6`. 332 tests passing.
@@ -362,6 +364,7 @@ git log --oneline --all
 - **Phase 1: Authentication** (Completed) - Google OAuth and user management
 
 **Priority Changes:**
+- **2026-08-16:** Admin-only authentication (Issue 12) shipped. Only `super_admin`/`admin` can use the system; unknown sign-ins auto-register as `unrecognised` (not `pending`) and see a no-access page with no session. The non-admin viewer role is deferred to a future issue; viewer-facing routes are admin-gated until then. Suspended users get 403 at the callback instead of a masked 500. No schema change — the `user_status` enum keeps `pending` as an unused legacy value. 385 tests passing.
 - **2026-08-15:** `pers_no` as canonical personnel identifier (Issue 09) shipped. `Personnel.short_id` removed; `Personnel.pers_no` (from the CSV `Pers` column) is the cross-roll person identifier. Cross-roll matching (tagging clone, CSV-process tagging import) matches on `pers_no`; blank Pers cells store NULL and never match. API field renames: `short_id` → `pers_no` on personnel responses, `personnel_short_id` → `personnel_pers_no` on tagging-entry responses, unmatched items surface `{pers_no, name}`. Migration `o5d6e7f8a9b0`. 344 tests passing.
 - **2026-08-13:** Tagging overlay (Issue #3) shipped. New `Tagging` + `TaggingEntry` entities model an overlay of person → subunit remappings on top of a Nominal Roll — never mutating the NR's personnel/subunit data. `TaggingEntry` uses the same 4-string `from_*`/`to_*` subunit tuple as `GroupingPersonnelOverride`; `from_*` is auto-snapshotted from the linked personnel when omitted. `POST /api/v1/taggings/{id}/clone` matches source personnel to target-NR rows by `Personnel.short_id` (the cross-roll person identifier); unmatched source personnel are surfaced. Label uniqueness server-enforced (409 on duplicate). Super-admin-only API + admin UI at `/admin/taggings` with per-person remap picker and clone modal. Migration `i9d0e1f2a3b4`. 360 tests passing.
 - **2026-08-13:** Personnel category (Issue #10) shipped. New `Personnel.category` column (`Officer` / `WOSE`) inferred from rank via `parade_state.utils.ranks.category_for_rank()`. ME1-ME3 → WOSE, ME4+ → Officer. Migration `h8c9d0e1f2a3` adds the column nullable (no backfill — demo DB regenerated). Ingest skips and reports rows with unrecognized ranks. Category filter added to `GET /api/v1/personnel`, `/nominal-roll`, and `/admin/groupings/{id}/personnel`. PATCHing rank recomputes category (rejected with 400 on unrecognized rank). Category is always inferred, never manually editable. 340 tests passing.

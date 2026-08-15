@@ -183,17 +183,22 @@ paths:
       tags: [auth]
       summary: Google OAuth callback
       description: |
-        Handles the OAuth callback from Google.
-        - If email matches SUPER_ADMIN_EMAIL env var → create/update user as super_admin, activate.
-        - If email matches a `pending` account → activate account, set google_sub.
-        - If email not found → create `unrecognised` record, write audit log event, return 403.
-        Writes `auth.signin_success` or `auth.signin_unrecognised` to audit log.
+        Handles the OAuth callback from Google. Admin-only system.
+        - If email matches SUPER_ADMIN_EMAIL env var → create/update user as
+          active super_admin, create session, redirect to `/admin`.
+        - If email matches an existing active admin → create session,
+          redirect to `/admin`.
+        - If email is suspended → 403 (no session).
+        - Otherwise (unknown email, or non-admin account) → auto-register as
+          `unrecognised` (unknown emails only), render the no-access page
+          with 403, and create no session. A super-admin promotes the user
+          to admin via `PATCH /users/{userId}`.
       security: []
       responses:
         '302':
-          description: Redirect to app on success
+          description: Redirect to /admin with session cookie set
         '403':
-          description: No preregistered account found
+          description: Not an active admin (no-access page), or account suspended (JSON error)
           content:
             application/json:
               schema:
@@ -259,8 +264,10 @@ paths:
       summary: Preregister a user account
       x-access-control: admin
       description: |
-        Creates a `pending` account. Admin assigns access level, subunit scope grants,
-        and grouping grants upfront. User activates on first Google sign-in.
+        NOT IMPLEMENTED. Preregistration was rejected (issue 12): with 20–50
+        internal users, accounts auto-register as `unrecognised` on first
+        Google sign-in and a super-admin promotes them to admin via
+        `PATCH /users/{userId}`.
       requestBody:
         required: true
         content:
