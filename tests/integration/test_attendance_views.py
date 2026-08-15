@@ -139,6 +139,7 @@ async def test_user_attendance_overlays_active_tagging_values(
             from_sub_unit_1=sample_personnel[0].sub_unit_1,
             to_unit="Coy B",
             to_sub_unit_1="Platoon 9",
+            to_sub_unit_2="Section 9",
         )
     )
     db_session.add(tagging)
@@ -173,9 +174,13 @@ async def test_user_attendance_overlays_active_tagging_values(
     # Copy Remarks is super-admin-only now that the admin page is gone.
     assert "Copy Remarks" in response.text
     assert "changed-row" in response.text
-    # Effective values come from the tagging entry, not the canonical row.
+    # Sub-unit 2/3 columns are shown; effective values come from the
+    # tagging entry, not the canonical row.
+    assert "Sub-unit 2" in response.text
+    assert "Sub-unit 3" in response.text
     assert "Coy B" in response.text
     assert "Platoon 9" in response.text
+    assert "Section 9" in response.text
 
 
 @pytest.mark.asyncio

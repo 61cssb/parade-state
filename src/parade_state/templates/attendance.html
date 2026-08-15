@@ -95,6 +95,8 @@
             <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
                 <th style="padding: 0.5rem;">Unit</th>
                 <th style="padding: 0.5rem;">Sub-unit 1</th>
+                <th style="padding: 0.5rem;">Sub-unit 2</th>
+                <th style="padding: 0.5rem;">Sub-unit 3</th>
                 <th style="padding: 0.5rem;">Category</th>
                 <th style="padding: 0.5rem;">Rank</th>
                 <th style="padding: 0.5rem;">Name</th>
@@ -111,6 +113,8 @@
                 data-category="{{ r.category }}" data-rank="{{ r.rank }}" data-name="{{ r.full_name }}">
                 <td style="padding: 0.5rem;">{{ r.unit }}</td>
                 <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_1 or '' }}</td>
+                <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_2 or '' }}</td>
+                <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_3 or '' }}</td>
                 <td style="padding: 0.5rem; white-space: nowrap;">{{ r.category }}</td>
                 <td style="padding: 0.5rem; white-space: nowrap;">{{ r.rank }}</td>
                 <td style="padding: 0.5rem;">{{ r.full_name }}</td>

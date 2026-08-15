@@ -99,6 +99,8 @@ async def attendance_view(
                 ).order_by(
                     Personnel.unit,
                     Personnel.sub_unit_1,
+                    Personnel.sub_unit_2,
+                    Personnel.sub_unit_3,
                     Personnel.rank,
                     Personnel.full_name,
                 )
@@ -163,6 +165,12 @@ async def attendance_view(
                         "full_name": person.full_name,
                         "unit": entry.to_unit if entry else person.unit,
                         "sub_unit_1": eff_sub1,
+                        "sub_unit_2": (
+                            entry.to_sub_unit_2 if entry else person.sub_unit_2
+                        ),
+                        "sub_unit_3": (
+                            entry.to_sub_unit_3 if entry else person.sub_unit_3
+                        ),
                         "is_changed": entry is not None,
                         "status_am": record.status_am if record else "absent",
                         "remarks_am": record.remarks_am if record else "",
