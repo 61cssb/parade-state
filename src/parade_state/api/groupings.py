@@ -1060,7 +1060,7 @@ async def export_grouping_csv(
 
         # Build row
         row = [
-            person.short_id,
+            person.pers_no or "",
             person.rank,
             person.full_name,
             person.unit,

@@ -1,4 +1,4 @@
-"""Behavioral tests for personnel identity (short_id) and nominal_roll versioning."""
+"""Behavioral tests for personnel identity (pers_no) and nominal_roll versioning."""
 
 from datetime import date
 
@@ -10,17 +10,17 @@ from parade_state.models import (
     NominalRoll,
     Personnel,
 )
-from parade_state.utils import ids, utc_dt
+from parade_state.utils import utc_dt
 
 
-class TestPersonnelIdentity:
-    """Test personnel identity via the cross-nominal_roll short_id."""
+class TestPersonnelPersNo:
+    """Test personnel identity via the cross-nominal_roll pers_no."""
 
     @pytest.mark.asyncio
-    async def test_personnel_short_id_auto_generated(
+    async def test_personnel_pers_no_nullable(
         self, db_session, sample_nominal_roll, sample_users
     ):
-        """A Personnel row gets an 8-char base62 short_id by default."""
+        """A Personnel row with no pers_no (blank CSV Pers cell) stores NULL."""
         admin_id = sample_users["admin"].id
 
         person = Personnel(
@@ -34,23 +34,18 @@ class TestPersonnelIdentity:
         db_session.add(person)
         await db_session.commit()
 
-        assert isinstance(person.short_id, str)
-        assert len(person.short_id) == 8
-        # Auto-minted value uses the base62 alphabet (no ambiguous look-alikes)
-        alphabet = set(
-            "23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-        )
-        assert set(person.short_id).issubset(alphabet)
+        assert person.pers_no is None
 
     @pytest.mark.asyncio
-    async def test_personnel_distinct_rows_get_distinct_short_ids(
+    async def test_personnel_distinct_rows_get_distinct_pers_nos(
         self, db_session, sample_nominal_roll, sample_users
     ):
-        """Two distinct persons get distinct row ids and distinct short_ids."""
+        """Two distinct persons get distinct row ids and distinct pers_nos."""
         admin_id = sample_users["admin"].id
 
         person1 = Personnel(
             nominal_roll_id=sample_nominal_roll.id,
+            pers_no="10000001",
             rank="PTE",
             category="WOSE",
             full_name="John Doe",
@@ -59,6 +54,7 @@ class TestPersonnelIdentity:
         )
         person2 = Personnel(
             nominal_roll_id=sample_nominal_roll.id,
+            pers_no="10000002",
             rank="PTE",
             category="WOSE",
             full_name="John Doe Jr",
@@ -70,14 +66,14 @@ class TestPersonnelIdentity:
         await db_session.commit()
 
         assert person1.id != person2.id
-        assert person1.short_id != person2.short_id
+        assert person1.pers_no != person2.pers_no
         assert person1.full_name != person2.full_name
 
     @pytest.mark.asyncio
-    async def test_personnel_short_id_shared_across_nominal_rolls(
+    async def test_personnel_pers_no_shared_across_nominal_rolls(
         self, db_session, sample_users
     ):
-        """The same person appearing in two nominal_rolls shares one short_id across rows."""
+        """The same person appearing in two nominal_rolls shares one pers_no across rows."""
         admin_id = sample_users["admin"].id
 
         nominal_roll1 = NominalRoll(
@@ -93,11 +89,10 @@ class TestPersonnelIdentity:
         db_session.add_all([nominal_roll1, nominal_roll2])
         await db_session.commit()
 
-        # The same individual, deliberately assigned one short_id across nominal_rolls.
-        shared_short_id = ids.short_id()
+        # The same individual — one external pers_no, two roll rows.
         person1 = Personnel(
             nominal_roll_id=nominal_roll1.id,
-            short_id=shared_short_id,
+            pers_no="10000001",
             rank="PTE",
             category="WOSE",
             full_name="John Doe",
@@ -106,7 +101,7 @@ class TestPersonnelIdentity:
         )
         person2 = Personnel(
             nominal_roll_id=nominal_roll2.id,
-            short_id=shared_short_id,  # same person, different nominal_roll
+            pers_no="10000001",  # same person, different nominal_roll
             rank="PTE",
             category="WOSE",
             full_name="John Doe",
@@ -120,19 +115,18 @@ class TestPersonnelIdentity:
         # Distinct rows, distinct nominal_rolls, but ONE cross-nominal_roll person identity.
         assert person1.nominal_roll_id != person2.nominal_roll_id
         assert person1.id != person2.id
-        assert person1.short_id == person2.short_id
+        assert person1.pers_no == person2.pers_no
 
     @pytest.mark.asyncio
-    async def test_personnel_nominal_roll_short_id_unique_constraint(
+    async def test_personnel_pers_no_unique_per_nominal_roll(
         self, db_session, sample_nominal_roll, sample_users
     ):
-        """UNIQUE(nominal_roll_id, short_id): two rows, same nominal_roll, same short_id must fail."""
+        """UNIQUE(nominal_roll_id, pers_no): two rows, same roll, same pers_no must fail."""
         admin_id = sample_users["admin"].id
-        clashing_short_id = ids.short_id()
 
         person1 = Personnel(
             nominal_roll_id=sample_nominal_roll.id,
-            short_id=clashing_short_id,
+            pers_no="10000001",
             rank="PTE",
             category="WOSE",
             full_name="John Doe",
@@ -141,7 +135,7 @@ class TestPersonnelIdentity:
         )
         person2 = Personnel(
             nominal_roll_id=sample_nominal_roll.id,  # same nominal_roll
-            short_id=clashing_short_id,  # same short_id in same nominal_roll
+            pers_no="10000001",  # same pers_no in same nominal_roll
             rank="CPL",
             category="WOSE",
             full_name="Jane Doe",
@@ -155,27 +149,14 @@ class TestPersonnelIdentity:
         await db_session.rollback()
 
     @pytest.mark.asyncio
-    async def test_personnel_different_persons_different_short_ids(
-        self, db_session, sample_users
+    async def test_personnel_multiple_null_pers_nos_allowed(
+        self, db_session, sample_nominal_roll, sample_users
     ):
-        """Different persons in different nominal_rolls have different short_ids."""
+        """Multiple rows with NULL pers_no coexist (a NULL never clashes)."""
         admin_id = sample_users["admin"].id
 
-        nominal_roll1 = NominalRoll(
-            caa=date(2024, 1, 1),
-            csv_hash="hash1",
-            uploaded_by=admin_id,
-        )
-        nominal_roll2 = NominalRoll(
-            caa=date(2024, 2, 1),
-            csv_hash="hash2",
-            uploaded_by=admin_id,
-        )
-        db_session.add_all([nominal_roll1, nominal_roll2])
-        await db_session.commit()
-
         person1 = Personnel(
-            nominal_roll_id=nominal_roll1.id,
+            nominal_roll_id=sample_nominal_roll.id,
             rank="PTE",
             category="WOSE",
             full_name="John Doe",
@@ -183,10 +164,10 @@ class TestPersonnelIdentity:
             created_by=admin_id,
         )
         person2 = Personnel(
-            nominal_roll_id=nominal_roll2.id,
-            rank="PTE",
+            nominal_roll_id=sample_nominal_roll.id,
+            rank="CPL",
             category="WOSE",
-            full_name="Jane Smith",  # a different person
+            full_name="Jane Smith",
             unit="Coy A",
             created_by=admin_id,
         )
@@ -194,7 +175,8 @@ class TestPersonnelIdentity:
         db_session.add_all([person1, person2])
         await db_session.commit()
 
-        assert person1.short_id != person2.short_id
+        assert person1.pers_no is None
+        assert person2.pers_no is None
 
 
 class TestNominalRollVersioning:

@@ -2,7 +2,7 @@
 
 Covers: super_admin-only authorization, overlay semantics (Personnel rows
 never mutate), CRUD with entry validation, and clone behavior (matching by
-``short_id``, unmatched surfacing).
+``pers_no``, unmatched surfacing).
 """
 
 from datetime import date
@@ -36,10 +36,10 @@ USER_PARAMS = {"user_id": "regular-user-id", "user_role": "user"}
 async def second_nominal_roll(
     db_session: AsyncSession, sample_users, sample_personnel
 ) -> tuple[NominalRoll, list[Personnel]]:
-    """Create a second NR with two personnel sharing short_ids with the first NR.
+    """Create a second NR with two personnel sharing pers_nos with the first NR.
 
     personnel[0] and personnel[1] from the first NR are mirrored here under
-    the same short_id (the cross-roll person identifier). personnel[2] is
+    the same pers_no (the cross-roll person identifier). personnel[2] is
     intentionally not mirrored — clone tests rely on it being unmatched.
 
     An empty 1:1 tagging is auto-created so the clone-merge endpoint has a
@@ -62,7 +62,7 @@ async def second_nominal_roll(
     mirrored = [
         Personnel(
             nominal_roll_id=str(nr.id),
-            short_id=source[0].short_id,  # same person, different NR
+            pers_no=source[0].pers_no,  # same person, different NR
             rank=source[0].rank,
             category=source[0].category,
             full_name=source[0].full_name,
@@ -72,7 +72,7 @@ async def second_nominal_roll(
         ),
         Personnel(
             nominal_roll_id=str(nr.id),
-            short_id=source[1].short_id,
+            pers_no=source[1].pers_no,
             rank=source[1].rank,
             category=source[1].category,
             full_name=source[1].full_name,
@@ -175,7 +175,7 @@ async def test_create_tagging_snapshots_from_subunit(
     assert entry["from_sub_unit_2"] == "Section 1"
     assert entry["to_unit"] == "Coy B"
     assert entry["to_sub_unit_1"] == "Platoon 3"
-    assert entry["personnel_short_id"] == p.short_id
+    assert entry["personnel_pers_no"] == p.pers_no
     assert "PTE" in (entry["personnel_label"] or "")
 
 
@@ -597,7 +597,7 @@ async def test_tagging_does_not_mutate_personnel(
 
 
 @pytest.mark.asyncio
-async def test_clone_matches_by_short_id(
+async def test_clone_matches_by_pers_no(
     client: TestClient, super_admin_token_headers, sample_personnel, sample_nominal_roll,
     second_nominal_roll, db_session: AsyncSession,
 ):
@@ -633,7 +633,7 @@ async def test_clone_matches_by_short_id(
     assert data["source_count"] == 3
     assert data["matched_count"] == 2
     assert len(data["unmatched"]) == 1
-    assert data["unmatched"][0]["short_id"] == sample_personnel[2].short_id
+    assert data["unmatched"][0]["pers_no"] == sample_personnel[2].pers_no
 
     target_tagging = data["tagging"]
     assert target_tagging["nominal_roll_id"] == str(other_nr.id)
@@ -647,6 +647,56 @@ async def test_clone_matches_by_short_id(
     for entry in target_tagging["entries"]:
         assert entry["from_unit"] == "Coy B"
         assert entry["from_sub_unit_1"] == "Platoon 9"
+
+
+@pytest.mark.asyncio
+async def test_clone_null_pers_no_source_surfaces_unmatched(
+    client: TestClient, super_admin_token_headers, sample_personnel,
+    sample_nominal_roll, second_nominal_roll, db_session: AsyncSession, sample_users,
+):
+    """A source person with NULL pers_no can never match — surfaces unmatched
+    with an empty pers_no string in the response.
+    """
+    other_nr, _mirrored = second_nominal_roll
+    admin_id = str(sample_users["admin"].id)
+
+    null_pers_no_person = Personnel(
+        nominal_roll_id=str(sample_nominal_roll.id),
+        rank="PTE",
+        category="WOSE",
+        full_name="No Pers Number",
+        unit="Coy A",
+        created_by=admin_id,
+    )
+    db_session.add(null_pers_no_person)
+    await db_session.commit()
+
+    create = client.post(
+        "/api/v1/taggings",
+        headers=super_admin_token_headers,
+        params=SUPER_ADMIN_PARAMS,
+        json={
+            "label": "null-pers-no-source",
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "entries": [
+                {"personnel_id": str(null_pers_no_person.id), "to_unit": "Coy X"},
+            ],
+        },
+    )
+    source_id = create.json()["id"]
+
+    response = client.post(
+        f"/api/v1/taggings/{source_id}/clone",
+        headers=super_admin_token_headers,
+        params=SUPER_ADMIN_PARAMS,
+        json={"target_nominal_roll_id": str(other_nr.id)},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["matched_count"] == 0
+    assert len(data["unmatched"]) == 1
+    assert data["unmatched"][0]["pers_no"] == ""
+    assert "No Pers Number" in (data["unmatched"][0]["name"] or "")
 
 
 @pytest.mark.asyncio

@@ -1,79 +1,97 @@
-"""Unit tests for ids utility module (short_id generation)."""
+"""Unit tests for ids utility module (UUID generation/validation/conversion)."""
+
+import uuid as uuid_module
+
+import pytest
 
 from parade_state.utils import ids
 
 
-class TestShortIdGeneration:
-    """Test short_id generator."""
+class TestUuidGeneration:
+    """Test UUID generators."""
 
-    def test_short_id_default_length(self):
-        """Default short_id is 8 chars."""
-        sid = ids.short_id()
-        assert isinstance(sid, str)
-        assert len(sid) == 8
+    def test_uuid4_returns_uuid_object(self):
+        result = ids.uuid4()
+        assert isinstance(result, uuid_module.UUID)
+        assert result.version == 4
 
-    def test_short_id_custom_length(self):
-        """Length is configurable."""
-        assert len(ids.short_id(length=12)) == 12
-        assert len(ids.short_id(length=4)) == 4
+    def test_uuid4_unique(self):
+        assert ids.uuid4() != ids.uuid4()
 
-    def test_short_id_alphabet_is_base62(self):
-        """short_id only uses characters from the base62 alphabet."""
-        alphabet = set("23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
-        for _ in range(200):
-            sid = ids.short_id()
-            assert set(sid).issubset(alphabet)
-            # No ambiguous look-alikes
-            assert not any(c in sid for c in "01OIl")
+    def test_uuid4_str_returns_string(self):
+        result = ids.uuid4_str()
+        assert isinstance(result, str)
+        assert len(result) == 36  # canonical 8-4-4-4-12 format
 
-    def test_short_id_uniqueness_sample(self):
-        """A draw of many short IDs produces negligible collisions."""
-        samples = {ids.short_id() for _ in range(5000)}
-        assert len(samples) == 5000  # 8-char base62: collisions vanishingly rare at this n
+    def test_db_default_returns_uuid_string(self):
+        result = ids.db_default()
+        assert isinstance(result, str)
+        assert ids.is_valid(result)
 
 
-class TestMintUniqueShortId:
-    """Test mint_unique_short_id retry logic."""
+class TestUuidValidation:
+    """Test UUID validation."""
 
-    def test_returns_unused_id(self):
-        """With nothing taken, returns an 8-char id immediately."""
+    def test_is_valid_accepts_valid_uuid(self):
+        assert ids.is_valid("12345678-1234-5678-1234-567812345678") is True
 
-        def never_taken(_candidate: str) -> bool:
-            return False
+    def test_is_valid_rejects_invalid_string(self):
+        assert ids.is_valid("invalid-uuid") is False
 
-        sid = ids.mint_unique_short_id(never_taken)
-        assert len(sid) == 8
+    def test_is_valid_rejects_non_string(self):
+        assert ids.is_valid(12345) is False
 
-    def test_retries_past_taken_ids(self):
-        """Retries until is_taken returns False."""
+    def test_validate_valid_uuid_no_error(self):
+        ids.validate("12345678-1234-5678-1234-567812345678")  # no raise
 
-        call_count = {"n": 0}
+    def test_validate_invalid_uuid_raises(self):
+        with pytest.raises(ValueError):
+            ids.validate("invalid-uuid")
 
-        def taken_for_first_three(candidate: str) -> bool:
-            call_count["n"] += 1
-            return call_count["n"] <= 3
+    def test_validate_non_string_raises_type_error(self):
+        with pytest.raises(TypeError):
+            ids.validate(None)
 
-        sid = ids.mint_unique_short_id(taken_for_first_three)
-        assert len(sid) == 8
-        assert call_count["n"] == 4  # 3 taken + 1 accepted
 
-    def test_raises_when_all_attempts_collide(self):
-        """Raises RuntimeError when every attempt is reported taken."""
+class TestUuidConversion:
+    """Test UUID conversion helpers."""
 
-        def always_taken(_candidate: str) -> bool:
-            return True
+    def test_to_uuid_from_string(self):
+        uuid_obj = ids.to_uuid("12345678-1234-5678-1234-567812345678")
+        assert isinstance(uuid_obj, uuid_module.UUID)
 
-        try:
-            ids.mint_unique_short_id(always_taken, max_attempts=5)
-            raise AssertionError("expected RuntimeError")
-        except RuntimeError as exc:
-            assert "unique" in str(exc)
+    def test_to_uuid_passthrough_uuid_object(self):
+        original = uuid_module.uuid4()
+        assert ids.to_uuid(original) is original
 
-    def test_respects_custom_length(self):
-        """Honours the length argument."""
+    def test_to_uuid_invalid_string_raises(self):
+        with pytest.raises(ValueError):
+            ids.to_uuid("invalid")
 
-        def never_taken(_candidate: str) -> bool:
-            return False
+    def test_to_uuid_non_string_raises(self):
+        with pytest.raises(TypeError):
+            ids.to_uuid(123)
 
-        sid = ids.mint_unique_short_id(never_taken, length=10)
-        assert len(sid) == 10
+    def test_to_string_from_uuid_object(self):
+        result = ids.to_string(uuid_module.UUID("12345678-1234-5678-1234-567812345678"))
+        assert result == "12345678-1234-5678-1234-567812345678"
+
+    def test_to_string_valid_string_passthrough(self):
+        assert ids.to_string("12345678-1234-5678-1234-567812345678") == (
+            "12345678-1234-5678-1234-567812345678"
+        )
+
+    def test_to_string_invalid_string_raises(self):
+        with pytest.raises(ValueError):
+            ids.to_string("not-a-uuid")
+
+    def test_or_default_returns_value_when_valid(self):
+        assert ids.or_default("12345678-1234-5678-1234-567812345678") == (
+            "12345678-1234-5678-1234-567812345678"
+        )
+
+    def test_or_default_returns_default_when_none(self):
+        assert ids.or_default(None, "fallback") == "fallback"
+
+    def test_or_default_returns_default_when_invalid(self):
+        assert ids.or_default("invalid", "fallback") == "fallback"

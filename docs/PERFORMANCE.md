@@ -72,7 +72,7 @@ class Personnel(Base):
     __tablename__ = "personnel"
 
     # Indexed for fast lookups
-    short_id: Mapped[str] = mapped_column(String(8), index=True)  # cross-roll person identity
+    pers_no: Mapped[str | None] = mapped_column(String(20), index=True)  # cross-roll person identity
     rank: Mapped[str] = mapped_column(String(50), index=True)
     full_name: Mapped[str] = mapped_column(String(255), index=True)
     unit: Mapped[str] = mapped_column(String(255), index=True)

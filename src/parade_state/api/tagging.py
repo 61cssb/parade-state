@@ -56,14 +56,14 @@ def _snapshot_from_personnel(personnel: Personnel) -> dict:
 
 def _entry_to_response(
     entry: TaggingEntry,
-    short_id: str | None = None,
+    pers_no: str | None = None,
     personnel_label: str | None = None,
 ) -> TaggingEntryResponse:
     return TaggingEntryResponse(
         id=entry.id,
         tagging_id=entry.tagging_id,
         personnel_id=entry.personnel_id,
-        personnel_short_id=short_id,
+        personnel_pers_no=pers_no,
         personnel_label=personnel_label,
         from_unit=entry.from_unit,
         from_sub_unit_1=entry.from_sub_unit_1,
@@ -79,19 +79,19 @@ def _entry_to_response(
 async def _build_entries_response(
     db: AsyncSession, entries: list[TaggingEntry]
 ) -> list[TaggingEntryResponse]:
-    """Build entry responses with personnel short_id/label denormalized."""
+    """Build entry responses with personnel pers_no/label denormalized."""
     if not entries:
         return []
     personnel_ids = [e.personnel_id for e in entries]
     rows = (
         await db.execute(
-            select(Personnel.id, Personnel.short_id, Personnel.rank, Personnel.full_name)
+            select(Personnel.id, Personnel.pers_no, Personnel.rank, Personnel.full_name)
             .where(Personnel.id.in_(personnel_ids))
         )
     ).all()
     info_by_id = {
         row.id: {
-            "short_id": row.short_id,
+            "pers_no": row.pers_no,
             "label": f"{row.rank} {row.full_name}".strip(),
         }
         for row in rows
@@ -99,7 +99,7 @@ async def _build_entries_response(
     return [
         _entry_to_response(
             e,
-            short_id=info_by_id.get(e.personnel_id, {}).get("short_id"),
+            pers_no=info_by_id.get(e.personnel_id, {}).get("pers_no"),
             personnel_label=info_by_id.get(e.personnel_id, {}).get("label"),
         )
         for e in entries
@@ -246,21 +246,22 @@ async def _load_nr_tagging(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
-async def copy_entries_by_short_id(
+async def copy_entries_by_pers_no(
     db: AsyncSession,
     source_tagging: Tagging,
     target_tagging: Tagging,
     target_nominal_roll_id: str,
 ) -> tuple[int, list[TaggingCloneUnmatchedItem]]:
-    """Copy ``source_tagging.entries`` into ``target_tagging`` by ``short_id``.
+    """Copy ``source_tagging.entries`` into ``target_tagging`` by ``pers_no``.
 
     Used by the clone endpoint and the CSV-process "import taggings" flow.
-    Matches each source entry's personnel ``short_id`` against target-NR
+    Matches each source entry's personnel ``pers_no`` against target-NR
     personnel. Matched personnel get a new entry on the target tagging
     pointing at the target-NR personnel row; ``from_*`` is re-snapshotted
     from the target personnel. Personnel that already have an entry on the
     target tagging are skipped (no clobber). Source personnel with no
-    ``short_id`` match in the target NR are surfaced in the return value.
+    ``pers_no`` match in the target NR (including NULL pers_no — a NULL
+    never matches) are surfaced in the return value.
 
     Returns ``(matched_count, unmatched)``.
     """
@@ -268,30 +269,30 @@ async def copy_entries_by_short_id(
     if not source_entries:
         return 0, []
 
-    # Load source personnel rows (for short_id lookup + naming unmatched).
+    # Load source personnel rows (for pers_no lookup + naming unmatched).
     source_personnel = await _load_personnel_map(
         db, [e.personnel_id for e in source_entries]
     )
-    entry_short_ids: list[str | None] = [
-        source_personnel[e.personnel_id].short_id
+    entry_pers_nos: list[str | None] = [
+        source_personnel[e.personnel_id].pers_no
         if e.personnel_id in source_personnel
         else None
         for e in source_entries
     ]
 
-    # Load target-NR personnel keyed by short_id.
-    valid_short_ids = [sid for sid in entry_short_ids if sid]
+    # Load target-NR personnel keyed by pers_no.
+    valid_pers_nos = [pn for pn in entry_pers_nos if pn]
     target_lookup: dict[str, Personnel] = {}
-    if valid_short_ids:
+    if valid_pers_nos:
         target_rows = (
             await db.execute(
                 select(Personnel).where(
                     Personnel.nominal_roll_id == target_nominal_roll_id,
-                    Personnel.short_id.in_(valid_short_ids),
+                    Personnel.pers_no.in_(valid_pers_nos),
                 )
             )
         ).scalars().all()
-        target_lookup = {p.short_id: p for p in target_rows}
+        target_lookup = {p.pers_no: p for p in target_rows}
 
     # Load personnel_ids already on the target tagging (skip to avoid clobber).
     existing_target_personnel_ids = {
@@ -300,13 +301,13 @@ async def copy_entries_by_short_id(
 
     matched_count = 0
     unmatched: list[TaggingCloneUnmatchedItem] = []
-    for entry, short_id in zip(source_entries, entry_short_ids, strict=True):
-        target_person = target_lookup.get(short_id) if short_id else None
+    for entry, pers_no in zip(source_entries, entry_pers_nos, strict=True):
+        target_person = target_lookup.get(pers_no) if pers_no else None
         if target_person is None:
             source_p = source_personnel.get(entry.personnel_id)
             unmatched.append(
                 TaggingCloneUnmatchedItem(
-                    short_id=short_id or "",
+                    pers_no=pers_no or "",
                     name=(
                         f"{source_p.rank} {source_p.full_name}".strip()
                         if source_p
@@ -577,8 +578,8 @@ async def clone_tagging(
 
     Under the 1:1 model every NR already has a tagging, so "clone" no longer
     creates a new tagging — it merges the source's entries into the target
-    NR's tagging by ``short_id`` matching. Personnel already on the target
-    tagging are skipped (no clobber); source personnel with no short_id
+    NR's tagging by ``pers_no`` matching. Personnel already on the target
+    tagging are skipped (no clobber); source personnel with no pers_no
     match in the target NR are surfaced in the response.
     """
     _require_super_admin(user_role)
@@ -618,7 +619,7 @@ async def clone_tagging(
         )
 
     source_count = len(source.entries)
-    matched_count, unmatched = await copy_entries_by_short_id(
+    matched_count, unmatched = await copy_entries_by_pers_no(
         db, source, target_tagging, target_nr.id
     )
 

@@ -790,6 +790,7 @@ async def test_export_grouping_csv(
     # Create personnel
     personnel = Personnel(
         nominal_roll_id="nominal_roll-1",
+        pers_no="10000001",
         rank="PTE",
         category="WOSE",
         full_name="John Doe",
@@ -838,7 +839,7 @@ async def test_export_grouping_csv(
 
     # Verify CSV content
     csv_content = response.content.decode("utf-8")
-    assert personnel.short_id in csv_content
+    assert personnel.pers_no in csv_content
     assert "Rank" in csv_content
     assert "John Doe" in csv_content
     assert "Override Unit" in csv_content

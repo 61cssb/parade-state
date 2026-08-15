@@ -58,7 +58,7 @@
         <tbody>
             {% for e in entries %}
             <tr class="changed-row" style="border-bottom: 1px solid #f3e8c7;">
-                <td style="padding: 0.5rem;"><strong>{{ e.label }}</strong> <span style="font-family: monospace; font-size: 0.75rem; color: #6b7280;">{{ e.short_id }}</span></td>
+                <td style="padding: 0.5rem;"><strong>{{ e.label }}</strong>{% if e.pers_no %} <span style="font-family: monospace; font-size: 0.75rem; color: #6b7280;">{{ e.pers_no }}</span>{% endif %}</td>
                 <td style="padding: 0.5rem;">{{ e.from_unit or '—' }}</td>
                 <td style="padding: 0.5rem;">{{ e.from_sub_unit_1 or '—' }}</td>
                 <td style="padding: 0.5rem;">{{ e.from_sub_unit_2 or '—' }}</td>
@@ -158,7 +158,7 @@
         <button type="button" onclick="closeImportModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
     </div>
     <p style="font-size: 0.85rem; color: #374151; margin-bottom: 1rem;">
-        Merges the source NR's tagging entries into <strong>CAA {{ active_nominal_roll_caa }}</strong> by matching personnel across NRs on <em>short_id</em>. Entries that already exist on the target are skipped; unmatched source personnel are surfaced in the result.
+        Merges the source NR's tagging entries into <strong>CAA {{ active_nominal_roll_caa }}</strong> by matching personnel across NRs on <em>pers_no</em>. Entries that already exist on the target are skipped; unmatched source personnel are surfaced in the result.
     </p>
     <form id="import-form" onsubmit="event.preventDefault(); submitImport();">
         <div style="margin-bottom: 0.75rem;">
@@ -360,7 +360,7 @@
         if (!person) return;
         addRemapRow({
             personnel_id: person.id,
-            personnel_label: (person.rank + ' ' + person.name + ' (' + person.short_id + ')').trim(),
+            personnel_label: (person.rank + ' ' + person.name + (person.pers_no ? ' (' + person.pers_no + ')' : '')).trim(),
             from_unit: person.unit,
             from_sub_unit_1: person.sub_unit_1,
         });
@@ -390,7 +390,7 @@
                 addRemapRow({
                     personnel_id: e.personnel_id,
                     personnel_label: p
-                        ? (p.rank + ' ' + p.name + ' (' + p.short_id + ')').trim()
+                        ? (p.rank + ' ' + p.name + (p.pers_no ? ' (' + p.pers_no + ')' : '')).trim()
                         : (e.personnel_label || e.personnel_id),
                     from_unit: p ? p.unit : (e.from_unit || null),
                     from_sub_unit_1: p ? p.sub_unit_1 : (e.from_sub_unit_1 || null),

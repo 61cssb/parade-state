@@ -34,7 +34,7 @@ For a scoped user viewing a grouping:
 WITH effective_assignment AS (
     SELECT
         p.id            AS personnel_id,
-        p.short_id,
+        p.pers_no,
         COALESCE(dpo.unit,        p.unit)        AS unit,
         COALESCE(dpo.sub_unit_1,  p.sub_unit_1)  AS sub_unit_1,
         COALESCE(dpo.sub_unit_2,  p.sub_unit_2)  AS sub_unit_2,
@@ -136,7 +136,7 @@ When a user edits notes in the attendance session view:
 ## Notes transfer on new nominal roll confirmation
 
 Notes follow the *person*, not the row. When a new nominal roll is confirmed, personnel are matched
-to prior nominal rolls by `short_id` (same person — see cross-roll matching in SPECIFICATION §3.2.1).
+to prior nominal rolls by `pers_no` (same person — see cross-roll matching in SPECIFICATION §3.2.1).
 Notes from the prior active grouping are copied onto the matched personnel rows in the new
 grouping:
 
@@ -151,16 +151,15 @@ SELECT
 FROM grouping_notes dn
 JOIN groupings old_d ON old_d.id = dn.grouping_id
 JOIN personnel old_p ON old_p.id = dn.personnel_id
-JOIN personnel new_p ON new_p.short_id = old_p.short_id   -- same person, cross-roll
+JOIN personnel new_p ON new_p.pers_no = old_p.pers_no     -- same person, cross-roll
 WHERE old_d.id = :prior_grouping_id
   AND new_p.nominal_roll_id = :new_nominal_roll_id
   AND new_p.status = 'active'
 ON CONFLICT (grouping_id, personnel_id) DO NOTHING;
 ```
 
-Unmatched persons (no `short_id` counterpart in the prior grouping) start with no transferred
-notes. Admin-confirmed matches from the diff-review step are what make `short_id` line up across
-nominal rolls.
+Unmatched persons (no `pers_no` counterpart in the prior roll — including NULL `pers_no`)
+start with no transferred notes.
 
 ---
 

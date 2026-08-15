@@ -307,7 +307,7 @@ async def test_example(client, sample_users, sample_grouping):
   (rank/name) are rejected with 409; `status` still mutates the personnel
   row; the response returns effective (`to_*`-overlaid) values.
 - Merge-into-target: `POST /api/v1/taggings/{id}/clone` merges the source's
-  entries into the target NR's existing tagging by `Personnel.short_id`;
+  entries into the target NR's existing tagging by `Personnel.pers_no`;
   already-present personnel are skipped (no clobber); unmatched source
   personnel are surfaced in the response.
 - `POST /api/v1/csv/{upload_id}/process` turns a stored CSV upload into a
@@ -400,12 +400,12 @@ for personnel in personnel_list:
 
 **4. Search Functionality:**
 ```python
-# Full-text search across name and short_id
+# Full-text search across name and pers_no
 if search_term:
     query = query.where(
         or_(
             Personnel.full_name.ilike(f"%{search_term}%"),
-            Personnel.short_id.ilike(f"%{search_term}%")
+            Personnel.pers_no.ilike(f"%{search_term}%")
         )
     )
 ```
@@ -503,7 +503,7 @@ LEFT JOIN grouping_personnel_overrides dop
   ON dop.personnel_id = p.id AND dop.grouping_id = :grouping_id
 WHERE p.nominal_roll_id = (SELECT nominal_roll_id FROM groupings WHERE id = :grouping_id)
   AND (p.unit = :filter_unit OR :filter_unit IS NULL)
-  AND (p.full_name LIKE :search OR p.short_id LIKE :search OR :search IS NULL)
+  AND (p.full_name LIKE :search OR p.pers_no LIKE :search OR :search IS NULL)
 
 # Attendance history query
 SELECT ar.*, s.date, s.session_type
