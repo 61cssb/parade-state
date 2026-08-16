@@ -197,6 +197,14 @@ def upgrade() -> None:
     # 6. Add new columns.
     # ========================================================================
     # groupings.mode — standard | adhoc | vehicle (default "standard")
+    # PostgreSQL: create the enum type first — ALTER TABLE ADD COLUMN does
+    # not create types implicitly (no-op on SQLite, which uses VARCHAR).
+    sa.Enum(
+        "standard",
+        "adhoc",
+        "vehicle",
+        name="grouping_mode",
+    ).create(bind, checkfirst=True)
     op.add_column(
         "groupings",
         sa.Column(
@@ -219,7 +227,9 @@ def upgrade() -> None:
             "checkbox",
             sa.Boolean(),
             nullable=False,
-            server_default=sa.text("0"),
+            # "false", not 0: Postgres rejects integer defaults on boolean
+            # columns; SQLite accepts the keyword literal.
+            server_default=sa.text("false"),
         ),
     )
 

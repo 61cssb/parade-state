@@ -70,17 +70,38 @@ def upgrade() -> None:
             status_val,
         )
 
-    # Step 2: widen the enum. SQLite stores sa.Enum as VARCHAR with a CHECK
-    # constraint; batch_alter_table rebuilds the table with the new column
-    # type. render_as_batch=True is set in env.py for both online/offline.
-    with op.batch_alter_table("attendance_records", schema=None) as batch_op:
-        batch_op.alter_column(
-            "status",
-            existing_type=sa.Enum(*LEGACY_STATUSES, name="attendance_status"),
-            type_=sa.Enum(*NEW_STATUSES, name="attendance_status"),
-            existing_nullable=False,
-            existing_server_default=None,
-        )
+    # Step 2: widen the enum.
+    if bind.dialect.name == "postgresql":
+        # Native enum: add the new values in place (old values retained;
+        # 'excused'/'unknown' remain as harmless leftovers after the remap
+        # above). Postgres 12+ allows ADD VALUE inside a transaction as
+        # long as the new values are not used later in the same one.
+        existing = {
+            row[0]
+            for row in bind.execute(
+                sa.text(
+                    "SELECT e.enumlabel FROM pg_enum e "
+                    "JOIN pg_type t ON t.oid = e.enumtypid "
+                    "WHERE t.typname = 'attendance_status'"
+                )
+            ).all()
+        }
+        for value in NEW_STATUSES:
+            if value not in existing:
+                # value comes from the hardcoded NEW_STATUSES tuple
+                op.execute(f"ALTER TYPE attendance_status ADD VALUE '{value}'")
+    else:
+        # SQLite stores sa.Enum as VARCHAR with a CHECK constraint;
+        # batch_alter_table rebuilds the table with the new column type.
+        # render_as_batch=True is set in env.py for both online/offline.
+        with op.batch_alter_table("attendance_records", schema=None) as batch_op:
+            batch_op.alter_column(
+                "status",
+                existing_type=sa.Enum(*LEGACY_STATUSES, name="attendance_status"),
+                type_=sa.Enum(*NEW_STATUSES, name="attendance_status"),
+                existing_nullable=False,
+                existing_server_default=None,
+            )
 
 
 def downgrade() -> None:

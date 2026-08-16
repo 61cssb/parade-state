@@ -30,6 +30,11 @@ def upgrade() -> None:
     # SQLite stores sa.Enum as VARCHAR with a CHECK constraint;
     # batch_alter_table rebuilds the table with the new column.
     # render_as_batch=True is set in env.py for both online/offline.
+    # PostgreSQL needs the enum type created explicitly: batch mode emits
+    # ALTER TABLE ... ADD COLUMN, which does not create types implicitly.
+    sa.Enum("Officer", "WOSE", name="personnel_category").create(
+        op.get_bind(), checkfirst=True
+    )
     with op.batch_alter_table("personnel", schema=None) as batch_op:
         batch_op.add_column(
             sa.Column(
