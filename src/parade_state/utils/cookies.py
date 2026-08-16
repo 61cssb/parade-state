@@ -55,7 +55,8 @@ across the application and provide better security and maintainability.
 
 - **HttpOnly**: Prevents JavaScript access (XSS protection)
 - **SameSite**: CSRF protection (lax for same-site redirects)
-- **Secure**: HTTPS-only transmission (set True for production)
+- **Secure**: HTTPS-only transmission (on by default in production, see
+  :func:`auth_cookie_secure`)
 - **Path**: Cookie scope (set to "/" for entire site)
 - **Domain**: Cookie domain scope (None for current domain)
 
@@ -64,7 +65,8 @@ across the application and provide better security and maintainability.
 All authentication cookies use these consistent parameters:
 - httponly: True (prevents JavaScript access)
 - samesite: "lax" (CSRF protection, allows same-site redirects)
-- secure: False (set to True for HTTPS in production)
+- secure: env-driven via AUTH_COOKIE_SECURE (Secure in production; override
+  with AUTH_COOKIE_SECURE=false for local HTTP testing)
 - path: "/" (entire site)
 - domain: None (current domain only)
 - max_age: 86400 seconds (24 hours)
@@ -83,8 +85,28 @@ AUTH_COOKIE_MAX_AGE = 86400  # 24 hours in seconds
 AUTH_COOKIE_PATH = "/"
 AUTH_COOKIE_DOMAIN = None
 AUTH_COOKIE_SAMESITE = "lax"
-AUTH_COOKIE_SECURE = False  # Set to True for HTTPS in production
 AUTH_COOKIE_HTTPONLY = True
+
+
+def auth_cookie_secure() -> bool:
+    """Return whether auth cookies must be transmitted over HTTPS only.
+
+    Env-driven via settings: Secure by default in production, off in
+    development. Set AUTH_COOKIE_SECURE=false to override for local HTTP
+    testing.
+
+    Example:
+        ```python
+        if cookies.auth_cookie_secure():
+            # running with production cookie policy
+            ...
+        ```
+    """
+    # Imported lazily: parade_state.config reads this package's env module,
+    # and importing it at module scope here would create an import cycle.
+    from parade_state.config import get_settings
+
+    return get_settings().AUTH_COOKIE_SECURE
 
 
 def set_auth_cookie(
@@ -116,7 +138,7 @@ def set_auth_cookie(
         path=AUTH_COOKIE_PATH,
         domain=AUTH_COOKIE_DOMAIN,
         samesite=AUTH_COOKIE_SAMESITE,
-        secure=AUTH_COOKIE_SECURE,
+        secure=auth_cookie_secure(),
         httponly=AUTH_COOKIE_HTTPONLY,
     )
 
@@ -163,7 +185,7 @@ def clear_auth_cookie(response: Response) -> None:
         path=AUTH_COOKIE_PATH,
         domain=AUTH_COOKIE_DOMAIN,
         samesite=AUTH_COOKIE_SAMESITE,
-        secure=AUTH_COOKIE_SECURE,
+        secure=auth_cookie_secure(),
         httponly=AUTH_COOKIE_HTTPONLY,
     )
 
@@ -276,26 +298,6 @@ def clear_cookie(
     )
 
 
-def configure_production_settings() -> None:
-    """Configure cookie settings for production environment.
-
-    Call this during application startup for production environments.
-
-    Effects:
-    - Sets secure=True for HTTPS-only transmission
-    - Updates other production-appropriate settings
-
-    Example:
-        ```python
-        # In main.py during startup
-        if env.get("ENVIRONMENT") == "production":
-            cookies.configure_production_settings()
-        ```
-    """
-    global AUTH_COOKIE_SECURE
-    AUTH_COOKIE_SECURE = True  # Require HTTPS for production
-
-
 def get_cookie_settings() -> dict[str, Any]:
     """Get current cookie configuration as dictionary.
 
@@ -314,6 +316,6 @@ def get_cookie_settings() -> dict[str, Any]:
         "path": AUTH_COOKIE_PATH,
         "domain": AUTH_COOKIE_DOMAIN,
         "samesite": AUTH_COOKIE_SAMESITE,
-        "secure": AUTH_COOKIE_SECURE,
+        "secure": auth_cookie_secure(),
         "httponly": AUTH_COOKIE_HTTPONLY,
     }

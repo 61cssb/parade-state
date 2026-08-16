@@ -56,10 +56,12 @@ This module depends on:
 - `parade_state.utils` - Environment and datetime utilities
 """
 
+import logging
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from jinja2 import Environment, FileSystemLoader
-from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import RedirectResponse
@@ -71,6 +73,8 @@ from parade_state.models import User
 from parade_state.utils import cookies, env, utc_dt
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 ADMIN_ROLES = ("admin", "super_admin")
 
@@ -310,9 +314,9 @@ async def auth_callback(
         # Deliberate error responses (e.g. suspended accounts) must keep
         # their status code instead of being masked as a 500 below.
         raise
-    except Exception as e:
-        # Log error and return friendly message
-        print(f"OAuth callback error: {str(e)}")
+    except Exception:
+        # Log error (with traceback) and return friendly message
+        logger.exception("OAuth callback failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Authentication failed",

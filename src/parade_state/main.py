@@ -1,21 +1,19 @@
 """FastAPI application setup and configuration."""
 
+import logging
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
-
-from parade_state.utils import env, utc_dt
 
 # Load environment variables from .env file
 load_dotenv()
 
+from parade_state.admin_routes import router as admin_router
 from parade_state.api import (
     access_control,
     attendance,
@@ -30,103 +28,133 @@ from parade_state.api import (
     tagging,
     users,
 )
-from parade_state.admin_routes import router as admin_router
+from parade_state.config import Settings, get_settings
 from parade_state.db import init_database
-from parade_state.utils import env
-from parade_state.web.auth import router as web_auth_router
 from parade_state.web.attendance import router as web_attendance_router
+from parade_state.web.auth import router as web_auth_router
 from parade_state.web.grouping import router as web_grouping_router
 from parade_state.web.nominal_roll import router as web_nominal_roll_router
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Manage application lifecycle."""
-    # Startup
-    # Only initialize if not already initialized (prevents test database from being reset)
-    from parade_state.db import get_session_maker
-
-    if get_session_maker() is None:
-        database_url = env.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:") or "sqlite+aiosqlite:///:memory:"
-        init_database(database_url)
-    yield
-    # Shutdown
-    pass
+logger = logging.getLogger(__name__)
 
 
-app = FastAPI(
-    title="Parade State Management System",
-    description="Battalion parade state management with access control",
-    version="0.1.0",
-    lifespan=lifespan,
-)
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """Build the FastAPI application.
 
-# Set up Jinja2 templates directory
-templates_dir = Path(__file__).parent / "templates"
-app.state.templates_dir = str(templates_dir)  # Store directory path instead
+    Args:
+        settings: Prebuilt settings; defaults to the process-wide cached
+            settings. Tests inject custom configurations.
 
-# CORS middleware for mobile UI
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure properly for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    Returns:
+        Configured FastAPI application instance
 
-# Add session middleware for OAuth flow
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=env.get("SESSION_SECRET", "fallback-secret-key"),
-    max_age=86400,  # 24 hours
-    session_cookie="session_data",  # Different name to avoid conflict
-    same_site="lax",  # Allow same-site redirects
-)
+    Raises:
+        RuntimeError: In production, when required settings are missing —
+            the process refuses to boot (see Settings.validate())
+    """
+    if settings is None:
+        settings = get_settings()
+    settings.validate()
 
-# Note: NiceGUI admin interface pages are registered via @ui.page decorators
-# They will be available when the app starts
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """Manage application lifecycle."""
+        # Startup
+        # Only initialize if not already initialized (prevents test
+        # database from being reset)
+        from parade_state.db import get_session_maker
+
+        if get_session_maker() is None:
+            init_database(settings.DATABASE_URL)
+        yield
+        # Shutdown
+        pass
+
+    app = FastAPI(
+        title=settings.APP_NAME,
+        description="Battalion parade state management with access control",
+        version=settings.APP_VERSION,
+        lifespan=lifespan,
+        # OpenAPI docs are a development aid; production does not expose
+        # the API surface.
+        docs_url=None if settings.is_production else "/docs",
+        redoc_url=None if settings.is_production else "/redoc",
+        openapi_url=None if settings.is_production else "/openapi.json",
+    )
+
+    # Set up Jinja2 templates directory
+    templates_dir = Path(__file__).parent / "templates"
+    app.state.templates_dir = str(templates_dir)  # Store directory path instead
+
+    # CORS middleware: credentialed requests are accepted only from the
+    # configured origins. Production validation rejects "*".
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Session middleware for the OAuth flow. Production must set a real
+    # SESSION_SECRET (enforced by validate()); development falls back to a
+    # random per-process secret so no known-to-the-world key is ever used.
+    session_secret = settings.SESSION_SECRET
+    if not session_secret:
+        session_secret = secrets.token_urlsafe(32)
+        logger.warning(
+            "SESSION_SECRET not set — using a random per-process secret; "
+            "OAuth sessions will not survive a restart. Set SESSION_SECRET "
+            "to silence this warning."
+        )
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=session_secret,
+        max_age=86400,  # 24 hours
+        session_cookie="session_data",  # Different name to avoid conflict
+        same_site="lax",  # Allow same-site redirects
+    )
+
+    # Include routers
+    # User-facing web routes (OAuth flows, redirects)
+    app.include_router(web_auth_router, prefix="/auth", tags=["web-auth"])
+
+    # User-facing web routes (non-admin views)
+    app.include_router(web_grouping_router, tags=["web-grouping"])
+    app.include_router(web_attendance_router, tags=["web-attendance"])
+    app.include_router(web_nominal_roll_router, tags=["web-nominal-roll"])
+
+    # Admin interface routes
+    app.include_router(admin_router, tags=["admin"])
+
+    # REST API endpoints (JSON responses)
+    app.include_router(auth.router, prefix="/api/v1/auth", tags=["api-auth"])
+    app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
+    app.include_router(groupings.router, prefix="/api/v1/groupings", tags=["groupings"])
+    app.include_router(sessions.router, prefix="/api/v1/sessions", tags=["sessions"])
+    app.include_router(
+        attendance.router, prefix="/api/v1/attendance", tags=["attendance"]
+    )
+    app.include_router(personnel.router, prefix="/api/v1", tags=["personnel"])
+    app.include_router(
+        access_control.router, prefix="/api/v1/access-control", tags=["access-control"]
+    )
+    app.include_router(csv_upload.router, prefix="/api/v1/csv", tags=["csv-upload"])
+    app.include_router(
+        nominal_rolls.router, prefix="/api/v1/nominal-rolls", tags=["nominal-rolls"]
+    )
+    app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
+    app.include_router(
+        deferments.router, prefix="/api/v1/deferments", tags=["deferments"]
+    )
+    app.include_router(tagging.router, prefix="/api/v1/taggings", tags=["taggings"])
+
+    @app.get("/health")
+    async def health_check():
+        """Health check endpoint."""
+        return {"status": "healthy", "version": settings.APP_VERSION}
+
+    return app
 
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy", "version": "0.1.0"}
-
-
-
-
-# Include routers
-# User-facing web routes (OAuth flows, redirects)
-app.include_router(web_auth_router, prefix="/auth", tags=["web-auth"])
-
-# User-facing web routes (non-admin views)
-app.include_router(web_grouping_router, tags=["web-grouping"])
-app.include_router(web_attendance_router, tags=["web-attendance"])
-app.include_router(web_nominal_roll_router, tags=["web-nominal-roll"])
-
-# Admin interface routes
-app.include_router(admin_router, tags=["admin"])
-
-# REST API endpoints (JSON responses)
-app.include_router(auth.router, prefix="/api/v1/auth", tags=["api-auth"])
-app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
-app.include_router(
-    groupings.router, prefix="/api/v1/groupings", tags=["groupings"]
-)
-app.include_router(sessions.router, prefix="/api/v1/sessions", tags=["sessions"])
-app.include_router(attendance.router, prefix="/api/v1/attendance", tags=["attendance"])
-app.include_router(personnel.router, prefix="/api/v1", tags=["personnel"])
-app.include_router(
-    access_control.router, prefix="/api/v1/access-control", tags=["access-control"]
-)
-app.include_router(csv_upload.router, prefix="/api/v1/csv", tags=["csv-upload"])
-app.include_router(
-    nominal_rolls.router, prefix="/api/v1/nominal-rolls", tags=["nominal-rolls"]
-)
-app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
-app.include_router(
-    deferments.router, prefix="/api/v1/deferments", tags=["deferments"]
-)
-app.include_router(
-    tagging.router, prefix="/api/v1/taggings", tags=["taggings"]
-)
+app = create_app()

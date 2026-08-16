@@ -350,6 +350,11 @@ response.set_cookie(
 )
 ```
 
+Enforced centrally by `parade_state.utils.cookies`: the `Secure` flag is
+env-driven (`AUTH_COOKIE_SECURE`) and defaults to on in production. There
+are no fallback session secrets — production refuses to boot without a
+real `SESSION_SECRET` (see `Settings.validate()` in `config.py`).
+
 ### Session Expiration
 
 **Implement appropriate session timeouts:**
@@ -453,6 +458,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 ```
+
+The application wires `Settings.ALLOWED_ORIGINS` (env `ALLOWED_ORIGINS`)
+into `CORSMiddleware`. Production must list explicit origins — `*` is
+rejected at startup because wildcard origins combined with
+`allow_credentials=True` let any site make credentialed requests.
 
 ### Error Messages
 
