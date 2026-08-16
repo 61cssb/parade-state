@@ -44,6 +44,14 @@
 
 ### Required Environment Variables
 
+**Environment:**
+```bash
+# "production" enables hardening: fail-fast secrets, strict CORS,
+# Secure cookies, no /docs. Railway deployments are auto-detected as
+# production; set this explicitly on any other platform.
+ENVIRONMENT="production"
+```
+
 **Database:**
 ```bash
 # Production database connection (PostgreSQL recommended)
@@ -55,18 +63,27 @@ DATABASE_URL="postgresql://user:password@host:5432/dbname"
 
 **Authentication:**
 ```bash
-# Google OAuth configuration
+# Google OAuth configuration (required in production — the app refuses
+# to boot without them)
 GOOGLE_CLIENT_ID="your-google-client-id.apps.googleusercontent.com"
 GOOGLE_CLIENT_SECRET="your-google-client-secret"
 
-# Session management
+# Session management (required in production)
 SESSION_SECRET="your-cryptographic-secret-min-32-characters"
 ```
 
 **Super Admin:**
 ```bash
-# Super admin email for initial bootstrap
+# Super admin email for initial bootstrap (required in production)
 SUPER_ADMIN_EMAIL="admin@yourdomain.com"
+```
+
+**CORS:**
+```bash
+# Origins allowed to make credentialed requests (comma-separated).
+# Required in production — "*" is rejected there; development defaults
+# to permissive "*" for local tooling.
+ALLOWED_ORIGINS="https://your-app-domain.com"
 ```
 
 **Application:**
@@ -76,7 +93,25 @@ APP_BASE_URL="https://your-app-domain.com"
 
 # Optional: Debug mode (disable in production!)
 DEBUG=false
+
+# Optional: auth cookie Secure flag (defaults to true in production;
+# override to false only for local HTTP testing of a production build)
+# AUTH_COOKIE_SECURE=true
 ```
+
+### Production Hardening Behavior
+
+When `ENVIRONMENT=production` (explicitly or via Railway auto-detection):
+
+- **Fail-fast startup:** the app refuses to boot if `SESSION_SECRET`,
+  `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SUPER_ADMIN_EMAIL`, or
+  explicit `ALLOWED_ORIGINS` is missing — no fallback secrets exist
+- **Secure cookies:** the auth session cookie carries the `Secure` flag
+  (HTTPS-only transmission)
+- **Strict CORS:** credentialed requests are accepted only from
+  `ALLOWED_ORIGINS`
+- **No OpenAPI exposure:** `/docs`, `/redoc`, and `/openapi.json` return
+  404 (they remain available in development)
 
 ### Generating Secure Secrets
 
@@ -242,8 +277,13 @@ uv run alembic upgrade head
    GOOGLE_CLIENT_ID       # Google OAuth client ID
    GOOGLE_CLIENT_SECRET   # Google OAuth client secret
    SESSION_SECRET         # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+   ALLOWED_ORIGINS        # e.g. https://your-app.up.railway.app (no "*" in production)
    APP_BASE_URL           # Railway provides this
    ```
+
+   Railway is auto-detected as production, so the deployment fails fast
+   with a clear error if any required variable above is missing — this is
+   intentional (see "Production Hardening Behavior" above).
 
 4. **Build and Start:**
    - Railway detects the [Dockerfile](../Dockerfile) at the repo root and builds it

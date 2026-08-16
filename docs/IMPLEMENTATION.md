@@ -771,8 +771,14 @@ SUPER_ADMIN_EMAIL      # Super admin email for bootstrap
 GOOGLE_CLIENT_ID       # Google OAuth client ID
 GOOGLE_CLIENT_SECRET   # Google OAuth client secret
 SESSION_SECRET         # Session encryption secret
+ALLOWED_ORIGINS        # Explicit CORS origins ("*" rejected in production)
 APP_BASE_URL           # https://{your-app}.railway.app
 ```
+
+Production is detected via `ENVIRONMENT=production` or automatically on
+Railway. The app then refuses to boot without the required variables
+above (no fallback secrets), sets the Secure flag on auth cookies, and
+disables `/docs` / `/redoc` / `/openapi.json`.
 
 **Railway deployment:**
 
