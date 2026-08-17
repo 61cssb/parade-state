@@ -25,16 +25,21 @@ def upgrade() -> None:
     (personnel record) is treated as called up until a deferment says otherwise.
     """
     # --- Personnel.callup_status ---
+    # PostgreSQL needs the enum type to exist before ALTER TABLE can use
+    # it (create_table creates types implicitly; add_column does not).
+    # checkfirst=True keeps re-runs safe; SQLite ignores native enums.
+    callup_status_enum = sa.Enum(
+        "Called Up",
+        "Not Called Up",
+        "Deferred",
+        name="personnel_callup_status",
+    )
+    callup_status_enum.create(op.get_bind(), checkfirst=True)
     op.add_column(
         "personnel",
         sa.Column(
             "callup_status",
-            sa.Enum(
-                "Called Up",
-                "Not Called Up",
-                "Deferred",
-                name="personnel_callup_status",
-            ),
+            callup_status_enum,
             nullable=False,
             server_default="Called Up",
         ),
