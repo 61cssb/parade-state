@@ -34,4 +34,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic upgrade head && uvicorn parade_state.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Run migrations, then serve. --proxy-headers lets uvicorn honor
+# Railway's X-Forwarded-Proto so request.url.scheme is https behind the
+# edge proxy (required for OAuth redirect URIs and secure cookies).
+CMD ["sh", "-c", "alembic upgrade head && uvicorn parade_state.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips=*"]
