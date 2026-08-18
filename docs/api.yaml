@@ -262,12 +262,14 @@ paths:
     post:
       tags: [users]
       summary: Preregister a user account
-      x-access-control: admin
+      x-access-control: super_admin
       description: |
-        NOT IMPLEMENTED. Preregistration was rejected (issue 12): with 20–50
-        internal users, accounts auto-register as `unrecognised` on first
-        Google sign-in and a super-admin promotes them to admin via
-        `PATCH /users/{userId}`.
+        Creates a user before their first Google sign-in (super admins only).
+        The email is lowercased so the OAuth callback's exact-match lookup
+        finds the row; the account is created `active`, so the first sign-in
+        works immediately without the usual `unrecognised` holding state.
+        Replaces the earlier auto-register-and-promote flow for accounts
+        that must be ready before the person ever visits the site.
       requestBody:
         required: true
         content:
@@ -311,6 +313,9 @@ paths:
       x-access-control: admin
       description: |
         Writable fields: `role`, `status`, `access_level_id`.
+        Promoting a user to `super_admin`/`admin` while `unrecognised` (or
+        legacy `pending`) also sets `status=active`; explicitly suspended
+        users stay suspended until separately reactivated.
         Suspending a user immediately invalidates their active sessions.
         Writes `user.access_updated` to audit log.
       requestBody:
@@ -2254,37 +2259,29 @@ components:
 
     CreateUserRequest:
       type: object
-      required: [email, role]
+      required: [email]
       properties:
         email:
           type: string
           format: email
+          description: Lowercased server-side to match the Google sign-in email
+        name:
+          type: string
+          description: Defaults to the email local part
         role:
           type: string
-          enum: [admin, scoped]
-        accessLevelId:
-          type: string
-          format: uuid
-          description: Required if role=scoped
-        groupingIds:
-          type: array
-          items:
-            type: string
-            format: uuid
-        subunitGrants:
-          type: array
-          items:
-            $ref: '#/components/schemas/SubunitGrantInput'
+          enum: [super_admin, admin, user]
+          default: user
 
     UpdateUserRequest:
       type: object
       properties:
         role:
           type: string
-          enum: [admin, scoped]
+          enum: [super_admin, admin, user]
         status:
           type: string
-          enum: [active, suspended]
+          enum: [pending, active, suspended, unrecognised]
         accessLevelId:
           type: string
           format: uuid

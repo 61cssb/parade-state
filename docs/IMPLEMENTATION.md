@@ -182,7 +182,8 @@ async def test_example(client, sample_users, sample_grouping):
 - Role-based authorization (super_admin, admin, user)
 - Session management with expiration and cleanup
 - User CRUD operations with proper access control
-- **Endpoints:** 7 authentication + 5 user management = 12 total
+- User pre-provisioning: super-admins can create accounts by email (Add User form on /admin/users) before first sign-in; promotion to super_admin/admin auto-activates unrecognised accounts
+- **Endpoints:** 7 authentication + 6 user management = 13 total
 
 **Grouping Management (✅ Complete)**
 - Grouping lifecycle (draft → active → inactive → closed → finalized)
