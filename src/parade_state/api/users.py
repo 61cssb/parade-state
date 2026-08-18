@@ -3,12 +3,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 from pydantic import BaseModel
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.auth.dependencies import (
     require_admin_user,
     require_authenticated_user,
+    require_super_admin_user,
 )
 from parade_state.db import get_db_session
 from parade_state.models import AccessLevel, AuditLog, User
@@ -22,6 +23,14 @@ class UserUpdate(BaseModel):
     status: str | None = None
     role: str | None = None
     access_level_id: str | None = None
+
+
+class UserCreate(BaseModel):
+    """Schema for creating a user before their first sign-in."""
+
+    email: str
+    name: str | None = None
+    role: str = "user"
 
 
 router = APIRouter()
@@ -104,6 +113,79 @@ async def list_users(
         "total_count": total_count,
         "skip": skip,
         "limit": limit,
+    }
+
+
+@router.post("/", status_code=http_status.HTTP_201_CREATED)
+async def create_user(
+    user_data: UserCreate,
+    current_user: User = Depends(require_super_admin_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Create a user before their first sign-in (super admin only).
+
+    Pre-provisioned users skip the unrecognised state: when they later
+    sign in with Google, the existing row is matched and they receive a
+    session immediately.
+    """
+
+    email = user_data.email.strip().lower()
+
+    # Basic email validation (same rule as env.get_email)
+    if "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Invalid email format",
+        )
+
+    if user_data.role not in ["super_admin", "admin", "user"]:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Invalid role value",
+        )
+
+    # The OAuth callback matches emails exactly, so duplicates are checked
+    # case-insensitively to avoid creating a second unrecognised row when
+    # the user signs in with Google's canonical (lowercase) form.
+    existing_result = await db.execute(
+        select(User).where(func.lower(User.email) == email)
+    )
+    if existing_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="A user with this email already exists",
+        )
+
+    name = user_data.name.strip() if user_data.name else ""
+    user = User(
+        email=email,
+        name=name or email.split("@")[0],
+        role=user_data.role,
+        status="active",
+    )
+    db.add(user)
+    await db.flush()  # Assign the id so the audit log can reference it
+
+    audit_log = AuditLog(
+        user_id=str(current_user.id),
+        entity_type="user",
+        entity_id=str(user.id),
+        action="create",
+        description=f"Created user '{email}' with role '{user_data.role}'",
+    )
+    db.add(audit_log)
+
+    await db.commit()
+    await db.refresh(user)
+
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "name": user.name,
+        "role": user.role,
+        "status": user.status,
+        "access_level_id": str(user.access_level_id) if user.access_level_id else None,
+        "updated_at": user.updated_at.isoformat(),
     }
 
 
@@ -220,6 +302,16 @@ async def update_user(
             )
         changes.append(f"role: '{user.role}' -> '{update_data.role}'")
         user.role = update_data.role
+
+        # Promoting to an admin role implies activation: an unrecognised
+        # (or legacy pending) account becomes active so the user can sign
+        # in. Explicit suspensions are left untouched.
+        if update_data.role in ("super_admin", "admin") and user.status in (
+            "unrecognised",
+            "pending",
+        ):
+            changes.append(f"status: '{user.status}' -> 'active'")
+            user.status = "active"
 
     if update_data.access_level_id is not None:
         try:
