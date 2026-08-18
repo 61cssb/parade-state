@@ -5,6 +5,27 @@
 {% block page_title %}Users{% endblock %}
 
 {% block content %}
+{% if user.role == 'super_admin' %}
+<div class="card" style="margin-bottom: 1rem;">
+    <h3 style="margin: 0 0 0.75rem 0; font-size: 1rem;">Add User</h3>
+    <form onsubmit="addUser(event)" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+        <input type="email" id="newUserEmail" required placeholder="Email (must match their Google account)"
+               style="flex: 2; min-width: 220px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+        <input type="text" id="newUserName" placeholder="Name (optional)"
+               style="flex: 1; min-width: 140px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+        <select id="newUserRole" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
+            <option value="super_admin">Super Admin</option>
+        </select>
+        <button type="submit" class="btn btn-primary">Add</button>
+    </form>
+    <p style="margin: 0.5rem 0 0 0; font-size: 0.8rem; color: #6b7280;">
+        Pre-provisions the account as active; their first Google sign-in will work immediately.
+    </p>
+</div>
+{% endif %}
+
 <div class="card">
     <form method="get" action="/admin/users" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
         <input type="text" name="search" value="{{ search }}" placeholder="Search name or email..."
@@ -85,6 +106,41 @@
 <script>
     function getAuthToken() {
         return localStorage.getItem('auth_token');
+    }
+
+    async function addUser(event) {
+        event.preventDefault();
+
+        const token = getAuthToken();
+        if (!token) {
+            alert('Authentication token not found. Please log in again.');
+            return;
+        }
+
+        const email = document.getElementById('newUserEmail').value;
+        const name = document.getElementById('newUserName').value;
+        const role = document.getElementById('newUserRole').value;
+
+        try {
+            const response = await fetch('/api/v1/users', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token,
+                },
+                body: JSON.stringify({ email: email, name: name || null, role: role }),
+            });
+
+            if (response.ok) {
+                showStatus('User "' + email + '" added successfully.', 'success');
+                setTimeout(function() { location.reload(); }, 1000);
+            } else {
+                const data = await response.json();
+                showStatus('Add failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showStatus('Network error: ' + error.message, 'error');
+        }
     }
 
     async function updateUser(userId, field, value) {

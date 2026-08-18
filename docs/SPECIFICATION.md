@@ -666,8 +666,9 @@ callup transitions.
 The system is admin-only: only `super_admin` and `admin` accounts can sign in and use it. The non-admin viewer role is deferred to a future issue.
 
 1. On first Google sign-in, an unknown email is auto-registered as `unrecognised` with role `user`; the visitor sees a "no access" page and receives no session. The SUPER_ADMIN_EMAIL bootstrap account is created `active`/`super_admin` instead.
-2. A super-admin promotes `unrecognised` users to `admin` (and `active`) via `/admin/users`; the user can then sign in normally.
-3. Admin may suspend at any time (403 at sign-in). Suspension immediately invalidates active sessions.
+2. A super-admin promotes `unrecognised` users to `admin` (and `active`) via `/admin/users`; the user can then sign in normally. Promotion to `super_admin`/`admin` automatically sets `status=active` for `unrecognised` (or legacy `pending`) accounts; explicitly suspended accounts stay suspended.
+3. A super-admin may also pre-provision an account via the Add User form on `/admin/users` (`POST /api/v1/users`): the row is created `active` with the chosen role (email lowercased to match the Google sign-in), so the person's first sign-in works immediately without the unrecognised holding state.
+4. Admin may suspend at any time (403 at sign-in). Suspension immediately invalidates active sessions.
 
 ### 5.3 Row Visibility Rules
 
