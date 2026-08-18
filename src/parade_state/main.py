@@ -114,6 +114,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_age=86400,  # 24 hours
         session_cookie="session_data",  # Different name to avoid conflict
         same_site="lax",  # Allow same-site redirects
+        https_only=settings.AUTH_COOKIE_SECURE,  # Secure flag on the OAuth-state cookie
     )
 
     # Include routers
