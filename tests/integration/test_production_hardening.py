@@ -97,6 +97,15 @@ def test_openapi_docs_available_in_development(monkeypatch):
     assert client.get("/openapi.json").status_code == 200
 
 
+def test_root_redirects_to_login(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+
+    response = TestClient(create_app(Settings())).get("/", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/auth/login"
+
+
 def test_auth_cookie_carries_secure_in_production(monkeypatch):
     _production_settings(monkeypatch)
     get_settings.cache_clear()
