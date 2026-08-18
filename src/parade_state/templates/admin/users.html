@@ -104,18 +104,11 @@
 
 {% block scripts %}
 <script>
-    function getAuthToken() {
-        return localStorage.getItem('auth_token');
-    }
+    // API calls authenticate via the HttpOnly session cookie sent with
+    // same-origin requests; no client-side token handling is needed.
 
     async function addUser(event) {
         event.preventDefault();
-
-        const token = getAuthToken();
-        if (!token) {
-            alert('Authentication token not found. Please log in again.');
-            return;
-        }
 
         const email = document.getElementById('newUserEmail').value;
         const name = document.getElementById('newUserName').value;
@@ -126,7 +119,6 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + token,
                 },
                 body: JSON.stringify({ email: email, name: name || null, role: role }),
             });
@@ -144,12 +136,6 @@
     }
 
     async function updateUser(userId, field, value) {
-        const token = getAuthToken();
-        if (!token) {
-            alert('Authentication token not found. Please log in again.');
-            return;
-        }
-
         const body = {};
         body[field] = value;
 
@@ -158,7 +144,6 @@
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + token,
                 },
                 body: JSON.stringify(body),
             });
@@ -180,18 +165,9 @@
             return;
         }
 
-        const token = getAuthToken();
-        if (!token) {
-            alert('Authentication token not found. Please log in again.');
-            return;
-        }
-
         try {
             const response = await fetch('/api/v1/users/' + userId, {
                 method: 'DELETE',
-                headers: {
-                    'Authorization': 'Bearer ' + token,
-                },
             });
 
             if (response.ok) {
