@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.responses import RedirectResponse
 
 # Load environment variables from .env file
 load_dotenv()
@@ -153,6 +154,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health_check():
         """Health check endpoint."""
         return {"status": "healthy", "version": settings.APP_VERSION}
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> RedirectResponse:
+        """Send the bare domain to the login flow.
+
+        /auth/login already routes by role: active admins continue to
+        /admin, everyone else gets the no-access page.
+        """
+        return RedirectResponse(url="/auth/login", status_code=302)
 
     return app
 
