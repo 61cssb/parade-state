@@ -282,3 +282,36 @@ async def test_promote_suspended_user_keeps_suspension(client: TestClient, test_
 
     assert response.status_code == 200
     assert response.json()["status"] == "suspended"
+
+
+@pytest.mark.asyncio
+async def test_api_accepts_session_cookie_auth(client: TestClient, test_db):
+    """Admin UI fetches authenticate via the session cookie, not just Bearer.
+
+    The OAuth sign-in flow sets an HttpOnly session_token cookie and never
+    provisions a localStorage Bearer token, so the API must accept the
+    cookie for same-origin calls.
+    """
+    _, super_admin_session = await create_test_user_and_session(
+        test_db, role="super_admin"
+    )
+
+    client.cookies.set("session_token", super_admin_session.token)
+    response = client.post(
+        "/api/v1/users/",
+        json={"email": "cookie.auth@example.com", "role": "admin"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_api_rejects_request_without_credentials(client: TestClient):
+    """Requests with neither a Bearer header nor a session cookie get 401."""
+    response = client.post(
+        "/api/v1/users/",
+        json={"email": "anon@example.com"},
+    )
+
+    assert response.status_code == 401
