@@ -4,10 +4,13 @@ import asyncio
 import uuid
 from datetime import date, datetime, timedelta
 from typing import AsyncGenerator
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
 # Ensure all models are imported so they're registered with Base
 import parade_state.models.access  # noqa: F401
@@ -19,7 +22,7 @@ import parade_state.models.deferments  # noqa: F401
 import parade_state.models.grouping  # noqa: F401
 import parade_state.models.personnel  # noqa: F401
 import parade_state.models.tagging  # noqa: F401
-from parade_state.db import Base, get_session_maker, init_database
+from parade_state.db import Base, get_session_maker, init_database, normalize_database_url
 from parade_state.main import app
 from parade_state.models import (
     AccessLevel,
@@ -39,7 +42,7 @@ from parade_state.models import (
     UserSession,
     UserSubunitScope,
 )
-from parade_state.utils import utc_dt
+from parade_state.utils import env, ids, utc_dt
 
 
 @pytest.fixture(scope="session")
@@ -50,22 +53,77 @@ def event_loop():
     loop.close()
 
 
+async def _create_postgres_database(server_url: str) -> tuple[str, str]:
+    """Create a uniquely named database on the test Postgres server.
+
+    Per-test databases (dropped on teardown) preserve the same isolation
+    guarantees as per-test SQLite files, without schema-level drops that
+    the users <-> access_levels FK cycle would complicate.
+
+    Returns:
+        Tuple of (database name, test database URL). The URL points at
+        the new database and is ready for ``init_database``.
+    """
+    admin_engine = create_async_engine(
+        normalize_database_url(server_url),
+        isolation_level="AUTOCOMMIT",
+        poolclass=NullPool,
+    )
+    try:
+        db_name = f"parade_state_test_{ids.uuid4().hex[:12]}"
+        async with admin_engine.connect() as conn:
+            await conn.execute(text(f'CREATE DATABASE "{db_name}"'))
+    finally:
+        await admin_engine.dispose()
+
+    parts = urlsplit(server_url)
+    test_url = urlunsplit(parts._replace(path=f"/{db_name}"))
+    return db_name, test_url
+
+
+async def _drop_postgres_database(server_url: str, db_name: str) -> None:
+    """Drop a test database, forcibly disconnecting any lingering sessions."""
+    admin_engine = create_async_engine(
+        normalize_database_url(server_url),
+        isolation_level="AUTOCOMMIT",
+        poolclass=NullPool,
+    )
+    try:
+        async with admin_engine.connect() as conn:
+            await conn.execute(text(f'DROP DATABASE "{db_name}" WITH (FORCE)'))
+    finally:
+        await admin_engine.dispose()
+
+
 @pytest.fixture
 async def test_engine(tmp_path):
     """Create test database engine for each test.
 
     This fixture is function-scoped to ensure complete test isolation.
-    Each test gets its own database file and engine, preventing data
+    Each test gets its own database and engine, preventing data
     leakage between tests.
+
+    By default each test uses its own SQLite file under ``tmp_path``.
+    Setting ``TEST_DATABASE_URL`` to a Postgres server URL instead gives
+    each test a freshly created database on that server, which is how the
+    suite is validated against the production dialect.
     """
-    # Create a unique database file for this test
-    db_file = tmp_path / "test.db"
-    database_url = f"sqlite+aiosqlite:///{db_file}"
+    server_url = env.get("TEST_DATABASE_URL")
+    db_name = None
+    if server_url:
+        db_name, database_url = await _create_postgres_database(server_url)
+    else:
+        db_file = tmp_path / "test.db"
+        database_url = f"sqlite+aiosqlite:///{db_file}"
 
     # Initialize the GLOBAL database state
     # This ensures get_db_session() returns the test database
     # Critical for authentication tests to work correctly
-    init_database(database_url)
+    #
+    # NullPool on Postgres: asyncpg connections are bound to the loop that
+    # created them, and the TestClient portal runs a second loop, so pooled
+    # connections would leak across loops ("attached to a different loop").
+    init_database(database_url, poolclass=NullPool if server_url else None)
 
     # Get the global engine that was just created
     from parade_state.db import _engine
@@ -80,6 +138,9 @@ async def test_engine(tmp_path):
 
     # Cleanup: dispose engine after test completes
     await engine.dispose()
+
+    if server_url and db_name:
+        await _drop_postgres_database(server_url, db_name)
 
 
 @pytest.fixture
@@ -240,11 +301,11 @@ async def sample_grouping(db_session: AsyncSession, sample_nominal_roll, sample_
         nominal_roll_id=nominal_roll_id,
         mode="standard",
         status="active",
-        valid_from=utc_dt.utcnow() - timedelta(days=1),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow() - timedelta(days=1),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         personnel_count=3,
         created_by=admin_id,
-        activated_at=utc_dt.utcnow(),
+        activated_at=utc_dt.db_utcnow(),
     )
 
     db_session.add(grouping)
