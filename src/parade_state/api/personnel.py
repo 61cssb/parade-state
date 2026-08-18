@@ -710,7 +710,7 @@ async def update_personnel(
     # Apply status directly to the personnel row (still allowed).
     if status_update is not None:
         personnel.status = status_update
-        personnel.updated_at = utc_dt.utcnow()
+        personnel.updated_at = utc_dt.db_utcnow()
         personnel.updated_by = user_id
 
     # Redirect unit/subunit edits to the tagging entry overlay.

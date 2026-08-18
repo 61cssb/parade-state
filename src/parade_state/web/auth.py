@@ -257,8 +257,8 @@ async def auth_callback(
                 name=name or email.split("@")[0],
                 status="active" if is_super_admin else "unrecognised",
                 role="super_admin" if is_super_admin else "user",
-                first_sign_in_at=utc_dt.utcnow(),
-                last_sign_in_at=utc_dt.utcnow(),
+                first_sign_in_at=utc_dt.db_utcnow(),
+                last_sign_in_at=utc_dt.db_utcnow(),
             )
 
             db.add(user)
@@ -267,7 +267,7 @@ async def auth_callback(
 
         else:
             # Update last sign in
-            user.last_sign_in_at = utc_dt.utcnow()
+            user.last_sign_in_at = utc_dt.db_utcnow()
 
             # Update user info if changed
             if name:

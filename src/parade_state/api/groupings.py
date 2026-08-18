@@ -168,7 +168,7 @@ async def create_grouping(
 
     # Auto-activate if status is active
     if grouping_data.status == "active":
-        grouping.activated_at = utc_dt.utcnow()
+        grouping.activated_at = utc_dt.db_utcnow()
 
     db.add(grouping)
     await db.commit()
@@ -310,11 +310,11 @@ async def update_grouping(
                     detail="Another grouping is already active. Only one grouping can be active at a time.",
                 )
 
-            grouping.activated_at = utc_dt.utcnow()
+            grouping.activated_at = utc_dt.db_utcnow()
 
         # Handle deactivation
         if new_status in ["inactive", "closed"] and current_status == "active":
-            grouping.deactivated_at = utc_dt.utcnow()
+            grouping.deactivated_at = utc_dt.db_utcnow()
 
         grouping.status = new_status
 
@@ -417,7 +417,7 @@ async def activate_grouping(
 
     # Activate grouping
     grouping.status = "active"
-    grouping.activated_at = utc_dt.utcnow()
+    grouping.activated_at = utc_dt.db_utcnow()
 
     await db.commit()
     await db.refresh(grouping)
@@ -455,7 +455,7 @@ async def deactivate_grouping(
 
     # Deactivate grouping
     grouping.status = "inactive"
-    grouping.deactivated_at = utc_dt.utcnow()
+    grouping.deactivated_at = utc_dt.db_utcnow()
 
     await db.commit()
     await db.refresh(grouping)
@@ -660,7 +660,7 @@ async def create_personnel_override(
         checkbox=override_data.checkbox,
         remarks=override_data.remarks,
         created_by=user_id,
-        updated_at=utc_dt.utcnow(),
+        updated_at=utc_dt.db_utcnow(),
     )
 
     db.add(override)
@@ -837,7 +837,7 @@ async def update_grouping_notes(
     # Update notes
     notes.notes = notes_data.notes
     notes.updated_by = user_id
-    notes.updated_at = utc_dt.utcnow()
+    notes.updated_at = utc_dt.db_utcnow()
     notes.notes_version += 1
 
     await db.commit()
