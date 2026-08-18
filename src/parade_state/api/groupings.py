@@ -140,6 +140,13 @@ async def create_grouping(
             detail=f"Nominal roll {grouping_data.nominal_roll_id} not found",
         )
 
+    # Normalise datetimes to naive UTC for the TIMESTAMP WITHOUT TIME ZONE
+    # columns: asyncpg (Postgres) rejects aware values, SQLite accepts either.
+    for field in ("valid_from", "valid_until", "scheduled_activation"):
+        value = getattr(grouping_data, field)
+        if value is not None:
+            setattr(grouping_data, field, utc_dt.ensure_naive(utc_dt.to_utc(value)))
+
     # Validate date range — required for standard mode, optional for adhoc/vehicle
     if grouping_data.mode == "standard":
         if not grouping_data.valid_from or not grouping_data.valid_until:
@@ -267,14 +274,19 @@ async def update_grouping(
     if update_data.name is not None:
         grouping.name = update_data.name
 
+    # Naive-UTC normalisation, as in the create endpoint
     if update_data.valid_from is not None:
-        grouping.valid_from = update_data.valid_from
+        grouping.valid_from = utc_dt.ensure_naive(utc_dt.to_utc(update_data.valid_from))
 
     if update_data.valid_until is not None:
-        grouping.valid_until = update_data.valid_until
+        grouping.valid_until = utc_dt.ensure_naive(
+            utc_dt.to_utc(update_data.valid_until)
+        )
 
     if update_data.scheduled_activation is not None:
-        grouping.scheduled_activation = update_data.scheduled_activation
+        grouping.scheduled_activation = utc_dt.ensure_naive(
+            utc_dt.to_utc(update_data.scheduled_activation)
+        )
 
     if update_data.notes is not None:
         grouping.notes = update_data.notes
