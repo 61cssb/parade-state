@@ -124,6 +124,8 @@
             });
 
             if (response.ok) {
+                document.getElementById('newUserEmail').value = '';
+                document.getElementById('newUserName').value = '';
                 showStatus('User "' + email + '" added successfully.', 'success');
                 setTimeout(function() { location.reload(); }, 1000);
             } else {
