@@ -457,6 +457,13 @@ git push origin main --force
 
 ### Database Rollback
 
+Verified on fresh PostgreSQL 16: the full chain upgrades cleanly, and
+`alembic downgrade` works for realistic rollback windows (e.g. `downgrade -4`
+then `upgrade head` round-trips). Full `downgrade base` also completes, but
+leaves the native enum types behind (Postgres does not drop types with
+tables) — re-upgrading *that same database* then fails on type creation.
+After a downgrade-to-base, migrate into a fresh database instead.
+
 **If Migration Failed:**
 ```bash
 # Identify current migration
@@ -470,10 +477,9 @@ uv run alembic downgrade <target-revision>
 ```
 
 **Restore from Backup (if needed):**
-```bash
-# PostgreSQL restore
-psql -U user -h host -d dbname < backup_file.sql
-```
+
+See the [Backup Strategy](#backup-strategy) section for the full, tested
+restore procedure (age decryption + `pg_restore`).
 
 ---
 
@@ -601,43 +607,123 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 
 ## Backup Strategy
 
-### Database Backups
+### Decision
 
-**Automated Backups:**
+Backups run as a **GitHub Actions scheduled job** ([`.github/workflows/backup-db.yml`](../.github/workflows/backup-db.yml)):
+daily `pg_dump` (custom format) over Railway's public TCP proxy → **age public-key
+encryption** → upload to a **Google Drive** folder owned by the designated
+super-admin → 30-day retention sweep.
+
+Why this setup:
+
+- Railway's built-in backups require the Pro plan; the free tier has none.
+- Public repo → Actions minutes are free, and the backup lives off-platform
+  (GitHub secrets hold only the *public* age key; the private key never
+  leaves the super-admin).
+- Usage is concentrated in one two-week window per year with sporadic use
+  otherwise; daily granularity plus on-demand manual runs cover both, and
+  minor data loss (≤1 day) is acceptable per the DR posture.
+
+### One-Time Setup (super-admin)
+
+**1. Railway — enable the public TCP proxy**
+
+Dashboard → project `parade-state` → service `Postgres` → Settings →
+Networking → *Public TCP Proxy* → enable. Copy the resulting
+`DATABASE_PUBLIC_URL` (a `postgresql://...?sslmode=require` URL) and add it
+as GitHub secret **`RAILWAY_PUBLIC_DATABASE_URL`**.
+
+**2. Generate the encryption keypair**
+
 ```bash
-# Daily backup cron job
-0 2 * * * pg_dump -U user -h host dbname > /backups/db_$(date +\%Y\%m\%d).sql
+# any machine with age installed (e.g. "brew install age" / "pacman -S age")
+age-keygen -o parade-state-backup.key
+# prints: # public key: age1...
 ```
 
-**Backup Retention:**
-- Daily backups: Keep 7 days
-- Weekly backups: Keep 4 weeks
-- Monthly backups: Keep 12 months
+Add the `age1...` public key as GitHub secret **`AGE_PUBLIC_KEY`**. Store
+`parade-state-backup.key` (the private key) in the super-admin's password
+manager — **it is the only way to restore backups, and GitHub never sees it**.
+
+**3. Google Drive — service account + shared folder**
+
+1. In a Google Cloud project, create a service account and enable the
+   Google Drive API for it. Create and download its JSON key.
+2. Add the JSON file contents as GitHub secret **`GDRIVE_SERVICE_ACCOUNT_JSON`**.
+3. In the super-admin's Drive, create the backup folder (e.g.
+   `parade-state backups`), share it with the service account's email as
+   **Editor**, and copy the folder ID from the URL
+   (`https://drive.google.com/drive/folders/<FOLDER_ID>`).
+4. Add the folder ID as GitHub repository *variable*
+   **`GDRIVE_ROOT_FOLDER_ID`** (Settings → Secrets and variables → Actions
+   → Variables).
+
+**4. First run**
+
+Actions → *Database backup* → *Run workflow* (manual dispatch). Verify a
+`parade-state-<timestamp>.dump.age` file appears in the Drive folder.
+
+### Schedule and Retention
+
+- Runs daily at 19:23 UTC (03:23 SGT), plus manual dispatch anytime.
+- Backups older than 30 days are deleted from Drive by the same job.
+- **GitHub disables scheduled workflows after 60 days without repo
+  activity.** Before the annual intensive-use window (and during long
+  dormant stretches), push any commit or trigger a manual run to keep the
+  schedule alive.
+
+### Restore Procedure (tested 2026-08-19)
+
+> The restore path was verified end-to-end: seeded database → `pg_dump` →
+> age encrypt/decrypt round-trip → `pg_restore` into a fresh PostgreSQL 16 →
+> row counts matched and the app booted and served `/health` and `/docs`.
+
+**1. Fetch and decrypt** (super-admin, any machine):
+
+```bash
+# download parade-state-<timestamp>.dump.age from the Drive folder
+age -d -i parade-state-backup.key -o backup.dump parade-state-<timestamp>.dump.age
+```
+
+**2. Optional local verification** before touching production:
+
+```bash
+docker run -d --name restore-check -e POSTGRES_PASSWORD=test \
+  -e POSTGRES_USER=test -p 127.0.0.1:55433:5432 postgres:16-alpine
+# pg_restore must come from a client >= the server's major version
+docker run --rm -i postgres:16-alpine pg_restore -U test --no-owner \
+  -h 172.17.0.1 -d postgres < backup.dump   # adjust host for your docker network
+DATABASE_URL=postgresql://test:test@127.0.0.1:55433/postgres \
+  uv run uvicorn parade_state.main:app --port 8123
+curl -sf http://127.0.0.1:8123/health
+```
+
+**3. Restore to Railway:**
+
+```bash
+# Fresh Postgres service (or recreated volume) in the Railway project;
+# copy its internal/public connection URL, then from any machine:
+pg_restore --no-owner --no-privileges --dbname="$RESTORE_DATABASE_URL" backup.dump
+```
+
+Use a `pg_restore` matching the server's major version (the workflow pins
+`postgresql-client-16`; mismatched newer clients emit settings older servers
+reject — seen with v18 client vs v16 server).
+
+The dump includes `alembic_version`, so the app's startup
+`alembic upgrade head` is a no-op after restore. Point the app service's
+`DATABASE_URL` at the restored database, redeploy, and verify `/health`,
+then spot-check data via the admin UI.
 
 ### Disaster Recovery
 
-**Recovery Plan:**
-
-1. **Assess Damage:**
-   - What data is lost?
-   - What systems are affected?
-
-2. **Restore from Backup:**
-   ```bash
-   # Restore most recent good backup
-   psql -U user -h host dbname < backup_file.sql
-   ```
-
-3. **Run Migrations:**
-   ```bash
-   # Apply any migrations since backup
-   uv run alembic upgrade head
-   ```
-
-4. **Verify System:**
-   - Test application endpoints
-   - Verify data integrity
-   - Monitor logs for errors
+1. **Assess:** what data is lost, and as of when? Pick the newest backup
+   that predates the damage.
+2. **Restore** using the procedure above (backup age is at most ~24 h).
+3. **Verify:** `/health`, admin UI spot checks, monitor logs for errors.
+4. **Post-incident:** if the database URL changed, update
+   `RAILWAY_PUBLIC_DATABASE_URL` (and Railway variable references) to match
+   the new database.
 
 ---
 
