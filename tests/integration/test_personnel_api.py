@@ -11,6 +11,7 @@ from parade_state.models.grouping import (
     GroupingNotes,
     GroupingPersonnelOverride,
 )
+from parade_state.models.csv_ingestion import NominalRoll
 from parade_state.models.personnel import Personnel
 from tests.test_utils import (
     assert_404_response,
@@ -888,9 +889,19 @@ async def test_list_personnel_from_different_nominal_roll_forbidden(
     sample_nominal_roll,
 ):
     """Test that personnel from different nominal_roll are not returned."""
-    # Create personnel for different nominal_roll
+    # Create a real second nominal roll (Postgres enforces the FK) and
+    # personnel belonging to it
+    other_roll = NominalRoll(
+        caa=date(2024, 2, 1),
+        csv_hash="other_hash",
+        personnel_count=1,
+        uploaded_by=str(sample_users["admin"].id),
+    )
+    db_session.add(other_roll)
+    await db_session.commit()
+
     other_personnel = Personnel(
-        nominal_roll_id=str(sample_nominal_roll.id) + "different",  # Different nominal_roll
+        nominal_roll_id=str(other_roll.id),
         rank="Private",
         category="WOSE",
         full_name="Other Person",
@@ -934,9 +945,19 @@ async def test_get_personnel_from_different_nominal_roll_forbidden(
     sample_nominal_roll,
 ):
     """Test that getting personnel from different nominal_roll returns error."""
-    # Create personnel for different nominal_roll
+    # Create a real second nominal roll (Postgres enforces the FK) and
+    # personnel belonging to it
+    other_roll = NominalRoll(
+        caa=date(2024, 2, 1),
+        csv_hash="other_hash",
+        personnel_count=1,
+        uploaded_by=str(sample_users["admin"].id),
+    )
+    db_session.add(other_roll)
+    await db_session.commit()
+
     other_personnel = Personnel(
-        nominal_roll_id=str(sample_nominal_roll.id) + "different",  # Different nominal_roll
+        nominal_roll_id=str(other_roll.id),
         rank="Private",
         category="WOSE",
         full_name="Other Person",
