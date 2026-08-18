@@ -125,6 +125,21 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def db_utcnow() -> datetime:
+    """Get current UTC time as a naive datetime for database binding.
+
+    The database stores TIMESTAMP WITHOUT TIME ZONE (naive UTC). Binding
+    a timezone-aware datetime to such a column is accepted by SQLite but
+    rejected by PostgreSQL's asyncpg driver ("can't subtract offset-naive
+    and offset-aware datetimes"), so any datetime assigned to a model
+    attribute must come from here (or be wrapped in ensure_naive()).
+
+    Returns:
+        Naive UTC datetime, safe for INSERT/UPDATE on naive columns
+    """
+    return ensure_naive(utcnow())
+
+
 def utc_from_timestamp(timestamp: float) -> datetime:
     """Convert timestamp to UTC datetime.
 
@@ -280,7 +295,9 @@ def parse_datetime(datetime_string: str, format_string: str | None = None) -> da
     return ensure_aware(dt_parsed)
 
 
-def get_age(birth_date: datetime | dt.datetime, today: datetime | dt.datetime | None = None) -> int:
+def get_age(
+    birth_date: datetime | dt.datetime, today: datetime | dt.datetime | None = None
+) -> int:
     """Calculate age from birth date.
 
     Args:
