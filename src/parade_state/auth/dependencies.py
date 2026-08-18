@@ -55,7 +55,8 @@ It depends on:
 
 ## Security
 
-- **Token extraction:** Uses HTTPBearer for secure Bearer token extraction
+- **Token extraction:** Bearer header (API clients) with fallback to the
+  HttpOnly session cookie set at OAuth sign-in (admin UI fetch calls)
 - **Session validation:** Every request validates session in database
 - **Status checking:** Verifies user account is active
 - **Role checking:** Provides role-based authorization helpers
@@ -68,9 +69,24 @@ from sqlalchemy import select
 from parade_state.auth.session import get_valid_session
 from parade_state.db import get_db_session
 from parade_state.models import User
-from parade_state.utils import ids
+from parade_state.utils import cookies
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
+
+
+def _resolve_session_token(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None,
+) -> str | None:
+    """Resolve the session token from the Bearer header or the auth cookie.
+
+    Both carry the same DB-backed session token: API clients pass it as a
+    Bearer header, while the admin UI relies on the HttpOnly session cookie
+    set by the OAuth sign-in flow (same-origin fetches send it automatically).
+    """
+    if credentials and credentials.credentials:
+        return credentials.credentials
+    return cookies.get_auth_token(request)
 
 
 async def get_current_user_optional(
@@ -78,8 +94,9 @@ async def get_current_user_optional(
 ) -> User | None:
     """Get current user from session without requiring authentication.
 
-    Extracts the Bearer token from Authorization header and validates it,
-    but returns None instead of raising exception if not authenticated.
+    Extracts the session token from the Bearer header or the auth cookie
+    and validates it, but returns None instead of raising exception if not
+    authenticated.
 
     Useful for endpoints that have different behavior for authenticated
     vs anonymous users.
@@ -102,12 +119,10 @@ async def get_current_user_optional(
                 return {"content": "free"}
         ```
     """
-    auth_header = request.headers.get("Authorization")
+    token = _resolve_session_token(request, None)
 
-    if not auth_header or not auth_header.startswith("Bearer "):
+    if not token:
         return None
-
-    token = auth_header[7:]  # Remove "Bearer " prefix
 
     async for db in get_db_session():
         session = await get_valid_session(db, token, update_last_accessed=True)
@@ -125,22 +140,22 @@ async def get_current_user_optional(
 
 async def require_authenticated_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> User:
     """Require authenticated user for protected endpoints.
 
-    Validates Bearer token and returns authenticated user.
-    Raises HTTPException if not authenticated.
+    Validates the session token — Bearer header or auth cookie — and
+    returns authenticated user. Raises HTTPException if not authenticated.
 
     Args:
         request: FastAPI Request object
-        credentials: HTTP Bearer credentials
+        credentials: HTTP Bearer credentials, if a header was provided
 
     Returns:
         Authenticated User object
 
     Raises:
-        HTTPException 401: If token invalid, expired, or user not found
+        HTTPException 401: If token missing, invalid, expired, or user not found
         HTTPException 403: If user account is not active
         HTTPException 500: If database connection error
 
@@ -157,7 +172,14 @@ async def require_authenticated_user(
             }
         ```
     """
-    token = credentials.credentials
+    token = _resolve_session_token(request, credentials)
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     async for db in get_db_session():
         session = await get_valid_session(db, token, update_last_accessed=True)
@@ -194,7 +216,7 @@ async def require_authenticated_user(
 
 async def require_admin_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> User:
     """Require admin user for admin-only endpoints.
 
@@ -234,7 +256,7 @@ async def require_admin_user(
 
 async def require_super_admin_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> User:
     """Require super admin user for super-admin-only endpoints.
 
@@ -301,7 +323,7 @@ def check_access_level(required_access_level_order: int):
 
     async def check_access(
         request: Request,
-        credentials: HTTPAuthorizationCredentials = Depends(security),
+        credentials: HTTPAuthorizationCredentials | None = Depends(security),
     ) -> User:
         user = await require_authenticated_user(request, credentials)
 
