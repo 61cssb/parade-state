@@ -106,6 +106,21 @@ def test_root_redirects_to_login(monkeypatch):
     assert response.headers["location"] == "/auth/login"
 
 
+def test_oauth_state_cookie_carries_secure_in_production(monkeypatch):
+    """The OAuth-start response sets the short-lived session_data cookie."""
+    _production_settings(monkeypatch)
+
+    client = TestClient(create_app(Settings()), base_url="https://testserver")
+    response = client.get("/auth/oauth/start", follow_redirects=False)
+
+    assert response.status_code == 302
+    header = response.headers["set-cookie"].lower()
+    assert "session_data=" in header
+    assert "secure" in header
+    assert "httponly" in header
+    assert "samesite=lax" in header
+
+
 def test_auth_cookie_carries_secure_in_production(monkeypatch):
     _production_settings(monkeypatch)
     get_settings.cache_clear()
