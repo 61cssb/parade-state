@@ -299,3 +299,14 @@ class TestDefaultValues:
         # Should be approximately 1 day (within 1 second tolerance)
         expected_seconds = 24 * 60 * 60
         assert abs(time_diff - expected_seconds) < 1.0
+
+    def test_db_utcnow_is_naive(self):
+        """db_utcnow must return naive datetimes for naive DB columns."""
+        assert utc_dt.db_utcnow().tzinfo is None
+
+    def test_db_utcnow_matches_utcnow(self):
+        """db_utcnow is the naive form of utcnow (same instant)."""
+        before = utc_dt.utcnow()
+        db_now = utc_dt.db_utcnow()
+        after = utc_dt.utcnow()
+        assert before.replace(tzinfo=None) <= db_now <= after.replace(tzinfo=None)
