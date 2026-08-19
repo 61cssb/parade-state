@@ -1,395 +1,125 @@
-# Next Implementation Phase
+# Roadmap & Open Work
 
-**Last Updated:** 2026-08-16 (admin-only authentication)
-**Status:** Production-Ready Backend with User-Facing Views
+**Last Updated:** 2026-08-19
+**Status:** In production on Railway (admin-only access). Test users
+(non-admin) targeted for the weekend of 2026-08-22; annual
+intensive-use window ~2026-09-10.
 
----
-
-## Current System Status
-
-### Production-Ready Metrics
-- 385 tests passing (100% pass rate)
-- 57 API endpoints fully implemented and tested
-- Enterprise-grade security with multi-tenant access control
-- Comprehensive documentation (architecture, security, deployment, testing)
-- Database migrations initialized and production-ready
-
-### Completed Core Features
-- Google OAuth authentication & role-based access control
-- **Admin interface with Jinja2 templates** (modern responsive UI)
-- **Host-independent OAuth flow** (works with any domain/hostname)
-- Complete grouping management (lifecycle, overrides, notes)
-- Attendance session management (AM/PM sessions, status transitions)
-- Comprehensive attendance tracking (individual & bulk operations)
-- Personnel management API (grouping-based listing, filtering, search)
-- **Advanced access control** (grouping-based multi-tenant security)
-- **CSV file upload** (SHA256 hashing, duplicate detection, column parsing)
-- **User management admin page** (inline role/status editing, search/filter, audit logging)
-- **Audit log API + admin page** (filterable, paginated, colored action badges)
-- **Combined grouping + session admin page** (master-detail with status transitions, session creation)
-- **Non-admin grouping summary view** (AM/PM session counts, unit breakdown) — admin-gated pending the viewer role
-- **Non-admin attendance marking view** (inline status/remarks editing, role-aware nav) — admin-gated pending the viewer role
-- **Nominal Roll admin view** (`/admin/nominal-rolls`) with CAA date, source filename, personnel count, status
-- **`CsvUpload.original_filename`** — upload-time filename now stored (was only in audit log)
-- **Nominal Roll API** (`GET /api/v1/nominal-rolls`, `GET /api/v1/nominal-rolls/{id}`) — list/detail with latest CsvUpload join
-- **Non-admin nominal roll browser** (`/nominal-roll`) — roster table with nominal roll selector, search, unit filter; row-numbered for easy counting — admin-gated pending the viewer role
-- **Admin-only authentication (Issue 12)** (2026-08-16) — Only `super_admin`/`admin` can sign in. Unknown Google sign-ins auto-register as `unrecognised` (was `pending`) and get a "no access" page with no session; the `user_status` DB enum is untouched (`pending` stays as a legacy value). Suspended accounts get a real 403 at the callback (the `except Exception` that masked it as a 500 is fixed). Viewer-facing routes (`/grouping`, `/attendance`, `/nominal-roll`) are gated on admin role; promotion of `unrecognised` users happens via the existing `/admin/users` page.
-- **Postgres migration validation + backup routine (Issue 14)** (2026-08-19) — The test suite now runs against Postgres via env-gated `TEST_DATABASE_URL` (per-test CREATE/DROP DATABASE on the target server, `NullPool` to keep asyncpg connections loop-safe alongside the TestClient portal). Running it surfaced and fixed real dialect fallout: the groupings API bound tz-aware payload datetimes to the naive TIMESTAMP columns (asyncpg rejects them; now normalized to naive UTC in create + update), `j0e1f2a3b4c5`'s downgrade recreated legacy tables with enum types that already exist (now reuses surviving types via `create_type=False` and recreates the dropped indexes), and the baseline downgrade dropped `access_levels` before `personnel` (its sensitivity FK). Test fixtures that relied on SQLite ignoring FKs now seed the well-known user/nominal-roll rows they reference. Full chain verified on fresh PG16: upgrade → `downgrade -4` → re-upgrade, and `downgrade base` (orphan enum types make same-DB re-upgrade unsupported — documented). Backups: daily GitHub Actions job (`.github/workflows/backup-db.yml`) → `pg_dump` over Railway's public TCP proxy → age public-key encryption → Google Drive folder shared with a service account, 30-day retention; restore procedure (decrypt → `pg_restore` → verify) tested end-to-end and documented in [DEPLOYMENT.md](DEPLOYMENT.md).
-- **`short_id` personnel identity** (2026-06-29) — `pers_no` dropped entirely (no longer imported or stored); replaced with server-minted 8-char base62 `short_id` as the cross-roll person identifier. Migration `c3d4e5f6a7b8` (batch-mode for SQLite). See [docs/SPECIFICATION.md](SPECIFICATION.md) §3.2.1.
-- **Grouping creation from nominal roll** (2026-07-01) — GUI modal on `/admin/nominal-rolls` for confirmed nominal rolls; API validates nominal roll existence + confirmed status (400 on failure). UI uses military date/time format (YYYYMMDD HHMM) with hardcoded Singapore timezone (+08:00).
-- **Nominal Roll lifecycle management** (2026-07-01) — `PATCH /api/v1/nominal-rolls/{id}` for draft↔confirmed transitions (confirm/unconfirm); `DELETE /api/v1/nominal-rolls/{id}` for super_admin-only cascade deletion (draft/confirmed only). Migration `d4e5f6a7b8c9`.
-- **Grouping personnel exclusion** (2026-07-01) — New `GroupingPersonnelExclusion` model; `POST/DELETE /api/v1/groupings/{id}/exclusions` endpoints (draft-only); admin page at `/admin/groupings/{id}/personnel` with checkbox-based multi-row editing, client-side search, batch update, and change tracking. Excluded personnel filtered from all grouping views via shared listing function.
-- **Session auto-population** (2026-07-01) — Creating a session now automatically generates AttendanceRecord entries for all active personnel in the grouping's nominal roll (minus exclusions), with status='absent'. Eliminates manual record creation.
-- **Attendance status enum simplified** (2026-07-01) — Removed "unknown" status; only "present", "absent", "excused" remain. Default is "absent".
-- **Attendance status enum replaced with operational reporting categories** (2026-08-13) — New 9-value enum: `present`, `absent`, `time_off`, `mc`, `yet_to_inpro`, `outpro`, `reporting_sick`, `late`, `att_out` (default `absent`). Legacy `excused` and stray `unknown` rows migrated to `absent` with warning log. Aggregation schemas (`GroupingStatusSessionInfo`, `GroupingStatusUnitBreakdown`, `PersonnelAttendanceHistoryStats`) now bucket statuses into present-like (`present`, `late`) vs absent-like (everything else) and drop the `excused` count field. Migration `g7b8c9d0e1f2` (batch mode for SQLite); `env.py` now sets `render_as_batch=True` so future SQLite schema changes can use `batch_alter_table` uniformly.
-- **Grouping date editing** (2026-07-01) — Admin UI supports editing valid_from/valid_until via inline form. API validates that no sessions fall outside the new date range (returns error if sessions would be orphaned).
-- **Admin groupings page enhancements** (2026-07-01) — Auto-expands active grouping on page load, per-session "Update" button linking to /attendance, autofill next session date/type for quick session creation.
-- **Attendance page enhancements** (2026-07-01) — Color-coded status dropdown (present=green, absent=red, excused=yellow), sub-unit 1 & 2 columns displayed, column filter and sort support.
-- **Deferments MVP** (2026-07-02) — Super-admin-only deferment CRUD at `/admin/deferments` and `/api/v1/deferments`. New `Personnel.callup_status` field (`Called Up` / `Not Called Up` / `Deferred`). Approving a deferment flips the linked personnel to `Deferred`; reverting from Approved returns to `Called Up` (except for neutral statuses `Not called up` / `Do not call up`). `rank_name` and `sub_unit` snapshotted at creation. Migration `e5f6a7b8c9d0`; existing demo DB backfilled to `Called Up`. User-type scoping deferred to a later phase.
-
-### System Capabilities
-- Multi-tenant grouping isolation with access control
-- Automatic data filtering by grouping scope
-- Role-based permissions (super_admin, admin, user)
-- Grouping access grants and revocation
-- Subunit scope filtering support
-- Comprehensive audit trails (user management, CSV uploads, grouping/session transitions) with browsable admin view
-- Production deployment guides
+This is the living roadmap. Feature behavior lives in
+[SPECIFICATION.md](SPECIFICATION.md), endpoints in [api.yaml](api.yaml),
+deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
+[BACKUP_SETUP.md](BACKUP_SETUP.md), and implementation history in git
+(PR titles carry the summaries this file used to duplicate).
 
 ---
 
-## Current Phase: Frontend Development (Phase 9) - IN PROGRESS
+## Current Snapshot
 
-**Priority:** HIGH
-**Status:** Phase 9D (Non-Admin Views) COMPLETE — Phase 9E (Mobile Optimization) NEXT
+- **Tests:** 419 SQLite / 422 Postgres passing. The suite runs against
+  Postgres by setting `TEST_DATABASE_URL` (per-test databases).
+- **Access model:** `super_admin` + `admin` only. Unknown Google
+  sign-ins auto-register as `unrecognised` (no access, no session);
+  suspended accounts get 403 at the callback. Promotion happens via
+  `/admin/users`.
+- **Ops:** nightly age-encrypted `pg_dump` backups to the super-admin's
+  Google Drive (30-day retention); super-admin UI database restore at
+  `/admin/database-restore` (verify-then-swap; production-validated
+  2026-08-19 including the older-dump migration path). `RESTORE_ENABLED`
+  kill switch.
 
-### Phase 9A: Foundation — COMPLETED
+### What the app does today
 
-- [x] Set up Jinja2 templates in FastAPI (singleton pattern, cache_size=0)
-- [x] Create base template with responsive layout
-- [x] Implement Google OAuth login UI flow (login page, OAuth start, callback)
-- [x] Host-independent OAuth (dynamic redirect URIs)
-- [x] Secure server-side cookie management (httponly, centralized in utils.cookies)
-- [x] Protected admin routes with authentication checks
-- [x] Logout functionality (no redirect loops)
-- [x] 7 admin page templates created (dashboard, groupings, sessions, users, csv-upload, settings, audit)
-
-### Phase 9B: Dashboard Wiring + CSV Upload — COMPLETED
-
-- [x] Dashboard shows real counts (active groupings, open sessions, active personnel, active users)
-- [x] Dashboard shows recent audit log activity (last 10 entries with user names)
-- [x] CSV upload accepts .csv files with SHA256 hashing and duplicate detection
-- [x] CSV upload detects and displays columns
-- [x] CSV upload shows previous uploads list
-- [x] Added `"id": current_admin.id` to all 7 template user dicts
-- [x] 9 integration tests for CSV upload API
-- [x] Documentation updated ([ENDPOINTS.md](ENDPOINTS.md))
-
-### Phase 9C-1: User Management — COMPLETED
-
-- [x] User management page with search/filter (name, email, status, role)
-- [x] Inline role editing via dropdown (PATCH /api/v1/users/{id})
-- [x] Inline status editing via dropdown
-- [x] Delete user with confirmation (super_admin only)
-- [x] AuditLog entries created on user update and delete
-- [x] 3 integration tests for audit log verification
-
-### Phase 9C-2: Audit Log API + Page — COMPLETED
-
-- [x] `GET /api/v1/audit/logs` endpoint with filtering (entity_type, action, target_user_id) and pagination
-- [x] Admin page at `/admin/audit` with filter form, colored action badges, pagination footer
-- [x] User name/email resolved via left outer join (handles null user_id for system entries)
-- [x] 10 integration tests (filtering by entity_type/action/target_user_id, pagination, ordering, permissions, null user_id, user_name resolution)
-- [x] Action badges colored by type (red=delete, green=create, yellow=update, purple=archive, blue=close, pink=finalize) — ready for Phase 9C-3 operations
-
-#### Deferred CSV Pipeline Steps (Future Sessions)
-- **Step 2:** Column mapping UI (map raw CSV columns to canonical names) — the current
-  process endpoint uses the fixed canonical map from the WY2627 ICT fixture
-  (`parade_state.utils.csv_constants`); generalizing to arbitrary fixtures is future work
-- **Step 3:** Diff confirmation (compare new upload vs current active Nominal Roll)
-- ~~ColumnMetadata record creation~~ ✅ (created by `POST /api/v1/csv/{id}/process`)
-- ~~Nominal Roll creation from CSV data~~ ✅ (`POST /api/v1/csv/{id}/process`)
-- ~~Personnel record generation from mapped CSV rows~~ ✅ (same endpoint)
-
-### Phase 9X: Tagging 1:1 Model Simplification — COMPLETED (2026-08-14)
-
-**Goal:** Every NominalRoll has exactly one Tagging. CSV-sourced NRs are
-read-only; unit/subunit edits land on the Tagging overlay.
-
-**Completed:**
-- [x] Migration `m3b4c5d6e7f8`: dedup safety → backfill empty taggings → drop global
-  label uniqueness → `UNIQUE(nominal_roll_id)` (1:1, mirrors `AttendanceScope`)
-- [x] `Tagging.label` now optional/informational; NR identity is the natural key
-- [x] `PATCH /api/v1/personnel/{id}` redirects unit/subunit edits to a TaggingEntry
-  upsert (merge semantics); identity fields (rank/name) → 409; response returns
-  effective (`to_*`-overlaid) values
-- [x] `POST /api/v1/csv/{upload_id}/process` — app-side CSV→NR pipeline (NR +
-  Personnel + ColumnMetadata + auto-tagging), with optional "import taggings from
-  another NR" via short_id matching (reuses the extracted
-  `copy_entries_by_short_id` helper)
-- [x] Clone endpoint repurposed to merge-into-target-tagging (no new tagging;
-  skips existing entries)
-- [x] Admin Taggings page → entries-only view (from→to, yellow rows) with
-  edit/import-from-NR modals; create/clone modals removed
-- [x] CSV upload page → Step 2 "Process into Nominal Roll" form with the
-  import-taggings dropdown
-- [x] Public NR browser overlays effective unit/subunit; tagged rows render
-  yellow (`.changed-row`)
-- [x] Canonical CSV column map lifted into `parade_state.utils.csv_constants`
-  (shared by `experiments/csv_to_nr/ingest.py` and the process endpoint)
-- [x] Demo ingest (`ingest.py`) auto-creates the empty tagging per run
-
-### Phase 9Y: Active-NR Attendance Model — COMPLETED (2026-08-14)
-
-**Goal:** Replace the per-NR AttendanceScope activation and the NR
-confirm/unconfirm workflow with a single system-wide "active for attendance"
-Nominal Roll.
-
-**Completed:**
-- [x] Migration `n4c5d6e7f8a9`: `nominal_rolls.attendance_active/_activated_at/
-  _activated_by` added (backfilled from the most recently activated scope
-  row); `attendance_scope` table dropped; `attendance.tagging_id` dropped
-  (derivable from `nominal_roll_id` under 1:1); NR `status`/`confirmed_at`/
-  `confirmed_by` dropped
-- [x] `POST /nominal-rolls/{id}/activate-attendance` (auto-switches; stamps
-  at/by) and `deactivate-attendance` (keeps stamp as history); super-admin
-  only; audit logged
-- [x] Attendance writes gated to the active NR only (400 otherwise); the NR's
-  1:1 tagging is always applied (no more NR-vs-tagging scope choice)
-- [x] Admin Nominal Rolls page: active row highlighted (green) + badge;
-  "Use for Attendance" / "Deactivate Attendance" buttons; status column,
-  filter and Confirm/Unconfirm removed; "Create Grouping" on every row
-  (groupings no longer require a confirmed NR)
-- [x] Admin attendance page: scope-activation control removed; editing
-  enabled only for the active NR
-- [x] User `/attendance`: defaults to the active NR; shows an inactive
-  message instead of the marking table when no NR is active
-- [x] Tagging delete guard: 409 when the tagging's NR has attendance rows
-- [x] NR browsers drop status labels; default to the active NR
-- [x] Follow-up: `/admin/attendance` page removed (duplicated `/attendance`);
-  Copy Remarks moved to `/attendance` (super-admin-only) and the
-  effective-aware sub-unit-1 filter ported over
-- [x] Follow-up: remap editing via comboboxes — super-admin click-to-edit
-  cells in the NR browser (PATCH → tagging overlay; custom suggestion panel
-  anchored under the cell, with a "leave blank" pick for sub-units 2/3) and
-  free-typable datalist inputs in the Taggings modal (targets may be values
-  not yet on the NR)
-
-### Phase 9C-3: Grouping + Session Management — COMPLETED
-
-- [x] Combined admin page at `/admin/groupings` with expandable session sub-views per grouping
-- [x] `/admin/sessions` redirects to `/admin/groupings` (Sessions nav link removed)
-- [x] Grouping list with status-colored cards, filter by status
-- [x] Grouping status transitions: activate, close, archive, finalize (hardcoded action buttons per valid transitions)
-- [x] Session sub-view with status badges and action buttons (close, finalize)
-- [x] Inline session creation form (date + AM/PM) for draft and active groupings
-- [x] Delete (super_admin only) for groupings (blocked if active/finalized) and sessions (blocked if finalized)
-- [x] PRD §8 compliance fix: API now allows session creation for draft groupings (was blocked to active-only)
-- [x] API stays separate (`/api/v1/groupings/*`, `/api/v1/sessions/*`) — only HTML admin view combined
-- [x] 1 new test (draft grouping session creation), 1 updated test (inactive grouping now correctly tested)
-
-### Phase 9D: Non-Admin Views — COMPLETED
-
-**Goal:** User-facing grouping summary and attendance marking views for regular (non-admin) users.
-
-**Completed features:**
-- [x] `get_current_user_optional()` auth function (any active authenticated user, no role check)
-- [x] `GET /grouping` — grouping summary with AM/PM session counts and unit breakdown
-- [x] `GET /attendance` — attendance marking table with inline status/remarks editing
-- [x] Role-aware nav in base.html (Grouping/Attendance for all users,  (admin links conditional on role)
-- [x] OAuth callback redirects admins to `/admin`, regular users to `/grouping`
-- [x] Login page redirects already-authenticated users to the appropriate view
-- [x] Grouping selector dropdown (GET param, page reload) on both views
-- [x] Session selector dropdown on attendance view, defaults to most recent open session
-- [x] Attendance table disabled (read-only) when session is closed/finalized
-- [x] 235 tests passing (no regressions)
-
-**Design decisions (confirmed 2026-06-22):**
-- Simple table layout (no complex UI components)
-- Fixed columns hardcoded but not position-dependent in code (future-proof for column config)
-- Grouping selector dropdown (GET param, page reload)
-- Column manifest pattern deferred (depends on CSV Step 2 — column mapping)
-- Parade state format deferred (awaiting formal spec from stakeholder post-MVP approval)
-- Bulk marking remains admin-only
-- Skip graceful empty-state handling for now
-
-**Files created:**
-- `src/parade_state/web/grouping.py` — grouping view route (`/grouping`)
-- `src/parade_state/web/attendance.py` — attendance view route (`/attendance`)
-- `src/parade_state/templates/grouping.html` — grouping summary template
-- `src/parade_state/templates/attendance.html` — attendance marking template
-
-**Files modified:**
-- `src/parade_state/auth/admin_dependencies.py` — added `get_current_user_optional()`
-- `src/parade_state/templates/base.html` — role-aware nav  (Grouping/Attendance for all,  (admin links conditional on `user.role in ['admin', 'super_admin']`)
-- `src/parade_state/web/auth.py` — OAuth callback role-aware redirect, login page redirect for regular users
-- `src/parade_state/main.py` — registered new web routers
-
-**Deferred items (await CSV Step 2):**
-- Column manifest pattern (configurable columns, sensitivity levels, display order)
-- Column mapping UI
-- Personnel browser (nominal roll-scoped, not grouping-scoped)
-
-### Phase 9E: Mobile Optimization (Future)
-
-**Priority:** Responsive design for field use (tablets, mobile).
+- Google OAuth sign-in (host-independent), admin-only auth, audit log
+- CSV upload → process into Nominal Roll + Personnel + auto-tagging
+  (fixed canonical column map from the WY2627 fixture — see CSV Step 2);
+  taggings importable across NRs by `pers_no`
+- Tagging overlay, 1:1 per NR: unit/subunit edits land on the overlay;
+  reads serve effective (`to_*`-overlaid) values; CSV-sourced NR data
+  itself is read-only
+- One system-wide **active-for-attendance** Nominal Roll (super-admin
+  switch); `Attendance` rows per (personnel, date) with AM/PM
+  status + remarks; writes gated to the active NR
+- Attendance access control by effective sub-unit 1
+  (`UserSubunitAssignment`; deny-by-default; super_admin bypasses)
+- Groupings: lifecycle, personnel exclusions/overrides, date editing
+- Deferments (super-admin CRUD; `Personnel.callup_status`)
+- Admin UI: dashboard, users, audit log, groupings, nominal rolls,
+  taggings, deferments, CSV upload, DB restore
+- User-facing views — `/grouping`, `/attendance`, `/nominal-roll` —
+  built, but admin-gated pending the viewer role (below)
 
 ---
 
-### Phase 9F: Nominal Roll Views — COMPLETED (2026-06-24)
+## Prioritized Open Work
 
-**Goal:** Surface nominal roll data to both admins (management view) and regular users (roster browser).
+### 1. Viewer role — before test users (weekend of 2026-08-22)
 
-**Completed features:**
-- [x] `CsvUpload.original_filename` column + Alembic migration `a1b2c3d4e5f6`
-- [x] `GET /api/v1/nominal-rolls` (list) and `GET /api/v1/nominal-rolls/{id}` (detail), admin-only, with latest-CsvUpload join for source filename
-- [x] `POST /api/v1/csv/upload` stores `original_filename`
-- [x] Admin nominal roll management page at `/admin/nominal-rolls` (CAA date, source file, personnel count, status filter)
-- [x] Non-admin nominal roll browser at `/nominal-roll` — roster table with row numbers, nominal roll selector, search, unit filter
-- [x] Nav: "Nominal Roll" link in user sidebar (between Attendance and Admin section); "Nominal Rolls" link in admin sidebar
-- [x] 235 tests still passing (no regressions)
+Open `/grouping`, `/attendance`, `/nominal-roll` to an appropriate
+non-admin role. Deferred from Issue 12: routes and views already exist;
+the work is the role decision (new `viewer` status vs reusing
+`unrecognised`→promoted flow), route gating, nav, and attendance
+permissions (subunit-1 scoping already exists).
 
-**Design decisions:**
-- File reference stored on `CsvUpload` (normalized) and surfaced via join in nominal roll views. Denormalization to `Nominal Roll` deferred — see Pending Decisions.
-- Nominal Roll browser is open to all authenticated users (org-wide reference data). Grouping-based subunit scoping is a possible future refinement.
+### 2. UI test automation, Tier 1 — before the 2026-09-10 window
 
-**Files added:**
-- `src/parade_state/api/nominal_rolls.py`
-- `src/parade_state/web/nominal-roll.py`
-- `src/parade_state/templates/admin/nominal-rolls.html`
-- `src/parade_state/templates/nominal-roll.html`
-- `src/parade_state/migrations/versions/a1b2c3d4e5f6_add_original_filename_to_csv_uploads.py`
+Behavioral page tests via the existing `client` fixture (GET page →
+assert HTML → POST API → assert state) in `tests/behavioral/`. Covers
+most of the manual-test burden that PRs #3/#4 exposed. Tier 2
+(Playwright, `@pytest.mark.e2e`) once flows settle; Tier 3 (visual
+regression) indefinitely deferred.
 
----
+### 3. CSV Step 2: column mapping — before the window *if* the fixture changes
 
-### Pending Decisions
+The process endpoint uses the fixed canonical map from the WY2627 ICT
+fixture (`parade_state.utils.csv_constants`). Generalizing to arbitrary
+fixtures becomes urgent the moment a cycle's NR export differs — check
+the September fixture early. Step 3 (diff confirmation vs the active
+NR) follows, and forces the file-reference decision below.
 
-**Nominal Roll file-reference convention (2026-06-24).** Each Nominal Roll is currently associated with its source file via `CsvUpload.original_filename` (upload-time filename, joined via `nominal roll.csv_uploads`). Open questions:
-- Should this be denormalized onto `Nominal Roll` directly (e.g., `NominalRoll.source_filename`) for cheaper queries / independent renaming?
-- Should the identifier be a filename, a content-addressed hash (`sha256_hash` already exists), or an opaque upload ID?
-- Naming: `original_filename` vs `source_filename` vs `source_file_ref`.
+### 4. Mobile optimization (Phase 9E) — for field use during the window
 
-Defer until the diff-confirmation step (Phase 9C-2 deferred work) forces a concrete decision.
+Responsive design for tablets/phones. Original phase plan applies.
 
----
+### 5. Reporting & analytics (Phase 7) — after the window produces data
 
-### Phase 9G: UI Test Automation (Deferred — pending UI stabilization)
+Exception/summary reporting needs real usage patterns; revisit with
+production data afterwards.
 
-**Trigger:** Implement once the UI flow is stable and we're no longer making frequent changes to templates/interactions. Adding earlier would mean rewriting tests on every UI iteration.
+### 6. Performance & scalability (Phase 8) — as data grows
 
-**Why:** PRs #3 and #4 required extensive manual UI testing — clicking through modals, buttons, filters, and dropdowns to verify behavior that the existing API-level tests don't cover. The UI is server-rendered Jinja2 + inline `fetch()` calls, so most of this is cheaply automatable.
+Indexing, query optimization, caching, background jobs. Post-window if
+volumes justify it.
 
-#### Tier 1: Page-rendering + flow tests (pytest + TestClient) — LOW COST
+### 7. Deferments user-type scoping — minor
 
-Expand the existing `client` fixture to test page routes end-to-end: GET page → assert rendered HTML → POST API → GET page → assert updated state. Lives in `tests/behavioral/`. Covers roughly 70% of the manual test load:
-
-- Session creation auto-populates `/attendance` with absent records
-- Grouping date edits → 400 (invalid) / 200 (valid) with updated page state
-- Excluded personnel absent from non-admin grouping view
-- Nominal Roll modal button rendered conditionally on confirmed status
-- Nominal Roll confirm/unconfirm/delete buttons → page re-renders correctly
-- Checkbox exclusion UI on `/admin/groupings/{id}/personnel` renders expected rows
-
-#### Tier 2: Client-side JS behavior (Playwright Python) — NEW DEPENDENCY
-
-For tests that need a real browser to execute JavaScript. Lives in `tests/e2e/`, gated behind `@pytest.mark.e2e` so default `uv run pytest` stays fast and CI can opt in:
-
-- Color-coded status dropdown updates on change
-- Filter and sort on attendance table
-- Autofill suggests next session by time of day
-- Modal open/close and form submission flows
-
-#### Tier 3: Visual regression (screenshot diffing) — INDEFINITELY DEFERRED
-
-Overkill until a real visual regression problem emerges.
-
-**Dependencies:** None blocking. Can be implemented at any point after the UI stabilizes. Source manual-test checklists live in PRs #3 and #4.
+Deferment CRUD is super-admin-only with no user-type scoping; extend
+when real deferment workflows emerge.
 
 ---
 
-## Deferred Phases
+## Pending Decisions
 
-### **Phase 7: Reporting & Analytics** (DEFERRED)
-**Why Deferred:** Requires production data to design meaningful reports. Can't build exception reporting without understanding real-world patterns. Will revisit after frontend launches and users generate data.
-
-**Original Plan:** Grouping status reports, CSV export, attendance summaries
-
-**New Timeline:** After Phase 9 completion and production data collection
-
-### **Phase 8: Performance & Scalability** (MEDIUM Priority)
-**Focus:** Optimize for growing datasets and increased usage  
-**Key Areas:** Database indexing, query optimization, caching layer, background jobs
-**Timeline:** After Phase 9, before or during production scaling
+**Nominal Roll file-reference convention (open since 2026-06-24).** NRs
+reference their source file via `CsvUpload.original_filename` (joined).
+Open questions: denormalize onto `NominalRoll`? filename vs
+content-hash (`sha256_hash` exists) vs opaque upload ID? naming?
+Defer until CSV Step 3 (diff confirmation) forces it.
 
 ---
 
-## Technical Documentation
+## Recent History (one line each; git log is authoritative)
 
-For detailed information on completed features and system architecture, see:
-
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture and design decisions
-- **[SECURITY.md](SECURITY.md)** - Security patterns and access control
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Production deployment guides
-- **[TESTING.md](TESTING.md)** - Testing strategies and approaches
-- **[CODE_STYLE.md](CODE_STYLE.md)** - Coding standards and conventions
-
----
-
-## Implementation History
-
-For detailed implementation history, see git commit log:
-```bash
-git log --oneline --all
-```
-
-**Recent Major Completions:**
-- **In-App Database Restore** (2026-08-19) - Super-admin restore from the admin UI (`/admin/database-restore`): upload a *decrypted* pg_dump custom-format file (age decryption stays offline), and the app runs a verify-then-swap restore — validate archive (version guard) → restore into a temp database → verify (known alembic revision ≤ build head, core tables) → rename-swap with backend eviction and engine re-init → migrate if the dump is older than head → audit-log (`database`/`restore` enum values added via migration `p6e7f8a9b0c1`). Live data is untouched until verification passes; failed swaps drop the temp DB and roll back. Docker image ships postgresql-client-18 via PGDG (codename-detected after the trixie base broke a hard-coded bookworm pin). `RESTORE_ENABLED` kill switch. Tests: gating paths on every dialect, full flow (dump → upload → swap → engine re-init → data check) on Postgres; live-server drill verified end-to-end against uvicorn + Docker Postgres 18. 419 SQLite / 421 Postgres tests passing.
-- **Postgres Migration Validation + Backup Routine (Issue 14)** (2026-08-19) - Env-gated `TEST_DATABASE_URL` runs the whole suite against Postgres (per-test databases; `init_database` gained a `poolclass` override used with `NullPool` because asyncpg connections cannot cross event loops and the TestClient portal runs a second loop). The Postgres run exposed real bugs, all fixed: groupings API create/update bound tz-aware request datetimes to naive TIMESTAMP columns (now normalized to naive UTC; regression test with a +08:00 payload), `j0e1f2a3b4c5` downgrade collided with surviving enum types and skipped legacy indexes (now `create_type=False` reuse + index recreation), baseline `bef66a2a675e` downgrade dropped `access_levels` before `personnel` (FK order), and tests seeded fake FK targets SQLite never checked (well-known users/nominal-rolls now real rows). Migration chain verified on fresh PG16 including downgrade round-trips; the same-DB downgrade-to-base → re-upgrade cycle is unsupported (orphan enum types) and documented. Backup routine shipped: daily GitHub Actions `pg_dump` → age public-key encryption → Google Drive via the super-admin's OAuth token (service accounts can no longer own My Drive files), 30-day retention, restore tested end-to-end (docs/DEPLOYMENT.md). 416 tests passing on SQLite and Postgres.
-- **Production Hardening (Issue 13)** (2026-08-16) - Closed the pre-internet-exposure gaps: `Settings` reworked to read env at instantiation with `ENVIRONMENT` detection (explicit `ENVIRONMENT=production` or auto-detected on Railway via `RAILWAY_PROJECT_ID`/`RAILWAY_SERVICE_ID`). Production now fails fast at boot (`Settings.validate()`, called by the new `create_app()` factory in `main.py`) when `SESSION_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SUPER_ADMIN_EMAIL`, or explicit `ALLOWED_ORIGINS` is missing — both fallback secrets deleted (dev gets a random per-process session secret with a warning). CORS wired to `Settings.ALLOWED_ORIGINS` (replacing hardcoded `["*"]` + credentials; `*` rejected in production). Auth cookie `Secure` flag env-driven via `AUTH_COOKIE_SECURE` (default on in production; dead `configure_production_settings()` removed). `/docs`, `/redoc`, `/openapi.json` return 404 in production. OAuth callback errors logged via `logging` instead of `print()`. 402 tests passing.
-- **Admin-only Authentication (Issue 12)** (2026-08-16) - Removed the pending-user flow from application logic: unknown Google sign-ins auto-register as `unrecognised` and see a no-access page (403) with no session; only active admins get sessions. Fixed the swallowed-status bug in the OAuth callback (`except Exception` turned the suspended 403 into a 500). Viewer-facing routes (`/grouping`, `/attendance`, `/nominal-roll`) now require admin role; `/auth/login` no longer redirects non-admins to `/grouping`. New `no_access.html` template + `/auth/no-access` route. `user_status` DB enum untouched (`pending` kept as legacy value — Postgres cannot drop enum values without a type rebuild); Python model default is now `unrecognised`. Super-admins promote users via the existing `/admin/users` page. No schema change. 385 tests passing.
-- **pers_no as Canonical Personnel Identifier (Issue 09)** (2026-08-15) - Policy change: `pers_no` (the external personnel number from the CSV `Pers` column) is no longer sensitive and becomes the canonical cross-roll person identifier, replacing the server-minted 8-char base62 `short_id`. `Personnel.pers_no` (String(20), nullable — blank Pers cells store NULL, never empty strings; UNIQUE(nominal_roll_id, pers_no); all rows for the same person across rolls share one value; one pers_no = one person globally). `short_id` fully removed: model, `ids.short_id()`/`ids.mint_unique_short_id()` utilities, schemas (`short_id` → `pers_no`, `personnel_short_id` → `personnel_pers_no` — API-breaking renames), tagging clone/CSV-import matching (`copy_entries_by_pers_no`; NULL pers_no never matches), search filters, groupings CSV export, admin + user-facing UI, and all docs. Migration `o5d6e7f8a9b0` (batch-mode for SQLite; fresh-install stance — pers_no added nullable with no backfill, populate by re-ingesting). Demo `nr_demo.db` regenerated via the ingest script (which now self-stamps `alembic_version` at head); stale `nr_demo.db.bak` removed. 344 tests passing.
-- **Attendance Model Rework — PR 3 (Issue #4)** (2026-08-14) - Attendance admin UI + user-view polish. New super-admin page at `/admin/attendance` with NR/date/subunit-1 selectors, inline scope-activation control (NR or a Tagging), roster editor (AM/PM status + remarks), and a Copy Remarks button (disabled on the NR's first day). User-facing `/attendance` now filters its roster to the caller's assigned subunits (tagging-aware effective sub_unit_1; super_admin sees all), shows the active-scope banner, and wires up Copy Remarks. **Issue #4 complete.** 336 tests passing.
-- **Attendance Model Rework — PR 2 (Issue #4)** (2026-08-14) - Added NR-scoped Subunit-1 attendance access: new `UserSubunitAssignment(user_id, nominal_roll_id, sub_unit_1)` model. Server-enforced 403 on attendance upsert and copy-remarks when the caller lacks an assignment for a target personnel's *effective* sub_unit_1 (tagging-aware — follows the active Tagging's `to_sub_unit_1`, falling back to canonical). `super_admin` bypasses; deny-by-default. Super-admin CRUD API under `/api/v1/access-control/...`. Reusable enforcement helper in `api/subunit_access.py`. Migration `k1f2a3b4c5d6`. 332 tests passing.
-- **Attendance Model Rework — PR 1 (Issue #4)** (2026-08-14) - Restructured attendance to attach to a Nominal Roll / Tagging scope with hardcoded AM/PM slots. New `Attendance` (one row per `(personnel, date)`; `status_am`/`remarks_am` + `status_pm`/`remarks_pm`) and `AttendanceScope` (1:1 with NR; the active NR-or-Tagging scope) models. Removed the user-managed `Session` model — `/api/v1/sessions/*` returns 410 Gone. Active-scope gating: a super-admin activates a scope per NR before attendance can be recorded (`PUT /api/v1/attendance/scope/{nr_id}`). New endpoints: `GET /api/v1/attendance/`, `PUT /api/v1/attendance/upsert`, `POST /api/v1/attendance/copy-remarks` (PM-prev-day → AM before noon; AM-same-day → PM after noon). Tagging delete guarded (409) when linked to attendance or set as active scope. Data migration `j0e1f2a3b4c5` merges legacy AM/PM `attendance_records` into the new shape and drops `sessions`/`attendance_records`. User-facing `/attendance` and `/grouping` views rewired to AM/PM; admin groupings page session UI removed. 321 tests passing.
-- **Tagging Overlay (Issue #3)** (2026-08-13) - Introduced the Tagging overlay: `Tagging` (globally-unique label, NR FK CASCADE) + `TaggingEntry` (one person → subunit remap per tagging; 4-string `from_*`/`to_*` tuple mirroring `GroupingPersonnelOverride`). Overlay semantics — creating/editing/deleting a tagging never mutates the underlying NR. `POST /api/v1/taggings/{id}/clone` matches source personnel to target-NR rows by `Personnel.short_id` (the cross-roll person identifier); unmatched source personnel surfaced in the response. Super-admin-only API + admin UI at `/admin/taggings`. Migration `i9d0e1f2a3b4`. 360 tests passing.
-- **Personnel Category (Issue #10)** (2026-08-13) - Added `Personnel.category` column (`Officer` / `WOSE`), inferred from rank at ingest time via `parade_state.utils.ranks`. ME1-ME3 classify as WOSE, ME4+ as Officer. Migration `h8c9d0e1f2a3` adds the nullable column; `nr_demo.db` regenerated (no backfill). Category filter on `GET /api/v1/personnel`, on `/nominal-roll`, and on `/admin/groupings/{id}/personnel`. PATCHing rank recomputes category; category is never manually editable. 340 tests passing.
-- **short_id Refactor** (2026-06-29) - Replaced `Personnel.pers_no` (opaque, sensitive external key, no longer imported or stored) with `Personnel.short_id` — a server-minted 8-char base62 cross-roll person identifier. Added `ids.short_id()` and `ids.mint_unique_short_id()`. Migration `c3d4e5f6a7b8` (uses `batch_alter_table` for SQLite compatibility). Updated API, web/views, schemas, tests, and all docs. 245 tests passing.
-- **Phase 9F: Nominal Roll Views** (2026-06-24) - Admin nominal roll management page (`/admin/nominal-rolls`), non-admin nominal roll browser (`/nominal-roll`) with row-numbered roster table and search/unit filter, nominal roll API endpoints, `CsvUpload.original_filename` column + migration `a1b2c3d4e5f6`. File-reference naming convention deferred (see Pending Decisions).
-- **Phase 9D: Non-Admin Views (2026-06-22) - Grouping summary view (`/grouping`) with AM/PM session counts and unit breakdown, attendance marking view (`/attendance`) with inline status/remarks editing, `get_current_user_optional()` auth function, role-aware nav, OAuth callback role-aware redirect
-- **Phase 9C-3: Grouping + Session Management** (2026-06-22) - Combined admin page with expandable session sub-views, status transitions, session creation, PRD §8 compliance fix, 1 new + 1 updated test
-- **Phase 9C-2: Audit Log API + Page** (2026-06-22) - Audit log API with filtering/pagination, admin page with colored action badges, 10 integration tests
-- **Phase 9C-1: User Management** (2026-06-22) - Admin users page with search/filter, inline role/status editing, delete, audit log entries on user update/delete
-- **Phase 9B: Dashboard + CSV Upload** (2026-06-22) - Dashboard with real DB queries, CSV file upload API with SHA256 hashing/duplicate detection/column parsing, 9 integration tests
-- **Phase 9A: Frontend Foundation** (2026-06-22) - OAuth authentication, Jinja2 templates, admin interface, secure cookies, logout
-- **Phase 5: Advanced Access Control** (2026-05-10) - Multi-tenant security
-- **Phase 4: Personnel Management (2026-05-08) - Grouping-based personnel operations
-- **Phase 3: Attendance Sessions** (Completed) - AM/PM session management
-- **Phase 2: Groupings (Completed) - Grouping lifecycle management
-- **Phase 1: Authentication** (Completed) - Google OAuth and user management
-
-**Priority Changes:**
-- **2026-08-19:** Post-restore migration fixed after first production test. The post-swap `alembic upgrade head` ran as a subprocess with an ini path computed from the package location — nonexistent in the image's wheel install — and alembic's config error prints to stdout, so the API surfaced a blank 500 detail. The upgrade now runs in-process (`command.upgrade` in a worker thread, `script_location` set programmatically) and reports real exception text. Also fixed: the displaced fallback database kept `ALLOW_CONNECTIONS false` from the swap, making it unusable as a fallback; it is re-enabled after the swap. Regression test restores a one-revision-old dump end-to-end.
-- **2026-08-19:** In-app database restore shipped. Super-admins restore decrypted backup dumps from `/admin/database-restore` — verify-then-swap into a temp database, engine re-init, post-restore migration when the dump is older than head, audit-logged; `pg_restore` ships in the container via PGDG. 419 SQLite / 421 Postgres tests passing.
-- **2026-08-19:** Postgres migration validation + backup routine (Issue 14) shipped. Suite runs against Postgres via `TEST_DATABASE_URL`; fixed the groupings API tz-aware datetime binding, two downgrade dialect bugs, and FK-less test fixtures. Migrations verified on fresh PG16 including downgrade round-trips. Daily encrypted `pg_dump` → Google Drive GitHub Actions backup with a tested restore path (see docs/DEPLOYMENT.md). 416 tests passing on SQLite and Postgres.
-- **2026-08-16:** Production hardening (Issue 13) shipped. Production is detected via `ENVIRONMENT=production` (Railway auto-detected); the app refuses to boot without required secrets (no fallbacks), auth cookies are `Secure` by default, CORS honors `ALLOWED_ORIGINS` only (`*` rejected in production), and OpenAPI docs are production-disabled. 402 tests passing.
-- **2026-08-16:** Admin-only authentication (Issue 12) shipped. Only `super_admin`/`admin` can use the system; unknown sign-ins auto-register as `unrecognised` (not `pending`) and see a no-access page with no session. The non-admin viewer role is deferred to a future issue; viewer-facing routes are admin-gated until then. Suspended users get 403 at the callback instead of a masked 500. No schema change — the `user_status` enum keeps `pending` as an unused legacy value. 385 tests passing.
-- **2026-08-15:** `pers_no` as canonical personnel identifier (Issue 09) shipped. `Personnel.short_id` removed; `Personnel.pers_no` (from the CSV `Pers` column) is the cross-roll person identifier. Cross-roll matching (tagging clone, CSV-process tagging import) matches on `pers_no`; blank Pers cells store NULL and never match. API field renames: `short_id` → `pers_no` on personnel responses, `personnel_short_id` → `personnel_pers_no` on tagging-entry responses, unmatched items surface `{pers_no, name}`. Migration `o5d6e7f8a9b0`. 344 tests passing.
-- **2026-08-13:** Tagging overlay (Issue #3) shipped. New `Tagging` + `TaggingEntry` entities model an overlay of person → subunit remappings on top of a Nominal Roll — never mutating the NR's personnel/subunit data. `TaggingEntry` uses the same 4-string `from_*`/`to_*` subunit tuple as `GroupingPersonnelOverride`; `from_*` is auto-snapshotted from the linked personnel when omitted. `POST /api/v1/taggings/{id}/clone` matches source personnel to target-NR rows by `Personnel.short_id` (the cross-roll person identifier); unmatched source personnel are surfaced. Label uniqueness server-enforced (409 on duplicate). Super-admin-only API + admin UI at `/admin/taggings` with per-person remap picker and clone modal. Migration `i9d0e1f2a3b4`. 360 tests passing.
-- **2026-08-13:** Personnel category (Issue #10) shipped. New `Personnel.category` column (`Officer` / `WOSE`) inferred from rank via `parade_state.utils.ranks.category_for_rank()`. ME1-ME3 → WOSE, ME4+ → Officer. Migration `h8c9d0e1f2a3` adds the column nullable (no backfill — demo DB regenerated). Ingest skips and reports rows with unrecognized ranks. Category filter added to `GET /api/v1/personnel`, `/nominal-roll`, and `/admin/groupings/{id}/personnel`. PATCHing rank recomputes category (rejected with 400 on unrecognized rank). Category is always inferred, never manually editable. 340 tests passing.
-- **2026-07-01:** Session auto-population, attendance enum simplification, grouping date editing, and UI enhancements shipped. Session creation now auto-generates AttendanceRecord entries for all active personnel (minus exclusions) with status='absent'. Attendance status enum reduced to present/absent/excused (removed "unknown"; default "absent"). Admin groupings page auto-expands active grouping, adds per-session "Update" button linking to /attendance, and autofills next session date/type. Grouping date editing (valid_from/valid_until) via inline form with API validation that no sessions fall outside the new range. Attendance page gains color-coded status dropdown, sub-unit 1 & 2 columns, and column filter/sort.
-- **2026-07-01:** Grouping management enhancements complete. Three feature sets shipped: (1) Grouping creation from nominal roll via GUI modal on `/admin/nominal-rolls` with API-level nominal roll validation (must exist + be confirmed). (2) Nominal Roll lifecycle management — `PATCH` for draft↔confirmed transitions, `DELETE` for super_admin cascade deletion. (3) Grouping personnel exclusion — new `GroupingPersonnelExclusion` model, draft-only API endpoints, admin page at `/admin/groupings/{id}/personnel` with checkbox-based multi-row editing. Personnel listing function updated to filter excluded personnel from all grouping views. Migration `d4e5f6a7b8c9`. 270 tests passing.
-- **2026-06-29:** `short_id` refactor complete. `Personnel.pers_no` dropped (never imported or stored); replaced with server-minted 8-char base62 `short_id` (cross-roll person identity). Migration `c3d4e5f6a7b8` (batch-mode for SQLite). 245 tests passing. Next: mobile optimization (Phase 9E) or diff-confirmation step.
-- **2026-06-24:** Phase 9F complete. Admin nominal roll management page (`/admin/nominal-rolls`) and non-admin nominal roll browser (`/nominal-roll`) shipped. Added `CsvUpload.original_filename` column (migration `a1b2c3d4e5f6`) and `GET /api/v1/nominal-rolls` endpoints. Nominal Roll browser shows row-numbered roster table with search/unit filter, open to all authenticated users. Next: mobile optimization (Phase 9E) or diff-confirmation step (Phase 9C-2 deferred work).
-- **2026-06-22:** Phase 9D complete. Non-admin user-facing views implemented: grouping summary (`/grouping`) with AM/PM session counts and unit breakdown, attendance marking (`/attendance`) with inline status/remarks editing. Added `get_current_user_optional()` auth function. Role-aware nav in base.html. OAuth callback now redirects admins to `/admin` and regular users to `/grouping`. Next: mobile optimization (Phase 9E).
-- **2026-06-22:** Phase 9C-3 complete. Combined grouping + session admin page at `/admin/groupings` with expandable sub-views, status transitions, inline session creation. PRD §8 compliance fix (draft groupings can now create sessions). `/admin/sessions` redirects to `/admin/groupings`. Next: mobile optimization (Phase 9C-4) or settings page wiring.
-- **2026-06-22:** Phase 9C-2 complete. Audit log API + admin page implemented with filtering (entity_type, action, target_user_id), pagination, and colored action badges. Next: remaining admin pages (attendance marking, personnel browser, grouping management, session controls).
-- **2026-06-22:** Phase 9B + 9C-1 complete. Dashboard wired with real data, CSV upload implemented, user management page functional with audit logging. Next: audit log API + page.
-- **2026-06-22:** Phase 9A complete. OAuth login/logout working, 7 admin templates created. Next: wire up dashboard with real data and implement CSV upload step 1 (file ingestion).
-- **2026-06-22:** Phase 9 (Frontend) prioritized from LOW to HIGH. Admin interface completed with host-independent OAuth flow. Frontend development now critical for user acquisition and production validation.
-- **2026-05-16:** Phase 7 reduced to grouping status + CSV export only. Comprehensive reporting deferred pending stakeholder requirements and production data analysis.
-
----
-
-**Next: Phase 9E — Mobile Optimization**
-
-Session auto-population, attendance enum simplification (removed "unknown"), grouping date editing with session validation, admin groupings page auto-expand and quick-session features, and attendance page color-coding/filter/sort complete (2026-07-01). These enhancements streamline the admin and user workflows for parade state management. Next: responsive design optimization for field use (tablets, mobile), the diff-confirmation step (Phase 9C-2 deferred work) if CSV pipeline continuation is prioritized, or Phase 9G (UI test automation) once the UI flow is stable.
+- **2026-08-19:** In-app DB restore shipped (PR #38); post-restore
+  migration fixed to run in-process after the first production test
+  (PR #40); restore button states fixed (PR #39)
+- **2026-08-19:** Postgres suite validation + nightly encrypted
+  Drive backup pipeline (Issue 14, PRs #31–#37)
+- **2026-08-16:** Production hardening (Issue 13); admin-only
+  authentication (Issue 12)
+- **2026-08-15:** `pers_no` became the canonical personnel identifier
+  (Issue 09; `short_id` removed)
+- **2026-08-14:** Attendance model rework — NR/tagging scope, AM/PM
+  rows, subunit access (Issue #4); tagging 1:1 model (9X); active-NR
+  attendance (9Y)
+- **2026-08-13:** Tagging overlay (Issue #3); personnel category
+  inferred from rank (Issue 10)
