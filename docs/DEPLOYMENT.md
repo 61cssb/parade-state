@@ -656,8 +656,22 @@ Summary of what it provisions:
 
 ### Restore Procedure (tested 2026-08-19)
 
-> The restore path was verified end-to-end: seeded database → `pg_dump` →
-> age encrypt/decrypt round-trip → `pg_restore` into a fresh PostgreSQL 16 →
+**Primary path — admin UI.** Sign in as the super-admin → **DB Restore**
+(`/admin/database-restore`), upload the *decrypted* `backup.dump`
+(decrypt offline with the age key first — see
+[BACKUP_SETUP.md](BACKUP_SETUP.md) Step 7), type the database name to
+confirm. The app restores into a scratch database, verifies it (schema
+revision not newer than the build, core tables present), and swaps it
+into place without touching the live data until verification passes.
+The page reports a summary; the operation is audit-logged
+(`database` / `restore`). Requires `RESTORE_ENABLED` (default true) and
+ships `pg_restore` in the container image.
+
+**Fallback path — CLI** (app down, or restoring into a brand-new
+database):
+
+> The CLI path was verified end-to-end: seeded database → `pg_dump` →
+> age encrypt/decrypt round-trip → `pg_restore` into a fresh PostgreSQL →
 > row counts matched and the app booted and served `/health` and `/docs`.
 
 **1. Fetch and decrypt** (super-admin, any machine):
