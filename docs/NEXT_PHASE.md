@@ -2,8 +2,8 @@
 
 **Last Updated:** 2026-08-19
 **Status:** In production on Railway (admin-only access). Test users
-(non-admin) targeted for the weekend of 2026-08-22; annual
-intensive-use window ~2026-09-10.
+(admins) coming on the weekend of 2026-08-22; annual intensive-use
+window ~2026-09-10.
 
 This is the living roadmap. Feature behavior lives in
 [SPECIFICATION.md](SPECIFICATION.md), endpoints in [api.yaml](api.yaml),
@@ -52,13 +52,9 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ## Prioritized Open Work
 
-### 1. Viewer role — before test users (weekend of 2026-08-22)
+### 1. Mobile optimization (Phase 9E) — next up, for field use during the window
 
-Open `/grouping`, `/attendance`, `/nominal-roll` to an appropriate
-non-admin role. Deferred from Issue 12: routes and views already exist;
-the work is the role decision (new `viewer` status vs reusing
-`unrecognised`→promoted flow), route gating, nav, and attendance
-permissions (subunit-1 scoping already exists).
+Responsive design for tablets/phones. Original phase plan applies.
 
 ### 2. UI test automation, Tier 1 — before the 2026-09-10 window
 
@@ -68,22 +64,31 @@ most of the manual-test burden that PRs #3/#4 exposed. Tier 2
 (Playwright, `@pytest.mark.e2e`) once flows settle; Tier 3 (visual
 regression) indefinitely deferred.
 
-### 3. CSV Step 2: column mapping — before the window *if* the fixture changes
+### 3. Reporting & analytics (Phase 7) — blocked on format requests from test users
+
+Exception/summary reporting needs real usage patterns. First step:
+collect format requests from the test users (admins) coming on the
+weekend of 2026-08-22, then design reports around what they actually
+need during the window.
+
+### 4. CSV Step 3: diff confirmation — after the season (2026)
+
+When a new CSV arrives for a unit with an existing NR, compare it
+against the previous NR (personnel added / removed / changed: rank,
+name, sub-unit, pers_no) and require confirmation before committing —
+the safety net against wrong or partial roster files. Currently a new
+upload replaces the roster wholesale (SHA256 dedupe is the only
+guard). This step also forces the file-reference decision below.
+Deferred: one NR this season, admins at the wheel, and the
+process endpoint's tagging import already covers cross-season
+carry-over.
+
+### 5. CSV Step 2: column mapping — after the season (2026)
 
 The process endpoint uses the fixed canonical map from the WY2627 ICT
-fixture (`parade_state.utils.csv_constants`). Generalizing to arbitrary
-fixtures becomes urgent the moment a cycle's NR export differs — check
-the September fixture early. Step 3 (diff confirmation vs the active
-NR) follows, and forces the file-reference decision below.
-
-### 4. Mobile optimization (Phase 9E) — for field use during the window
-
-Responsive design for tablets/phones. Original phase plan applies.
-
-### 5. Reporting & analytics (Phase 7) — after the window produces data
-
-Exception/summary reporting needs real usage patterns; revisit with
-production data afterwards.
+fixture (`parade_state.utils.csv_constants`). Only one NR format is in
+play this season, so generalizing to arbitrary fixtures waits until
+post-season.
 
 ### 6. Performance & scalability (Phase 8) — as data grows
 
@@ -94,6 +99,14 @@ volumes justify it.
 
 Deferment CRUD is super-admin-only with no user-type scoping; extend
 when real deferment workflows emerge.
+
+### 8. Viewer role — deferred until regular non-admin users exist
+
+Open `/grouping`, `/attendance`, `/nominal-roll` to a non-admin role.
+Routes and views already exist; the work is the role decision (new
+`viewer` status vs reusing the promoted flow), route gating, nav, and
+attendance permissions (subunit-1 scoping already exists). This
+season's test users will be admins, so this waits.
 
 ---
 
