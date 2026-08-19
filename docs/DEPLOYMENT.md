@@ -309,6 +309,82 @@ uv run alembic upgrade head
 - **Deployments:** Automatic on git push
 - **Rollback:** One-click rollback to previous deployment
 
+### Environments: Production and Development
+
+The Railway project `parade-state` (workspace "JS Ng's Projects") hosts two
+independent environments, each with its own `parade-state` app service and
+`Postgres` database (region asia-southeast1). **Databases are fully
+separated** — a migration tested in development cannot touch the production
+schema (the shared-DB approach was considered and rejected in issue #15).
+
+| | Production | Development |
+|---|---|---|
+| Railway environment | `production` | `development` |
+| Domain | `parade-state-production.up.railway.app` | `parade-state-development.up.railway.app` |
+| Tracks branch | `main` (GitHub auto-deploy) | `dev` (GitHub auto-deploy) |
+| Database | Only real data | Empty start; resettable (`PURGE_ENABLED=true`) |
+| `SESSION_SECRET` | own value | **own value** (never share between environments) |
+| `ALLOWED_ORIGINS` / `APP_BASE_URL` | production domain | development domain |
+| `PURGE_ENABLED` | `false` | `true` (admin-UI data purge for testing) |
+
+`DATABASE_URL` is the environment-scoped reference
+`${{Postgres.DATABASE_URL}}` in both environments — it resolves to that
+environment's own Postgres, so it must never be hardcoded.
+
+**Google OAuth:** one client serves both environments; each environment's
+callback (`https://<domain>/auth/callback`) is registered as a redirect URI
+on the client. The redirect URI is derived from the request host at
+runtime, so no code/config distinguishes environments.
+
+**Branch model and promotion:**
+
+1. Feature branches → PR into `dev` → auto-deploys to `development`, where
+   test users try changes first
+2. When validated, PR `dev` → `main` → auto-deploys to `production`
+   (production always tracks `main`)
+
+**Deploying to development manually** (GitHub auto-deploy handles pushes to
+`dev`; use this to work around it):
+
+```bash
+railway link --workspace "JS Ng's Projects" --project parade-state --environment development
+railway up --detach -m "what changed"
+railway deployment list   # poll to a terminal status — never trust queued/building
+```
+
+Free-tier note: deploys to asia-southeast1 are refused during peak hours
+(08:00–20:00 SGT). Schedule deploys outside that window rather than
+retrying.
+
+**Bootstrapping a fresh development database:** the DB starts empty (no
+users). The first sign-in matching `SUPER_ADMIN_EMAIL` bootstraps as
+super_admin; pre-provision everyone else (active, correct role) at
+`/admin/users` before their first sign-in, otherwise they are created as
+`unrecognised`.
+
+**Refreshing development from a production dump** (when prod-realistic data
+is wanted — read-realistic, write-isolated):
+
+```bash
+# 1. Dump production via its public TCP proxy (client must be PG 18+)
+pg_dump -Fc \
+  "postgresql://postgres:<password>@shinkansen.proxy.rlwy.net:48032/railway?sslmode=require" \
+  -f prod.dump
+
+# 2. Restore into development via the admin UI: sign in on the development
+#    domain as super_admin → admin "Restore Backup" page
+#    (/admin/database-restore) → upload prod.dump (RESTORE_ENABLED; the
+#    image ships postgresql-client-18, and the restore validates the archive
+#    and swaps via a temporary database)
+```
+
+Warning: this copies real PII onto the development database and wipes
+whatever dev data existed — coordinate with test users first.
+
+**Never point at development:** the nightly backup workflow
+(`RAILWAY_PUBLIC_DATABASE_URL` secret) targets production's public proxy
+only; see [BACKUP_SETUP.md](BACKUP_SETUP.md).
+
 ### Other Platforms
 
 **Docker Deployment:**
