@@ -51,8 +51,7 @@
                placeholder="{{ database_name }}"
                style="padding: 0.45rem 0.6rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 100%; max-width: 24rem; margin-bottom: 1rem;">
 
-        <button type="submit" id="restoreBtn" class="btn btn-primary" disabled
-                style="background: #dc2626;">
+        <button type="submit" id="restoreBtn" class="btn" disabled>
             Restore database
         </button>
     </form>
@@ -60,6 +59,11 @@
     <div id="status" style="margin-top: 1rem;"></div>
     <div id="summary" style="margin-top: 1rem;"></div>
 </div>
+
+<style>
+    #restoreBtn { background: #dc2626; }
+    #restoreBtn:disabled { background: #9ca3af; cursor: not-allowed; opacity: 1; }
+</style>
 
 <script>
     const ADMIN_USER_ID = "{{ user.id }}";
