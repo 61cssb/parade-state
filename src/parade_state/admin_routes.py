@@ -727,7 +727,7 @@ async def admin_database_restore(request: Request):
         return RedirectResponse(url="/auth/login", status_code=302)
     if current_admin.role != "super_admin":
         return _no_permission_response(
-            request, current_admin, "DB Restore", "database-restore"
+            request, current_admin, "Restore Backup", "database-restore"
         )
 
     from parade_state.config import get_settings
