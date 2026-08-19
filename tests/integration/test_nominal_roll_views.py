@@ -1,9 +1,11 @@
 """Tests for the nominal roll browser HTML view.
 
-The cell editor is client-side JS over PATCH /api/v1/personnel/{id} (the
-redirect-to-tagging behaviour is covered in test_personnel_api.py); these
-tests pin the view wiring — editable cells plus the embedded suggestion
-lists for super-admins, plain read-only cells for everyone else.
+The cell editor is client-side JS that stages edits locally (surviving
+refreshes via localStorage) and applies them with one PATCH
+/api/v1/personnel/{id} per person (the redirect-to-tagging behaviour is
+covered in test_personnel_api.py); these tests pin the view wiring —
+editable cells, the embedded suggestion lists, and the staged-edit
+Apply/Discard bar for super-admins, plain read-only cells for everyone else.
 
 Note: the auth helper is called directly inside the handler (not via
 Depends()), so we monkeypatch the module-level reference to inject a user.
@@ -71,6 +73,53 @@ async def test_nominal_roll_super_admin_cell_editor_wiring(
 
 
 @pytest.mark.asyncio
+async def test_nominal_roll_staged_edits_wiring(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_users,
+    db_session,
+    monkeypatch,
+):
+    """Super-admins get the staged-edit flow: edits are held client-side
+    (darker-yellow pending cells, per-roll localStorage draft) until the
+    floating bar's Apply sends one PATCH per person, or Discard reverts.
+    """
+    from parade_state.web import nominal_roll as web_nominal_roll
+
+    super_admin = User(
+        email="super-stage@example.com",
+        name="Super Admin",
+        role="super_admin",
+        status="active",
+    )
+    db_session.add(super_admin)
+    await db_session.commit()
+
+    async def _fake_current_user(_request):
+        return super_admin
+
+    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+
+    response = client.get(
+        "/nominal-roll", params={"nominal_roll_id": str(sample_nominal_roll.id)}
+    )
+    assert response.status_code == 200
+    # Per-roll localStorage draft key, so staged edits survive a refresh.
+    assert "ps:nr-edits:" in response.text
+    # Staging instead of instant saves.
+    assert "stageCellEdit" in response.text
+    assert "saveCellEdit" not in response.text
+    # Floating bar with Apply/Discard.
+    assert "pending-bar" in response.text
+    assert "applyStaged" in response.text
+    assert "discardStaged" in response.text
+    # Pending cells are a darker yellow than the saved-changes row (#fef3c7).
+    assert ".cell-edit.pending" in response.text
+    assert "#fcd34d" in response.text
+
+
+@pytest.mark.asyncio
 async def test_nominal_roll_read_only_for_non_super_admins(
     client: TestClient,
     sample_nominal_roll,
@@ -94,3 +143,7 @@ async def test_nominal_roll_read_only_for_non_super_admins(
     assert "John Doe" in response.text  # roster still renders
     assert "data-field=" not in response.text
     assert "EDIT_OPTIONS" not in response.text
+    # No staged-edit machinery either — nothing to stage without the editor.
+    # (The inert CSS ships for everyone; the JS wiring is what matters.)
+    assert "stageCellEdit" not in response.text
+    assert "ps:nr-edits" not in response.text
