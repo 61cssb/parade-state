@@ -55,32 +55,34 @@
 <div class="card">
     <h3>Recent Uploads</h3>
     {% if recent_uploads %}
-    <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
-                <th style="padding: 0.5rem;">Uploaded At</th>
-                <th style="padding: 0.5rem;">Filename</th>
-                <th style="padding: 0.5rem;">Hash</th>
-                <th style="padding: 0.5rem;">Lines</th>
-                <th style="padding: 0.5rem;">Status</th>
-                <th style="padding: 0.5rem;">Nominal Roll</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for upload in recent_uploads %}
-            <tr style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 0.5rem;">{{ upload.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                <td style="padding: 0.5rem; font-size: 0.85rem;">{{ upload.original_filename or '—' }}</td>
-                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ upload.sha256_hash }}</td>
-                <td style="padding: 0.5rem;">{{ upload.line_count }}</td>
-                <td style="padding: 0.5rem;">
-                    <span class="btn {% if upload.status == 'received' %}btn-primary{% elif upload.status == 'failed' %}btn-success{% endif %}" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">{{ upload.status }}</span>
-                </td>
-                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ upload.nominal_roll_id[:8] if upload.nominal_roll_id else '—' }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.5rem;">Uploaded At</th>
+                    <th style="padding: 0.5rem;">Filename</th>
+                    <th style="padding: 0.5rem;">Hash</th>
+                    <th style="padding: 0.5rem;">Lines</th>
+                    <th style="padding: 0.5rem;">Status</th>
+                    <th style="padding: 0.5rem;">Nominal Roll</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for upload in recent_uploads %}
+                <tr style="border-bottom: 1px solid #e5e7eb;">
+                    <td style="padding: 0.5rem;">{{ upload.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td style="padding: 0.5rem; font-size: 0.85rem;">{{ upload.original_filename or '—' }}</td>
+                    <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ upload.sha256_hash }}</td>
+                    <td style="padding: 0.5rem;">{{ upload.line_count }}</td>
+                    <td style="padding: 0.5rem;">
+                        <span class="btn {% if upload.status == 'received' %}btn-primary{% elif upload.status == 'failed' %}btn-success{% endif %}" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">{{ upload.status }}</span>
+                    </td>
+                    <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ upload.nominal_roll_id[:8] if upload.nominal_roll_id else '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
     {% else %}
     <p style="color: #6b7280; margin-top: 1rem;">No uploads yet.</p>
     {% endif %}

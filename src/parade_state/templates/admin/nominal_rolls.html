@@ -40,72 +40,74 @@
         .active-row { background: #d1fae5 !important; }
         .active-row td { background: #d1fae5 !important; }
     </style>
-    <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
-                <th style="padding: 0.5rem;">CAA Date</th>
-                <th style="padding: 0.5rem;">Label</th>
-                <th style="padding: 0.5rem;">Remarks</th>
-                <th style="padding: 0.5rem;">Source File</th>
-                <th style="padding: 0.5rem;">Personnel</th>
-                <th style="padding: 0.5rem;">Attendance</th>
-                <th style="padding: 0.5rem;">Uploaded At</th>
-                <th style="padding: 0.5rem;">CSV Hash</th>
-                <th style="padding: 0.5rem;">Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for nr in nominal_rolls %}
-            <tr class="{% if nr.attendance_active %}active-row{% endif %}" style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 0.5rem;">{{ nr.caa }}</td>
-                <td style="padding: 0.5rem;" id="label-cell-{{ nr.id }}">
-                    <span id="label-display-{{ nr.id }}"
-                          class="inline-edit-chip"
-                          data-value="{{ nr.label or '' }}"
-                          onclick="editLabel('{{ nr.id }}')"
-                          title="Click to edit label">{{ nr.label or '—' }}</span>
-                </td>
-                <td style="padding: 0.5rem; max-width: 18rem;" id="remarks-cell-{{ nr.id }}">
-                    <span id="remarks-display-{{ nr.id }}"
-                          class="inline-edit-chip"
-                          data-value="{{ nr.remarks or '' }}"
-                          onclick="editRemarks('{{ nr.id }}')"
-                          title="Click to edit remarks"
-                          style="max-width: 17rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;">{{ nr.remarks or '—' }}</span>
-                </td>
-                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ nr.original_filename }}</td>
-                <td style="padding: 0.5rem;">{{ nr.personnel_count }}</td>
-                <td style="padding: 0.5rem;">
-                    {% if nr.attendance_active %}
-                    <span class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                          title="{% if nr.attendance_activated_at %}Activated {{ nr.attendance_activated_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}">
-                        Active for attendance
-                    </span>
-                    {% else %}
-                    <span style="font-size: 0.75rem; color: #9ca3af;">—</span>
-                    {% endif %}
-                </td>
-                <td style="padding: 0.5rem;">{{ nr.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ nr.csv_hash }}</td>
-                <td style="padding: 0.5rem; white-space: nowrap;">
-                    <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                            onclick="openCreateModal('{{ nr.id }}', '{{ nr.caa }}', {{ nr.personnel_count }})">Create Grouping</button>
-                    {% if user.role == 'super_admin' %}
-                    {% if nr.attendance_active %}
-                    <button class="btn" style="background: #f59e0b; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
-                            onclick="deactivateAttendance('{{ nr.id }}', '{{ nr.caa }}')">Deactivate Attendance</button>
-                    {% else %}
-                    <button class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
-                            onclick="useForAttendance('{{ nr.id }}', '{{ nr.caa }}')">Use for Attendance</button>
-                    {% endif %}
-                    <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
-                            onclick="deleteNominalRoll('{{ nr.id }}', '{{ nr.caa }}')">Delete</button>
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.5rem;">CAA Date</th>
+                    <th style="padding: 0.5rem;">Label</th>
+                    <th style="padding: 0.5rem;">Remarks</th>
+                    <th style="padding: 0.5rem;">Source File</th>
+                    <th style="padding: 0.5rem;">Personnel</th>
+                    <th style="padding: 0.5rem;">Attendance</th>
+                    <th style="padding: 0.5rem;">Uploaded At</th>
+                    <th style="padding: 0.5rem;">CSV Hash</th>
+                    <th style="padding: 0.5rem;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for nr in nominal_rolls %}
+                <tr class="{% if nr.attendance_active %}active-row{% endif %}" style="border-bottom: 1px solid #e5e7eb;">
+                    <td style="padding: 0.5rem;">{{ nr.caa }}</td>
+                    <td style="padding: 0.5rem;" id="label-cell-{{ nr.id }}">
+                        <span id="label-display-{{ nr.id }}"
+                              class="inline-edit-chip"
+                              data-value="{{ nr.label or '' }}"
+                              onclick="editLabel('{{ nr.id }}')"
+                              title="Click to edit label">{{ nr.label or '—' }}</span>
+                    </td>
+                    <td style="padding: 0.5rem; max-width: 18rem;" id="remarks-cell-{{ nr.id }}">
+                        <span id="remarks-display-{{ nr.id }}"
+                              class="inline-edit-chip"
+                              data-value="{{ nr.remarks or '' }}"
+                              onclick="editRemarks('{{ nr.id }}')"
+                              title="Click to edit remarks"
+                              style="max-width: 17rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;">{{ nr.remarks or '—' }}</span>
+                    </td>
+                    <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ nr.original_filename }}</td>
+                    <td style="padding: 0.5rem;">{{ nr.personnel_count }}</td>
+                    <td style="padding: 0.5rem;">
+                        {% if nr.attendance_active %}
+                        <span class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                              title="{% if nr.attendance_activated_at %}Activated {{ nr.attendance_activated_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}">
+                            Active for attendance
+                        </span>
+                        {% else %}
+                        <span style="font-size: 0.75rem; color: #9ca3af;">—</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.5rem;">{{ nr.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td style="padding: 0.5rem; font-family: monospace; font-size: 0.8rem;">{{ nr.csv_hash }}</td>
+                    <td style="padding: 0.5rem; white-space: nowrap;">
+                        <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                                onclick="openCreateModal('{{ nr.id }}', '{{ nr.caa }}', {{ nr.personnel_count }})">Create Grouping</button>
+                        {% if user.role == 'super_admin' %}
+                        {% if nr.attendance_active %}
+                        <button class="btn" style="background: #f59e0b; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
+                                onclick="deactivateAttendance('{{ nr.id }}', '{{ nr.caa }}')">Deactivate Attendance</button>
+                        {% else %}
+                        <button class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
+                                onclick="useForAttendance('{{ nr.id }}', '{{ nr.caa }}')">Use for Attendance</button>
+                        {% endif %}
+                        <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
+                                onclick="deleteNominalRoll('{{ nr.id }}', '{{ nr.caa }}')">Delete</button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
     {% else %}
     <p style="color: #6b7280; margin-top: 1rem;">No nominal rolls yet. Upload and process a CSV to create one.</p>
     {% endif %}

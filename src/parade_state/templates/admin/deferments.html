@@ -32,51 +32,53 @@
     </form>
 
     {% if deferments %}
-    <table style="width: 100%; border-collapse: collapse; margin-top: 0.5rem;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
-                <th style="padding: 0.5rem;">Nominal Roll</th>
-                <th style="padding: 0.5rem;">Subunit</th>
-                <th style="padding: 0.5rem;">Rank-Name</th>
-                <th style="padding: 0.5rem;">Reason</th>
-                <th style="padding: 0.5rem;">Status</th>
-                <th style="padding: 0.5rem;">Remarks</th>
-                <th style="padding: 0.5rem;">OC Updates</th>
-                <th style="padding: 0.5rem;">Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for d in deferments %}
-            <tr style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 0.5rem; font-size: 0.8rem; color: #6b7280;">{% if d.nominal_roll_caa %}{{ d.nominal_roll_caa }}{% else %}—{% endif %}</td>
-                <td style="padding: 0.5rem;">{{ d.sub_unit }}</td>
-                <td style="padding: 0.5rem;">{{ d.rank_name }}</td>
-                <td style="padding: 0.5rem;">{{ d.reason }}</td>
-                <td style="padding: 0.5rem;">
-                    {% set status_color = {
-                        'Approved': '#10b981',
-                        'Withdrawn': '#6b7280',
-                        'Rejected': '#ef4444',
-                        'To Resubmit': '#f59e0b',
-                        'Time off arrangement': '#8b5cf6',
-                        'Pending action': '#2563eb',
-                        'Not called up': '#6b7280',
-                        'Do not call up': '#6b7280'
-                    } %}
-                    <span style="font-size: 0.75rem; padding: 0.25rem 0.5rem; color: white; border-radius: 0.25rem; background: {{ status_color.get(d.status, '#6b7280') }};">{{ d.status }}</span>
-                </td>
-                <td style="padding: 0.5rem; font-size: 0.85rem; max-width: 18rem; white-space: pre-wrap; overflow: hidden; text-overflow: ellipsis;">{{ d.remarks or '—' }}</td>
-                <td style="padding: 0.5rem; font-size: 0.85rem; max-width: 18rem; white-space: pre-wrap; overflow: hidden; text-overflow: ellipsis;">{{ d.oc_updates or '—' }}</td>
-                <td style="padding: 0.5rem; white-space: nowrap;">
-                    <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                            onclick="openEditModal('{{ d.id }}')">Edit</button>
-                    <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
-                            onclick="deleteDeferment('{{ d.id }}', '{{ d.rank_name }}')">Delete</button>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 0.5rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.5rem;">Nominal Roll</th>
+                    <th style="padding: 0.5rem;">Subunit</th>
+                    <th style="padding: 0.5rem;">Rank-Name</th>
+                    <th style="padding: 0.5rem;">Reason</th>
+                    <th style="padding: 0.5rem;">Status</th>
+                    <th style="padding: 0.5rem;">Remarks</th>
+                    <th style="padding: 0.5rem;">OC Updates</th>
+                    <th style="padding: 0.5rem;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for d in deferments %}
+                <tr style="border-bottom: 1px solid #e5e7eb;">
+                    <td style="padding: 0.5rem; font-size: 0.8rem; color: #6b7280;">{% if d.nominal_roll_caa %}{{ d.nominal_roll_caa }}{% else %}—{% endif %}</td>
+                    <td style="padding: 0.5rem;">{{ d.sub_unit }}</td>
+                    <td style="padding: 0.5rem;">{{ d.rank_name }}</td>
+                    <td style="padding: 0.5rem;">{{ d.reason }}</td>
+                    <td style="padding: 0.5rem;">
+                        {% set status_color = {
+                            'Approved': '#10b981',
+                            'Withdrawn': '#6b7280',
+                            'Rejected': '#ef4444',
+                            'To Resubmit': '#f59e0b',
+                            'Time off arrangement': '#8b5cf6',
+                            'Pending action': '#2563eb',
+                            'Not called up': '#6b7280',
+                            'Do not call up': '#6b7280'
+                        } %}
+                        <span style="font-size: 0.75rem; padding: 0.25rem 0.5rem; color: white; border-radius: 0.25rem; background: {{ status_color.get(d.status, '#6b7280') }};">{{ d.status }}</span>
+                    </td>
+                    <td style="padding: 0.5rem; font-size: 0.85rem; max-width: 18rem; white-space: pre-wrap; overflow: hidden; text-overflow: ellipsis;">{{ d.remarks or '—' }}</td>
+                    <td style="padding: 0.5rem; font-size: 0.85rem; max-width: 18rem; white-space: pre-wrap; overflow: hidden; text-overflow: ellipsis;">{{ d.oc_updates or '—' }}</td>
+                    <td style="padding: 0.5rem; white-space: nowrap;">
+                        <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                                onclick="openEditModal('{{ d.id }}')">Edit</button>
+                        <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-left: 0.25rem;"
+                                onclick="deleteDeferment('{{ d.id }}', '{{ d.rank_name }}')">Delete</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
     {% else %}
     <p style="color: #6b7280; margin-top: 1rem;">No deferments found. Click "New Deferment" to create one.</p>
     {% endif %}

@@ -38,50 +38,52 @@
 {% endif %}
 
 <div class="card">
-    <table id="personnel-table" style="width: 100%; border-collapse: collapse;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
-                <th style="padding: 0.5rem; width: 2rem;">
-                    {% if is_draft %}
-                    <input type="checkbox" id="select-all" onchange="onSelectAll(this.checked)">
-                    {% endif %}
-                </th>
-                <th style="padding: 0.5rem;">Category</th>
-                <th style="padding: 0.5rem;">Rank</th>
-                <th style="padding: 0.5rem;">Name</th>
-                <th style="padding: 0.5rem;">Unit</th>
-                <th style="padding: 0.5rem;">Sub-Unit</th>
-                <th style="padding: 0.5rem;">Pers No</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for p in personnel_rows %}
-            <tr id="row-{{ p.id }}"
-                data-personnel-id="{{ p.id }}"
-                data-initial-included="{{ 'false' if p.is_excluded else 'true' }}"
-                data-category="{{ p.category }}"
-                data-searchable="{{ p.full_name|lower }} {{ (p.pers_no or '')|lower }}"
-                style="border-bottom: 1px solid #f3f4f6; {% if p.is_excluded %}background: #fafafa;{% endif %}">
-                <td style="padding: 0.5rem;">
-                    {% if is_draft %}
-                    <input type="checkbox" class="row-checkbox"
-                           data-personnel-id="{{ p.id }}"
-                           {% if not p.is_excluded %}checked{% endif %}
-                           onchange="onRowToggle('{{ p.id }}')">
-                    {% else %}
-                    <input type="checkbox" disabled {% if not p.is_excluded %}checked{% endif %}>
-                    {% endif %}
-                </td>
-                <td style="padding: 0.5rem; white-space: nowrap;">{{ p.category }}</td>
-                <td style="padding: 0.5rem;">{{ p.rank }}</td>
-                <td style="padding: 0.5rem;">{{ p.full_name }}</td>
-                <td style="padding: 0.5rem;">{{ p.unit }}</td>
-                <td style="padding: 0.5rem;">{{ p.sub_unit_1 or '—' }}</td>
-                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.85rem;">{{ p.pers_no or '—' }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="table-wrap">
+        <table id="personnel-table" style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.5rem; width: 2rem;">
+                        {% if is_draft %}
+                        <input type="checkbox" id="select-all" onchange="onSelectAll(this.checked)">
+                        {% endif %}
+                    </th>
+                    <th style="padding: 0.5rem;">Category</th>
+                    <th style="padding: 0.5rem;">Rank</th>
+                    <th style="padding: 0.5rem;">Name</th>
+                    <th style="padding: 0.5rem;">Unit</th>
+                    <th style="padding: 0.5rem;">Sub-Unit</th>
+                    <th style="padding: 0.5rem;">Pers No</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in personnel_rows %}
+                <tr id="row-{{ p.id }}"
+                    data-personnel-id="{{ p.id }}"
+                    data-initial-included="{{ 'false' if p.is_excluded else 'true' }}"
+                    data-category="{{ p.category }}"
+                    data-searchable="{{ p.full_name|lower }} {{ (p.pers_no or '')|lower }}"
+                    style="border-bottom: 1px solid #f3f4f6; {% if p.is_excluded %}background: #fafafa;{% endif %}">
+                    <td style="padding: 0.5rem;">
+                        {% if is_draft %}
+                        <input type="checkbox" class="row-checkbox"
+                               data-personnel-id="{{ p.id }}"
+                               {% if not p.is_excluded %}checked{% endif %}
+                               onchange="onRowToggle('{{ p.id }}')">
+                        {% else %}
+                        <input type="checkbox" disabled {% if not p.is_excluded %}checked{% endif %}>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.5rem; white-space: nowrap;">{{ p.category }}</td>
+                    <td style="padding: 0.5rem;">{{ p.rank }}</td>
+                    <td style="padding: 0.5rem;">{{ p.full_name }}</td>
+                    <td style="padding: 0.5rem;">{{ p.unit }}</td>
+                    <td style="padding: 0.5rem;">{{ p.sub_unit_1 or '—' }}</td>
+                    <td style="padding: 0.5rem; font-family: monospace; font-size: 0.85rem;">{{ p.pers_no or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
     {% if not personnel_rows %}
     <p style="color: #6b7280; margin-top: 1rem;">No personnel found.</p>
     {% endif %}

@@ -37,28 +37,30 @@
 <div class="card">
     <h3>Recent Activity</h3>
     {% if recent_activity %}
-    <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
-                <th style="padding: 0.5rem;">Timestamp</th>
-                <th style="padding: 0.5rem;">User</th>
-                <th style="padding: 0.5rem;">Action</th>
-                <th style="padding: 0.5rem;">Entity</th>
-                <th style="padding: 0.5rem;">Description</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for entry in recent_activity %}
-            <tr style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 0.5rem;">{{ entry.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
-                <td style="padding: 0.5rem;">{{ entry.user_name }}</td>
-                <td style="padding: 0.5rem;"><span class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">{{ entry.action }}</span></td>
-                <td style="padding: 0.5rem;">{{ entry.entity_type }}</td>
-                <td style="padding: 0.5rem;">{{ entry.description }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.5rem;">Timestamp</th>
+                    <th style="padding: 0.5rem;">User</th>
+                    <th style="padding: 0.5rem;">Action</th>
+                    <th style="padding: 0.5rem;">Entity</th>
+                    <th style="padding: 0.5rem;">Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in recent_activity %}
+                <tr style="border-bottom: 1px solid #e5e7eb;">
+                    <td style="padding: 0.5rem;">{{ entry.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td style="padding: 0.5rem;">{{ entry.user_name }}</td>
+                    <td style="padding: 0.5rem;"><span class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">{{ entry.action }}</span></td>
+                    <td style="padding: 0.5rem;">{{ entry.entity_type }}</td>
+                    <td style="padding: 0.5rem;">{{ entry.description }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
     {% else %}
     <p style="color: #6b7280; margin-top: 1rem;">No recent activity</p>
     {% endif %}

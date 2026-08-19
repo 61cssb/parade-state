@@ -59,26 +59,28 @@
 {% if unit_breakdown %}
 <div class="card">
     <h3 style="margin-bottom: 1rem;">Unit Breakdown</h3>
-    <table style="width: 100%; border-collapse: collapse;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
-                <th style="padding: 0.5rem;">Unit</th>
-                <th style="padding: 0.5rem; text-align: center;">Present</th>
-                <th style="padding: 0.5rem; text-align: center;">Absent</th>
-                <th style="padding: 0.5rem; text-align: center;">Total</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for u in unit_breakdown %}
-            <tr style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 0.5rem; font-weight: bold;">{{ u.unit }}</td>
-                <td style="padding: 0.5rem; text-align: center; color: #10b981; font-weight: bold;">{{ u.present }}</td>
-                <td style="padding: 0.5rem; text-align: center; color: #ef4444;">{{ u.absent }}</td>
-                <td style="padding: 0.5rem; text-align: center; font-weight: bold;">{{ u.total }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.5rem;">Unit</th>
+                    <th style="padding: 0.5rem; text-align: center;">Present</th>
+                    <th style="padding: 0.5rem; text-align: center;">Absent</th>
+                    <th style="padding: 0.5rem; text-align: center;">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in unit_breakdown %}
+                <tr style="border-bottom: 1px solid #e5e7eb;">
+                    <td style="padding: 0.5rem; font-weight: bold;">{{ u.unit }}</td>
+                    <td style="padding: 0.5rem; text-align: center; color: #10b981; font-weight: bold;">{{ u.present }}</td>
+                    <td style="padding: 0.5rem; text-align: center; color: #ef4444;">{{ u.absent }}</td>
+                    <td style="padding: 0.5rem; text-align: center; font-weight: bold;">{{ u.total }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </div>
 {% endif %}
 {% else %}
