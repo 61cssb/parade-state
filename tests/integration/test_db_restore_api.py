@@ -202,6 +202,74 @@ async def test_restore_happy_path_swaps_and_reinitializes(
 @pytest.mark.skipif(
     not _pg_dump_compatible(), reason="needs TEST_DATABASE_URL + local pg_dump"
 )
+async def test_restore_older_dump_runs_post_restore_migration(
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
+    sample_personnel,
+    db_session,
+):
+    """A dump stamped one revision behind head is migrated after the swap.
+
+    Regression test for the production incident where the post-restore
+    ``alembic upgrade head`` ran as a subprocess: the ini path computed
+    from the package location did not exist in the image (wheel install),
+    and alembic's config error printed to stdout — surfacing as a 500
+    with a blank detail. The upgrade now runs in-process.
+    """
+    from alembic.script import ScriptDirectory
+    from sqlalchemy import text as sa_text
+
+    from parade_state import db
+    from parade_state.db.restore import _app_head_revision, _migrations_dir
+
+    head = _app_head_revision()
+    script = ScriptDirectory(str(_migrations_dir()))
+    parent = script.get_revision(head).down_revision
+    assert isinstance(parent, str)  # head is never the base revision
+
+    await db_session.execute(
+        sa_text("CREATE TABLE IF NOT EXISTS alembic_version "
+                "(version_num VARCHAR(32) PRIMARY KEY)")
+    )
+    await db_session.execute(sa_text("DELETE FROM alembic_version"))
+    await db_session.execute(
+        sa_text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+        {"v": parent},
+    )
+    await db_session.commit()
+
+    current_db = db._engine.url.database
+    dump = _dump_database(_current_test_db_url())
+
+    response = client.post(
+        RESTORE_URL,
+        headers=super_admin_token_headers,
+        params={**SUPER_ADMIN_PARAMS, "confirmation": current_db},
+        files={"file": ("backup.dump", dump, "application/octet-stream")},
+    )
+
+    assert response.status_code == 200, response.text
+    summary = response.json()
+    assert summary["needs_migration"] is True
+    assert summary["migrated_to_head"] is True
+    assert summary["pre_restore_db_dropped"] is True
+
+    session_maker = db.get_session_maker()
+    async with session_maker() as session:
+        version = (
+            await session.execute(sa_text("SELECT version_num FROM alembic_version"))
+        ).scalar_one()
+        personnel_count = (
+            await session.execute(sa_text("SELECT count(*) FROM personnel"))
+        ).scalar_one()
+    assert version == head
+    assert personnel_count == len(sample_personnel)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not _pg_dump_compatible(), reason="needs TEST_DATABASE_URL + local pg_dump"
+)
 async def test_restore_rejects_wrong_confirmation(
     client: TestClient, super_admin_token_headers: dict[str, str]
 ):

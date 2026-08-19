@@ -58,13 +58,6 @@ def _migrations_dir() -> Path:
     return Path(parade_state.__file__).resolve().parent / "migrations"
 
 
-def _alembic_ini_path() -> Path:
-    """alembic.ini at the deployment root (repo root, or /app in the image)."""
-    import parade_state
-
-    return Path(parade_state.__file__).resolve().parents[1] / "alembic.ini"
-
-
 def _app_head_revision() -> str:
     """Head alembic revision of the deployed code."""
     from alembic.script import ScriptDirectory
@@ -368,18 +361,50 @@ async def _swap_databases(
             )
             raise
 
+        # The displaced database keeps the ALLOW_CONNECTIONS false set
+        # before the rename; without this it could not serve as the
+        # documented fallback if the post-restore migration fails.
+        try:
+            await conn.execute(
+                text(f'ALTER DATABASE "{pre_restore}" ALLOW_CONNECTIONS true')
+            )
+        except Exception:  # noqa: BLE001 - swap already succeeded
+            logging.getLogger(__name__).warning(
+                "could not re-enable connections on fallback database %s",
+                pre_restore,
+            )
+
     return pre_restore
+
+
+def _run_upgrade(database_url: str) -> None:
+    """Sync in-process alembic upgrade (runs in a worker thread).
+
+    The migrations env.py reads ``DATABASE_URL`` from the process
+    environment, so the variable is set for the duration of the run.
+    The config is built programmatically — passing an ini path computed
+    from the package location broke on wheel installs (site-packages,
+    where no alembic.ini exists), and alembic prints its config errors
+    to stdout, which made subprocess failures surface as blank details.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    config = Config()
+    config.set_main_option("script_location", str(_migrations_dir()))
+    with env.override("DATABASE_URL", database_url):
+        command.upgrade(config, "head")
 
 
 async def _migrate_restored(database_url: str) -> None:
     """Run alembic upgrade head against the restored database."""
-    code, _, stderr = await _run_subprocess(
-        ["alembic", "-c", str(_alembic_ini_path()), "upgrade", "head"],
-        env_extra={"DATABASE_URL": database_url},
-    )
-    if code != 0:
-        detail = stderr.decode("utf-8", errors="replace").strip()[-500:]
-        raise RestoreError(f"alembic upgrade failed after swap: {detail}", 500)
+    try:
+        await asyncio.to_thread(_run_upgrade, database_url)
+    except Exception as exc:
+        logging.getLogger(__name__).exception(
+            "post-restore alembic upgrade failed"
+        )
+        raise RestoreError(f"alembic upgrade failed after swap: {exc}", 500)
 
 
 async def restore_from_dump(dump: bytes, *, operator_id: str) -> dict:
