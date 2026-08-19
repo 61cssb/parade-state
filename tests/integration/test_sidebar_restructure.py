@@ -1,9 +1,10 @@
 """Tests for the sidebar restructure (issue 07).
 
-Covers the ICT/Admin section layout, the in-page no-access pattern for
-super-admin-only pages, the merged management elements on /nominal-roll
-and /grouping, the moved Manage Personnel page, and the retired admin
-pages (/admin/nominal-rolls, /admin/groupings, /admin/sessions).
+Covers the sidebar layout (workflow pages flat, then an Admin section),
+the in-page no-access pattern for super-admin-only pages, the merged
+management elements on /nominal-roll and /grouping, the moved Manage
+Personnel page, and the retired admin pages (/admin/nominal-rolls,
+/admin/groupings, /admin/sessions).
 """
 
 import pytest
@@ -43,33 +44,41 @@ async def _make_super_admin(db_session: AsyncSession) -> User:
 
 
 @pytest.mark.asyncio
-async def test_sidebar_renders_ict_and_admin_sections(
+async def test_sidebar_lists_workflow_pages_then_admin_section(
     client: TestClient, db_session: AsyncSession, sample_users
 ):
-    """The sidebar groups items into ICT and Admin sections and lists every
-    page, including the relabelled Upload NR entry."""
+    """The sidebar lists the workflow pages flat (Dashboard through Grouping,
+    in order), then an Admin section with Users, Settings, Audit Log, and
+    the relabelled Restore Backup entry."""
     await _sign_in(client, db_session, sample_users["admin"])
 
     response = client.get("/admin")
 
     assert response.status_code == 200
     body = response.text
-    assert "ICT" in body
-    assert "Admin" in body
-    for label in (
-        "Nominal Roll",
-        "Upload NR",
-        "Attendance",
-        "Grouping",
-        "Taggings",
-        "Deferments",
-        "Dashboard",
-        "Users",
-        "Settings",
-        "Audit Log",
-        "DB Restore",
-    ):
-        assert label in body, label
+
+    # Workflow pages in order, no section label above them.
+    order = [
+        'href="/admin"',
+        'href="/admin/csv-upload"',
+        'href="/nominal-roll"',
+        'href="/admin/taggings"',
+        'href="/admin/deferments"',
+        'href="/attendance"',
+        'href="/grouping"',
+        'nav-section-label">Admin',
+        'href="/admin/users"',
+        'href="/admin/settings"',
+        'href="/admin/audit"',
+        'href="/admin/database-restore"',
+    ]
+    positions = [body.index(marker) for marker in order]
+    assert positions == sorted(positions), "sidebar entries out of order"
+
+    assert "Restore Backup" in body
+    assert "Upload NR" in body
+    assert '<div class="nav-section-label">ICT</div>' not in body
+    assert ">DB Restore<" not in body
 
     # Retired pages must not be linked from the sidebar.
     assert 'href="/admin/nominal-rolls"' not in body
