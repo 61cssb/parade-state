@@ -26,6 +26,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "j0e1f2a3b4c5"
@@ -348,16 +349,28 @@ def downgrade() -> None:
     op.drop_index("ix_attendance_scope_id", table_name="attendance_scope")
     op.drop_table("attendance_scope")
 
-    # Recreate empty legacy tables for schema continuity.
+    # Postgres leaves the enum types behind when ``upgrade`` dropped the
+    # legacy tables (types are not dropped with tables), so the recreated
+    # columns must REUSE the surviving types instead of creating them:
+    # SQLAlchemy only suppresses the implicit CREATE TYPE for enum types it
+    # sees more than once per table, so a single-occurrence generic Enum
+    # would emit CREATE TYPE and fail with DuplicateObject on Postgres.
+    # ``create_type=False`` (a no-op on SQLite) makes the reuse explicit.
     op.create_table(
         "sessions",
         sa.Column("id", sa.String(length=36), nullable=False),
         sa.Column("deployment_id", sa.String(length=36), nullable=False),
         sa.Column("date", sa.Date(), nullable=False),
-        sa.Column("session_type", sa.Enum("AM", "PM", name="session_type"), nullable=False),
+        sa.Column(
+            "session_type",
+            postgresql.ENUM("AM", "PM", name="session_type", create_type=False),
+            nullable=False,
+        ),
         sa.Column(
             "status",
-            sa.Enum("open", "closed", "finalized", name="session_status"),
+            postgresql.ENUM(
+                "open", "closed", "finalized", name="session_status", create_type=False
+            ),
             nullable=False,
         ),
         sa.Column("created_at", sa.DateTime(), nullable=False),
@@ -386,7 +399,11 @@ def downgrade() -> None:
         sa.Column("deployment_id", sa.String(length=36), nullable=False),
         sa.Column(
             "status",
-            sa.Enum(*ATTENDANCE_STATUSES, name="attendance_status"),
+            postgresql.ENUM(
+                *ATTENDANCE_STATUSES,
+                name="attendance_status",
+                create_type=False,
+            ),
             nullable=False,
         ),
         sa.Column("remarks", sa.Text(), nullable=True),
@@ -418,4 +435,13 @@ def downgrade() -> None:
         sa.UniqueConstraint(
             "session_id", "personnel_id", name="unique_session_personnel_attendance"
         ),
+    )
+    # Recreate the indexes the baseline migration's downgrade expects to
+    # drop (the upgrade removed them implicitly with the tables).
+    op.create_index(
+        op.f("ix_sessions_id"), "sessions", ["id"], unique=False
+    )
+    op.create_index(op.f("ix_sessions_date"), "sessions", ["date"], unique=False)
+    op.create_index(
+        op.f("ix_attendance_records_id"), "attendance_records", ["id"], unique=False
     )

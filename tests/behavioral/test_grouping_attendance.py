@@ -31,8 +31,8 @@ class TestGroupingLifecycle:
             nominal_roll_id=sample_nominal_roll.id,
             mode="standard",
             status="active",
-            valid_from=utc_dt.utcnow() - timedelta(days=1),
-            valid_until=utc_dt.utcnow() + timedelta(days=30),
+            valid_from=utc_dt.db_utcnow() - timedelta(days=1),
+            valid_until=utc_dt.db_utcnow() + timedelta(days=30),
             created_by=admin_id,
         )
         db_session.add(grouping1)
@@ -43,8 +43,8 @@ class TestGroupingLifecycle:
             nominal_roll_id=sample_nominal_roll.id,
             mode="standard",
             status="active",
-            valid_from=utc_dt.utcnow() - timedelta(days=1),
-            valid_until=utc_dt.utcnow() + timedelta(days=30),
+            valid_from=utc_dt.db_utcnow() - timedelta(days=1),
+            valid_until=utc_dt.db_utcnow() + timedelta(days=30),
             created_by=admin_id,
         )
         db_session.add(grouping2)
@@ -79,7 +79,7 @@ class TestAttendanceSnapshotRules:
             sub_unit_3_snapshot=personnel.sub_unit_3,
             created_by=admin_id,
             updated_by=admin_id,
-            last_edit_at=utc_dt.utcnow(),
+            last_edit_at=utc_dt.db_utcnow(),
             last_edit_by=admin_id,
         )
         db_session.add(attendance)
@@ -117,9 +117,9 @@ class TestAttendanceSnapshotRules:
         # Retroactive edit.
         attendance.status_am = "absent"
         attendance.remarks_am = "Sick leave"
-        attendance.updated_at = utc_dt.utcnow()
+        attendance.updated_at = utc_dt.db_utcnow()
         attendance.updated_by = admin_id
-        attendance.last_edit_at = utc_dt.utcnow()
+        attendance.last_edit_at = utc_dt.db_utcnow()
         attendance.last_edit_by = admin_id
         attendance.is_retroactive_edit = True
         await db_session.commit()

@@ -333,7 +333,7 @@ class TestColumnMapping:
             # Attempt transition
             mapping.status = to_status
             if to_status == "deprecated":
-                mapping.deprecated_at = utc_dt.utcnow()
+                mapping.deprecated_at = utc_dt.db_utcnow()
             await db_session.commit()
 
             # Verify transition succeeded

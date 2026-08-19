@@ -1,0 +1,92 @@
+# Daily encrypted PostgreSQL backup to Google Drive.
+#
+# Pipeline: pg_dump (custom format) -> age public-key encryption ->
+# rclone upload to the shared Drive folder -> 30-day retention sweep.
+#
+# Required secrets (setup guide in docs/DEPLOYMENT.md - "Backups"):
+#   RAILWAY_PUBLIC_DATABASE_URL  Railway Postgres public TCP proxy URL
+#                                (starts with postgresql://, includes
+#                                sslmode=require; internal URL won't work
+#                                from outside Railway)
+#   AGE_PUBLIC_KEY               age X25519 recipient (public key). The
+#                                matching private key (identity file) stays
+#                                with the super-admin - GitHub never sees it.
+#   GDRIVE_SERVICE_ACCOUNT_JSON  Google service-account JSON key for the
+#                                account the backup folder is shared with
+#
+# Required repository variable:
+#   GDRIVE_ROOT_FOLDER_ID        Drive folder ID the SA can write to
+#
+# Note: GitHub disables scheduled workflows after 60 days without repo
+# activity. Run a manual dispatch (or push any commit) during dormant
+# periods, and especially before the annual intensive-use window.
+name: Database backup
+
+on:
+  schedule:
+    # 19:23 UTC daily = 03:23 SGT (off-peak, off-round minute)
+    - cron: "23 19 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DB_URL: ${{ secrets.RAILWAY_PUBLIC_DATABASE_URL }}
+      ROOT_FOLDER: ${{ vars.GDRIVE_ROOT_FOLDER_ID }}
+    steps:
+      - name: Install postgresql client and age
+        run: |
+          # PGDG repo: the Railway server is PostgreSQL 18, and pg_dump must
+          # be same-major-or-newer; Ubuntu's default only carries 16
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-18
+          curl -sSfL https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-amd64.tar.gz \
+            | sudo tar xz -C /usr/local/bin --strip-components=1 age/age age/age-keygen
+
+      - name: Dump database
+        run: |
+          pg_dump "$DB_URL" --format=custom --no-owner --no-privileges --file=backup.dump
+          test -s backup.dump
+
+      - name: Encrypt dump
+        run: |
+          TIMESTAMP=$(date -u +%Y%m%dT%H%MZ)
+          echo "BACKUP_FILE=parade-state-${TIMESTAMP}.dump.age" >> "$GITHUB_ENV"
+          age -r "${{ secrets.AGE_PUBLIC_KEY }}" -o "parade-state-${TIMESTAMP}.dump.age" backup.dump
+
+      - name: Configure rclone
+        run: |
+          printf '%s' "${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}" > service-account.json
+          cat > rclone.conf <<'EOF'
+          [gdrive]
+          type = drive
+          scope = drive
+          service_account_file = service-account.json
+          EOF
+
+      - name: Upload to Google Drive
+        run: |
+          rclone --config rclone.conf copy "$BACKUP_FILE" gdrive: \
+            --drive-root-folder-id "$ROOT_FOLDER" --transfers 1
+
+      - name: Enforce retention (delete backups older than 30 days)
+        run: |
+          rclone --config rclone.conf delete gdrive: \
+            --drive-root-folder-id "$ROOT_FOLDER" --min-age 30d
+
+      - name: Cleanup workspace
+        if: always()
+        run: rm -f backup.dump service-account.json rclone.conf "$BACKUP_FILE"

@@ -166,6 +166,28 @@ open htmlcov/index.html  # On macOS
 xdg-open htmlcov/index.html  # On Linux
 ```
 
+### Running the Suite Against PostgreSQL
+
+Production runs on Postgres while the default test database is SQLite, and
+the dialects disagree in ways that only surface at runtime (foreign-key
+enforcement, naive-datetime binding, enum type creation). Validate the
+suite against Postgres by pointing `TEST_DATABASE_URL` at any reachable
+server — each test then gets its own freshly created database on that
+server (dropped afterwards), so isolation matches the SQLite path:
+
+```bash
+# One-off local Postgres (18 matches the production server)
+docker run -d --name ps-pg-test -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test \
+  -e POSTGRES_DB=test -p 127.0.0.1:55432:5432 postgres:18-alpine
+
+TEST_DATABASE_URL=postgresql://test:test@127.0.0.1:55432/test \
+  uv run pytest --no-cov -q
+```
+
+Unset, the suite runs on per-test SQLite files as usual. Run this before
+releases and after any migration change (see `docs/DEPLOYMENT.md` for the
+related migration downgrade/round-trip checks).
+
 ---
 
 ## Database Isolation Strategy

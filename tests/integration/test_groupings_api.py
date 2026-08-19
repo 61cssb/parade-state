@@ -1,6 +1,6 @@
 """Tests for grouping API endpoints."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,6 +21,28 @@ from tests.test_utils import (
     assert_pagination_works,
     assert_permission_denied,
 )
+
+
+@pytest.fixture(autouse=True)
+async def well_known_nominal_rolls(db_session, sample_users):
+    """Create the nominal rolls referenced by this file's fixed IDs.
+
+    Several tests build groupings against "nominal_roll-1"/"nominal_roll-2".
+    Postgres enforces the groupings -> nominal_rolls foreign key that
+    SQLite ignores, so those rows must exist for real.
+    """
+    admin_id = str(sample_users["admin"].id)
+    for index in range(5):
+        db_session.add(
+            NominalRoll(
+                id=f"nominal_roll-{index}",
+                caa=date(2024, 6, index + 1),
+                csv_hash=f"well-known-roll-{index}",
+                personnel_count=0,
+                uploaded_by=admin_id,
+            )
+        )
+    await db_session.commit()
 
 
 @pytest.mark.asyncio
@@ -75,6 +97,48 @@ async def test_create_grouping_as_regular_user_forbidden(
         params={"user_id": "regular-user-id", "user_role": "user"},
         json_data=grouping_data,
     )
+
+
+@pytest.mark.asyncio
+async def test_create_grouping_normalizes_aware_datetimes_to_naive_utc(
+    client: TestClient, admin_token_headers: dict[str, str], db_session,
+    sample_nominal_roll,
+):
+    """Datetimes with offsets are stored as naive UTC.
+
+    The columns are TIMESTAMP WITHOUT TIME ZONE; asyncpg (Postgres) rejects
+    aware values outright, and dropping an offset without converting would
+    corrupt non-UTC wall-clock times. A +08:00 payload must therefore land
+    as the equivalent naive UTC instant.
+    """
+    sgt = timezone(timedelta(hours=8))
+    aware_from = (utc_dt.utcnow() + timedelta(days=1)).astimezone(sgt)
+    aware_until = aware_from + timedelta(days=30)
+    grouping_data = {
+        "name": "TZ Grouping",
+        "nominal_roll_id": str(sample_nominal_roll.id),
+        "mode": "standard",
+        "valid_from": aware_from.isoformat(),
+        "valid_until": aware_until.isoformat(),
+    }
+
+    response = client.post(
+        "/api/v1/groupings/",
+        json=grouping_data,
+        headers=admin_token_headers,
+        params={"user_id": "admin-user-id", "user_role": "admin"},
+    )
+
+    assert response.status_code == 201, response.text
+
+    result = await db_session.execute(
+        select(Grouping).where(Grouping.name == "TZ Grouping")
+    )
+    grouping = result.scalar_one()
+    assert grouping.valid_from is not None
+    assert grouping.valid_from.tzinfo is None
+    assert grouping.valid_from == utc_dt.ensure_naive(utc_dt.to_utc(aware_from))
+    assert grouping.valid_until == utc_dt.ensure_naive(utc_dt.to_utc(aware_until))
 
 
 @pytest.mark.asyncio
@@ -169,8 +233,8 @@ async def test_list_groupings(
         name="Grouping 1",
         nominal_roll_id="nominal_roll-1",
         mode="standard",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
     grouping2 = Grouping(
@@ -178,10 +242,10 @@ async def test_list_groupings(
         nominal_roll_id="nominal_roll-2",
         mode="standard",
         status="active",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
-        activated_at=utc_dt.utcnow(),
+        activated_at=utc_dt.db_utcnow(),
     )
 
     db_session.add(grouping1)
@@ -212,17 +276,17 @@ async def test_list_groupings_with_status_filter(
         nominal_roll_id="nominal_roll-1",
         mode="standard",
         status="active",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
-        activated_at=utc_dt.utcnow(),
+        activated_at=utc_dt.db_utcnow(),
     )
     grouping2 = Grouping(
         name="Draft Grouping",
         nominal_roll_id="nominal_roll-2",
         mode="standard",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -256,8 +320,8 @@ async def test_get_grouping(
         name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
         mode="standard",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -299,8 +363,8 @@ async def test_update_grouping(
         name="Original Name",
         nominal_roll_id="nominal_roll-1",
         mode="standard",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -331,8 +395,8 @@ async def test_update_grouping_status_transition(
         name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
         mode="standard",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -364,8 +428,8 @@ async def test_update_grouping_invalid_status_transition(
         nominal_roll_id="nominal_roll-1",
         mode="standard",
         status="finalized",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -394,8 +458,8 @@ async def test_activate_grouping(
         name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
         mode="standard",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -424,10 +488,10 @@ async def test_activate_grouping_already_active(
         nominal_roll_id="nominal_roll-1",
         mode="standard",
         status="active",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
-        activated_at=utc_dt.utcnow(),
+        activated_at=utc_dt.db_utcnow(),
     )
 
     db_session.add(grouping)
@@ -453,10 +517,10 @@ async def test_deactivate_grouping(
         nominal_roll_id="nominal_roll-1",
         mode="standard",
         status="active",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
-        activated_at=utc_dt.utcnow(),
+        activated_at=utc_dt.db_utcnow(),
     )
 
     db_session.add(grouping)
@@ -483,8 +547,8 @@ async def test_delete_grouping_as_super_admin(
         name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
         mode="standard",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="super-admin-user-id",
     )
 
@@ -515,8 +579,8 @@ async def test_delete_grouping_as_admin_forbidden(
         name="Test Grouping",
         nominal_roll_id="nominal_roll-1",
         mode="standard",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -543,10 +607,10 @@ async def test_delete_active_grouping_forbidden(
         nominal_roll_id="nominal_roll-1",
         mode="standard",
         status="active",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="super-admin-user-id",
-        activated_at=utc_dt.utcnow(),
+        activated_at=utc_dt.db_utcnow(),
     )
 
     db_session.add(grouping)
@@ -571,16 +635,16 @@ async def test_search_groupings(
         name="Alpha Grouping",
         nominal_roll_id="nominal_roll-1",
         mode="standard",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
     grouping2 = Grouping(
         name="Bravo Grouping",
         nominal_roll_id="nominal_roll-2",
         mode="standard",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -615,8 +679,8 @@ async def test_list_groupings_pagination(
             name=f"Grouping {i}",
             nominal_roll_id=f"nominal_roll-{i}",
             mode="standard",
-            valid_from=utc_dt.utcnow(),
-            valid_until=utc_dt.utcnow() + timedelta(days=30),
+            valid_from=utc_dt.db_utcnow(),
+            valid_until=utc_dt.db_utcnow() + timedelta(days=30),
             created_by="admin-user-id",
         )
         db_session.add(grouping)
@@ -649,8 +713,8 @@ async def test_get_grouping_status_no_sessions(
         nominal_roll_id="nominal_roll-1",
         mode="standard",
         status="active",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -686,8 +750,8 @@ async def test_get_grouping_status_with_sessions(
         nominal_roll_id="nominal_roll-1",
         mode="standard",
         status="active",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -779,8 +843,8 @@ async def test_export_grouping_csv(
         nominal_roll_id="nominal_roll-1",
         mode="standard",
         status="active",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 
@@ -858,8 +922,8 @@ async def test_export_grouping_csv_unauthorized(
         nominal_roll_id="nominal_roll-1",
         mode="standard",
         status="active",
-        valid_from=utc_dt.utcnow(),
-        valid_until=utc_dt.utcnow() + timedelta(days=30),
+        valid_from=utc_dt.db_utcnow(),
+        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
         created_by="admin-user-id",
     )
 

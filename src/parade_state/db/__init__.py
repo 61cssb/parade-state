@@ -75,14 +75,24 @@ def normalize_database_url(database_url: str) -> str:
     return urlunsplit(parts._replace(scheme=scheme, query=urlencode(query)))
 
 
-def init_database(database_url: str) -> None:
-    """Initialize the database engine and session factory."""
+def init_database(database_url: str, poolclass: type | None = None) -> None:
+    """Initialize the database engine and session factory.
+
+    Args:
+        database_url: Raw database URL from the environment.
+        poolclass: Optional SQLAlchemy pool class. Asyncpg connections are
+            bound to the event loop that created them, so contexts that run
+            the engine across multiple loops (e.g. pytest fixtures plus
+            FastAPI's TestClient portal) must pass ``NullPool`` to prevent
+            cross-loop connection reuse.
+    """
     global _engine, _async_session_maker
 
     _engine = create_async_engine(
         normalize_database_url(database_url),
         echo=False,  # Set to True for SQL logging in development
         pool_pre_ping=True,
+        poolclass=poolclass,
     )
 
     _async_session_maker = async_sessionmaker(
