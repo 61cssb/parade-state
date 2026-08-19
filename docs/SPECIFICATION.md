@@ -429,6 +429,30 @@ The NR personnel row is immutable for unit/subunit fields:
 - The public NR browser (`/nominal-roll`) shows effective values with a
   yellow row background (`.changed-row`) for tagged personnel.
 
+#### 3.4.5 Staged Cell Edits (super-admin NR browser)
+
+Cell edits in the NR browser are **not** saved instantly — they are staged
+client-side and applied in a batch, so a misclick costs nothing:
+
+- Editing a cell stages the value locally (no API call): the cell shows the
+  staged text on a darker-yellow background (`.cell-edit.pending`,
+  `#fcd34d`) — visually distinct from the amber-100 saved-changes row.
+- A floating bar (fixed bottom-center, `.pending-bar`) shows
+  `N unapplied changes · M personnel` with **Apply** and **Discard**
+  (Discard confirms first). Editing a cell back to its server value
+  unstages it.
+- **Apply** sends one `PATCH /api/v1/personnel/{id}` per person carrying all
+  their staged fields (merged server-side into a single TaggingEntry per
+  person). Each person-level success is removed from the draft before the
+  next request, so failures stay staged and are reported in an alert.
+- **Persistence:** the draft lives in `localStorage` under
+  `ps:nr-edits:{nominal_roll_id}` (per roll, per browser) and survives page
+  refreshes and roll switching. On load, staged fields that now match the
+  server's effective value (applied elsewhere) are silently dropped;
+  personnel filtered out of the current view keep their staged edits.
+  Known limitation: concurrent tabs are last-writer-wins.
+- Non-super-admins get no editor and no staging machinery at all.
+
 ### 3.5 Attendance Tracking
 
 #### 3.5.1 Attendance (NR/Tagging-scoped, AM/PM)

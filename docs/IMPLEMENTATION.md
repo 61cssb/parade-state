@@ -279,14 +279,19 @@ async def test_example(client, sample_users, sample_grouping):
   from `/admin/groupings/{id}/personnel` to `/grouping/{id}/personnel`. The
   orphaned `/admin/sessions` redirect route was removed.
 
-**Remap Editing (✅ comboboxes)**
+**Remap Editing (✅ comboboxes, ✅ staged edits)**
 - Public NR browser: super-admins click a unit / sub-unit cell to remap it —
   the cell becomes an input with a custom suggestion panel anchored under
   the cell (the native datalist popup was replaced because its placement is
-  browser-controlled); pick an existing value or type a new one, Enter saves
-  via `PATCH /api/v1/personnel/{id}` (recorded on the tagging overlay; row
-  turns yellow on reload). Sub-unit 2/3 panels offer a "leave blank" pick
-  that clears the value. Regular users see the read-only table.
+  browser-controlled); pick an existing value or type a new one, Enter
+  **stages** the edit (darker-yellow pending cell; no API call). Sub-unit
+  2/3 panels offer a "leave blank" pick that clears the value. Regular
+  users see the read-only table.
+- Staged edits are held per roll in `localStorage` (`ps:nr-edits:{roll_id}`,
+  refresh-safe) until the floating bottom bar's **Apply** sends one
+  `PATCH /api/v1/personnel/{id}` per person (recorded on the tagging
+  overlay; row turns amber-100 on reload) or **Discard** reverts. See
+  SPECIFICATION §3.4.5.
 - Taggings edit modal: the cascading to-unit/to-sub selects are replaced by
   datalist inputs — remap targets may be values that don't exist on
   the NR yet (e.g. standing up a new subunit).

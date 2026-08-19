@@ -131,6 +131,8 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-20:** NR browser cell edits staged client-side with an
+  Apply/Discard bar (Issue 17) — misclick-safe, refresh-persistent
 - **2026-08-20:** Sidebar restructured into ICT/Admin sections; NR and
   grouping admin pages merged into their views (Issue 07)
 - **2026-08-19:** In-app DB restore shipped (PR #38); post-restore
