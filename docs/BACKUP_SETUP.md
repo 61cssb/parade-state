@@ -158,6 +158,7 @@ The full tested restore procedure lives in
 | Connection works locally, fails in Actions | `sslmode` missing/typo'd in the URL | Append `?sslmode=require` |
 | Job env shows `ROOT_FOLDER:` empty; upload misbehaves | Folder ID filed as a **secret**, not variable | Delete secret; re-add under the Variables tab |
 | Upload: `403` / `directory not found` | Drive API not enabled on the SA's project, folder shared with a typo'd `client_email`, or wrong folder ID | Verify Step 4 item 2 and Step 5 |
+| Upload: `invalid character 't' looking for beginning of object key string` | The service-account file corrupted in transit — historically by interpolating the secret directly into a shell script (its double quotes broke quoting); the workflow now passes secrets via `env:` and validates the JSON before use | If it recurs, the pasted secret itself is bad — re-validate the downloaded JSON per Step 4 |
 | `FATAL: the database system is starting up` | Postgres cold-starting (serverless) or restarting | The workflow now polls up to 2 min; if it persists, the DB is crash-looping — check Railway |
 | `pg_dump: server version mismatch` | Server major newer than the client (server is PostgreSQL 18; the runner's preinstalled client 16 shadows the installed 18 unless `/usr/lib/postgresql/18/bin` is first on `PATH`) | Workflow already handles this; if Railway upgrades the server major again, bump `postgresql-client-NN` **and** the PATH line in the workflow |
 | `rclone: command not found` | Runner image no longer preinstalls rclone | Workflow already installs it |
