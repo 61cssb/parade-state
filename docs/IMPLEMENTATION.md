@@ -191,8 +191,14 @@ async def test_example(client, sample_users, sample_grouping):
 - Grouping notes with version tracking
 - Validity window enforcement
 - Manual activation/deactivation
-- **Grouping date editing:** Admin UI supports editing valid_from/valid_until via an inline form; API validates that no sessions fall outside the new date range
-- **Admin groupings page:** Auto-expands active grouping on page load; per-session "Update" button linking to /attendance; autofills next session date/type
+- **Grouping date editing:** UI supports editing valid_from/valid_until via an inline form; API validates that no sessions fall outside the new date range
+- **Grouping management lives on `/grouping`** in the collapsed-by-default
+  "Grouping management" expander below the selector (merged from the retired
+  admin groupings page): read-only mode/validity/notes metadata, Edit Dates,
+  per-status lifecycle buttons, Manage Personnel link (draft-only), and
+  super-admin Delete — same gating and confirm dialogs as before. The page's
+  status filter is absorbed by the selector, which lists every grouping with
+  its status.
 - **Endpoints:** 7 grouping management endpoints
 
 **Attendance Session Management (🗑 Removed in issue #4)**
@@ -248,11 +254,30 @@ async def test_example(client, sample_users, sample_grouping):
 - **Copy Remarks** lives on `/attendance`, visible to **super-admins only**
   (before noon → previous day's PM remarks into today's AM; after noon →
   today's AM into PM; the AM copy is disabled on the NR's first day).
-- Admin Nominal Rolls page: the active-for-attendance row is highlighted
-  (green) with an "Active for attendance" badge; super-admins see
-  "Use for Attendance" (auto-switch) / "Deactivate Attendance" buttons. The
-  status column, filter, and Confirm/Unconfirm buttons are removed;
-  "Create Grouping" is available on every row.
+- Nominal Roll management lives on `/nominal-roll` in the collapsed-by-default
+  "Roll management" expander below the roll selector (merged from the retired
+  admin Nominal Rolls page): inline label/remarks editing and Create Grouping
+  for all admins; "Use for Attendance" (auto-switch) / "Deactivate Attendance"
+  / Delete for super-admins, with the same confirm dialogs as before. The
+  admin page's metadata columns (source file, uploaded at, CSV hash) were
+  dropped — upload provenance stays on the Upload NR page's Recent Uploads.
+
+**Sidebar Restructure (✅ ICT / Admin sections)**
+- The sidebar groups pages into two sections: **ICT** (Nominal Roll,
+  Upload NR, Attendance, Grouping, Taggings, Deferments) and **Admin**
+  (Dashboard, Users, Settings, Audit Log, DB Restore). "CSV Upload" was
+  relabelled "Upload NR" (route unchanged). Both sections are visible to
+  every signed-in admin; role-based section visibility is deferred until
+  distinct roles exist.
+- Super-admin-only pages (Taggings, Deferments, DB Restore) are listed for
+  plain admins too, but render an in-page no-access message (403, page shell
+  intact) instead of silently redirecting to /admin.
+- The admin Nominal Rolls and Groupings pages were retired — their
+  management controls moved into expandable panels on `/nominal-roll` and
+  `/grouping` (see the Grouping Management and Attendance UI notes above).
+  Manage Personnel moved
+  from `/admin/groupings/{id}/personnel` to `/grouping/{id}/personnel`. The
+  orphaned `/admin/sessions` redirect route was removed.
 
 **Remap Editing (✅ comboboxes)**
 - Public NR browser: super-admins click a unit / sub-unit cell to remap it —

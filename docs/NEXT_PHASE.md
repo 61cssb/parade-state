@@ -1,6 +1,6 @@
 # Roadmap & Open Work
 
-**Last Updated:** 2026-08-19
+**Last Updated:** 2026-08-20
 **Status:** In production on Railway (admin-only access). Test users
 (admins) coming on the weekend of 2026-08-22; annual intensive-use
 window ~2026-09-10.
@@ -15,7 +15,7 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ## Current Snapshot
 
-- **Tests:** 428 SQLite passing. The suite runs against
+- **Tests:** 438 SQLite passing. The suite runs against
   Postgres by setting `TEST_DATABASE_URL` (per-test databases).
 - **Access model:** `super_admin` + `admin` only. Unknown Google
   sign-ins auto-register as `unrecognised` (no access, no session);
@@ -43,11 +43,17 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   status + remarks; writes gated to the active NR
 - Attendance access control by effective sub-unit 1
   (`UserSubunitAssignment`; deny-by-default; super_admin bypasses)
-- Groupings: lifecycle, personnel exclusions/overrides, date editing
+- Groupings: lifecycle, personnel exclusions/overrides, date editing —
+  managed from the `/grouping` view's expander (admin groupings page
+  retired)
 - Deferments (super-admin CRUD; `Personnel.callup_status`)
-- Admin UI: dashboard, users, audit log, groupings, nominal rolls,
-  taggings, deferments, CSV upload, DB restore, Settings purge
-  (testing-only)
+- Sidebar in two sections — **ICT** (Nominal Roll, Upload NR,
+  Attendance, Grouping, Taggings, Deferments) and **Admin** (Dashboard,
+  Users, Settings, Audit Log, DB Restore); SA-only pages show an
+  in-page no-access message for plain admins
+- Admin UI: dashboard, users, audit log, taggings, deferments,
+  Upload NR (CSV upload), DB restore, Settings purge (testing-only);
+  NR and grouping management live in expanders on their views
 - User-facing views — `/grouping`, `/attendance`, `/nominal-roll` —
   built, but admin-gated pending the viewer role (below)
 
@@ -125,6 +131,8 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-20:** Sidebar restructured into ICT/Admin sections; NR and
+  grouping admin pages merged into their views (Issue 07)
 - **2026-08-19:** In-app DB restore shipped (PR #38); post-restore
   migration fixed to run in-process after the first production test
   (PR #40); restore button states fixed (PR #39)
