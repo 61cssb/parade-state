@@ -41,36 +41,38 @@
     </p>
     {% elif entries %}
     <div style="overflow-x: auto;">
-    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
-                <th style="padding: 0.5rem;">Personnel</th>
-                <th style="padding: 0.5rem;">From unit</th>
-                <th style="padding: 0.5rem;">From sub 1</th>
-                <th style="padding: 0.5rem;">From sub 2</th>
-                <th style="padding: 0.5rem;">From sub 3</th>
-                <th style="padding: 0.5rem;">To unit</th>
-                <th style="padding: 0.5rem;">To sub 1</th>
-                <th style="padding: 0.5rem;">To sub 2</th>
-                <th style="padding: 0.5rem;">To sub 3</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for e in entries %}
-            <tr class="changed-row" style="border-bottom: 1px solid #f3e8c7;">
-                <td style="padding: 0.5rem;"><strong>{{ e.label }}</strong>{% if e.pers_no %} <span style="font-family: monospace; font-size: 0.75rem; color: #6b7280;">{{ e.pers_no }}</span>{% endif %}</td>
-                <td style="padding: 0.5rem;">{{ e.from_unit or '—' }}</td>
-                <td style="padding: 0.5rem;">{{ e.from_sub_unit_1 or '—' }}</td>
-                <td style="padding: 0.5rem;">{{ e.from_sub_unit_2 or '—' }}</td>
-                <td style="padding: 0.5rem;">{{ e.from_sub_unit_3 or '—' }}</td>
-                <td style="padding: 0.5rem;"><strong>{{ e.to_unit }}</strong></td>
-                <td style="padding: 0.5rem;">{{ e.to_sub_unit_1 or '—' }}</td>
-                <td style="padding: 0.5rem;">{{ e.to_sub_unit_2 or '—' }}</td>
-                <td style="padding: 0.5rem;">{{ e.to_sub_unit_3 or '—' }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.5rem;">Personnel</th>
+                    <th style="padding: 0.5rem;">From unit</th>
+                    <th style="padding: 0.5rem;">From sub 1</th>
+                    <th style="padding: 0.5rem;">From sub 2</th>
+                    <th style="padding: 0.5rem;">From sub 3</th>
+                    <th style="padding: 0.5rem;">To unit</th>
+                    <th style="padding: 0.5rem;">To sub 1</th>
+                    <th style="padding: 0.5rem;">To sub 2</th>
+                    <th style="padding: 0.5rem;">To sub 3</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in entries %}
+                <tr class="changed-row" style="border-bottom: 1px solid #f3e8c7;">
+                    <td style="padding: 0.5rem;"><strong>{{ e.label }}</strong>{% if e.pers_no %} <span style="font-family: monospace; font-size: 0.75rem; color: #6b7280;">{{ e.pers_no }}</span>{% endif %}</td>
+                    <td style="padding: 0.5rem;">{{ e.from_unit or '—' }}</td>
+                    <td style="padding: 0.5rem;">{{ e.from_sub_unit_1 or '—' }}</td>
+                    <td style="padding: 0.5rem;">{{ e.from_sub_unit_2 or '—' }}</td>
+                    <td style="padding: 0.5rem;">{{ e.from_sub_unit_3 or '—' }}</td>
+                    <td style="padding: 0.5rem;"><strong>{{ e.to_unit }}</strong></td>
+                    <td style="padding: 0.5rem;">{{ e.to_sub_unit_1 or '—' }}</td>
+                    <td style="padding: 0.5rem;">{{ e.to_sub_unit_2 or '—' }}</td>
+                    <td style="padding: 0.5rem;">{{ e.to_sub_unit_3 or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
     </div>
     <p style="color: #6b7280; font-size: 0.8rem; margin-top: 0.75rem;">
         {{ entries|length }} entr{{ entries|length == 1 and 'y' or 'ies' }}.
@@ -128,19 +130,21 @@
             </div>
         </div>
 
-        <table id="remap-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
-            <thead>
-                <tr style="text-align: left; border-bottom: 1px solid #e5e7eb;">
-                    <th style="padding: 0.35rem;">Personnel</th>
-                    <th style="padding: 0.35rem;">To unit *</th>
-                    <th style="padding: 0.35rem;">To sub 1</th>
-                    <th style="padding: 0.35rem;">To sub 2</th>
-                    <th style="padding: 0.35rem;">To sub 3</th>
-                    <th style="padding: 0.35rem;"></th>
-                </tr>
-            </thead>
-            <tbody id="remap-body"></tbody>
-        </table>
+        <div class="table-wrap">
+            <table id="remap-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                <thead>
+                    <tr style="text-align: left; border-bottom: 1px solid #e5e7eb;">
+                        <th style="padding: 0.35rem;">Personnel</th>
+                        <th style="padding: 0.35rem;">To unit *</th>
+                        <th style="padding: 0.35rem;">To sub 1</th>
+                        <th style="padding: 0.35rem;">To sub 2</th>
+                        <th style="padding: 0.35rem;">To sub 3</th>
+                        <th style="padding: 0.35rem;"></th>
+                    </tr>
+                </thead>
+                <tbody id="remap-body"></tbody>
+            </table>
+        </div>
 
         <div id="edit-status-msg" style="margin-top: 1rem;"></div>
         <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem;">

@@ -48,52 +48,54 @@
     </form>
 
     {% if users %}
-    <table style="width: 100%; border-collapse: collapse;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
-                <th style="padding: 0.5rem;">Name</th>
-                <th style="padding: 0.5rem;">Email</th>
-                <th style="padding: 0.5rem;">Role</th>
-                <th style="padding: 0.5rem;">Status</th>
-                <th style="padding: 0.5rem;">Access Level</th>
-                <th style="padding: 0.5rem;">Last Sign In</th>
-                <th style="padding: 0.5rem;">Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for u in users %}
-            <tr style="border-bottom: 1px solid #e5e7eb;" data-user-id="{{ u.id }}">
-                <td style="padding: 0.5rem;">{{ u.name }}</td>
-                <td style="padding: 0.5rem;">{{ u.email }}</td>
-                <td style="padding: 0.5rem;">
-                    <select onchange="updateUser('{{ u.id }}', 'role', this.value)"
-                            style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
-                        <option value="user" {% if u.role == 'user' %}selected{% endif %}>User</option>
-                        <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>Admin</option>
-                        <option value="super_admin" {% if u.role == 'super_admin' %}selected{% endif %}>Super Admin</option>
-                    </select>
-                </td>
-                <td style="padding: 0.5rem;">
-                    <select onchange="updateUser('{{ u.id }}', 'status', this.value)"
-                            style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
-                        <option value="active" {% if u.status == 'active' %}selected{% endif %}>Active</option>
-                        <option value="pending" {% if u.status == 'pending' %}selected{% endif %}>Pending</option>
-                        <option value="suspended" {% if u.status == 'suspended' %}selected{% endif %}>Suspended</option>
-                        <option value="unrecognised" {% if u.status == 'unrecognised' %}selected{% endif %}>Unrecognised</option>
-                    </select>
-                </td>
-                <td style="padding: 0.5rem;">{{ u.access_level or '--' }}</td>
-                <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">
-                    {% if u.last_sign_in_at %}{{ u.last_sign_in_at.strftime('%Y-%m-%d %H:%M') }}{% else %}Never{% endif %}
-                </td>
-                <td style="padding: 0.5rem;">
-                    <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                            onclick="deleteUser('{{ u.id }}', '{{ u.email }}')">Delete</button>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.5rem;">Name</th>
+                    <th style="padding: 0.5rem;">Email</th>
+                    <th style="padding: 0.5rem;">Role</th>
+                    <th style="padding: 0.5rem;">Status</th>
+                    <th style="padding: 0.5rem;">Access Level</th>
+                    <th style="padding: 0.5rem;">Last Sign In</th>
+                    <th style="padding: 0.5rem;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr style="border-bottom: 1px solid #e5e7eb;" data-user-id="{{ u.id }}">
+                    <td style="padding: 0.5rem;">{{ u.name }}</td>
+                    <td style="padding: 0.5rem;">{{ u.email }}</td>
+                    <td style="padding: 0.5rem;">
+                        <select onchange="updateUser('{{ u.id }}', 'role', this.value)"
+                                style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                            <option value="user" {% if u.role == 'user' %}selected{% endif %}>User</option>
+                            <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>Admin</option>
+                            <option value="super_admin" {% if u.role == 'super_admin' %}selected{% endif %}>Super Admin</option>
+                        </select>
+                    </td>
+                    <td style="padding: 0.5rem;">
+                        <select onchange="updateUser('{{ u.id }}', 'status', this.value)"
+                                style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                            <option value="active" {% if u.status == 'active' %}selected{% endif %}>Active</option>
+                            <option value="pending" {% if u.status == 'pending' %}selected{% endif %}>Pending</option>
+                            <option value="suspended" {% if u.status == 'suspended' %}selected{% endif %}>Suspended</option>
+                            <option value="unrecognised" {% if u.status == 'unrecognised' %}selected{% endif %}>Unrecognised</option>
+                        </select>
+                    </td>
+                    <td style="padding: 0.5rem;">{{ u.access_level or '--' }}</td>
+                    <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">
+                        {% if u.last_sign_in_at %}{{ u.last_sign_in_at.strftime('%Y-%m-%d %H:%M') }}{% else %}Never{% endif %}
+                    </td>
+                    <td style="padding: 0.5rem;">
+                        <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                                onclick="deleteUser('{{ u.id }}', '{{ u.email }}')">Delete</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
     {% else %}
     <p style="color: #6b7280; margin-top: 1rem;">No users found.</p>
     {% endif %}

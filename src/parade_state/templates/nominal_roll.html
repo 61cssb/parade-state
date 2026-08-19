@@ -147,39 +147,39 @@
     {% endif %}
 
     {% if personnel %}
-    <div style="overflow-x: auto;">
-    <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
-                <th style="padding: 0.5rem;">#</th>
-                <th style="padding: 0.5rem;">Unit</th>
-                <th style="padding: 0.5rem;">Sub Unit 1</th>
-                <th style="padding: 0.5rem;">Sub Unit 2</th>
-                <th style="padding: 0.5rem;">Sub Unit 3</th>
-                <th style="padding: 0.5rem;">Category</th>
-                <th style="padding: 0.5rem;">Rank</th>
-                <th style="padding: 0.5rem;">Full Name</th>
-                <th style="padding: 0.5rem;">Pers No</th>
-                <th style="padding: 0.5rem;">Remarks</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for p in personnel %}
-            <tr class="{% if p.is_changed %}changed-row{% endif %}" style="border-bottom: 1px solid #e5e7eb;">
-                <td style="padding: 0.5rem; color: #9ca3af; font-variant-numeric: tabular-nums;">{{ loop.index }}</td>
-                <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'unit', p.unit) if user.role == 'super_admin' else (p.unit or '—') }}</td>
-                <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_1', p.sub_unit_1) if user.role == 'super_admin' else (p.sub_unit_1 or '—') }}</td>
-                <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_2', p.sub_unit_2) if user.role == 'super_admin' else (p.sub_unit_2 or '—') }}</td>
-                <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_3', p.sub_unit_3) if user.role == 'super_admin' else (p.sub_unit_3 or '—') }}</td>
-                <td style="padding: 0.5rem; white-space: nowrap;">{{ p.category }}</td>
-                <td style="padding: 0.5rem; white-space: nowrap;">{{ p.rank }}</td>
-                <td style="padding: 0.5rem;">{{ p.full_name }}</td>
-                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.85rem;">{{ p.pers_no or '—' }}</td>
-                <td style="padding: 0.5rem; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ p.remarks or '' }}">{{ p.remarks or '—' }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.5rem;">#</th>
+                    <th style="padding: 0.5rem;">Unit</th>
+                    <th style="padding: 0.5rem;">Sub Unit 1</th>
+                    <th style="padding: 0.5rem;">Sub Unit 2</th>
+                    <th style="padding: 0.5rem;">Sub Unit 3</th>
+                    <th style="padding: 0.5rem;">Category</th>
+                    <th style="padding: 0.5rem;">Rank</th>
+                    <th style="padding: 0.5rem;">Full Name</th>
+                    <th style="padding: 0.5rem;">Pers No</th>
+                    <th style="padding: 0.5rem;">Remarks</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in personnel %}
+                <tr class="{% if p.is_changed %}changed-row{% endif %}" style="border-bottom: 1px solid #e5e7eb;">
+                    <td style="padding: 0.5rem; color: #9ca3af; font-variant-numeric: tabular-nums;">{{ loop.index }}</td>
+                    <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'unit', p.unit) if user.role == 'super_admin' else (p.unit or '—') }}</td>
+                    <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_1', p.sub_unit_1) if user.role == 'super_admin' else (p.sub_unit_1 or '—') }}</td>
+                    <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_2', p.sub_unit_2) if user.role == 'super_admin' else (p.sub_unit_2 or '—') }}</td>
+                    <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_3', p.sub_unit_3) if user.role == 'super_admin' else (p.sub_unit_3 or '—') }}</td>
+                    <td style="padding: 0.5rem; white-space: nowrap;">{{ p.category }}</td>
+                    <td style="padding: 0.5rem; white-space: nowrap;">{{ p.rank }}</td>
+                    <td style="padding: 0.5rem;">{{ p.full_name }}</td>
+                    <td style="padding: 0.5rem; font-family: monospace; font-size: 0.85rem;">{{ p.pers_no or '—' }}</td>
+                    <td style="padding: 0.5rem; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ p.remarks or '' }}">{{ p.remarks or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
     {% if total_count > personnel|length %}
     <p style="color: #6b7280; margin-top: 1rem; font-size: 0.85rem;">

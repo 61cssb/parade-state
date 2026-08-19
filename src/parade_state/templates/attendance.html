@@ -90,84 +90,86 @@
         super-admin to grant attendance access.
     </p>
     {% elif attendance_rows %}
-    <table id="attendance-table" style="width: 100%; border-collapse: collapse;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
-                <th style="padding: 0.5rem;">Unit</th>
-                <th style="padding: 0.5rem;">Sub-unit 1</th>
-                <th style="padding: 0.5rem;">Sub-unit 2</th>
-                <th style="padding: 0.5rem;">Sub-unit 3</th>
-                <th style="padding: 0.5rem;">Category</th>
-                <th style="padding: 0.5rem;">Rank</th>
-                <th style="padding: 0.5rem;">Name</th>
-                <th style="padding: 0.5rem;">AM Status</th>
-                <th style="padding: 0.5rem;">AM Remarks</th>
-                <th style="padding: 0.5rem;">PM Status</th>
-                <th style="padding: 0.5rem;">PM Remarks</th>
-            </tr>
-        </thead>
-        <tbody id="attendance-body">
-            {% for r in attendance_rows %}
-            <tr class="{% if r.is_changed %}changed-row{% endif %}" style="border-bottom: 1px solid #e5e7eb;" data-personnel-id="{{ r.personnel_id }}"
-                data-unit="{{ r.unit }}" data-sub1="{{ r.sub_unit_1 or '' }}"
-                data-category="{{ r.category }}" data-rank="{{ r.rank }}" data-name="{{ r.full_name }}">
-                <td style="padding: 0.5rem;">{{ r.unit }}</td>
-                <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_1 or '' }}</td>
-                <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_2 or '' }}</td>
-                <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_3 or '' }}</td>
-                <td style="padding: 0.5rem; white-space: nowrap;">{{ r.category }}</td>
-                <td style="padding: 0.5rem; white-space: nowrap;">{{ r.rank }}</td>
-                <td style="padding: 0.5rem;">{{ r.full_name }}</td>
-                <td style="padding: 0.5rem;">
-                    <select class="status-select" data-slot="am" data-pid="{{ r.personnel_id }}"
-                            {% if not attendance_active %}disabled{% endif %}
-                            onchange="markDirty(this)"
-                            style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-weight: 600;">
-                        <option value="present" {% if r.status_am == 'present' %}selected{% endif %}>Present</option>
-                        <option value="absent" {% if r.status_am == 'absent' %}selected{% endif %}>Absent</option>
-                        <option value="time_off" {% if r.status_am == 'time_off' %}selected{% endif %}>Time Off</option>
-                        <option value="mc" {% if r.status_am == 'mc' %}selected{% endif %}>MC</option>
-                        <option value="yet_to_inpro" {% if r.status_am == 'yet_to_inpro' %}selected{% endif %}>Yet to Inpro</option>
-                        <option value="outpro" {% if r.status_am == 'outpro' %}selected{% endif %}>Outpro</option>
-                        <option value="reporting_sick" {% if r.status_am == 'reporting_sick' %}selected{% endif %}>Reporting Sick</option>
-                        <option value="late" {% if r.status_am == 'late' %}selected{% endif %}>Late</option>
-                        <option value="att_out" {% if r.status_am == 'att_out' %}selected{% endif %}>Att Out</option>
-                    </select>
-                </td>
-                <td style="padding: 0.5rem;">
-                    <input type="text" data-slot="am" data-field="remarks" data-pid="{{ r.personnel_id }}"
-                           value="{{ r.remarks_am }}"
-                           {% if not attendance_active %}disabled{% endif %}
-                           onchange="markDirty(this)"
-                           style="width: 100%; min-width: 160px; padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
-                </td>
-                <td style="padding: 0.5rem;">
-                    <select class="status-select" data-slot="pm" data-pid="{{ r.personnel_id }}"
-                            {% if not attendance_active %}disabled{% endif %}
-                            onchange="markDirty(this)"
-                            style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-weight: 600;">
-                        <option value="present" {% if r.status_pm == 'present' %}selected{% endif %}>Present</option>
-                        <option value="absent" {% if r.status_pm == 'absent' %}selected{% endif %}>Absent</option>
-                        <option value="time_off" {% if r.status_pm == 'time_off' %}selected{% endif %}>Time Off</option>
-                        <option value="mc" {% if r.status_pm == 'mc' %}selected{% endif %}>MC</option>
-                        <option value="yet_to_inpro" {% if r.status_pm == 'yet_to_inpro' %}selected{% endif %}>Yet to Inpro</option>
-                        <option value="outpro" {% if r.status_pm == 'outpro' %}selected{% endif %}>Outpro</option>
-                        <option value="reporting_sick" {% if r.status_pm == 'reporting_sick' %}selected{% endif %}>Reporting Sick</option>
-                        <option value="late" {% if r.status_pm == 'late' %}selected{% endif %}>Late</option>
-                        <option value="att_out" {% if r.status_pm == 'att_out' %}selected{% endif %}>Att Out</option>
-                    </select>
-                </td>
-                <td style="padding: 0.5rem;">
-                    <input type="text" data-slot="pm" data-field="remarks" data-pid="{{ r.personnel_id }}"
-                           value="{{ r.remarks_pm }}"
-                           {% if not attendance_active %}disabled{% endif %}
-                           onchange="markDirty(this)"
-                           style="width: 100%; min-width: 160px; padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="table-wrap">
+        <table id="attendance-table" style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.5rem;">Unit</th>
+                    <th style="padding: 0.5rem;">Sub-unit 1</th>
+                    <th style="padding: 0.5rem;">Sub-unit 2</th>
+                    <th style="padding: 0.5rem;">Sub-unit 3</th>
+                    <th style="padding: 0.5rem;">Category</th>
+                    <th style="padding: 0.5rem;">Rank</th>
+                    <th style="padding: 0.5rem;">Name</th>
+                    <th style="padding: 0.5rem;">AM Status</th>
+                    <th style="padding: 0.5rem;">AM Remarks</th>
+                    <th style="padding: 0.5rem;">PM Status</th>
+                    <th style="padding: 0.5rem;">PM Remarks</th>
+                </tr>
+            </thead>
+            <tbody id="attendance-body">
+                {% for r in attendance_rows %}
+                <tr class="{% if r.is_changed %}changed-row{% endif %}" style="border-bottom: 1px solid #e5e7eb;" data-personnel-id="{{ r.personnel_id }}"
+                    data-unit="{{ r.unit }}" data-sub1="{{ r.sub_unit_1 or '' }}"
+                    data-category="{{ r.category }}" data-rank="{{ r.rank }}" data-name="{{ r.full_name }}">
+                    <td style="padding: 0.5rem;">{{ r.unit }}</td>
+                    <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_1 or '' }}</td>
+                    <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_2 or '' }}</td>
+                    <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_3 or '' }}</td>
+                    <td style="padding: 0.5rem; white-space: nowrap;">{{ r.category }}</td>
+                    <td style="padding: 0.5rem; white-space: nowrap;">{{ r.rank }}</td>
+                    <td style="padding: 0.5rem;">{{ r.full_name }}</td>
+                    <td style="padding: 0.5rem;">
+                        <select class="status-select" data-slot="am" data-pid="{{ r.personnel_id }}"
+                                {% if not attendance_active %}disabled{% endif %}
+                                onchange="markDirty(this)"
+                                style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-weight: 600;">
+                            <option value="present" {% if r.status_am == 'present' %}selected{% endif %}>Present</option>
+                            <option value="absent" {% if r.status_am == 'absent' %}selected{% endif %}>Absent</option>
+                            <option value="time_off" {% if r.status_am == 'time_off' %}selected{% endif %}>Time Off</option>
+                            <option value="mc" {% if r.status_am == 'mc' %}selected{% endif %}>MC</option>
+                            <option value="yet_to_inpro" {% if r.status_am == 'yet_to_inpro' %}selected{% endif %}>Yet to Inpro</option>
+                            <option value="outpro" {% if r.status_am == 'outpro' %}selected{% endif %}>Outpro</option>
+                            <option value="reporting_sick" {% if r.status_am == 'reporting_sick' %}selected{% endif %}>Reporting Sick</option>
+                            <option value="late" {% if r.status_am == 'late' %}selected{% endif %}>Late</option>
+                            <option value="att_out" {% if r.status_am == 'att_out' %}selected{% endif %}>Att Out</option>
+                        </select>
+                    </td>
+                    <td style="padding: 0.5rem;">
+                        <input type="text" data-slot="am" data-field="remarks" data-pid="{{ r.personnel_id }}"
+                               value="{{ r.remarks_am }}"
+                               {% if not attendance_active %}disabled{% endif %}
+                               onchange="markDirty(this)"
+                               style="width: 100%; min-width: 160px; padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                    </td>
+                    <td style="padding: 0.5rem;">
+                        <select class="status-select" data-slot="pm" data-pid="{{ r.personnel_id }}"
+                                {% if not attendance_active %}disabled{% endif %}
+                                onchange="markDirty(this)"
+                                style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-weight: 600;">
+                            <option value="present" {% if r.status_pm == 'present' %}selected{% endif %}>Present</option>
+                            <option value="absent" {% if r.status_pm == 'absent' %}selected{% endif %}>Absent</option>
+                            <option value="time_off" {% if r.status_pm == 'time_off' %}selected{% endif %}>Time Off</option>
+                            <option value="mc" {% if r.status_pm == 'mc' %}selected{% endif %}>MC</option>
+                            <option value="yet_to_inpro" {% if r.status_pm == 'yet_to_inpro' %}selected{% endif %}>Yet to Inpro</option>
+                            <option value="outpro" {% if r.status_pm == 'outpro' %}selected{% endif %}>Outpro</option>
+                            <option value="reporting_sick" {% if r.status_pm == 'reporting_sick' %}selected{% endif %}>Reporting Sick</option>
+                            <option value="late" {% if r.status_pm == 'late' %}selected{% endif %}>Late</option>
+                            <option value="att_out" {% if r.status_pm == 'att_out' %}selected{% endif %}>Att Out</option>
+                        </select>
+                    </td>
+                    <td style="padding: 0.5rem;">
+                        <input type="text" data-slot="pm" data-field="remarks" data-pid="{{ r.personnel_id }}"
+                               value="{{ r.remarks_pm }}"
+                               {% if not attendance_active %}disabled{% endif %}
+                               onchange="markDirty(this)"
+                               style="width: 100%; min-width: 160px; padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 
     {% if attendance_active %}
     <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
