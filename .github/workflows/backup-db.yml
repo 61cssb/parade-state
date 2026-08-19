@@ -56,6 +56,21 @@ jobs:
           curl -sSfL https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-amd64.tar.gz \
             | sudo tar xz -C /usr/local/bin --strip-components=1 age/age age/age-keygen
 
+      - name: Wait for database readiness
+        run: |
+          # Tolerates Railway cold starts (serverless), restarts, and
+          # deploys: poll for up to ~2 minutes before attempting the dump
+          for attempt in $(seq 1 12); do
+            if pg_isready -d "$DB_URL" --timeout=5 >/dev/null 2>&1; then
+              echo "database ready (attempt $attempt)"
+              exit 0
+            fi
+            echo "not ready yet (attempt $attempt/12); retrying in 10s"
+            sleep 10
+          done
+          echo "::error::database not reachable after 2 minutes"
+          exit 1
+
       - name: Dump database
         run: |
           pg_dump "$DB_URL" --format=custom --no-owner --no-privileges --file=backup.dump
