@@ -626,42 +626,22 @@ Why this setup:
 
 ### One-Time Setup (super-admin)
 
-**1. Railway — enable the public TCP proxy**
+The full step-by-step runbook — including every pitfall hit during the
+original setup (full-URL requirement, `sslmode`, variable-vs-secret
+distinction, Drive API enablement, client/server version rules) and a
+troubleshooting table — lives in
+**[BACKUP_SETUP.md](BACKUP_SETUP.md)**.
 
-Dashboard → project `parade-state` → service `Postgres` → Settings →
-Networking → *Public TCP Proxy* → enable. Copy the resulting
-`DATABASE_PUBLIC_URL` (a `postgresql://...?sslmode=require` URL) and add it
-as GitHub secret **`RAILWAY_PUBLIC_DATABASE_URL`**.
+Summary of what it provisions:
 
-**2. Generate the encryption keypair**
-
-```bash
-# any machine with age installed (e.g. "brew install age" / "pacman -S age")
-age-keygen -o parade-state-backup.key
-# prints: # public key: age1...
-```
-
-Add the `age1...` public key as GitHub secret **`AGE_PUBLIC_KEY`**. Store
-`parade-state-backup.key` (the private key) in the super-admin's password
-manager — **it is the only way to restore backups, and GitHub never sees it**.
-
-**3. Google Drive — service account + shared folder**
-
-1. In a Google Cloud project, create a service account and enable the
-   Google Drive API for it. Create and download its JSON key.
-2. Add the JSON file contents as GitHub secret **`GDRIVE_SERVICE_ACCOUNT_JSON`**.
-3. In the super-admin's Drive, create the backup folder (e.g.
-   `parade-state backups`), share it with the service account's email as
-   **Editor**, and copy the folder ID from the URL
-   (`https://drive.google.com/drive/folders/<FOLDER_ID>`).
-4. Add the folder ID as GitHub repository *variable*
-   **`GDRIVE_ROOT_FOLDER_ID`** (Settings → Secrets and variables → Actions
-   → Variables).
-
-**4. First run**
-
-Actions → *Database backup* → *Run workflow* (manual dispatch). Verify a
-`parade-state-<timestamp>.dump.age` file appears in the Drive folder.
+- Railway public TCP proxy → GitHub secret `RAILWAY_PUBLIC_DATABASE_URL`
+- age keypair → secret `AGE_PUBLIC_KEY` (private key in the super-admin's
+  password manager — the only way to restore)
+- Google service account with Drive API → secret `GDRIVE_SERVICE_ACCOUNT_JSON`
+- Super-admin-owned Drive folder shared to the service account →
+  repository **variable** `GDRIVE_ROOT_FOLDER_ID`
+- One manual workflow run to verify a `parade-state-<timestamp>.dump.age`
+  lands in Drive
 
 ### Schedule and Retention
 

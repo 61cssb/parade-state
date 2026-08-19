@@ -44,6 +44,7 @@
 
 - **[docs/SECURITY.md](docs/SECURITY.md)** - Security patterns and best practices
 - **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** - Production deployment (Railway, Docker, troubleshooting)
+- **[docs/BACKUP_SETUP.md](docs/BACKUP_SETUP.md)** - First-time backup pipeline setup runbook (super-admin)
 
 ### 📋 Planning & Status
 
