@@ -17,6 +17,7 @@ load_dotenv()
 from parade_state.admin_routes import router as admin_router
 from parade_state.api import (
     access_control,
+    admin_purge,
     attendance,
     audit,
     auth,
@@ -153,6 +154,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(tagging.router, prefix="/api/v1/taggings", tags=["taggings"])
     app.include_router(
         db_restore.router, prefix="/api/v1/admin", tags=["db-restore"]
+    )
+    app.include_router(
+        admin_purge.router, prefix="/api/v1/admin", tags=["admin-purge"]
     )
 
     @app.get("/health")

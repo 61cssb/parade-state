@@ -86,6 +86,12 @@ class Settings:
         # operators who prefer the CLI path only.
         self.RESTORE_ENABLED: bool = env.get_bool("RESTORE_ENABLED", default=True)
 
+        # Testing-only: super-admin purge of all nominal rolls and downstream
+        # data from the admin UI. Off in production unless explicitly enabled.
+        self.PURGE_ENABLED: bool = env.get_bool(
+            "PURGE_ENABLED", default=not self.is_production
+        )
+
     @property
     def is_production(self) -> bool:
         """Whether the app runs in the production environment."""

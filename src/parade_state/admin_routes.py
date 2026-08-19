@@ -838,6 +838,8 @@ async def admin_settings(
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
 
+    from parade_state.config import get_settings
+
     env = get_templates(request)
     template = env.get_template("admin/settings.html")
 
@@ -850,6 +852,7 @@ async def admin_settings(
             "role": current_admin.role,
         },
         active_page="settings",
+        purge_enabled=get_settings().PURGE_ENABLED,
     )
 
     return HTMLResponse(content=html_content)

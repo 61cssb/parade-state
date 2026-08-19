@@ -5,6 +5,119 @@
 {% block page_title %}Settings{% endblock %}
 
 {% block content %}
+{% if user.role == "super_admin" %}
+<div class="card" style="border-color: #dc2626;">
+    <h3 style="color: #dc2626;">Purge all data (testing only)</h3>
+    {% if not purge_enabled %}
+    <p style="color: #6b7280; margin: 0;">
+        Data purge is disabled on this deployment
+        (<code>PURGE_ENABLED=false</code>).
+    </p>
+    {% else %}
+    <p style="color: #6b7280;">
+        Deletes <strong>every nominal roll and all downstream data</strong>:
+        personnel, attendance, deferments, taggings, groupings, column
+        metadata, and CSV uploads — so CSV upload can be re-tested from a
+        clean slate. Users, access levels, and the audit log are preserved
+        (the purge itself is logged).
+    </p>
+
+    <form id="purgeForm">
+        <label style="display:block; font-size: 0.875rem; color:#374151; margin-bottom: 0.35rem;">
+            Type <strong>PURGE</strong> to confirm — this cannot be undone
+        </label>
+        <input type="text" id="confirmText" autocomplete="off"
+               placeholder="PURGE"
+               style="padding: 0.45rem 0.6rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 100%; max-width: 24rem; margin-bottom: 1rem;">
+
+        <button type="submit" id="purgeBtn" class="btn" disabled>
+            Purge all data
+        </button>
+    </form>
+
+    <div id="status" style="margin-top: 1rem;"></div>
+    <div id="summary" style="margin-top: 1rem;"></div>
+
+    <style>
+        #purgeBtn { background: #dc2626; }
+        #purgeBtn:disabled { background: #9ca3af; cursor: not-allowed; opacity: 1; }
+    </style>
+
+    <script>
+        const ADMIN_USER_ID = "{{ user.id }}";
+        const ADMIN_USER_ROLE = "{{ user.role }}";
+        const CONFIRMATION_WORD = "PURGE";
+
+        const confirmInput = document.getElementById('confirmText');
+        const purgeBtn = document.getElementById('purgeBtn');
+        const statusDiv = document.getElementById('status');
+        const summaryDiv = document.getElementById('summary');
+
+        function refreshButton() {
+            purgeBtn.disabled = confirmInput.value.trim() !== CONFIRMATION_WORD;
+        }
+        confirmInput.addEventListener('input', refreshButton);
+
+        document.getElementById('purgeForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            purgeBtn.disabled = true;
+            statusDiv.innerHTML = '<p style="color:#6b7280;">Purging…</p>';
+            summaryDiv.innerHTML = '';
+
+            const params = new URLSearchParams({
+                confirmation: confirmInput.value.trim(),
+                user_id: ADMIN_USER_ID,
+                user_role: ADMIN_USER_ROLE,
+            });
+
+            try {
+                const response = await fetch('/api/v1/admin/purge?' + params, {
+                    method: 'POST',
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    statusDiv.innerHTML =
+                        '<p style="color:#10b981; font-weight:bold;">Purge complete.</p>';
+                    summaryDiv.innerHTML = renderSummary(data);
+                } else {
+                    statusDiv.innerHTML =
+                        '<p style="color:#dc2626; font-weight:bold;">Purge failed:</p>';
+                    summaryDiv.innerHTML =
+                        '<pre style="background:#f3f4f6; padding:0.75rem; border-radius:0.25rem; white-space:pre-wrap;">'
+                        + (data.detail || JSON.stringify(data, null, 2))
+                        + '</pre>';
+                    refreshButton();
+                }
+            } catch (err) {
+                statusDiv.innerHTML =
+                    '<p style="color:#dc2626; font-weight:bold;">Request failed: ' + err + '</p>';
+                refreshButton();
+            }
+        });
+
+        function renderSummary(data) {
+            const counts = Object.entries(data.purged_counts || {})
+                .map(([t, n]) => `<tr><td style="padding:0.3rem 0.6rem;">${t}</td><td style="padding:0.3rem 0.6rem;">${n}</td></tr>`)
+                .join('');
+
+            return `
+                <div class="card" style="border-color:#10b981;">
+                    <h3 style="margin:0 0 0.75rem;">Purged rows</h3>
+                    <table style="border-collapse:collapse; border:1px solid #e5e7eb;">
+                        <thead><tr style="background:#f9fafb;">
+                            <th style="padding:0.3rem 0.6rem; text-align:left;">Table</th>
+                            <th style="padding:0.3rem 0.6rem; text-align:left;">Rows deleted</th>
+                        </tr></thead>
+                        <tbody>${counts}</tbody>
+                    </table>
+                </div>`;
+        }
+    </script>
+    {% endif %}
+</div>
+{% endif %}
+
 <div class="card">
     <h3>Access Levels</h3>
     <p style="color: #6b7280;">Access level configuration coming soon...</p>

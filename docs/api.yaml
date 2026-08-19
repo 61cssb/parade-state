@@ -43,6 +43,10 @@ tags:
     description: >
       Super-admin database restore from a decrypted backup dump
       (verify-then-swap; see docs/BACKUP_SETUP.md)
+  - name: admin-purge
+    description: >
+      Testing-only super-admin purge of all Nominal Rolls and downstream
+      data (gated by PURGE_ENABLED; off in production by default)
   - name: users
     description: User account management (admin)
   - name: access-levels
@@ -157,6 +161,48 @@ paths:
           description: Caller is not a super admin
         "409":
           description: Another restore is already in progress
+
+  # ---------------------------------------------------------------------------
+  # ADMIN — data purge (testing-only)
+  # ---------------------------------------------------------------------------
+
+  /admin/purge:
+    post:
+      tags: [admin-purge]
+      summary: Delete all Nominal Rolls and downstream data (testing-only)
+      description: |
+        Super-admin only (403 otherwise). Deletes every Nominal Roll and all
+        downstream data — personnel, attendance, deferments, taggings,
+        groupings (with overrides/exclusions/notes/access grants),
+        column metadata, CSV uploads, and NR-bound subunit assignments —
+        in one transaction, so CSV upload can be re-tested from a clean
+        slate. Preserved: users, access levels, sessions, global column
+        mappings, and the audit log (the purge itself is recorded there
+        as entity_type=database, action=delete, with per-table counts).
+        Requires `confirmation=PURGE` (exact match) and `PURGE_ENABLED`
+        on the deployment (default off in production, on elsewhere).
+        Returns per-table deleted-row counts.
+      parameters:
+        - name: confirmation
+          in: query
+          required: true
+          schema: { type: string }
+          description: Must equal PURGE
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Purge completed; body includes purged_counts per table
+        "400":
+          description: Wrong confirmation text or PURGE_ENABLED=false
+        "403":
+          description: Caller is not a super admin
 
   # ---------------------------------------------------------------------------
   # NOMINAL ROLLS — attendance activation
