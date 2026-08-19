@@ -137,6 +137,163 @@ async def test_process_csv_creates_nr_personnel_and_tagging(
 
 
 @pytest.mark.asyncio
+async def test_upload_with_auto_process_creates_nr_and_tagging(
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
+    admin_id: str,
+    db_session: AsyncSession,
+):
+    """auto_process=true on upload runs the full pipeline in one step.
+
+    The response carries the process result; the NR's 1:1 empty tagging
+    is auto-created and the upload is linked.
+    """
+    raw = _make_csv_bytes(
+        [
+            ["61 CSSB", "S1", "", "", "PTE", "Alice", "", "p101",
+             "Eligible", "", "", "", "", "", "", "", "", ""],
+            ["61 CSSB", "S1", "", "", "CPL", "Bob", "", "p102",
+             "Eligible", "", "", "", "", "", "", "", "", ""],
+        ]
+    )
+    response = client.post(
+        "/api/v1/csv/upload",
+        files={"file": ("auto_caa260301.csv", raw, "text/csv")},
+        params={"user_id": admin_id, "user_role": "admin", "auto_process": "true"},
+        headers=super_admin_token_headers,
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["is_duplicate"] is False
+    assert data["process_error"] is None
+    assert data["process_result"]["personnel_inserted"] == 2
+    nr_id = data["process_result"]["nominal_roll_id"]
+
+    nr = (await db_session.execute(
+        select(NominalRoll).where(NominalRoll.id == nr_id)
+    )).scalar_one()
+    assert nr.personnel_count == 2
+
+    # 1:1 tagging auto-created and empty.
+    tagging = (await db_session.execute(
+        select(Tagging).where(Tagging.nominal_roll_id == nr_id)
+    )).scalar_one()
+    entries = (await db_session.execute(
+        select(TaggingEntry).where(TaggingEntry.tagging_id == tagging.id)
+    )).scalars().all()
+    assert entries == []
+
+    # Upload linked to the created NR.
+    upload = (await db_session.execute(
+        select(CsvUpload).where(CsvUpload.id == data["id"])
+    )).scalar_one()
+    assert upload.nominal_roll_id == nr_id
+
+
+@pytest.mark.asyncio
+async def test_upload_auto_process_failure_keeps_upload_for_manual_step(
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
+    admin_id: str,
+    db_session: AsyncSession,
+):
+    """A wrong-column-count CSV uploads fine; auto-processing reports the
+    failure reason and leaves the upload stored/unprocessed for Step 2."""
+    csv_content = b"rank,name,unit\nPTE,John Doe,A Coy\n"
+
+    response = client.post(
+        "/api/v1/csv/upload",
+        files={"file": ("badcols_caa260302.csv", csv_content, "text/csv")},
+        params={"user_id": admin_id, "user_role": "admin", "auto_process": "true"},
+        headers=super_admin_token_headers,
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["process_result"] is None
+    assert "columns" in data["process_error"]
+
+    # Upload stored, unprocessed; no NR created.
+    upload = (await db_session.execute(
+        select(CsvUpload).where(CsvUpload.id == data["id"])
+    )).scalar_one()
+    assert upload.nominal_roll_id is None
+    assert upload.status == "received"
+    nrs = (await db_session.execute(select(NominalRoll))).scalars().all()
+    assert nrs == []
+
+
+@pytest.mark.asyncio
+async def test_upload_auto_process_reports_duplicate_caa(
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
+    admin_id: str,
+    uploaded_csv,
+    db_session: AsyncSession,
+):
+    """Auto-processing an upload whose CAA already has an NR reports the
+    conflict instead of failing the upload."""
+    upload_id, _ = uploaded_csv  # caa260220, will be processed below
+    first = client.post(
+        f"/api/v1/csv/{upload_id}/process",
+        headers=super_admin_token_headers,
+        params=SUPER_ADMIN_PARAMS,
+        json={"created_by": admin_id},
+    )
+    assert first.status_code == 201
+
+    # Different content (different pers_no) so it is not a file duplicate.
+    raw = _make_csv_bytes(
+        [
+            ["61 CSSB", "S9", "", "", "PTE", "Carol", "", "p201",
+             "", "", "", "", "", "", "", "", "", ""],
+        ]
+    )
+    response = client.post(
+        "/api/v1/csv/upload",
+        files={"file": ("second_caa260220.csv", raw, "text/csv")},
+        params={"user_id": admin_id, "user_role": "admin", "auto_process": "true"},
+        headers=super_admin_token_headers,
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["process_result"] is None
+    assert "already exists" in data["process_error"]
+
+    upload = (await db_session.execute(
+        select(CsvUpload).where(CsvUpload.id == data["id"])
+    )).scalar_one()
+    assert upload.nominal_roll_id is None
+
+
+@pytest.mark.asyncio
+async def test_upload_without_auto_process_stays_manual(
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
+    admin_id: str,
+    db_session: AsyncSession,
+):
+    """Default upload behavior is unchanged: nothing is processed."""
+    raw = _make_csv_bytes(
+        [
+            ["61 CSSB", "S1", "", "", "PTE", "Dan", "", "p301",
+             "", "", "", "", "", "", "", "", "", ""],
+        ]
+    )
+    response = client.post(
+        "/api/v1/csv/upload",
+        files={"file": ("manual_caa260303.csv", raw, "text/csv")},
+        params={"user_id": admin_id, "user_role": "admin"},
+        headers=super_admin_token_headers,
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["process_result"] is None
+    assert data["process_error"] is None
+    nrs = (await db_session.execute(select(NominalRoll))).scalars().all()
+    assert nrs == []
+
+
+@pytest.mark.asyncio
 async def test_process_csv_refuses_already_processed(
     client: TestClient,
     super_admin_token_headers: dict[str, str],
