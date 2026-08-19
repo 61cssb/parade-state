@@ -56,6 +56,8 @@ jobs:
           # The runner image preinstalls pg_dump 16 at /usr/bin/pg_dump and
           # the PGDG package does not take over the symlink; put 18 first
           echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+          # rclone is NOT preinstalled on the current runner image
+          curl -fsSL https://rclone.org/install.sh | sudo bash
           curl -sSfL https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-amd64.tar.gz \
             | sudo tar xz -C /usr/local/bin --strip-components=1 age/age age/age-keygen
 
