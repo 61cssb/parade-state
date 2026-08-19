@@ -36,7 +36,7 @@ Grouping (remaps personnel unit+subunit; has date+time validity range) —
 ```
 
 **Key Concepts:**
-- **Nominal Roll**: Base source of truth, uploaded from CSV, pinned by CAA date, read-only — unit/subunit edits are recorded on the NR's Tagging. Exactly one NR is **active for attendance** at a time (super-admin toggles "Use for Attendance" / "Deactivate Attendance" on the admin Nominal Rolls page; activating another NR auto-switches).
+- **Nominal Roll**: Base source of truth, uploaded from CSV, pinned by CAA date, read-only — unit/subunit edits are recorded on the NR's Tagging. Exactly one NR is **active for attendance** at a time (super-admin toggles "Use for Attendance" / "Deactivate Attendance" in the /nominal-roll view's Roll management panel; activating another NR auto-switches).
 - **Tagging**: 1:1 with an NR; the overlay of person → subunit remaps; never mutates the NR; always applied when attendance is taken against the active NR.
 - **Attendance**: One row per `(personnel, date)`, carrying `status_am`/`remarks_am` and `status_pm`/`remarks_pm` (statuses from the nine-value operational enum). AM and PM are hardcoded — there is no longer a user-managed Session model. Writes are only permitted against the active NR.
 - **Grouping**: Based on a nominal roll, remaps personnel assignments, valid for date+time range. A separate feature — the grouping view's checkbox/remarks never interact with attendance.
@@ -513,7 +513,7 @@ Grouping created (draft)
 
 **Activation gate** — Attendance writes are refused (HTTP 400) unless the
 target NR is the one currently active for attendance. A super-admin toggles
-this on the admin Nominal Rolls page (or via
+this in the /nominal-roll view's Roll management panel (or via
 `POST /api/v1/nominal-rolls/{id}/activate-attendance` /
 `deactivate-attendance`); activating another NR auto-switches activity.
 Deactivating leaves attendance inactive — the user-facing `/attendance` view

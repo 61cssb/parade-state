@@ -270,6 +270,7 @@ async def nominal_roll_view(
             "caa": selected.caa,
             "attendance_active": bool(selected.attendance_active),
             "personnel_count": selected.personnel_count,
+            "label": selected.label,
             "remarks": selected.remarks,
         },
         units=units,

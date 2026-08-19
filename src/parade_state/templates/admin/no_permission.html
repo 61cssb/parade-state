@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}No Access - Parade State{% endblock %}
+
+{% block page_title %}{{ page_name or 'No Access' }}{% endblock %}
+
+{% block content %}
+<div class="card" style="text-align: center; padding: 3rem 1.5rem;">
+    <div style="font-size: 3rem; margin-bottom: 1rem;">🔒</div>
+    <h2 style="color: #111827; margin-bottom: 0.5rem;">You do not have access to this page</h2>
+    <p style="color: #6b7280; margin-bottom: 1.5rem;">
+        {% if page_name %}{{ page_name }} is {% else %}This page is {% endif %}
+        restricted to super administrators.
+    </p>
+    <p style="font-size: 0.875rem; color: #6b7280;">
+        Signed in as <strong>{{ user.email }}</strong> ({{ user.role }}).
+        Contact a super administrator if you need access.
+    </p>
+</div>
+{% endblock %}

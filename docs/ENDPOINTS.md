@@ -14,21 +14,22 @@ This document clarifies the different types of endpoints in the Parade State app
 - `GET /auth/logout` - Logout handler (clears cookies, redirects to login)
 
 **User-Facing View Routes (Phase 9D / 9F):**
-- `GET /grouping` - Grouping summary (today's AM/PM session counts, unit breakdown) — grouping selector dropdown
+- `GET /grouping` - Grouping summary (today's AM/PM session counts, unit breakdown) — grouping selector dropdown plus an expandable grouping-management panel (metadata, Edit Dates, lifecycle transitions, Delete, Manage Personnel link — merged from the retired admin groupings page)
+- `GET /grouping/{id}/personnel` - Grouping personnel management (checkbox-based include/exclude, draft-only editing)
 - `GET /attendance` - Attendance marking table (inline status/remarks editing) — grouping + session selector
-- `GET /nominal-roll` - Nominal Roll browser (row-numbered roster table with unit/sub-unit columns, search, unit filter) — nominal roll selector dropdown
+- `GET /nominal-roll` - Nominal Roll browser (row-numbered roster table with unit/sub-unit columns, search, unit filter) — nominal roll selector dropdown plus an expandable roll-management panel (label/remarks editing, Create Grouping, attendance toggle, Delete — merged from the retired admin nominal rolls page)
 
 **Admin Interface Routes:**
 - `GET /admin` - Admin dashboard
-- `GET /admin/groupings` - Groupings + sessions management page (combined master-detail view)
-- `GET /admin/groupings/{id}/personnel` - Grouping personnel management (checkbox-based include/exclude, draft-only editing)
 - `GET /admin/users` - Users management page
-- `GET /admin/csv-upload` - CSV upload page
-- `GET /admin/nominal-rolls` - Nominal Roll management page (CAA date, label, source file, personnel count, status filter, confirm/unconfirm/delete actions)
+- `GET /admin/csv-upload` - Upload NR page (CSV upload with automatic processing into Nominal Rolls)
 - `GET /admin/settings` - Settings page
 - `GET /admin/audit` - Audit log page
+- `GET /admin/taggings` - Tagging overlay management (super-admin only; plain admins get an in-page no-access message)
+- `GET /admin/deferments` - Deferments management (super-admin only; in-page no-access message for plain admins)
+- `GET /admin/database-restore` - Restore Backup page (super-admin only; in-page no-access message for plain admins)
 
-**Note:** Sessions are managed within the groupings page (expandable per-grouping section). The REST APIs `/api/v1/groupings/*` and `/api/v1/sessions/*` remain separate.
+**Note:** The sidebar lists the workflow pages flat (Dashboard, Upload NR, Nominal Roll, Taggings, Deferments, Attendance, Grouping), then an **Admin** section (Users, Settings, Audit Log, Restore Backup). The former `/admin/nominal-rolls`, `/admin/groupings`, `/admin/groupings/{id}/personnel`, and `/admin/sessions` pages were retired when their management moved into the user-facing views. Sessions (AM/PM) are hardcoded; the REST APIs `/api/v1/groupings/*` and `/api/v1/sessions/*` remain separate.
 
 **Characteristics:**
 - Return HTML responses (Jinja2 templates)
