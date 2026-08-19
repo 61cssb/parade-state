@@ -8,6 +8,34 @@
 <style>
     .changed-row { background: #fef3c7 !important; }
     .changed-row td { background: #fef3c7 !important; }
+
+    /* Group headers replace the context columns on narrow screens
+       (the columns are hidden there via the media query below). */
+    .group-header { display: none; }
+    .group-header td {
+        background: #e0e7ff;
+        color: #1e3a8a;
+        font-weight: 600;
+        font-size: 0.8rem;
+        padding: 0.4rem 0.5rem;
+        border-bottom: 1px solid #c7d2fe;
+        white-space: nowrap;
+    }
+
+    @media (max-width: 767px) {
+        #attendance-table .col-unit,
+        #attendance-table .col-sub1,
+        #attendance-table .col-sub2,
+        #attendance-table .col-sub3,
+        #attendance-table .col-category,
+        #attendance-table .col-rank {
+            display: none;
+        }
+
+        #attendance-table .group-header {
+            display: table-row;
+        }
+    }
 </style>
 
 {% if nominal_rolls %}
@@ -94,12 +122,12 @@
         <table id="attendance-table" style="width: 100%; border-collapse: collapse;">
             <thead>
                 <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
-                    <th style="padding: 0.5rem;">Unit</th>
-                    <th style="padding: 0.5rem;">Sub-unit 1</th>
-                    <th style="padding: 0.5rem;">Sub-unit 2</th>
-                    <th style="padding: 0.5rem;">Sub-unit 3</th>
-                    <th style="padding: 0.5rem;">Category</th>
-                    <th style="padding: 0.5rem;">Rank</th>
+                    <th class="col-unit" style="padding: 0.5rem;">Unit</th>
+                    <th class="col-sub1" style="padding: 0.5rem;">Sub-unit 1</th>
+                    <th class="col-sub2" style="padding: 0.5rem;">Sub-unit 2</th>
+                    <th class="col-sub3" style="padding: 0.5rem;">Sub-unit 3</th>
+                    <th class="col-category" style="padding: 0.5rem;">Category</th>
+                    <th class="col-rank" style="padding: 0.5rem;">Rank</th>
                     <th style="padding: 0.5rem;">Name</th>
                     <th style="padding: 0.5rem;">AM Status</th>
                     <th style="padding: 0.5rem;">AM Remarks</th>
@@ -109,15 +137,20 @@
             </thead>
             <tbody id="attendance-body">
                 {% for r in attendance_rows %}
+                {% if loop.first or r.unit != loop.previtem.unit or (r.sub_unit_1 or '') != (loop.previtem.sub_unit_1 or '') %}
+                <tr class="group-header">
+                    <td colspan="11">{{ r.unit or '—' }}{% if r.sub_unit_1 %} — {{ r.sub_unit_1 }}{% endif %}</td>
+                </tr>
+                {% endif %}
                 <tr class="{% if r.is_changed %}changed-row{% endif %}" style="border-bottom: 1px solid #e5e7eb;" data-personnel-id="{{ r.personnel_id }}"
                     data-unit="{{ r.unit }}" data-sub1="{{ r.sub_unit_1 or '' }}"
                     data-category="{{ r.category }}" data-rank="{{ r.rank }}" data-name="{{ r.full_name }}">
-                    <td style="padding: 0.5rem;">{{ r.unit }}</td>
-                    <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_1 or '' }}</td>
-                    <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_2 or '' }}</td>
-                    <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_3 or '' }}</td>
-                    <td style="padding: 0.5rem; white-space: nowrap;">{{ r.category }}</td>
-                    <td style="padding: 0.5rem; white-space: nowrap;">{{ r.rank }}</td>
+                    <td class="col-unit" style="padding: 0.5rem;">{{ r.unit }}</td>
+                    <td class="col-sub1" style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_1 or '' }}</td>
+                    <td class="col-sub2" style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_2 or '' }}</td>
+                    <td class="col-sub3" style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_3 or '' }}</td>
+                    <td class="col-category" style="padding: 0.5rem; white-space: nowrap;">{{ r.category }}</td>
+                    <td class="col-rank" style="padding: 0.5rem; white-space: nowrap;">{{ r.rank }}</td>
                     <td style="padding: 0.5rem;">{{ r.full_name }}</td>
                     <td style="padding: 0.5rem;">
                         <select class="status-select" data-slot="am" data-pid="{{ r.personnel_id }}"
