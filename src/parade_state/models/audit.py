@@ -28,6 +28,7 @@ class AuditLog(Base):
             "personnel",
             "access_level",
             "column_mapping",
+            "database",
             name="audit_entity_type",
         ),
         index=True,
@@ -41,6 +42,7 @@ class AuditLog(Base):
             "archive",
             "close",
             "finalize",
+            "restore",
             name="audit_action",
         ),
     )

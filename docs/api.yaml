@@ -39,6 +39,10 @@ servers:
 tags:
   - name: auth
     description: Google OAuth flow and session management
+  - name: db-restore
+    description: >
+      Super-admin database restore from a decrypted backup dump
+      (verify-then-swap; see docs/BACKUP_SETUP.md)
   - name: users
     description: User account management (admin)
   - name: access-levels
@@ -98,6 +102,61 @@ tags:
 # =============================================================================
 
 paths:
+
+  # ---------------------------------------------------------------------------
+  # ADMIN — database restore
+  # ---------------------------------------------------------------------------
+
+  /admin/database/restore:
+    post:
+      tags: [db-restore]
+      summary: Restore the application database from a dump archive
+      description: |
+        Super-admin only (403 otherwise). Accepts a multipart upload of a
+        decrypted pg_dump custom-format file (the operator decrypts the
+        `.dump.age` backup offline; the server never sees age keys) plus a
+        `confirmation` query parameter that must equal the current database
+        name. Restore flow: validate archive (pg_restore --list, version
+        guard) → restore into a temporary database → verify (known alembic
+        revision not newer than the build's head, core tables present) →
+        swap by renaming databases → re-initialize the engine → migrate if
+        the dump was older than head → audit-log. The live database is
+        untouched until verification passes. 409 if another restore is in
+        flight; 400 when `RESTORE_ENABLED=false`, on SQLite deployments,
+        or on any verification failure (with the live DB unchanged).
+      parameters:
+        - name: confirmation
+          in: query
+          required: true
+          schema: { type: string }
+          description: Must equal the current database name
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: pg_dump custom-format archive, max 25 MB
+      responses:
+        "200":
+          description: Restore completed; body is the verification summary
+        "400":
+          description: Gating or verification failure (live DB unchanged)
+        "403":
+          description: Caller is not a super admin
+        "409":
+          description: Another restore is already in progress
 
   # ---------------------------------------------------------------------------
   # NOMINAL ROLLS — attendance activation

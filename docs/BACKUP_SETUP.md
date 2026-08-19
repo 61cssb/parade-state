@@ -152,18 +152,37 @@ If it fails, open the failed step's log (or
 `gh run view <run-id> --log-failed`) and match it against the table
 below.
 
-## Step 7 — One-time restore sanity check
+## Step 7 — Restoring a backup
 
-An untested backup is a hope, not a backup. Once (any machine with
-`age` + `pg_restore` ≥ 18):
+**Primary path — the admin UI (no shell access needed):**
+
+1. On any machine, decrypt the backup offline:
+   ```bash
+   age -d -i parade-state-backup.key -o backup.dump parade-state-*.dump.age
+   ```
+2. Sign in to the app as the super-admin → **DB Restore**
+   (`/admin/database-restore`) → upload `backup.dump` → type the
+   database name to confirm → *Restore database*.
+3. The app verifies the dump in a scratch database (schema version,
+   core tables) and only swaps it into place after it passes; the page
+   shows a verification summary (schema revision, table/row counts)
+   when done. Failed verification leaves the live database untouched.
+
+The restore requires the running deployment to have `pg_restore`
+available (the Docker image ships PostgreSQL client 18) and can be
+disabled with `RESTORE_ENABLED=false`.
+
+**Fallback path — CLI** (when the app itself is down, or restore into a
+fresh Railway database):
 
 ```bash
-# download the .dump.age from Drive
+# download the .dump.age from Drive, then:
 age -d -i parade-state-backup.key -o backup.dump parade-state-*.dump.age
-pg_restore --list backup.dump | head   # prints the TOC = dump is sound
+pg_restore --list backup.dump | head   # sanity: the TOC = dump is sound
+pg_restore --no-owner --no-privileges --dbname="$RESTORE_DATABASE_URL" backup.dump
 ```
 
-The full tested restore procedure lives in
+Full CLI procedure with local-verification steps:
 [DEPLOYMENT.md](DEPLOYMENT.md) → *Restore Procedure*.
 
 ---
