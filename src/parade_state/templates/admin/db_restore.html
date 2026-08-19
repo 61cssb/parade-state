@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block title %}Database Restore - Parade State Admin{% endblock %}
+
+{% block page_title %}Database Restore{% endblock %}
+
+{% block content %}
+<p style="color: #6b7280; margin-bottom: 1.5rem;">
+    Restore the application database from a decrypted backup dump.
+    <strong>Decrypt the <code>.dump.age</code> file offline first</strong>
+    (see docs/BACKUP_SETUP.md) — the key never leaves the super-admin's
+    password manager. The restore verifies the dump in a scratch database
+    and only swaps it into place after it passes; nothing touches the
+    live data until then.
+</p>
+
+{% if not restore_enabled %}
+<div class="card" style="border-color: #f59e0b;">
+    <h3 style="margin: 0 0 0.5rem; color: #b45309;">Restore disabled</h3>
+    <p style="margin: 0; color: #6b7280;">
+        This deployment has <code>RESTORE_ENABLED=false</code>. Use the
+        CLI procedure in docs/DEPLOYMENT.md instead.
+    </p>
+</div>
+{% else %}
+
+<div class="card">
+    <h3 style="margin: 0 0 1rem;">Restore from dump</h3>
+
+    <ol style="color: #374151; line-height: 1.8; margin-top: 0;">
+        <li>Download a <code>parade-state-*.dump.age</code> file from the backup folder in Google Drive.</li>
+        <li>Decrypt it on your machine:
+            <code style="display:block; margin-top:0.35rem; background:#f3f4f6; padding:0.35rem 0.6rem; border-radius:0.25rem;">
+                age -d -i parade-state-backup.key -o backup.dump parade-state-XXXX.dump.age
+            </code>
+        </li>
+        <li>Upload the resulting <code>backup.dump</code> below.</li>
+    </ol>
+
+    <form id="restoreForm" style="margin-top: 1.25rem;">
+        <label style="display:block; font-size: 0.875rem; color:#374151; margin-bottom: 0.35rem;">
+            Dump file (pg_dump custom format, max 25 MB)
+        </label>
+        <input type="file" id="dumpFile" accept=".dump"
+               style="margin-bottom: 1rem;">
+
+        <label style="display:block; font-size: 0.875rem; color:#374151; margin-bottom: 0.35rem;">
+            Type <strong><code>{{ database_name }}</code></strong> to confirm — this replaces <em>all</em> current data
+        </label>
+        <input type="text" id="confirmText" autocomplete="off"
+               placeholder="{{ database_name }}"
+               style="padding: 0.45rem 0.6rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 100%; max-width: 24rem; margin-bottom: 1rem;">
+
+        <button type="submit" id="restoreBtn" class="btn btn-primary" disabled
+                style="background: #dc2626;">
+            Restore database
+        </button>
+    </form>
+
+    <div id="status" style="margin-top: 1rem;"></div>
+    <div id="summary" style="margin-top: 1rem;"></div>
+</div>
+
+<script>
+    const ADMIN_USER_ID = "{{ user.id }}";
+    const ADMIN_USER_ROLE = "{{ user.role }}";
+    const DATABASE_NAME = "{{ database_name }}";
+
+    const fileInput = document.getElementById('dumpFile');
+    const confirmInput = document.getElementById('confirmText');
+    const restoreBtn = document.getElementById('restoreBtn');
+    const statusDiv = document.getElementById('status');
+    const summaryDiv = document.getElementById('summary');
+
+    function refreshButton() {
+        const hasFile = fileInput.files.length === 1;
+        const confirmed = confirmInput.value.trim() === DATABASE_NAME;
+        restoreBtn.disabled = !(hasFile && confirmed);
+    }
+    fileInput.addEventListener('change', refreshButton);
+    confirmInput.addEventListener('input', refreshButton);
+
+    document.getElementById('restoreForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        restoreBtn.disabled = true;
+        statusDiv.innerHTML = '<p style="color:#6b7280;">Restoring… the app may briefly reject requests during the swap.</p>';
+        summaryDiv.innerHTML = '';
+
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+
+        const params = new URLSearchParams({
+            confirmation: confirmInput.value.trim(),
+            user_id: ADMIN_USER_ID,
+            user_role: ADMIN_USER_ROLE,
+        });
+
+        try {
+            const response = await fetch('/api/v1/admin/database/restore?' + params, {
+                method: 'POST',
+                body: formData,
+            });
+            const data = await response.json();
+
+            if (response.ok) {
+                statusDiv.innerHTML = '<p style="color:#10b981; font-weight:bold;">Restore complete.</p>';
+                summaryDiv.innerHTML = renderSummary(data);
+            } else {
+                statusDiv.innerHTML = '<p style="color:#dc2626; font-weight:bold;">Restore failed:</p>';
+                summaryDiv.innerHTML =
+                    '<pre style="background:#f3f4f6; padding:0.75rem; border-radius:0.25rem; white-space:pre-wrap;">'
+                    + (data.detail || JSON.stringify(data, null, 2))
+                    + '</pre>';
+                refreshButton();
+            }
+        } catch (err) {
+            statusDiv.innerHTML = '<p style="color:#dc2626; font-weight:bold;">Request failed: ' + err + '</p>';
+            refreshButton();
+        }
+    });
+
+    function renderSummary(data) {
+        const counts = Object.entries(data.row_counts || {})
+            .map(([t, n]) => `<tr><td style="padding:0.3rem 0.6rem;">${t}</td><td style="padding:0.3rem 0.6rem;">${n}</td></tr>`)
+            .join('');
+        const lines = [
+            `Dump schema: <strong>${data.dump_version}</strong>` +
+            (data.needs_migration
+                ? ` (migrated to head${data.migrated_to_head === false ? ' — <span style="color:#b45309;">FAILED, see error above</span>' : ''})`
+                : ` (head, no migration needed)`),
+            `Tables restored: <strong>${data.table_count}</strong>`,
+            `Old database: <code>${data.pre_restore_db}</code> ${data.pre_restore_db_dropped ? '(dropped)' : '(kept as fallback)'}`,
+            `Audit log written: ${data.audit_written ? 'yes' : 'no'}`,
+        ].map(l => `<li style="margin-bottom:0.3rem;">${l}</li>`).join('');
+
+        return `
+            <div class="card" style="border-color:#10b981;">
+                <h3 style="margin:0 0 0.75rem;">Verification summary</h3>
+                <ul style="margin:0 0 0.75rem;">${lines}</ul>
+                ${counts ? `<table style="border-collapse:collapse; border:1px solid #e5e7eb;">
+                    <thead><tr style="background:#f9fafb;">
+                        <th style="padding:0.3rem 0.6rem; text-align:left;">Table</th>
+                        <th style="padding:0.3rem 0.6rem; text-align:left;">Rows</th>
+                    </tr></thead>
+                    <tbody>${counts}</tbody>
+                </table>` : ''}
+            </div>`;
+    }
+</script>
+{% endif %}
+{% endblock %}

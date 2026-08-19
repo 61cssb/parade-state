@@ -82,6 +82,10 @@ class Settings:
             env.get("APP_BASE_URL", "http://localhost:8000") or "http://localhost:8000"
         )
 
+        # Super-admin database restore from the admin UI. Kill switch for
+        # operators who prefer the CLI path only.
+        self.RESTORE_ENABLED: bool = env.get_bool("RESTORE_ENABLED", default=True)
+
     @property
     def is_production(self) -> bool:
         """Whether the app runs in the production environment."""

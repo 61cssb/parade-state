@@ -302,3 +302,17 @@ def is_set(key: str) -> bool:
     """
     value = os.getenv(key)
     return value is not None and value != ""
+
+
+def environ() -> dict[str, str]:
+    """Snapshot of the process environment for spawning subprocesses.
+
+    Returns:
+        Copy of the current environment as a plain dict, safe to mutate
+        before handing to ``asyncio.create_subprocess_exec(env=...)``.
+
+    Example:
+        >>> child_env = env.environ()
+        >>> child_env["PGPASSWORD"] = "secret"
+    """
+    return dict(os.environ)

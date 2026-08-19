@@ -518,6 +518,12 @@
                 <span class="icon">🕓</span><span>Deferments</span>
             </a>
             {% endif %}
+            {% if user.role == 'super_admin' %}
+            <a href="/admin/database-restore" title="Database Restore"
+               class="{% if active_page == 'database-restore' %}active{% endif %}">
+                <span class="icon">🗄️</span><span>DB Restore</span>
+            </a>
+            {% endif %}
             <a href="/admin/users" title="Users"
                class="{% if active_page == 'users' %}active{% endif %}">
                 <span class="icon">👥</span><span>Users</span>

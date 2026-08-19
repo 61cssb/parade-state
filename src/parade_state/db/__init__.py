@@ -24,6 +24,9 @@ class Base(DeclarativeBase):
 # Global database engine and session factory
 _engine = None
 _async_session_maker = None
+# Pool class the engine was built with, so runtime re-initialization
+# (e.g. after a database restore swap) preserves the caller's choice
+_poolclass = None
 
 
 def normalize_database_url(database_url: str) -> str:
@@ -86,7 +89,7 @@ def init_database(database_url: str, poolclass: type | None = None) -> None:
             FastAPI's TestClient portal) must pass ``NullPool`` to prevent
             cross-loop connection reuse.
     """
-    global _engine, _async_session_maker
+    global _engine, _async_session_maker, _poolclass
 
     _engine = create_async_engine(
         normalize_database_url(database_url),
@@ -94,6 +97,7 @@ def init_database(database_url: str, poolclass: type | None = None) -> None:
         pool_pre_ping=True,
         poolclass=poolclass,
     )
+    _poolclass = poolclass
 
     _async_session_maker = async_sessionmaker(
         _engine,

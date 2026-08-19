@@ -21,6 +21,7 @@ from parade_state.api import (
     audit,
     auth,
     csv_upload,
+    db_restore,
     deferments,
     groupings,
     nominal_rolls,
@@ -150,6 +151,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         deferments.router, prefix="/api/v1/deferments", tags=["deferments"]
     )
     app.include_router(tagging.router, prefix="/api/v1/taggings", tags=["taggings"])
+    app.include_router(
+        db_restore.router, prefix="/api/v1/admin", tags=["db-restore"]
+    )
 
     @app.get("/health")
     async def health_check():

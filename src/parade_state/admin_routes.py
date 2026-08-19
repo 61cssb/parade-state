@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import and_, func, or_, select
+from urllib.parse import urlsplit
 
 from parade_state.auth.admin_dependencies import (
     get_current_admin_user_optional,
@@ -933,6 +934,41 @@ async def admin_audit(
         total=total,
         entity_types=AUDIT_ENTITY_TYPES,
         actions=AUDIT_ACTIONS,
+    )
+
+    return HTMLResponse(content=html_content)
+
+
+@router.get("/admin/database-restore", response_class=HTMLResponse)
+async def admin_database_restore(request: Request):
+    """Render the database restore page (super-admin only)."""
+    current_admin = await get_current_admin_user_optional(request)
+    if not current_admin:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    if current_admin.role != "super_admin":
+        return RedirectResponse(url="/admin", status_code=302)
+
+    from parade_state.config import get_settings
+
+    settings = get_settings()
+    database_name = (
+        urlsplit(settings.DATABASE_URL).path.lstrip("/") or "postgres"
+    )
+
+    env = get_templates(request)
+    template = env.get_template("admin/db_restore.html")
+
+    html_content = template.render(
+        request=request,
+        user={
+            "id": current_admin.id,
+            "name": current_admin.name,
+            "email": current_admin.email,
+            "role": current_admin.role,
+        },
+        active_page="database-restore",
+        database_name=database_name,
+        restore_enabled=settings.RESTORE_ENABLED,
     )
 
     return HTMLResponse(content=html_content)
