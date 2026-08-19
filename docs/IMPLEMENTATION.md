@@ -262,16 +262,16 @@ async def test_example(client, sample_users, sample_grouping):
   admin page's metadata columns (source file, uploaded at, CSV hash) were
   dropped — upload provenance stays on the Upload NR page's Recent Uploads.
 
-**Sidebar Restructure (✅ ICT / Admin sections)**
-- The sidebar groups pages into two sections: **ICT** (Nominal Roll,
-  Upload NR, Attendance, Grouping, Taggings, Deferments) and **Admin**
-  (Dashboard, Users, Settings, Audit Log, DB Restore). "CSV Upload" was
-  relabelled "Upload NR" (route unchanged). Both sections are visible to
-  every signed-in admin; role-based section visibility is deferred until
-  distinct roles exist.
-- Super-admin-only pages (Taggings, Deferments, DB Restore) are listed for
-  plain admins too, but render an in-page no-access message (403, page shell
-  intact) instead of silently redirecting to /admin.
+**Sidebar Restructure (✅ workflow pages + Admin section)**
+- The sidebar lists the workflow pages flat in order — Dashboard, Upload NR
+  (relabelled from "CSV Upload"; route unchanged), Nominal Roll, Taggings,
+  Deferments, Attendance, Grouping — followed by an **Admin** section:
+  Users, Settings, Audit Log, Restore Backup (relabelled from "DB
+  Restore"). All entries are visible to every signed-in admin; role-based
+  section visibility is deferred until distinct roles exist.
+- Super-admin-only pages (Taggings, Deferments, Restore Backup) are listed
+  for plain admins too, but render an in-page no-access message (403, page
+  shell intact) instead of silently redirecting to /admin.
 - The admin Nominal Rolls and Groupings pages were retired — their
   management controls moved into expandable panels on `/nominal-roll` and
   `/grouping` (see the Grouping Management and Attendance UI notes above).

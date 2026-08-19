@@ -47,9 +47,9 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   managed from the `/grouping` view's expander (admin groupings page
   retired)
 - Deferments (super-admin CRUD; `Personnel.callup_status`)
-- Sidebar in two sections — **ICT** (Nominal Roll, Upload NR,
-  Attendance, Grouping, Taggings, Deferments) and **Admin** (Dashboard,
-  Users, Settings, Audit Log, DB Restore); SA-only pages show an
+- Sidebar: workflow pages flat (Dashboard, Upload NR, Nominal Roll,
+  Taggings, Deferments, Attendance, Grouping) + **Admin** section
+  (Users, Settings, Audit Log, Restore Backup); SA-only pages show an
   in-page no-access message for plain admins
 - Admin UI: dashboard, users, audit log, taggings, deferments,
   Upload NR (CSV upload), DB restore, Settings purge (testing-only);

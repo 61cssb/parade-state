@@ -27,9 +27,9 @@ This document clarifies the different types of endpoints in the Parade State app
 - `GET /admin/audit` - Audit log page
 - `GET /admin/taggings` - Tagging overlay management (super-admin only; plain admins get an in-page no-access message)
 - `GET /admin/deferments` - Deferments management (super-admin only; in-page no-access message for plain admins)
-- `GET /admin/database-restore` - Database restore (super-admin only; in-page no-access message for plain admins)
+- `GET /admin/database-restore` - Restore Backup page (super-admin only; in-page no-access message for plain admins)
 
-**Note:** The sidebar groups these into **ICT** (Nominal Roll, Upload NR, Attendance, Grouping, Taggings, Deferments) and **Admin** (Dashboard, Users, Settings, Audit Log, DB Restore) sections. The former `/admin/nominal-rolls`, `/admin/groupings`, `/admin/groupings/{id}/personnel`, and `/admin/sessions` pages were retired when their management moved into the user-facing views. Sessions (AM/PM) are hardcoded; the REST APIs `/api/v1/groupings/*` and `/api/v1/sessions/*` remain separate.
+**Note:** The sidebar lists the workflow pages flat (Dashboard, Upload NR, Nominal Roll, Taggings, Deferments, Attendance, Grouping), then an **Admin** section (Users, Settings, Audit Log, Restore Backup). The former `/admin/nominal-rolls`, `/admin/groupings`, `/admin/groupings/{id}/personnel`, and `/admin/sessions` pages were retired when their management moved into the user-facing views. Sessions (AM/PM) are hardcoded; the REST APIs `/api/v1/groupings/*` and `/api/v1/sessions/*` remain separate.
 
 **Characteristics:**
 - Return HTML responses (Jinja2 templates)
