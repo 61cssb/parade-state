@@ -56,6 +56,8 @@ across the application and provide better testability.
 """
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from urllib.parse import urlparse
 
 
@@ -316,3 +318,31 @@ def environ() -> dict[str, str]:
         >>> child_env["PGPASSWORD"] = "secret"
     """
     return dict(os.environ)
+
+
+@contextmanager
+def override(key: str, value: str) -> Iterator[None]:
+    """Temporarily set an environment variable for the wrapped block.
+
+    The previous value (or absence of one) is restored on exit, so the
+    change is visible only to code that reads the variable inside the
+    ``with`` block — e.g. library code that configures itself from the
+    process environment.
+
+    Args:
+        key: Environment variable name.
+        value: Value to set for the duration of the block.
+
+    Example:
+        >>> with env.override("DATABASE_URL", "postgresql://..."):
+        ...     run_tool_that_reads_database_url()
+    """
+    previous = os.environ.get(key)
+    os.environ[key] = value
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = previous
