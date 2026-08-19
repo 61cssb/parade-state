@@ -2033,6 +2033,76 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: Constraint violation }
 
+  /csv/upload:
+    post:
+      tags: [csv]
+      summary: Upload a CSV file for ingestion
+      description: |
+        Admin/super-admin only. Accepts a multipart CSV (`.csv`, ≤10 MB),
+        computes its SHA256 (duplicate files return the existing upload
+        with `is_duplicate: true`), parses the header row and line count,
+        and stores the raw content. With `auto_process=true` the stored
+        upload is immediately run through the same pipeline as
+        `POST /csv/{uploadId}/process` (NominalRoll + Personnel +
+        auto-created empty 1:1 Tagging): the result is returned in
+        `process_result`, or the failure reason in `process_error` — the
+        upload itself always succeeds and stays stored/unprocessed for
+        the manual processing flow.
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string, enum: [super_admin, admin, user] }
+        - name: auto_process
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+          description: Process the upload into a Nominal Roll immediately
+            after storing it; report the outcome instead of failing.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: Upload stored (metadata; `process_result` present only with auto_process)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  sha256_hash: { type: string }
+                  original_filename: { type: string, nullable: true }
+                  line_count: { type: integer }
+                  detected_columns: { type: array, items: { type: string } }
+                  status: { type: string }
+                  uploaded_at: { type: string, format: date-time }
+                  uploaded_by: { type: string, format: uuid }
+                  is_duplicate: { type: boolean }
+                  process_result:
+                    nullable: true
+                    type: object
+                    description: Present when auto_process succeeded — same
+                      shape as the /csv/{uploadId}/process 201 response.
+                  process_error:
+                    type: string
+                    nullable: true
+                    description: Present when auto_process failed; the upload
+                      remains stored and unprocessed.
+        '400': { description: Not a .csv file, empty, or undecodable }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { description: File exceeds 10 MB }
+
   /csv/{uploadId}/process:
     post:
       tags: [csv]

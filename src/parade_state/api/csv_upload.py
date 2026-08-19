@@ -81,6 +81,15 @@ async def upload_csv(
     file: UploadFile,
     user_id: str = Query(..., description="User ID uploading the file"),
     user_role: str = Query(..., description="User role for authorization"),
+    auto_process: bool = Query(
+        False,
+        description=(
+            "Attempt to process the upload into a NominalRoll immediately "
+            "after storing it. On success the result is in process_result; "
+            "on failure the reason is in process_error and the upload "
+            "remains stored/unprocessed for the manual Step 2 flow."
+        ),
+    ),
     db: AsyncSession = Depends(get_db_session),
 ) -> CsvUploadResponse:
     """Upload a CSV file for ingestion.
@@ -88,6 +97,12 @@ async def upload_csv(
     Accepts a CSV file, computes SHA256 hash, checks for duplicates,
     parses headers and counts lines, stores raw content in CsvUpload,
     and creates an AuditLog entry.
+
+    With ``auto_process=true`` the stored upload is immediately run
+    through the same pipeline as ``POST /csv/{id}/process`` (creating a
+    NominalRoll + Personnel + the NR's 1:1 empty Tagging) whenever
+    validation passes; any processing failure is reported via
+    ``process_error`` without failing the upload itself.
 
     Requires admin or super_admin role.
     """
@@ -191,16 +206,42 @@ async def upload_csv(
 
     await db.refresh(upload)
 
+    # Capture the ORM values before auto-processing: a processing
+    # failure rolls the session back, which expires the instance
+    # (attribute access would then need IO in a sync context).
+    upload_id = upload.id
+    upload_hash = upload.sha256_hash
+    upload_filename = upload.original_filename
+    upload_line_count = upload.line_count
+    upload_status = upload.status
+    upload_uploaded_at = upload.uploaded_at
+
+    process_result: CsvUploadProcessResponse | None = None
+    process_error: str | None = None
+    if auto_process:
+        try:
+            process_result = await _process_upload_into_nr(
+                db, upload, CsvUploadProcessRequest(created_by=user_id)
+            )
+        except HTTPException as exc:
+            # The upload is stored and committed; only the processing
+            # failed. Report the reason and leave the upload for the
+            # manual Step 2 flow.
+            await db.rollback()
+            process_error = str(exc.detail)
+
     return CsvUploadResponse(
-        id=upload.id,
-        sha256_hash=upload.sha256_hash,
-        original_filename=upload.original_filename,
-        line_count=upload.line_count,
+        id=upload_id,
+        sha256_hash=upload_hash,
+        original_filename=upload_filename,
+        line_count=upload_line_count,
         detected_columns=detected_columns,
-        status=upload.status,
-        uploaded_at=upload.uploaded_at,
-        uploaded_by=upload.uploaded_by,
+        status=upload_status,
+        uploaded_at=upload_uploaded_at,
+        uploaded_by=user_id,
         is_duplicate=False,
+        process_result=process_result,
+        process_error=process_error,
     )
 
 
@@ -328,11 +369,25 @@ async def process_csv_upload(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"CSV upload not found: {upload_id}",
         )
+
+    return await _process_upload_into_nr(db, upload, payload)
+
+
+async def _process_upload_into_nr(
+    db: AsyncSession, upload: CsvUpload, payload: CsvUploadProcessRequest
+) -> CsvUploadProcessResponse:
+    """Core CSV → NominalRoll pipeline, shared by the process endpoint
+    and the upload endpoint's auto-processing.
+
+    Raises ``HTTPException`` (400/409) with a user-facing reason when the
+    upload cannot be processed; the caller decides whether that is an
+    error response or an auto-processing report.
+    """
     if upload.nominal_roll_id is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"CSV upload {upload_id} has already been processed into "
+                f"CSV upload {upload.id} has already been processed into "
                 f"nominal roll {upload.nominal_roll_id}."
             ),
         )

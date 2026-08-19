@@ -5,7 +5,7 @@
 {% block page_title %}CSV Upload{% endblock %}
 
 {% block content %}
-<p style="color: #6b7280; margin-bottom: 1.5rem;">3-step upload process: Upload &rarr; Process into Nominal Roll (with optional tagging import) &rarr; Use</p>
+<p style="color: #6b7280; margin-bottom: 1.5rem;">Upload &rarr; (automatic processing into a Nominal Roll) &rarr; Use. Step 2 below is only needed for previously uploaded files, after an automatic-processing failure, or to import taggings during processing.</p>
 
 <div class="card">
     <h3>Step 1: Upload CSV File</h3>
@@ -18,10 +18,12 @@
 </div>
 
 <div class="card">
-    <h3>Step 2: Process Upload into Nominal Roll</h3>
+    <h3>Step 2: Process Upload into Nominal Roll (manual)</h3>
     <p style="color: #6b7280; font-size: 0.85rem; margin-top: 0.5rem;">
-        Pick an uploaded CSV (not yet processed) to build a NominalRoll + Personnel + auto-created empty Tagging.
-        Optionally import taggings from another NR (personnel matched by <em>pers_no</em>).
+        Clean uploads are processed automatically in Step 1. Use this form to process
+        a previously uploaded CSV, retry one whose automatic processing failed, or
+        import taggings from another NR (personnel matched by <em>pers_no</em>) during
+        processing — the NR's empty 1:1 tagging is always auto-created.
     </p>
     {% if processable_uploads %}
     <form id="process-form" onsubmit="event.preventDefault(); processUpload();" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.75rem;">
@@ -116,7 +118,7 @@
         formData.append('file', file);
 
         try {
-            const response = await fetch('/api/v1/csv/upload?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
+            const response = await fetch('/api/v1/csv/upload?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE + '&auto_process=true', {
                 method: 'POST',
                 body: formData,
             });
@@ -126,6 +128,11 @@
             if (response.ok) {
                 if (data.is_duplicate) {
                     statusDiv.innerHTML = '<p style="color: #f59e0b; font-weight: bold;">Duplicate file detected! This CSV was already uploaded.</p>';
+                } else if (data.process_result) {
+                    const pr = data.process_result;
+                    statusDiv.innerHTML = '<p style="color: #10b981; font-weight: bold;">Upload successful — automatically processed into a Nominal Roll (' + pr.personnel_inserted + ' personnel inserted, ' + pr.rows_skipped + ' skipped). Empty tagging created; import taggings later from the Taggings page if needed.</p>';
+                } else if (data.process_error) {
+                    statusDiv.innerHTML = '<p style="color: #f59e0b; font-weight: bold;">Uploaded, but automatic processing failed: ' + data.process_error + '</p><p style="color: #6b7280;">Reload the page to pick this upload in Step 2 below.</p>';
                 } else {
                     statusDiv.innerHTML = '<p style="color: #10b981; font-weight: bold;">Upload successful! Reload the page to see it in the Step 2 dropdown.</p>';
                 }
@@ -142,6 +149,7 @@
                     '<tr><td style="font-weight: bold; padding: 0.25rem;">SHA256 Hash:</td><td style="padding: 0.25rem; font-family: monospace; font-size: 0.8rem;">' + data.sha256_hash + '</td></tr>' +
                     '<tr><td style="font-weight: bold; padding: 0.25rem;">Data Lines:</td><td style="padding: 0.25rem;">' + data.line_count + '</td></tr>' +
                     '<tr><td style="font-weight: bold; padding: 0.25rem;">Status:</td><td style="padding: 0.25rem;">' + data.status + '</td></tr>' +
+                    (data.process_result ? '<tr><td style="font-weight: bold; padding: 0.25rem;">Nominal Roll:</td><td style="padding: 0.25rem; font-family: monospace;">' + data.process_result.nominal_roll_id + '</td></tr>' : '') +
                     '</table>' +
                     '<div style="margin-top: 0.5rem;">' +
                     '<strong>Detected Columns (' + data.detected_columns.length + '):</strong>' +
