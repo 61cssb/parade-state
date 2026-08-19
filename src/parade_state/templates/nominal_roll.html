@@ -49,6 +49,39 @@
     .suggest-item:hover, .suggest-item.active { background: #eff6ff; }
     .suggest-item.blank { color: #6b7280; font-style: italic; }
     .suggest-empty { padding: 0.35rem 0.6rem; color: #9ca3af; }
+    .inline-edit-chip {
+        display: inline-block;
+        padding: 0.15rem 0.4rem;
+        border-radius: 0.25rem;
+        border: 1px dashed #d1d5db;
+        cursor: pointer;
+        transition: background-color 0.1s, border-color 0.1s;
+    }
+    .inline-edit-chip:hover {
+        background-color: #f3f4f6;
+        border-color: #2563eb;
+    }
+    .inline-edit-chip:hover::after {
+        content: " ✎";
+        color: #2563eb;
+        font-size: 0.75rem;
+    }
+    /* Management panel: the expanded <details> body is absolutely positioned
+       so expanding it never shifts the personnel table below. */
+    .mgmt-details { position: relative; }
+    .mgmt-details > div {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        z-index: 40;
+        margin-top: 0.25rem;
+        padding: 0.75rem;
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.375rem;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    }
 </style>
 
 {# Super-admin click-to-edit cell for unit/subunit values. Edits are sent to
@@ -129,9 +162,54 @@
             — {{ total_count }} personnel match
         </span>
     </h3>
-    <details style="margin: 0.5rem 0 0;">
-        <summary style="cursor: pointer; font-size: 0.85rem; color: #374151; font-weight: 600;">Roll remarks</summary>
-        <p style="margin: 0.5rem 0 0; font-size: 0.875rem; color: #374151; white-space: pre-wrap;">{{ selected_nominal_roll.remarks or '(none set — editable on the admin nominal rolls page)' }}</p>
+    {# Roll management (merged from the retired admin nominal rolls page).
+       Collapsed by default; the panel overlays so expanding never shifts
+       the table. Label/remarks editing and Create Grouping are available
+       to all admins; attendance toggle and delete are super-admin-only. #}
+    <details class="mgmt-details" style="margin: 0.5rem 0 0;">
+        <summary style="cursor: pointer; font-size: 0.85rem; color: #374151; font-weight: 600;">Roll management</summary>
+        <div>
+            <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; font-size: 0.875rem; color: #374151;">
+                <span id="label-cell">Label:
+                    <span id="label-display" class="inline-edit-chip"
+                          data-value="{{ selected_nominal_roll.label or '' }}"
+                          onclick="editLabel()" title="Click to edit label">{{ selected_nominal_roll.label or '—' }}</span>
+                </span>
+                <span id="attendance-state">
+                    {% if selected_nominal_roll.attendance_active %}
+                    <span class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">Active for attendance</span>
+                    {% else %}
+                    <span style="font-size: 0.75rem; color: #9ca3af;">Not used for attendance</span>
+                    {% endif %}
+                </span>
+            </div>
+
+            <div id="remarks-cell" style="margin-top: 0.6rem; font-size: 0.875rem; color: #374151;">
+                Remarks:
+                <span id="remarks-display" class="inline-edit-chip"
+                      data-value="{{ selected_nominal_roll.remarks or '' }}"
+                      onclick="editRemarks()" title="Click to edit remarks"
+                      style="max-width: 30rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;">{{ selected_nominal_roll.remarks or '—' }}</span>
+            </div>
+
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.85rem;">
+                <button class="btn btn-primary" style="font-size: 0.8rem; padding: 0.3rem 0.6rem;"
+                        onclick="openCreateModal('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}', {{ selected_nominal_roll.personnel_count }})">Create Grouping</button>
+                {% if user.role == 'super_admin' %}
+                {% if selected_nominal_roll.attendance_active %}
+                <button class="btn" style="background: #f59e0b; color: white; font-size: 0.8rem; padding: 0.3rem 0.6rem;"
+                        onclick="deactivateAttendance('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}')">Deactivate Attendance</button>
+                {% else %}
+                <button class="btn btn-success" style="font-size: 0.8rem; padding: 0.3rem 0.6rem;"
+                        onclick="useForAttendance('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}')">Use for Attendance</button>
+                {% endif %}
+                <button class="btn" style="background: #ef4444; color: white; font-size: 0.8rem; padding: 0.3rem 0.6rem;"
+                        onclick="deleteNominalRoll('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}')">Delete</button>
+                {% endif %}
+            </div>
+
+            <div id="page-status" style="margin-top: 0.6rem;"></div>
+        </div>
     </details>
 
     {% if user.role == 'super_admin' %}
@@ -196,9 +274,465 @@
     <p style="color: #6b7280;">No nominal rolls available yet.</p>
 </div>
 {% endif %}
+
+{# Create Grouping modal (merged from the retired admin nominal rolls page) #}
+{% if selected_nominal_roll %}
+<div id="create-modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeCreateModal()"></div>
+<div id="create-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 500px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">Create Grouping</h3>
+        <button type="button" onclick="closeCreateModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
+    </div>
+
+    <div style="background: #f9fafb; border-radius: 0.375rem; padding: 0.75rem; margin-bottom: 1rem; font-size: 0.875rem;">
+        <strong>Source Nominal Roll:</strong> CAA <span id="modal-nominal-roll-caa">—</span> &middot; <span id="modal-nominal-roll-personnel">—</span> personnel
+    </div>
+
+    <form id="create-grouping-form" onsubmit="event.preventDefault(); submitCreateGrouping();">
+        <div style="margin-bottom: 0.75rem;">
+            <label for="grp-name" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Grouping Name <span style="color: #ef4444;">*</span></label>
+            <input type="text" id="grp-name" required style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" placeholder="e.g. MVT, FTX">
+        </div>
+
+        <div style="margin-bottom: 0.75rem;">
+            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Valid From <span style="color: #9ca3af; font-weight: normal;">(YYYYMMDD HHMM, Singapore time)</span></label>
+            <div style="display: flex; gap: 0.5rem;">
+                <input type="text" id="grp-from-date" pattern="\d{8}" maxlength="8" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 9rem;" placeholder="YYYYMMDD" onchange="onFromDateChange()">
+                <input type="text" id="grp-from-time" pattern="\d{4}" maxlength="4" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 7rem;" placeholder="HHMM">
+            </div>
+        </div>
+
+        <div style="margin-bottom: 0.75rem;">
+            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Valid Until <span style="color: #9ca3af; font-weight: normal;">(YYYYMMDD HHMM, Singapore time)</span></label>
+            <div style="display: flex; gap: 0.5rem;">
+                <input type="text" id="grp-until-date" pattern="\d{8}" maxlength="8" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 9rem;" placeholder="YYYYMMDD">
+                <input type="text" id="grp-until-time" pattern="\d{4}" maxlength="4" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 7rem;" placeholder="HHMM">
+            </div>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+            <label for="grp-notes" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Notes</label>
+            <textarea id="grp-notes" rows="2" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-family: inherit;" placeholder="Optional"></textarea>
+        </div>
+
+        <div id="modal-status" style="margin-bottom: 0.75rem;"></div>
+
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+            <button type="button" onclick="closeCreateModal()" style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: white; cursor: pointer;">Cancel</button>
+            <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1rem;">Create Grouping</button>
+        </div>
+    </form>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
+{% if selected_nominal_roll %}
+<script>
+    {# Roll management (merged from the retired admin nominal rolls page).
+       Acts on the currently selected roll only. #}
+    const ADMIN_USER_ID = "{{ user.id }}";
+    const ADMIN_USER_ROLE = "{{ user.role }}";
+    const SINGAPORE_OFFSET = "+08:00";
+    // Acts on the selected roll; openCreateModal re-affirms it for the modal.
+    let activeNominalRollId = "{{ selected_nominal_roll.id }}";
+
+    function showStatus(message, type) {
+        const div = document.getElementById('modal-status');
+        const color = type === 'success' ? '#10b981' : '#ef4444';
+        div.innerHTML = '<p style="color: ' + color + '; font-size: 0.875rem; margin: 0;">' + message + '</p>';
+    }
+
+    function showPageStatus(message, type) {
+        const div = document.getElementById('page-status');
+        const color = type === 'success' ? '#10b981' : '#ef4444';
+        div.innerHTML = '<p style="color: ' + color + '; font-weight: bold; margin: 0;">' + message + '</p>';
+    }
+
+    async function useForAttendance(nominalRollId, caa) {
+        if (!confirm('Mark the nominal roll with CAA date ' + caa + ' as active for attendance?\n\nAny currently active nominal roll is deactivated automatically.')) return;
+        try {
+            const response = await fetch(
+                '/api/v1/nominal-rolls/' + nominalRollId + '/activate-attendance?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                { method: 'POST' }
+            );
+            if (response.ok) {
+                showPageStatus('Nominal roll is now active for attendance.', 'success');
+                setTimeout(function() { location.reload(); }, 800);
+            } else {
+                const data = await response.json();
+                showPageStatus('Activate failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showPageStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    async function deactivateAttendance(nominalRollId, caa) {
+        if (!confirm('Deactivate attendance for the nominal roll with CAA date ' + caa + '?\n\nAttendance is inactive until another roll is marked "Use for Attendance".')) return;
+        try {
+            const response = await fetch(
+                '/api/v1/nominal-rolls/' + nominalRollId + '/deactivate-attendance?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                { method: 'POST' }
+            );
+            if (response.ok) {
+                showPageStatus('Attendance deactivated.', 'success');
+                setTimeout(function() { location.reload(); }, 800);
+            } else {
+                const data = await response.json();
+                showPageStatus('Deactivate failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showPageStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    async function deleteNominalRoll(nominalRollId, caa) {
+        const message =
+            'Delete nominal roll with CAA date ' + caa + '?\n\n' +
+            'This will permanently delete:\n' +
+            '  - All personnel records in this nominal roll\n' +
+            '  - All groupings based on this nominal roll\n' +
+            '  - All sessions and attendance records under those groupings\n\n' +
+            'This cannot be undone.';
+        if (!confirm(message)) return;
+        try {
+            const response = await fetch(
+                '/api/v1/nominal-rolls/' + nominalRollId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                { method: 'DELETE' }
+            );
+            if (response.ok) {
+                showPageStatus('Nominal roll deleted.', 'success');
+                setTimeout(function() { location.reload(); }, 800);
+            } else {
+                const data = await response.json();
+                showPageStatus('Delete failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showPageStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    function openCreateModal(nominalRollId, caa, personnelCount) {
+        activeNominalRollId = nominalRollId;
+        document.getElementById('modal-nominal-roll-caa').textContent = caa;
+        document.getElementById('modal-nominal-roll-personnel').textContent = personnelCount;
+        document.getElementById('modal-status').innerHTML = '';
+        document.getElementById('create-grouping-form').reset();
+        // Autofill valid_from/until to next day with default ops hours
+        const nextDay = tomorrowYYYYMMDD();
+        document.getElementById('grp-from-date').value = nextDay;
+        document.getElementById('grp-from-time').value = '0800';
+        document.getElementById('grp-until-date').value = nextDay;
+        document.getElementById('grp-until-time').value = '1700';
+        document.getElementById('create-modal-backdrop').style.display = 'block';
+        document.getElementById('create-modal').style.display = 'block';
+        document.getElementById('grp-name').focus();
+    }
+
+    function todayYYYYMMDD() {
+        const d = new Date();
+        return '' + d.getFullYear()
+            + String(d.getMonth() + 1).padStart(2, '0')
+            + String(d.getDate()).padStart(2, '0');
+    }
+
+    function tomorrowYYYYMMDD() {
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        return '' + d.getFullYear()
+            + String(d.getMonth() + 1).padStart(2, '0')
+            + String(d.getDate()).padStart(2, '0');
+    }
+
+    function onFromDateChange() {
+        const fromDate = document.getElementById('grp-from-date').value.trim();
+        const untilDate = document.getElementById('grp-until-date').value.trim();
+        if (/^\d{8}$/.test(fromDate) && /^\d{8}$/.test(untilDate) && fromDate > untilDate) {
+            document.getElementById('grp-until-date').value = fromDate;
+        }
+    }
+
+    function closeCreateModal() {
+        document.getElementById('create-modal-backdrop').style.display = 'none';
+        document.getElementById('create-modal').style.display = 'none';
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && document.getElementById('create-modal').style.display === 'block') {
+            closeCreateModal();
+        }
+    });
+
+    function toIso8601(dateStr, timeStr) {
+        // YYYYMMDD + HHMM -> YYYY-MM-DDTHH:MM:00+08:00 (Singapore time)
+        const yyyy = dateStr.slice(0, 4);
+        const mm = dateStr.slice(4, 6);
+        const dd = dateStr.slice(6, 8);
+        const hh = timeStr.slice(0, 2);
+        const min = timeStr.slice(2, 4);
+        return yyyy + '-' + mm + '-' + dd + 'T' + hh + ':' + min + ':00' + SINGAPORE_OFFSET;
+    }
+
+    function validateDateTime(dateStr, timeStr, label) {
+        if (!/^\d{8}$/.test(dateStr)) {
+            return label + ' date must be YYYYMMDD.';
+        }
+        if (!/^\d{4}$/.test(timeStr)) {
+            return label + ' time must be HHMM.';
+        }
+        const month = parseInt(dateStr.slice(4, 6), 10);
+        const day = parseInt(dateStr.slice(6, 8), 10);
+        const hour = parseInt(timeStr.slice(0, 2), 10);
+        const minute = parseInt(timeStr.slice(2, 4), 10);
+        if (month < 1 || month > 12) return label + ' month must be 01-12.';
+        if (day < 1 || day > 31) return label + ' day must be 01-31.';
+        if (hour > 23) return label + ' hour must be 00-23.';
+        if (minute > 59) return label + ' minute must be 00-59.';
+        return null;
+    }
+
+    async function submitCreateGrouping() {
+        const name = document.getElementById('grp-name').value.trim();
+        const fromDate = document.getElementById('grp-from-date').value.trim();
+        const fromTime = document.getElementById('grp-from-time').value.trim();
+        const untilDate = document.getElementById('grp-until-date').value.trim();
+        const untilTime = document.getElementById('grp-until-time').value.trim();
+        const notes = document.getElementById('grp-notes').value.trim();
+
+        if (!name) {
+            showStatus('Grouping name is required.', 'error');
+            return;
+        }
+
+        // Dates are optional (for adhoc groupings); validate only if provided
+        let validFrom = null;
+        let validUntil = null;
+
+        if (fromDate || fromTime || untilDate || untilTime) {
+            let err = validateDateTime(fromDate, fromTime, 'Valid from');
+            if (err) { showStatus(err, 'error'); return; }
+            err = validateDateTime(untilDate, untilTime, 'Valid until');
+            if (err) { showStatus(err, 'error'); return; }
+
+            if (fromDate < todayYYYYMMDD()) {
+                showStatus('Valid from date cannot be earlier than today.', 'error');
+                return;
+            }
+            if (untilDate < fromDate) {
+                showStatus('Valid until date cannot be earlier than valid from.', 'error');
+                return;
+            }
+
+            validFrom = toIso8601(fromDate, fromTime);
+            validUntil = toIso8601(untilDate, untilTime);
+
+            if (validUntil <= validFrom) {
+                showStatus('Valid until must be after valid from.', 'error');
+                return;
+            }
+        }
+
+        const payload = {
+            name: name,
+            nominal_roll_id: activeNominalRollId,
+            mode: 'standard',
+            valid_from: validFrom,
+            valid_until: validUntil,
+            status: 'draft',
+            notes: notes || null,
+        };
+
+        try {
+            const response = await fetch(
+                '/api/v1/groupings/?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                }
+            );
+            if (response.ok) {
+                showStatus('Grouping created. Redirecting…', 'success');
+                setTimeout(function() { window.location.href = '/grouping'; }, 700);
+            } else {
+                const data = await response.json();
+                showStatus('Create failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    // --- Inline label editing ---
+    function editLabel() {
+        const display = document.getElementById('label-display');
+        if (!display) return;
+        const current = display.getAttribute('data-value') || '';
+
+        const wrap = document.createElement('span');
+        wrap.style.display = 'inline-flex';
+        wrap.style.gap = '0.25rem';
+        wrap.style.alignItems = 'center';
+        wrap.innerHTML =
+            '<input type="text" maxlength="100" id="label-input" value="' + escapeAttr(current) + '" ' +
+            '    style="padding: 0.25rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.875rem; max-width: 12rem;">' +
+            '<button type="button" class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;" onclick="saveLabel()">Save</button>' +
+            '<button type="button" class="btn" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; border: 1px solid #d1d5db;" onclick="cancelEdit()">Cancel</button>' +
+            '<span id="label-error" style="color: #ef4444; font-size: 0.75rem;"></span>';
+        display.style.display = 'none';
+        display.insertAdjacentElement('afterend', wrap);
+
+        const input = document.getElementById('label-input');
+        input.focus();
+        input.select();
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); saveLabel(); }
+            else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+        });
+    }
+
+    async function saveLabel() {
+        const input = document.getElementById('label-input');
+        const errSpan = document.getElementById('label-error');
+        if (!input) return;
+        const value = input.value.trim();
+        errSpan.textContent = '';
+
+        try {
+            const response = await fetch(
+                '/api/v1/nominal-rolls/' + activeNominalRollId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ label: value }),
+                }
+            );
+            if (response.ok) {
+                const data = await response.json();
+                const newLabel = data.label || '';
+                const display = document.getElementById('label-display');
+                display.setAttribute('data-value', newLabel);
+                display.textContent = newLabel || '—';
+                cancelEdit();
+                showPageStatus('Label updated.', 'success');
+            } else if (response.status === 409) {
+                errSpan.textContent = 'Label already in use.';
+                input.focus();
+            } else if (response.status === 422) {
+                errSpan.textContent = 'Label must not be empty.';
+                input.focus();
+            } else {
+                const data = await response.json();
+                showPageStatus('Label update failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showPageStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    function cancelEdit() {
+        const display = document.getElementById('label-display');
+        const input = document.getElementById('label-input');
+        if (!display) return;
+        const wrap = input ? input.parentElement : null;
+        if (wrap) wrap.remove();
+        display.style.display = '';
+    }
+
+    // --- Inline remarks editing ---
+    function editRemarks() {
+        const display = document.getElementById('remarks-display');
+        if (!display) return;
+        const current = display.getAttribute('data-value') || '';
+
+        const wrap = document.createElement('span');
+        wrap.style.display = 'inline-flex';
+        wrap.style.flexDirection = 'column';
+        wrap.style.gap = '0.25rem';
+        wrap.style.alignItems = 'stretch';
+        wrap.style.maxWidth = '30rem';
+        wrap.innerHTML =
+            '<textarea id="remarks-input" rows="2" ' +
+            '    style="padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.875rem; font-family: inherit; resize: vertical; min-width: 14rem;">' +
+            escapeHtml(current) + '</textarea>' +
+            '<span style="display: flex; gap: 0.25rem; align-items: center;">' +
+            '  <button type="button" class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;" onclick="saveRemarks()">Save</button>' +
+            '  <button type="button" class="btn" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; border: 1px solid #d1d5db;" onclick="cancelRemarksEdit()">Cancel</button>' +
+            '  <span style="font-size: 0.7rem; color: #9ca3af;">Ctrl+Enter to save</span>' +
+            '  <span id="remarks-error" style="color: #ef4444; font-size: 0.75rem; margin-left: auto;"></span>' +
+            '</span>';
+        display.style.display = 'none';
+        display.insertAdjacentElement('afterend', wrap);
+
+        const textarea = document.getElementById('remarks-input');
+        textarea.focus();
+        // Place cursor at end
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        textarea.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                saveRemarks();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelRemarksEdit();
+            }
+        });
+    }
+
+    async function saveRemarks() {
+        const textarea = document.getElementById('remarks-input');
+        const errSpan = document.getElementById('remarks-error');
+        if (!textarea) return;
+        const value = textarea.value;
+        errSpan.textContent = '';
+
+        try {
+            const response = await fetch(
+                '/api/v1/nominal-rolls/' + activeNominalRollId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ remarks: value }),
+                }
+            );
+            if (response.ok) {
+                const data = await response.json();
+                const newRemarks = data.remarks || '';
+                const display = document.getElementById('remarks-display');
+                display.setAttribute('data-value', newRemarks);
+                display.textContent = newRemarks || '—';
+                cancelRemarksEdit();
+                showPageStatus('Remarks updated.', 'success');
+            } else {
+                const data = await response.json();
+                errSpan.textContent = data.detail || 'Update failed.';
+            }
+        } catch (error) {
+            showPageStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    function cancelRemarksEdit() {
+        const display = document.getElementById('remarks-display');
+        const textarea = document.getElementById('remarks-input');
+        if (!display) return;
+        const wrap = textarea ? textarea.parentElement : null;
+        if (wrap) wrap.remove();
+        display.style.display = '';
+    }
+
+    function escapeAttr(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function escapeHtml(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+</script>
+{% endif %}
 {% if user.role == 'super_admin' and selected_nominal_roll %}
 <script>
     const USER_ID = "{{ user.id }}";

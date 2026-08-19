@@ -15,9 +15,17 @@ from parade_state.api.access_control import (
     verify_grouping_access_or_admin,
 )
 from parade_state.api.attendance import attendance_counts_for_date
-from parade_state.auth.admin_dependencies import get_current_user_optional
+from parade_state.auth.admin_dependencies import (
+    get_current_admin_user_optional,
+    get_current_user_optional,
+)
 from parade_state.db import get_session_maker
-from parade_state.models import Attendance, Personnel
+from parade_state.models import (
+    Attendance,
+    Grouping,
+    GroupingPersonnelExclusion,
+    Personnel,
+)
 from parade_state.models.attendance import PRESENT_LIKE_STATUSES
 from parade_state.utils import utc_dt
 
@@ -131,10 +139,99 @@ async def grouping_view(
             "id": str(selected.id),
             "name": selected.name,
             "status": selected.status,
+            "mode": selected.mode,
+            "valid_from": selected.valid_from,
+            "valid_until": selected.valid_until,
+            "notes": selected.notes,
         },
         counts=counts,
         unit_breakdown=unit_rows,
         today=today,
+    )
+
+    return HTMLResponse(content=html_content)
+
+
+@router.get("/grouping/{grouping_id}/personnel", response_class=HTMLResponse)
+async def grouping_personnel(
+    request: Request,
+    grouping_id: str,
+):
+    """Render the grouping personnel management page (included/excluded lists).
+
+    Moved from /admin/groupings/{id}/personnel when the admin groupings page
+    was merged into this view; the admin login gate is unchanged.
+    """
+    current_admin = await get_current_admin_user_optional(request)
+    if not current_admin:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    session_maker = get_session_maker()
+    async with session_maker() as db:
+        # Fetch grouping
+        result = await db.execute(
+            select(Grouping).where(Grouping.id == grouping_id)
+        )
+        grouping = result.scalar_one_or_none()
+        if not grouping:
+            return RedirectResponse(url="/grouping", status_code=302)
+
+        # Fetch all personnel from the grouping's nominal roll
+        personnel_query = (
+            select(Personnel)
+            .where(Personnel.nominal_roll_id == grouping.nominal_roll_id)
+            .order_by(Personnel.unit, Personnel.sub_unit_1, Personnel.rank, Personnel.full_name)
+        )
+        personnel_result = await db.execute(personnel_query)
+        all_personnel = personnel_result.scalars().all()
+
+        # Fetch exclusion records for this grouping
+        exclusions_result = await db.execute(
+            select(GroupingPersonnelExclusion).where(
+                GroupingPersonnelExclusion.grouping_id == grouping_id
+            )
+        )
+        exclusions = exclusions_result.scalars().all()
+        excluded_map = {str(e.personnel_id) for e in exclusions}
+
+    # Build unified list with is_excluded flag
+    personnel_rows = []
+    included_count = 0
+    excluded_count = 0
+    for p in all_personnel:
+        is_excluded = str(p.id) in excluded_map
+        if is_excluded:
+            excluded_count += 1
+        else:
+            included_count += 1
+        personnel_rows.append({
+            "id": str(p.id),
+            "pers_no": p.pers_no,
+            "rank": p.rank,
+            "category": p.category,
+            "full_name": p.full_name,
+            "unit": p.unit,
+            "sub_unit_1": p.sub_unit_1,
+            "is_excluded": is_excluded,
+        })
+
+    env = _get_templates(request)
+    template = env.get_template("grouping_personnel.html")
+
+    html_content = template.render(
+        request=request,
+        user=_user_dict(current_admin),
+        active_page="grouping",
+        grouping={
+            "id": str(grouping.id),
+            "name": grouping.name,
+            "status": grouping.status,
+        },
+        is_draft=grouping.status == "draft",
+        personnel_rows=personnel_rows,
+        included_count=included_count,
+        excluded_count=excluded_count,
+        total_count=len(all_personnel),
     )
 
     return HTMLResponse(content=html_content)

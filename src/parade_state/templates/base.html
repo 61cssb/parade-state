@@ -498,9 +498,18 @@
             <span class="brand-text">Parade State</span>
         </a>
         <nav class="sidebar-nav">
+            {% if user %}
+            {# ICT — workflow pages. Per-item gating is enforced in-page:
+               super-admin-only surfaces (Taggings, Deferments) render a
+               no-access message for plain admins. #}
+            <div class="nav-section-label">ICT</div>
             <a href="/nominal-roll" title="Nominal Roll Browser"
                class="{% if active_page == 'nominal-roll' %}active{% endif %}">
                 <span class="icon">👥</span><span>Nominal Roll</span>
+            </a>
+            <a href="/admin/csv-upload" title="Upload NR"
+               class="{% if active_page == 'csv-upload' %}active{% endif %}">
+                <span class="icon">📤</span><span>Upload NR</span>
             </a>
             <a href="/attendance" title="Attendance"
                class="{% if active_page == 'attendance' %}active{% endif %}">
@@ -510,42 +519,19 @@
                class="{% if active_page == 'grouping' %}active{% endif %}">
                 <span class="icon">📊</span><span>Grouping</span>
             </a>
-            {% if user and user.role in ['admin', 'super_admin'] %}
+            <a href="/admin/taggings" title="Taggings"
+               class="{% if active_page == 'taggings' %}active{% endif %}">
+                <span class="icon">🏷️</span><span>Taggings</span>
+            </a>
+            <a href="/admin/deferments" title="Deferments"
+               class="{% if active_page == 'deferments' %}active{% endif %}">
+                <span class="icon">🕓</span><span>Deferments</span>
+            </a>
             <div class="nav-section-label">Admin</div>
             <a href="/admin" title="Dashboard"
                class="{% if active_page == 'dashboard' %}active{% endif %}">
                 <span class="icon">🏠</span><span>Dashboard</span>
             </a>
-            <a href="/admin/csv-upload" title="CSV Upload"
-               class="{% if active_page == 'csv-upload' %}active{% endif %}">
-                <span class="icon">📤</span><span>CSV Upload</span>
-            </a>
-            <a href="/admin/nominal-rolls" title="Nominal Rolls"
-               class="{% if active_page == 'nominal-rolls' %}active{% endif %}">
-                <span class="icon">📋</span><span>Nominal Rolls</span>
-            </a>
-            {% if user.role == 'super_admin' %}
-            <a href="/admin/taggings" title="Taggings"
-               class="{% if active_page == 'taggings' %}active{% endif %}">
-                <span class="icon">🏷️</span><span>Taggings</span>
-            </a>
-            {% endif %}
-            <a href="/admin/groupings" title="Groupings"
-               class="{% if active_page == 'groupings' %}active{% endif %}">
-                <span class="icon">🎖️</span><span>Groupings</span>
-            </a>
-            {% if user.role == 'super_admin' %}
-            <a href="/admin/deferments" title="Deferments"
-               class="{% if active_page == 'deferments' %}active{% endif %}">
-                <span class="icon">🕓</span><span>Deferments</span>
-            </a>
-            {% endif %}
-            {% if user.role == 'super_admin' %}
-            <a href="/admin/database-restore" title="Database Restore"
-               class="{% if active_page == 'database-restore' %}active{% endif %}">
-                <span class="icon">🗄️</span><span>DB Restore</span>
-            </a>
-            {% endif %}
             <a href="/admin/users" title="Users"
                class="{% if active_page == 'users' %}active{% endif %}">
                 <span class="icon">👥</span><span>Users</span>
@@ -557,6 +543,10 @@
             <a href="/admin/audit" title="Audit Log"
                class="{% if active_page == 'audit' %}active{% endif %}">
                 <span class="icon">📜</span><span>Audit Log</span>
+            </a>
+            <a href="/admin/database-restore" title="Database Restore"
+               class="{% if active_page == 'database-restore' %}active{% endif %}">
+                <span class="icon">🗄️</span><span>DB Restore</span>
             </a>
             {% endif %}
         </nav>

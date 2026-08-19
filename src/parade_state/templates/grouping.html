@@ -5,6 +5,25 @@
 {% block page_title %}Grouping Summary{% endblock %}
 
 {% block content %}
+<style>
+    /* Management panel: the expanded <details> body is absolutely positioned
+       so expanding it never shifts the summary cards below. */
+    .mgmt-details { position: relative; }
+    .mgmt-details > div {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        z-index: 40;
+        margin-top: 0.25rem;
+        padding: 0.75rem;
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.375rem;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    }
+</style>
+
 <!-- Grouping selector -->
 <div class="card">
     <form method="get" action="/grouping" style="display: flex; gap: 0.5rem; align-items: center;">
@@ -18,6 +37,89 @@
             {% endfor %}
         </select>
     </form>
+
+    {% if selected_grouping %}
+    {# Grouping management (merged from the retired admin groupings page).
+       Collapsed by default; the panel overlays so expanding never shifts
+       the page. Lifecycle buttons keep the per-status gating; Delete is
+       super-admin-only. #}
+    <details class="mgmt-details" style="margin: 0.75rem 0 0;">
+        <summary style="cursor: pointer; font-size: 0.85rem; color: #374151; font-weight: 600;">Grouping management</summary>
+        <div>
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                <strong>{{ selected_grouping.name }}</strong>
+                <span style="padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; background: #f3f4f6; color: #374151;">{{ selected_grouping.mode }}</span>
+                <span style="padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem;
+                    {% if selected_grouping.status == 'active' %}background: #d1fae5; color: #065f46;
+                    {% elif selected_grouping.status == 'draft' %}background: #f3f4f6; color: #374151;
+                    {% elif selected_grouping.status == 'inactive' %}background: #fef3c7; color: #92400e;
+                    {% elif selected_grouping.status == 'closed' %}background: #dbeafe; color: #1e40af;
+                    {% elif selected_grouping.status == 'finalized' %}background: #ede9fe; color: #5b21b6;
+                    {% elif selected_grouping.status == 'archived' %}background: #e5e7eb; color: #4b5563;
+                    {% else %}background: #e5e7eb; color: #374151;{% endif %}">{{ selected_grouping.status }}</span>
+            </div>
+
+            <p style="margin-top: 0.5rem; font-size: 0.85rem; color: #6b7280;">
+                {% if selected_grouping.valid_from and selected_grouping.valid_until %}
+                <span id="date-display">{{ selected_grouping.valid_from.strftime('%Y-%m-%d') }} → {{ selected_grouping.valid_until.strftime('%Y-%m-%d') }}</span>
+                {% else %}
+                <span>No validity window</span>
+                {% endif %}
+            </p>
+
+            {% if selected_grouping.notes %}
+            <p style="margin-top: 0.25rem; font-size: 0.85rem; color: #6b7280;">{{ selected_grouping.notes }}</p>
+            {% endif %}
+
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.75rem;">
+                {% if selected_grouping.status in ['draft', 'active', 'inactive'] and selected_grouping.valid_from and selected_grouping.valid_until %}
+                <button class="btn" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; background: #f3f4f6; color: #374151;"
+                        onclick="toggleEditDates()">Edit Dates</button>
+                {% endif %}
+                {% if selected_grouping.status == 'draft' %}
+                <a class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; text-decoration: none;"
+                   href="/grouping/{{ selected_grouping.id }}/personnel">Manage Personnel</a>
+                <button class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                        onclick="transitionGrouping('active')">Activate</button>
+                {% elif selected_grouping.status == 'active' %}
+                <button class="btn" style="background: #3b82f6; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                        onclick="transitionGrouping('closed')">Close</button>
+                {% elif selected_grouping.status == 'inactive' %}
+                <button class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                        onclick="transitionGrouping('active')">Activate</button>
+                <button class="btn" style="background: #3b82f6; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                        onclick="transitionGrouping('closed')">Close</button>
+                <button class="btn" style="background: #6b7280; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                        onclick="transitionGrouping('archived')">Archive</button>
+                {% elif selected_grouping.status == 'closed' %}
+                <button class="btn" style="background: #8b5cf6; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                        onclick="transitionGrouping('finalized')">Finalize</button>
+                {% endif %}
+                {% if user.role == 'super_admin' and selected_grouping.status not in ['active', 'finalized'] %}
+                <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                        onclick="deleteGrouping('{{ selected_grouping.id }}', '{{ selected_grouping.name }}')">Delete</button>
+                {% endif %}
+            </div>
+
+            {% if selected_grouping.status in ['draft', 'active', 'inactive'] and selected_grouping.valid_from and selected_grouping.valid_until %}
+            <div id="edit-dates" style="display: none; margin-top: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 0.375rem; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                <label style="font-size: 0.8rem; font-weight: 600;">Valid from:</label>
+                <input type="date" id="valid-from" value="{{ selected_grouping.valid_from.strftime('%Y-%m-%d') }}"
+                       style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
+                <label style="font-size: 0.8rem; font-weight: 600;">until:</label>
+                <input type="date" id="valid-until" value="{{ selected_grouping.valid_until.strftime('%Y-%m-%d') }}"
+                       style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
+                <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                        onclick="saveDates()">Save</button>
+                <button class="btn" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; background: #e5e7eb; color: #374151;"
+                        onclick="toggleEditDates()">Cancel</button>
+            </div>
+            {% endif %}
+
+            <div id="statusMessage" style="margin-top: 0.6rem;"></div>
+        </div>
+    </details>
+    {% endif %}
 </div>
 
 {% if selected_grouping %}
@@ -87,5 +189,98 @@
 <div class="card">
     <p style="color: #6b7280;">No groupings available. Contact an administrator to get access.</p>
 </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if selected_grouping %}
+<script>
+    {# Grouping management (merged from the retired admin groupings page).
+       Acts on the currently selected grouping only. #}
+    const ADMIN_USER_ID = "{{ user.id }}";
+    const ADMIN_USER_ROLE = "{{ user.role }}";
+    const GROUPING_ID = "{{ selected_grouping.id }}";
+
+    function showStatus(message, type) {
+        const div = document.getElementById('statusMessage');
+        const color = type === 'success' ? '#10b981' : '#ef4444';
+        div.innerHTML = '<p style="color: ' + color + '; font-weight: bold; margin: 0;">' + message + '</p>';
+    }
+
+    function toggleEditDates() {
+        const div = document.getElementById('edit-dates');
+        if (!div) return;
+        if (div.style.display === 'none' || div.style.display === '') {
+            div.style.display = 'flex';
+        } else {
+            div.style.display = 'none';
+        }
+    }
+
+    async function saveDates() {
+        const fromInput = document.getElementById('valid-from');
+        const untilInput = document.getElementById('valid-until');
+        if (!fromInput.value || !untilInput.value) {
+            showStatus('Both dates are required.', 'error');
+            return;
+        }
+        try {
+            const response = await fetch('/api/v1/groupings/' + GROUPING_ID + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    valid_from: fromInput.value + 'T00:00:00',
+                    valid_until: untilInput.value + 'T23:59:59',
+                }),
+            });
+            if (response.ok) {
+                showStatus('Grouping dates updated.', 'success');
+                setTimeout(function() { location.reload(); }, 800);
+            } else {
+                const data = await response.json();
+                showStatus('Update failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    async function transitionGrouping(newStatus) {
+        try {
+            const response = await fetch('/api/v1/groupings/' + GROUPING_ID + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: newStatus }),
+            });
+            if (response.ok) {
+                showStatus('Grouping transitioned to ' + newStatus + '.', 'success');
+                setTimeout(function() { location.reload(); }, 800);
+            } else {
+                const data = await response.json();
+                showStatus('Transition failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showStatus('Network error: ' + error.message, 'error');
+        }
+    }
+
+    async function deleteGrouping(groupingId, name) {
+        if (!confirm('Delete grouping "' + name + '"? This cannot be undone.')) return;
+        try {
+            const response = await fetch('/api/v1/groupings/' + groupingId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
+                method: 'DELETE',
+            });
+            if (response.ok) {
+                showStatus('Grouping deleted.', 'success');
+                setTimeout(function() { location.reload(); }, 800);
+            } else {
+                const data = await response.json();
+                showStatus('Delete failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            showStatus('Network error: ' + error.message, 'error');
+        }
+    }
+</script>
 {% endif %}
 {% endblock %}

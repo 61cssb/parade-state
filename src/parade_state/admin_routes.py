@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, or_, select
 from urllib.parse import urlsplit
 
 from parade_state.auth.admin_dependencies import (
@@ -13,20 +13,16 @@ from parade_state.auth.admin_dependencies import (
 from parade_state.db import get_session_maker
 from parade_state.models import (
     AccessLevel,
-    Attendance,
     AuditLog,
     CsvUpload,
     Deferment,
     Grouping,
-    GroupingPersonnelExclusion,
     NominalRoll,
     Personnel,
     Tagging,
     TaggingEntry,
     User,
-    UserSubunitAssignment,
 )
-from parade_state.utils import utc_dt
 
 router = APIRouter()
 depends_admin = Depends(require_admin_user_flexible)
@@ -44,16 +40,6 @@ AUDIT_ENTITY_TYPES = [
     "column_mapping",
 ]
 AUDIT_ACTIONS = ["create", "update", "delete", "archive", "close", "finalize"]
-
-# Grouping status filter dropdown options (mirrors Grouping model enum)
-GROUPING_STATUSES = [
-    "draft",
-    "active",
-    "inactive",
-    "archived",
-    "closed",
-    "finalized",
-]
 
 # Deferment filter dropdown options (mirrors Deferment model enums)
 DEFERMENT_REASONS = [
@@ -95,6 +81,30 @@ def get_templates(request: Request) -> Environment:
             cache_size=0  # Disable caching completely
         )
     return _jinja_env
+
+
+def _no_permission_response(
+    request: Request, current_admin, page_name: str, active_page: str
+) -> HTMLResponse:
+    """Render the in-page no-access message for super-admin-only pages.
+
+    Plain admins see the page shell (sidebar + topbar) with a 403 status
+    instead of a silent redirect, so restricted pages stay discoverable.
+    """
+    env = get_templates(request)
+    template = env.get_template("admin/no_permission.html")
+    html = template.render(
+        request=request,
+        user={
+            "id": str(current_admin.id),
+            "name": current_admin.name,
+            "email": current_admin.email,
+            "role": current_admin.role,
+        },
+        active_page=active_page,
+        page_name=page_name,
+    )
+    return HTMLResponse(content=html, status_code=403)
 
 
 @router.get("/admin", response_class=HTMLResponse)
@@ -178,156 +188,6 @@ async def admin_dashboard(
     )
 
     return HTMLResponse(content=html_content)
-
-
-@router.get("/admin/groupings", response_class=HTMLResponse)
-async def admin_groupings(
-    request: Request,
-    status_filter: str | None = None,
-):
-    """Render the groupings management page.
-
-    Sessions (AM/PM) are now hardcoded and no longer user-managed — the
-    expanded session sub-views and create-session form have been removed.
-    Attendance is managed from the (forthcoming) attendance admin page.
-    """
-    current_admin = await get_current_admin_user_optional(request)
-    if not current_admin:
-        return RedirectResponse(url="/auth/login", status_code=302)
-
-    session_maker = get_session_maker()
-    async with session_maker() as db:
-        query = select(Grouping).order_by(Grouping.created_at.desc()).limit(100)
-        if status_filter:
-            query = query.where(Grouping.status == status_filter)
-
-        groupings_result = await db.execute(query)
-        groupings = groupings_result.scalars().all()
-
-    groupings_data = [
-        {
-            "id": str(g.id),
-            "name": g.name,
-            "mode": g.mode,
-            "status": g.status,
-            "valid_from": g.valid_from,
-            "valid_until": g.valid_until,
-            "notes": g.notes,
-            "created_at": g.created_at,
-        }
-        for g in groupings
-    ]
-
-    env = get_templates(request)
-    template = env.get_template("admin/groupings.html")
-
-    html_content = template.render(
-        request=request,
-        user={
-            "id": current_admin.id,
-            "name": current_admin.name,
-            "email": current_admin.email,
-            "role": current_admin.role,
-        },
-        active_page="groupings",
-        groupings=groupings_data,
-        status_filter=status_filter or "",
-        grouping_statuses=GROUPING_STATUSES,
-    )
-
-    return HTMLResponse(content=html_content)
-
-
-@router.get("/admin/groupings/{grouping_id}/personnel", response_class=HTMLResponse)
-async def admin_grouping_personnel(
-    request: Request,
-    grouping_id: str,
-):
-    """Render the grouping personnel management page (included/excluded lists)."""
-    current_admin = await get_current_admin_user_optional(request)
-    if not current_admin:
-        return RedirectResponse(url="/auth/login", status_code=302)
-
-    session_maker = get_session_maker()
-    async with session_maker() as db:
-        # Fetch grouping
-        result = await db.execute(
-            select(Grouping).where(Grouping.id == grouping_id)
-        )
-        grouping = result.scalar_one_or_none()
-        if not grouping:
-            return RedirectResponse(url="/admin/groupings", status_code=302)
-
-        # Fetch all personnel from the grouping's nominal roll
-        personnel_query = (
-            select(Personnel)
-            .where(Personnel.nominal_roll_id == grouping.nominal_roll_id)
-            .order_by(Personnel.unit, Personnel.sub_unit_1, Personnel.rank, Personnel.full_name)
-        )
-        personnel_result = await db.execute(personnel_query)
-        all_personnel = personnel_result.scalars().all()
-
-        # Fetch exclusion records for this grouping
-        exclusions_result = await db.execute(
-            select(GroupingPersonnelExclusion).where(
-                GroupingPersonnelExclusion.grouping_id == grouping_id
-            )
-        )
-        exclusions = exclusions_result.scalars().all()
-        excluded_map = {str(e.personnel_id) for e in exclusions}
-
-    # Build unified list with is_excluded flag
-    personnel_rows = []
-    included_count = 0
-    excluded_count = 0
-    for p in all_personnel:
-        is_excluded = str(p.id) in excluded_map
-        if is_excluded:
-            excluded_count += 1
-        else:
-            included_count += 1
-        personnel_rows.append({
-            "id": str(p.id),
-            "pers_no": p.pers_no,
-            "rank": p.rank,
-            "category": p.category,
-            "full_name": p.full_name,
-            "unit": p.unit,
-            "sub_unit_1": p.sub_unit_1,
-            "is_excluded": is_excluded,
-        })
-
-    env = get_templates(request)
-    template = env.get_template("admin/grouping_personnel.html")
-
-    html_content = template.render(
-        request=request,
-        user={
-            "id": current_admin.id,
-            "name": current_admin.name,
-            "email": current_admin.email,
-            "role": current_admin.role,
-        },
-        active_page="groupings",
-        grouping={
-            "id": str(grouping.id),
-            "name": grouping.name,
-            "status": grouping.status,
-        },
-        is_draft=grouping.status == "draft",
-        personnel_rows=personnel_rows,
-        included_count=included_count,
-        excluded_count=excluded_count,
-        total_count=len(all_personnel),
-    )
-
-    return HTMLResponse(content=html_content)
-
-
-@router.get("/admin/sessions", response_class=HTMLResponse)
-async def admin_sessions(request: Request):
-    """Redirect to combined groupings page (sessions managed there)."""
-    return RedirectResponse(url="/admin/groupings", status_code=302)
 
 
 @router.get("/admin/users", response_class=HTMLResponse)
@@ -511,89 +371,6 @@ async def admin_csv_upload(
     return HTMLResponse(content=html_content)
 
 
-@router.get("/admin/nominal-rolls", response_class=HTMLResponse)
-async def admin_nominal_rolls(
-    request: Request,
-):
-    """Render the nominal rolls management page.
-
-    Highlights the NR currently active for attendance; super-admins can
-    toggle "Use for Attendance" / "Deactivate Attendance" per row.
-    """
-    current_admin = await get_current_admin_user_optional(request)
-    if not current_admin:
-        return RedirectResponse(url="/auth/login", status_code=302)
-
-    session_maker = get_session_maker()
-    async with session_maker() as db:
-        # Most recent CsvUpload per nominal roll (provides original_filename).
-        latest_upload_subq = (
-            select(
-                CsvUpload.nominal_roll_id.label("nominal_roll_id"),
-                CsvUpload.original_filename.label("original_filename"),
-            )
-            .where(CsvUpload.nominal_roll_id.is_not(None))
-            .order_by(CsvUpload.nominal_roll_id, CsvUpload.uploaded_at.desc())
-            .subquery()
-        )
-
-        query = (
-            select(
-                NominalRoll.id,
-                NominalRoll.caa,
-                NominalRoll.attendance_active,
-                NominalRoll.attendance_activated_at,
-                NominalRoll.personnel_count,
-                NominalRoll.uploaded_at,
-                NominalRoll.csv_hash,
-                NominalRoll.label,
-                NominalRoll.remarks,
-                latest_upload_subq.c.original_filename,
-            )
-            .outerjoin(
-                latest_upload_subq,
-                latest_upload_subq.c.nominal_roll_id == NominalRoll.id,
-            )
-            .order_by(NominalRoll.uploaded_at.desc())
-            .limit(100)
-        )
-
-        rows = (await db.execute(query)).all()
-
-    nominal_rolls = [
-        {
-            "id": str(row.id),
-            "caa": row.caa,
-            "attendance_active": bool(row.attendance_active),
-            "attendance_activated_at": row.attendance_activated_at,
-            "personnel_count": row.personnel_count,
-            "uploaded_at": row.uploaded_at,
-            "csv_hash": row.csv_hash[:12] + "...",
-            "original_filename": row.original_filename or "—",
-            "label": row.label,
-            "remarks": row.remarks,
-        }
-        for row in rows
-    ]
-
-    env = get_templates(request)
-    template = env.get_template("admin/nominal_rolls.html")
-
-    html_content = template.render(
-        request=request,
-        user={
-            "id": current_admin.id,
-            "name": current_admin.name,
-            "email": current_admin.email,
-            "role": current_admin.role,
-        },
-        active_page="nominal-rolls",
-        nominal_rolls=nominal_rolls,
-    )
-
-    return HTMLResponse(content=html_content)
-
-
 @router.get("/admin/deferments", response_class=HTMLResponse)
 async def admin_deferments(
     request: Request,
@@ -605,7 +382,7 @@ async def admin_deferments(
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
     if current_admin.role != "super_admin":
-        return RedirectResponse(url="/admin", status_code=302)
+        return _no_permission_response(request, current_admin, "Deferments", "deferments")
 
     session_maker = get_session_maker()
     async with session_maker() as db:
@@ -711,7 +488,7 @@ async def admin_taggings(
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
     if current_admin.role != "super_admin":
-        return RedirectResponse(url="/admin", status_code=302)
+        return _no_permission_response(request, current_admin, "Taggings", "taggings")
 
     session_maker = get_session_maker()
     async with session_maker() as db:
@@ -949,7 +726,9 @@ async def admin_database_restore(request: Request):
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
     if current_admin.role != "super_admin":
-        return RedirectResponse(url="/admin", status_code=302)
+        return _no_permission_response(
+            request, current_admin, "DB Restore", "database-restore"
+        )
 
     from parade_state.config import get_settings
 

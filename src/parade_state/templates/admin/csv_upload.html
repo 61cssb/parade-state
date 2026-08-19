@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 
-{% block title %}CSV Upload - Parade State Admin{% endblock %}
+{% block title %}Upload NR - Parade State Admin{% endblock %}
 
-{% block page_title %}CSV Upload{% endblock %}
+{% block page_title %}Upload NR{% endblock %}
 
 {% block content %}
 <p style="color: #6b7280; margin-bottom: 1.5rem;">Upload &rarr; (automatic processing into a Nominal Roll) &rarr; Use. Step 2 below is only needed for previously uploaded files, after an automatic-processing failure, or to import taggings during processing.</p>
@@ -211,7 +211,7 @@
                     });
                     html += '</ul>';
                 }
-                html += '<p style="margin: 0.75rem 0 0; font-size: 0.85rem;"><a href="/admin/nominal-rolls" style="color: #2563eb;">View nominal rolls &rarr;</a></p></div>';
+                html += '<p style="margin: 0.75rem 0 0; font-size: 0.85rem;"><a href="/nominal-roll" style="color: #2563eb;">View nominal rolls &rarr;</a></p></div>';
                 statusDiv.innerHTML = html;
             } else {
                 statusDiv.innerHTML = '<p style="color: #ef4444;">Processing failed: ' + (data.detail || 'Unknown error') + '</p>';
