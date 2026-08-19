@@ -82,14 +82,23 @@ jobs:
           test -s backup.dump
 
       - name: Encrypt dump
+        env:
+          AGE_RECIPIENT: ${{ secrets.AGE_PUBLIC_KEY }}
         run: |
           TIMESTAMP=$(date -u +%Y%m%dT%H%MZ)
           echo "BACKUP_FILE=parade-state-${TIMESTAMP}.dump.age" >> "$GITHUB_ENV"
-          age -r "${{ secrets.AGE_PUBLIC_KEY }}" -o "parade-state-${TIMESTAMP}.dump.age" backup.dump
+          age -r "$AGE_RECIPIENT" -o "parade-state-${TIMESTAMP}.dump.age" backup.dump
 
       - name: Configure rclone
+        env:
+          # Secrets must flow through env, never ${{ }} interpolation inside
+          # run scripts: the JSON's double quotes would terminate the shell's
+          # own quoting and corrupt the file written to disk
+          GDRIVE_SA_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
         run: |
-          printf '%s' "${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}" > service-account.json
+          printf '%s' "$GDRIVE_SA_JSON" > service-account.json
+          python3 -m json.tool service-account.json >/dev/null \
+            || { echo "::error::GDRIVE_SERVICE_ACCOUNT_JSON is not valid JSON"; exit 1; }
           cat > rclone.conf <<'EOF'
           [gdrive]
           type = drive
