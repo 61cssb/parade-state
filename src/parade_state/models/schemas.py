@@ -558,6 +558,12 @@ class CsvUploadResponse(BaseModel):
     uploaded_at: utc_dt.datetime
     uploaded_by: str
     is_duplicate: bool = False
+    # Present only when the caller opted into auto-processing on the
+    # upload endpoint: the created-NominalRoll pipeline result on
+    # success, or the processing failure reason in ``process_error``.
+    # The upload itself is always stored either way.
+    process_result: "CsvUploadProcessResponse | None" = None
+    process_error: str | None = None
 
     class Config:
         from_attributes = True
@@ -609,6 +615,11 @@ class CsvUploadProcessResponse(BaseModel):
     rows_skipped: int
     tagging_entries_imported: int = 0
     unmatched: list[CsvUploadProcessUnmatchedItem] = []
+
+
+# Resolve CsvUploadResponse's forward reference to the process result
+# schema defined above.
+CsvUploadResponse.model_rebuild()
 
 
 # ============================================================================
