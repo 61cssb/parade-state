@@ -44,8 +44,15 @@ jobs:
     steps:
       - name: Install postgresql client and age
         run: |
+          # PGDG repo: the Railway server is PostgreSQL 18, and pg_dump must
+          # be same-major-or-newer; Ubuntu's default only carries 16
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends postgresql-client-16
+          sudo apt-get install -y --no-install-recommends postgresql-client-18
           curl -sSfL https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-amd64.tar.gz \
             | sudo tar xz -C /usr/local/bin --strip-components=1 age/age age/age-keygen
 

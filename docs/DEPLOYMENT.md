@@ -689,9 +689,9 @@ age -d -i parade-state-backup.key -o backup.dump parade-state-<timestamp>.dump.a
 
 ```bash
 docker run -d --name restore-check -e POSTGRES_PASSWORD=test \
-  -e POSTGRES_USER=test -p 127.0.0.1:55433:5432 postgres:16-alpine
-# pg_restore must come from a client >= the server's major version
-docker run --rm -i postgres:16-alpine pg_restore -U test --no-owner \
+  -e POSTGRES_USER=test -p 127.0.0.1:55433:5432 postgres:18-alpine
+# pg_restore must come from a client >= the dump's major version (18)
+docker run --rm -i postgres:18-alpine pg_restore -U test --no-owner \
   -h 172.17.0.1 -d postgres < backup.dump   # adjust host for your docker network
 DATABASE_URL=postgresql://test:test@127.0.0.1:55433/postgres \
   uv run uvicorn parade_state.main:app --port 8123
@@ -706,9 +706,11 @@ curl -sf http://127.0.0.1:8123/health
 pg_restore --no-owner --no-privileges --dbname="$RESTORE_DATABASE_URL" backup.dump
 ```
 
-Use a `pg_restore` matching the server's major version (the workflow pins
-`postgresql-client-16`; mismatched newer clients emit settings older servers
-reject — seen with v18 client vs v16 server).
+Use a `pg_restore` matching the server's major version (the production
+server is PostgreSQL 18 and the workflow installs `postgresql-client-18`
+from the PGDG repo). Clients must be same-major-or-newer than the dump;
+mismatched newer clients also emit settings older servers reject (seen
+with a v18 client against a v16 server).
 
 The dump includes `alembic_version`, so the app's startup
 `alembic upgrade head` is a no-op after restore. Point the app service's

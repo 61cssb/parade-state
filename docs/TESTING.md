@@ -176,9 +176,9 @@ server — each test then gets its own freshly created database on that
 server (dropped afterwards), so isolation matches the SQLite path:
 
 ```bash
-# One-off local Postgres
+# One-off local Postgres (18 matches the production server)
 docker run -d --name ps-pg-test -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test \
-  -e POSTGRES_DB=test -p 127.0.0.1:55432:5432 postgres:16-alpine
+  -e POSTGRES_DB=test -p 127.0.0.1:55432:5432 postgres:18-alpine
 
 TEST_DATABASE_URL=postgresql://test:test@127.0.0.1:55432/test \
   uv run pytest --no-cov -q
