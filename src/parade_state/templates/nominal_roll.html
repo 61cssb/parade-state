@@ -27,6 +27,31 @@
         border-radius: 0.25rem;
         font-size: 0.875rem;
     }
+    /* Staged (unapplied) cell edit — darker than the saved-tagging row
+       (#fef3c7). The span's own background paints over the row yellow, so it
+       reads on already-changed rows too. */
+    .cell-edit.pending {
+        background-color: #fcd34d !important;
+        border-color: #b45309;
+    }
+    /* Floating unapplied-changes bar: fixed bottom-center, above the suggest
+       panel (z-50), below modals (z-100). */
+    .pending-bar {
+        position: fixed;
+        bottom: 1.25rem;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 90;
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        background: #fff;
+        border: 1px solid #d1d5db;
+        border-radius: 0.5rem;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        padding: 0.6rem 1rem;
+        font-size: 0.875rem;
+    }
     /* Custom suggestion panel — replaces the native datalist popup so the
        list anchors under the cell instead of over it (native popup placement
        is browser-controlled and unusable inside tables). */
@@ -84,9 +109,11 @@
     }
 </style>
 
-{# Super-admin click-to-edit cell for unit/subunit values. Edits are sent to
-   PATCH /api/v1/personnel/{id}, which records them as a tagging overlay —
-   the NR itself stays read-only and the row turns yellow on reload. #}
+{# Super-admin click-to-edit cell for unit/subunit values. Edits are staged
+   client-side (cell turns darker yellow) and sent as one PATCH
+   /api/v1/personnel/{id} per person on Apply, which records them as a tagging
+   overlay — the NR itself stays read-only and the row turns yellow once
+   applied. #}
 {% macro editable_cell(pid, field, value) -%}
 <span class="cell-edit" data-pid="{{ pid }}" data-field="{{ field }}" data-value="{{ value or '' }}" title="Click to edit">{{ value or '—' }}</span>
 {%- endmacro %}
@@ -737,6 +764,9 @@
 <script>
     const USER_ID = "{{ user.id }}";
     const USER_ROLE = "{{ user.role }}";
+    // Staged (unapplied) cell edits persist per roll, so they survive a page
+    // refresh. Cleared only by Apply (per person) or Discard (all).
+    const STAGE_KEY = 'ps:nr-edits:' + "{{ selected_nominal_roll.id }}";
 
     // Suggestion lists for the cell editor (unscoped NR values; typed
     // values outside these lists are accepted too).
@@ -858,13 +888,174 @@
         panelItems[activeIndex].scrollIntoView({ block: 'nearest' });
     }
 
+    // ---- Staged (unapplied) edits ---------------------------------------
+    // staged: {pid: {field: value|null}} — null means the sub-unit is cleared.
+    let staged = loadStaged();
+    let barEl = null;     // the floating unapplied-changes bar (created lazily)
+    let barBusy = false;  // an Apply is in flight
+
+    function loadStaged() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(STAGE_KEY) || '{}');
+            return (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+                ? parsed : {};
+        } catch (e) {
+            return {};  // corrupt entry → start clean
+        }
+    }
+
+    function persistStaged() {
+        if (Object.keys(staged).length) {
+            localStorage.setItem(STAGE_KEY, JSON.stringify(staged));
+        } else {
+            localStorage.removeItem(STAGE_KEY);
+        }
+    }
+
+    function stagedValue(pid, field) {
+        return staged[pid] && field in staged[pid] ? staged[pid][field] : undefined;
+    }
+
+    function setStaged(pid, field, value) {
+        (staged[pid] = staged[pid] || {})[field] = value;
+        persistStaged();
+        renderBar();
+    }
+
+    function unstageField(pid, field) {
+        if (!staged[pid]) return;
+        delete staged[pid][field];
+        if (!Object.keys(staged[pid]).length) delete staged[pid];
+        persistStaged();
+        renderBar();
+    }
+
+    function clearStagedPid(pid) {
+        delete staged[pid];
+        persistStaged();
+        renderBar();
+    }
+
+    function spanFor(pid, field) {
+        return document.querySelector(
+            '.cell-edit[data-pid="' + pid + '"][data-field="' + field + '"]');
+    }
+
+    // Sync a cell span to its staged-or-server value: text + pending class.
+    // Used after every stage/unstage/cancel and on page-load rehydration.
+    function paintSpan(span) {
+        const sv = stagedValue(span.dataset.pid, span.dataset.field);
+        const isPending = sv !== undefined && (sv || '') !== (span.dataset.value || '');
+        span.textContent = (isPending ? sv : span.dataset.value) || '—';
+        span.classList.toggle('pending', isPending);
+    }
+
+    function stagedCellCount() {
+        return Object.keys(staged).reduce((n, pid) => n + Object.keys(staged[pid]).length, 0);
+    }
+
+    function renderBar() {
+        const cells = stagedCellCount();
+        if (!cells) {
+            if (barEl) { barEl.remove(); barEl = null; }
+            return;
+        }
+        if (!barEl) {
+            barEl = document.createElement('div');
+            barEl.className = 'pending-bar';
+            const label = document.createElement('span');
+            label.id = 'pending-count';
+            label.style.color = '#374151';
+            const applyBtn = document.createElement('button');
+            applyBtn.type = 'button';
+            applyBtn.className = 'btn btn-primary';
+            applyBtn.style.padding = '0.35rem 0.9rem';
+            applyBtn.textContent = 'Apply';
+            applyBtn.onclick = applyStaged;
+            const discardBtn = document.createElement('button');
+            discardBtn.type = 'button';
+            discardBtn.className = 'btn';
+            discardBtn.style.padding = '0.35rem 0.9rem';
+            discardBtn.style.color = '#6b7280';
+            discardBtn.textContent = 'Discard';
+            discardBtn.onclick = discardStaged;
+            barEl.appendChild(label);
+            barEl.appendChild(applyBtn);
+            barEl.appendChild(discardBtn);
+            document.body.appendChild(barEl);
+        }
+        barEl.querySelector('#pending-count').textContent =
+            cells + ' unapplied change' + (cells === 1 ? '' : 's') +
+            ' \u00b7 ' + Object.keys(staged).length + ' personnel';
+    }
+
+    async function applyStaged() {
+        if (barBusy || !stagedCellCount()) return;
+        if (activeFinish) activeFinish(true);  // commit any open editor first
+        barBusy = true;
+        if (barEl) barEl.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+        const failures = [];
+        // One PATCH per person carrying all their staged fields; the endpoint
+        // merges the fields into a single tagging entry. Each success is
+        // persisted immediately, so a reload keeps only the failures staged.
+        for (const pid of Object.keys(staged)) {
+            try {
+                const res = await fetch(
+                    '/api/v1/personnel/' + encodeURIComponent(pid) +
+                    '?user_id=' + USER_ID + '&user_role=' + USER_ROLE,
+                    {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(staged[pid]),
+                    }
+                );
+                if (res.ok) {
+                    clearStagedPid(pid);
+                } else {
+                    const data = await res.json().catch(() => ({}));
+                    failures.push(pid + ': ' + (data.detail || 'HTTP ' + res.status));
+                }
+            } catch (err) {
+                failures.push(pid + ': network error — ' + err.message);
+            }
+        }
+        if (failures.length) {
+            alert('Failed to apply updates for ' + failures.length + ' personnel:\n' +
+                  failures.join('\n') + '\n\nThose changes remain staged.');
+        }
+        location.reload();  // rows re-render yellow with effective values
+    }
+
+    function discardStaged() {
+        if (barBusy) return;
+        if (activeFinish) activeFinish(false);
+        const cells = stagedCellCount();
+        if (!cells) return;
+        if (!confirm('Discard all ' + cells + ' unapplied change' +
+                     (cells === 1 ? '' : 's') + '?')) return;
+        for (const pid of Object.keys(staged)) {
+            for (const field of Object.keys(staged[pid])) {
+                const span = spanFor(pid, field);
+                if (span) {
+                    span.classList.remove('pending');
+                    span.textContent = span.dataset.value || '—';
+                }
+            }
+        }
+        staged = {};
+        persistStaged();
+        renderBar();
+    }
+
     function startCellEdit(span) {
         const input = document.createElement('input');
         input.type = 'text';
         input.className = 'cell-edit-input';
-        // Keep the current text with the cursor at its end — the panel opens
+        // Prefill with the staged value if this cell has an unapplied edit,
+        // else the server value. Keep the cursor at the end — the panel opens
         // unfiltered, so the prefill doesn't hide the suggestions.
-        input.value = span.dataset.value || '';
+        const stagedV = stagedValue(span.dataset.pid, span.dataset.field);
+        input.value = stagedV !== undefined ? (stagedV || '') : (span.dataset.value || '');
         // Match the cell's current width so opening/closing the editor never
         // shifts the table layout (a shift would redirect later clicks).
         input.style.width = Math.ceil(span.getBoundingClientRect().width) + 'px';
@@ -881,9 +1072,9 @@
             activeFinish = null;
             closeSuggest();
             if (save) {
-                saveCellEdit(span, input.value.trim());
+                stageCellEdit(span, input.value.trim());
             } else {
-                span.textContent = span.dataset.value || '—';
+                paintSpan(span);  // cancel restores staged-or-server value
             }
         };
         activeFinish = finish;
@@ -911,48 +1102,52 @@
         input.addEventListener('blur', function() { finish(false); });
     }
 
-    async function saveCellEdit(span, value) {
+    // Stage the edit instead of saving it: the cell turns darker yellow and
+    // the floating bar offers Apply (one PATCH per person) / Discard. Staged
+    // edits persist per roll in localStorage, so they survive a refresh.
+    function stageCellEdit(span, value) {
         const pid = span.dataset.pid;
         const field = span.dataset.field;
-        const original = span.dataset.value || '';
+        const stagedV = stagedValue(pid, field);
+        const current = stagedV !== undefined ? (stagedV || null)
+                                            : ((span.dataset.value || '') || null);
 
-        // No change → treat as cancel.
-        if ((value || null) === (original || null)) {
-            span.textContent = original || '—';
+        // No change vs what's already shown → treat as cancel.
+        if ((value || null) === current) {
+            paintSpan(span);
             return;
         }
 
         if (field === 'unit' && !value) {
             alert('Unit is required — to move the person, pick or type a unit.');
-            span.textContent = original || '—';
+            paintSpan(span);
             return;
         }
 
-        const body = {};
-        body[field] = value || null;  // empty sub-unit → cleared
+        // Editing back to the server value unstages the cell.
+        if ((value || null) === ((span.dataset.value || '') || null)) {
+            unstageField(pid, field);
+        } else {
+            setStaged(pid, field, value || null);  // empty sub-unit → cleared
+        }
+        paintSpan(span);
+    }
 
-        try {
-            const res = await fetch(
-                '/api/v1/personnel/' + encodeURIComponent(pid) +
-                '?user_id=' + USER_ID + '&user_role=' + USER_ROLE,
-                {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body),
-                }
-            );
-            if (res.ok) {
-                location.reload();  // row re-renders yellow with effective value
+    // Rehydrate staged edits on load: paint the cells still in view and drop
+    // any field that now matches the server value (already applied elsewhere).
+    // Personnel filtered out of the current view keep their staged edits.
+    for (const pid of Object.keys(staged)) {
+        for (const field of Object.keys(staged[pid])) {
+            const span = spanFor(pid, field);
+            if (!span) continue;
+            if ((staged[pid][field] || '') === (span.dataset.value || '')) {
+                unstageField(pid, field);
             } else {
-                const data = await res.json();
-                alert('Save failed: ' + (data.detail || 'Unknown error'));
-                span.textContent = span.dataset.value || '—';
+                paintSpan(span);
             }
-        } catch (err) {
-            alert('Network error: ' + err.message);
-            span.textContent = span.dataset.value || '—';
         }
     }
+    renderBar();
 </script>
 {% endif %}
 {% endblock %}
