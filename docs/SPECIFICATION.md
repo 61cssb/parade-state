@@ -621,7 +621,31 @@ deferment does not affect `callup_status`. `Not called up` and `Do not call up`
 belong to a later workflow phase and are explicitly excluded from driving
 callup transitions.
 
-### 4.7 Key Constraints Summary
+### 4.7 Data Purge (Testing-Only)
+
+Super-admin action (Admin → Settings) that deletes **every Nominal Roll and
+all downstream data** in one transaction: personnel, attendance,
+deferments, taggings, groupings (with their overrides, exclusions, notes,
+and access grants), column metadata, CSV uploads, and NR-bound subunit
+assignments.
+
+**Preserved:** users, access levels, sessions, global column mappings, and
+the audit log. The purge itself is audit-logged (`entity_type=database`,
+`action=delete`) with per-table deleted-row counts.
+
+**Guards:**
+
+- Super-admin only (403 otherwise)
+- Type-to-confirm: the request must carry `confirmation=PURGE`
+- Gated by `PURGE_ENABLED` (default: off in production, on elsewhere)
+
+**Purpose:** easy re-testing of CSV upload from a clean slate. Deleting
+`csv_uploads` too is deliberate — its unique `sha256_hash` would otherwise
+reject re-uploading the same test file. The feature is testing-only and
+may be disabled (`PURGE_ENABLED=false`) or removed entirely before
+production use.
+
+### 4.8 Key Constraints Summary
 
 | Table | Unique | Index | Purpose |
 |-------|--------|-------|---------|

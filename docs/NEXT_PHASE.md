@@ -15,7 +15,7 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ## Current Snapshot
 
-- **Tests:** 419 SQLite / 422 Postgres passing. The suite runs against
+- **Tests:** 428 SQLite passing. The suite runs against
   Postgres by setting `TEST_DATABASE_URL` (per-test databases).
 - **Access model:** `super_admin` + `admin` only. Unknown Google
   sign-ins auto-register as `unrecognised` (no access, no session);
@@ -25,7 +25,9 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   Google Drive (30-day retention); super-admin UI database restore at
   `/admin/database-restore` (verify-then-swap; production-validated
   2026-08-19 including the older-dump migration path). `RESTORE_ENABLED`
-  kill switch.
+  kill switch. Testing-only super-admin **data purge** at Settings
+  (`/admin/settings`, deletes all NRs + downstream data; audit-logged;
+  `PURGE_ENABLED` gate, default off in production).
 
 ### What the app does today
 
@@ -44,7 +46,8 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 - Groupings: lifecycle, personnel exclusions/overrides, date editing
 - Deferments (super-admin CRUD; `Personnel.callup_status`)
 - Admin UI: dashboard, users, audit log, groupings, nominal rolls,
-  taggings, deferments, CSV upload, DB restore
+  taggings, deferments, CSV upload, DB restore, Settings purge
+  (testing-only)
 - User-facing views — `/grouping`, `/attendance`, `/nominal-roll` —
   built, but admin-gated pending the viewer role (below)
 

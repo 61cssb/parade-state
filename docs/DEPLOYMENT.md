@@ -97,6 +97,11 @@ DEBUG=false
 # Optional: auth cookie Secure flag (defaults to true in production;
 # override to false only for local HTTP testing of a production build)
 # AUTH_COOKIE_SECURE=true
+
+# Optional: testing-only admin-UI purge of all Nominal Rolls and
+# downstream data (Settings page; audit-logged). Defaults to false in
+# production, true elsewhere. Keep disabled on the production deployment.
+# PURGE_ENABLED=false
 ```
 
 ### Production Hardening Behavior
