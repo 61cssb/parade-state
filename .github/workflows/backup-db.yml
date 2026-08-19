@@ -3,7 +3,7 @@
 # Pipeline: pg_dump (custom format) -> age public-key encryption ->
 # rclone upload to the shared Drive folder -> 30-day retention sweep.
 #
-# Required secrets (setup guide in docs/DEPLOYMENT.md - "Backups"):
+# Required secrets (setup guide: docs/BACKUP_SETUP.md):
 #   RAILWAY_PUBLIC_DATABASE_URL  Railway Postgres public TCP proxy URL
 #                                (starts with postgresql://, includes
 #                                sslmode=require; internal URL won't work
@@ -11,11 +11,15 @@
 #   AGE_PUBLIC_KEY               age X25519 recipient (public key). The
 #                                matching private key (identity file) stays
 #                                with the super-admin - GitHub never sees it.
-#   GDRIVE_SERVICE_ACCOUNT_JSON  Google service-account JSON key for the
-#                                account the backup folder is shared with
+#   GDRIVE_OAUTH_TOKEN           Token JSON printed by
+#                                `rclone authorize "drive"` run by the
+#                                super-admin - uploads are owned by their
+#                                Google account (service accounts can no
+#                                longer own My Drive files)
 #
 # Required repository variable:
-#   GDRIVE_ROOT_FOLDER_ID        Drive folder ID the SA can write to
+#   GDRIVE_ROOT_FOLDER_ID        Drive folder ID (super-admin's Drive) to
+#                                write backups into
 #
 # Note: GitHub disables scheduled workflows after 60 days without repo
 # activity. Run a manual dispatch (or push any commit) during dormant
@@ -41,6 +45,14 @@ jobs:
     env:
       DB_URL: ${{ secrets.RAILWAY_PUBLIC_DATABASE_URL }}
       ROOT_FOLDER: ${{ vars.GDRIVE_ROOT_FOLDER_ID }}
+      # Google no longer lets service accounts own files in a personal
+      # My Drive (403 storageQuotaExceeded), so auth is the super-admin's
+      # own OAuth token from `rclone authorize "drive"` (see
+      # docs/BACKUP_SETUP.md). rclone reads config from RCLONE_CONFIG_*
+      # env vars - no config file, no quoting hazards.
+      RCLONE_CONFIG_GDRIVE_TYPE: drive
+      RCLONE_CONFIG_GDRIVE_SCOPE: drive
+      RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.GDRIVE_OAUTH_TOKEN }}
     steps:
       - name: Install postgresql client and age
         run: |
@@ -89,33 +101,21 @@ jobs:
           echo "BACKUP_FILE=parade-state-${TIMESTAMP}.dump.age" >> "$GITHUB_ENV"
           age -r "$AGE_RECIPIENT" -o "parade-state-${TIMESTAMP}.dump.age" backup.dump
 
-      - name: Configure rclone
-        env:
-          # Secrets must flow through env, never ${{ }} interpolation inside
-          # run scripts: the JSON's double quotes would terminate the shell's
-          # own quoting and corrupt the file written to disk
-          GDRIVE_SA_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+      - name: Validate Drive OAuth token
         run: |
-          printf '%s' "$GDRIVE_SA_JSON" > service-account.json
-          python3 -m json.tool service-account.json >/dev/null \
-            || { echo "::error::GDRIVE_SERVICE_ACCOUNT_JSON is not valid JSON"; exit 1; }
-          cat > rclone.conf <<'EOF'
-          [gdrive]
-          type = drive
-          scope = drive
-          service_account_file = service-account.json
-          EOF
+          printf '%s' "$RCLONE_CONFIG_GDRIVE_TOKEN" | python3 -m json.tool >/dev/null \
+            || { echo "::error::GDRIVE_OAUTH_TOKEN is not valid JSON"; exit 1; }
 
       - name: Upload to Google Drive
         run: |
-          rclone --config rclone.conf copy "$BACKUP_FILE" gdrive: \
+          rclone copy "$BACKUP_FILE" gdrive: \
             --drive-root-folder-id "$ROOT_FOLDER" --transfers 1
 
       - name: Enforce retention (delete backups older than 30 days)
         run: |
-          rclone --config rclone.conf delete gdrive: \
+          rclone delete gdrive: \
             --drive-root-folder-id "$ROOT_FOLDER" --min-age 30d
 
       - name: Cleanup workspace
         if: always()
-        run: rm -f backup.dump service-account.json rclone.conf "$BACKUP_FILE"
+        run: rm -f backup.dump "$BACKUP_FILE"

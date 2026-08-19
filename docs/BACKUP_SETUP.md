@@ -69,7 +69,7 @@ Settings → Secrets and variables → Actions.
 |---|---|---|
 | `RAILWAY_PUBLIC_DATABASE_URL` | **Secret** | full URL from Step 1 |
 | `AGE_PUBLIC_KEY` | **Secret** | `age1...` public key from Step 3 |
-| `GDRIVE_SERVICE_ACCOUNT_JSON` | **Secret** | entire JSON file from Step 4 |
+| `GDRIVE_OAUTH_TOKEN` | **Secret** | token JSON from Step 4 |
 | `GDRIVE_ROOT_FOLDER_ID` | **Variable** ⚠️ | folder ID from Step 5 |
 
 > ⚠️ **Pitfall (hit during setup):** `GDRIVE_ROOT_FOLDER_ID` must be a
@@ -95,33 +95,51 @@ age-keygen -o parade-state-backup.key
 Rotating later: generate a new keypair, update the secret; keep the old
 private key until all backups made with it have aged out of retention.
 
-## Step 4 — Google Cloud: service account
+## Step 4 — Google Drive: authorize rclone as the super-admin
 
-1. console.cloud.google.com → create/reuse a project (e.g.
-   `parade-state-backups`)
-2. APIs & Services → Library → **Google Drive API** → Enable
-   (⚠️ forgetting this, or enabling it on a different project than the
-   service account, is the usual cause of 403s on upload)
-3. IAM & Admin → Service Accounts → Create (`backup-writer`) → open it →
-   Keys → Add key → **JSON** → download
-4. Entire file contents → secret `GDRIVE_SERVICE_ACCOUNT_JSON`
-5. Copy the `client_email` from the JSON — needed in Step 5
+> **Why user OAuth and not a service account:** Google no longer allows
+> service accounts to own files in a personal My Drive — uploads fail
+> with `403 storageQuotaExceeded` telling you to use shared drives or
+> OAuth delegation. Shared Drives need a paid Workspace account, so for
+> a consumer Gmail the supported path is the super-admin authorizing
+> rclone with their own account. Backups are then owned by that account
+> and count against its storage quota.
+
+On the super-admin's own machine (needs a browser):
+
+```bash
+# install rclone first: brew install rclone / pacman -S rclone /
+# apt install rclone / https://rclone.org/downloads
+rclone authorize "drive"
+```
+
+A browser opens → sign in as the super-admin → approve access. The
+command prints a **token JSON** (one line starting `{"access_token":...`).
+Copy the entire JSON — including the braces — and paste it as the secret
+**`GDRIVE_OAUTH_TOKEN`**.
+
+Notes:
+
+- The token contains a long-lived refresh token; rclone renews access
+  tokens automatically. It dies if the super-admin revokes the app in
+  their Google Account settings or (sometimes) changes their Google
+  password — if the nightly job suddenly 401s, re-run
+  `rclone authorize "drive"` and update the secret.
+- rclone's shared OAuth client is used by default; for a
+  higher-volume deployment, register your own OAuth client and pass its
+  ID/secret to rclone.
 
 ## Step 5 — Google Drive: the backup folder
 
-The folder must be created by **the super-admin in their own Drive** —
-human-owned, human-visible, on the human's storage quota. (A folder
-created *by the service account* would live in the SA's invisible
-storage and orphan if the SA is ever deleted — do not invert this.)
+Created by **the super-admin in their own Drive** — human-owned,
+human-visible, on the human's storage quota. With user-OAuth auth no
+sharing step is needed; the token already acts as the super-admin.
 
 1. drive.google.com (signed in as the super-admin) → New folder, e.g.
    `parade-state backups`
-2. Share → paste the `client_email` from Step 4 → role **Editor**.
-   Google warns the address is external — that is normal for service
-   accounts.
-3. Open the folder; copy the ID from the URL:
+2. Open the folder; copy the ID from the URL:
    `https://drive.google.com/drive/folders/<FOLDER_ID>`
-4. `<FOLDER_ID>` → repository **variable** `GDRIVE_ROOT_FOLDER_ID`
+3. `<FOLDER_ID>` → repository **variable** `GDRIVE_ROOT_FOLDER_ID`
 
 ## Step 6 — First run and verification
 
@@ -157,8 +175,9 @@ The full tested restore procedure lives in
 | `pg_dump: connection ... failed` immediately | Secret holds only `host:port` | Replace with the full `postgresql://` URL |
 | Connection works locally, fails in Actions | `sslmode` missing/typo'd in the URL | Append `?sslmode=require` |
 | Job env shows `ROOT_FOLDER:` empty; upload misbehaves | Folder ID filed as a **secret**, not variable | Delete secret; re-add under the Variables tab |
-| Upload: `403` / `directory not found` | Drive API not enabled on the SA's project, folder shared with a typo'd `client_email`, or wrong folder ID | Verify Step 4 item 2 and Step 5 |
-| Upload: `invalid character 't' looking for beginning of object key string` | The service-account file corrupted in transit — historically by interpolating the secret directly into a shell script (its double quotes broke quoting); the workflow now passes secrets via `env:` and validates the JSON before use | If it recurs, the pasted secret itself is bad — re-validate the downloaded JSON per Step 4 |
+| Upload: `403 ... storageQuotaExceeded ... Service Accounts do not have storage quota` | Auth set up as a service account — Google no longer allows SAs to own My Drive files on consumer accounts | Use the user-OAuth token from Step 4 (`GDRIVE_OAUTH_TOKEN`) |
+| Upload: `401` / `invalid_grant` | The OAuth refresh token was revoked (app removed in Google Account settings, Google password change, or six months unused) | Re-run `rclone authorize "drive"`, update `GDRIVE_OAUTH_TOKEN` |
+| Upload: `invalid character 't' looking for beginning of object key string` | A JSON secret corrupted in transit — historically by interpolating the secret directly into a shell script (its double quotes broke quoting); the workflow now passes secrets via `env:` and validates before use | If it recurs, the pasted secret itself is bad — re-copy the full JSON from `rclone authorize` |
 | `FATAL: the database system is starting up` | Postgres cold-starting (serverless) or restarting | The workflow now polls up to 2 min; if it persists, the DB is crash-looping — check Railway |
 | `pg_dump: server version mismatch` | Server major newer than the client (server is PostgreSQL 18; the runner's preinstalled client 16 shadows the installed 18 unless `/usr/lib/postgresql/18/bin` is first on `PATH`) | Workflow already handles this; if Railway upgrades the server major again, bump `postgresql-client-NN` **and** the PATH line in the workflow |
 | `rclone: command not found` | Runner image no longer preinstalls rclone | Workflow already installs it |

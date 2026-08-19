@@ -628,8 +628,8 @@ Why this setup:
 
 The full step-by-step runbook — including every pitfall hit during the
 original setup (full-URL requirement, `sslmode`, variable-vs-secret
-distinction, Drive API enablement, client/server version rules) and a
-troubleshooting table — lives in
+distinction, Google's service-account storage-quota change, client/server
+version rules) and a troubleshooting table — lives in
 **[BACKUP_SETUP.md](BACKUP_SETUP.md)**.
 
 Summary of what it provisions:
@@ -637,9 +637,11 @@ Summary of what it provisions:
 - Railway public TCP proxy → GitHub secret `RAILWAY_PUBLIC_DATABASE_URL`
 - age keypair → secret `AGE_PUBLIC_KEY` (private key in the super-admin's
   password manager — the only way to restore)
-- Google service account with Drive API → secret `GDRIVE_SERVICE_ACCOUNT_JSON`
-- Super-admin-owned Drive folder shared to the service account →
-  repository **variable** `GDRIVE_ROOT_FOLDER_ID`
+- Google Drive OAuth token from `rclone authorize "drive"` run by the
+  super-admin (service accounts can no longer own My Drive files) →
+  secret `GDRIVE_OAUTH_TOKEN`
+- Super-admin-owned Drive folder → repository **variable**
+  `GDRIVE_ROOT_FOLDER_ID`
 - One manual workflow run to verify a `parade-state-<timestamp>.dump.age`
   lands in Drive
 
