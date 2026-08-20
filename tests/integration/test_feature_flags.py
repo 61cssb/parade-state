@@ -141,6 +141,39 @@ async def test_flag_off_blocks_pages_even_for_super_admin(
 
 
 @pytest.mark.asyncio
+async def test_flag_off_page_renders_html_disabled_page(
+    client: TestClient, db_session: AsyncSession, monkeypatch
+):
+    """Page routes answer with a styled HTML 404 saying the feature is
+    deliberately switched off — not a JSON blob, so bookmark/saved-link
+    users know it is not a broken URL. Signed-in users keep the app
+    shell; anonymous visitors get the same page without the shell."""
+    _set_flags(monkeypatch, deferments=False, grouping=False)
+    sa = await _make_super_admin(db_session)
+    await _sign_in(client, db_session, sa)
+
+    grouping = client.get("/grouping")
+    assert grouping.status_code == 404
+    assert grouping.headers["content-type"].startswith("text/html")
+    body = grouping.text
+    assert "Grouping is switched off on this deployment" in body
+    assert "Your link is fine" in body
+    assert "sidebar-nav" in body  # app shell renders around the message
+
+    deferments = client.get("/admin/deferments")
+    assert deferments.status_code == 404
+    assert "Deferments is switched off on this deployment" in deferments.text
+
+    client.cookies.delete(AUTH_COOKIE_NAME)
+    anon = client.get("/grouping")
+    assert anon.status_code == 404
+    assert anon.headers["content-type"].startswith("text/html")
+    assert "Grouping is switched off on this deployment" in anon.text
+    # No user → no nav links (the .sidebar-nav CSS rule itself may ship).
+    assert 'href="/admin"' not in anon.text
+
+
+@pytest.mark.asyncio
 async def test_flag_off_blocks_pages_before_auth(client: TestClient, monkeypatch):
     """The gate runs before the login redirect: anonymous visitors also
     get 404, not a redirect that would confirm the route exists."""
@@ -169,6 +202,7 @@ async def test_flag_off_blocks_api_even_for_super_admin(
     for method, url in requests:
         response = client.request(method, url, params=SUPER_ADMIN_PARAMS)
         assert response.status_code == 404, f"{method} {url}"
+        assert response.headers["content-type"].startswith("application/json")
         assert "not available on this deployment" in response.json()["detail"]
 
 

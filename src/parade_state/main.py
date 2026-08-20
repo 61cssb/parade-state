@@ -6,8 +6,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
+from jinja2 import Environment, FileSystemLoader
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import RedirectResponse
 
@@ -31,9 +33,10 @@ from parade_state.api import (
     tagging,
     users,
 )
+from parade_state.auth.admin_dependencies import get_current_admin_user_optional
 from parade_state.config import Settings, get_settings
 from parade_state.db import init_database
-from parade_state.features import require_feature
+from parade_state.features import FeatureDisabledError, feature_label, require_feature
 from parade_state.web.attendance import router as web_attendance_router
 from parade_state.web.auth import router as web_auth_router
 from parade_state.web.grouping import router as web_grouping_router
@@ -176,6 +179,51 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(
         admin_purge.router, prefix="/api/v1/admin", tags=["admin-purge"]
     )
+
+    @app.exception_handler(FeatureDisabledError)
+    async def feature_disabled_handler(
+        request: Request, exc: FeatureDisabledError
+    ) -> HTMLResponse | JSONResponse:
+        """A flag-gated feature was reached while its flag is off.
+
+        API routes keep the JSON 404 (detail names the env var for
+        operators); page routes get a styled HTML 404 explaining the
+        feature is deliberately disabled, so bookmark / saved-link users
+        do not mistake it for a broken URL.
+        """
+        if request.url.path.startswith("/api/"):
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "detail": (
+                        "This feature is not available on this deployment "
+                        f"({exc.flag}=false)"
+                    )
+                },
+            )
+        user = None
+        try:
+            current = await get_current_admin_user_optional(request)
+            if current:
+                user = {
+                    "id": str(current.id),
+                    "name": current.name,
+                    "email": current.email,
+                    "role": current.role,
+                }
+        except Exception:  # noqa: BLE001 — the 404 page must render regardless
+            user = None
+        template_env = Environment(
+            loader=FileSystemLoader(app.state.templates_dir),
+            autoescape=False,
+            cache_size=0,
+        )
+        html = template_env.get_template("feature_disabled.html").render(
+            request=request,
+            user=user,
+            feature_label=feature_label(exc.flag),
+        )
+        return HTMLResponse(content=html, status_code=404)
 
     @app.get("/health")
     async def health_check():

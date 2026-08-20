@@ -20,9 +20,21 @@ Adding a new flag is a one-line ``Settings`` change plus gating:
   ``app.state`` for exactly this)
 """
 
-from fastapi import HTTPException, status
+from fastapi import Request
 
 from parade_state.config import get_settings
+
+#: Friendly names for flag-gated features, shown to users on the
+#: feature-disabled page. Unknown flags fall back to the raw name.
+FEATURE_LABELS = {
+    "FEATURE_DEFERMENTS": "Deferments",
+    "FEATURE_GROUPING": "Grouping",
+}
+
+
+def feature_label(flag: str) -> str:
+    """Human-readable feature name for ``flag``."""
+    return FEATURE_LABELS.get(flag, flag)
 
 
 def feature_enabled(flag: str) -> bool:
@@ -32,6 +44,20 @@ def feature_enabled(flag: str) -> bool:
     toggle flags by patching the cached settings instance.
     """
     return bool(getattr(get_settings(), flag))
+
+
+class FeatureDisabledError(Exception):
+    """A flag-gated feature was reached while its flag is off.
+
+    Raised by :func:`require_feature`; the application factory registers
+    a handler that answers API routes with the JSON 404 and page routes
+    with a styled HTML 404 explaining the feature is deliberately
+    disabled (so users do not mistake it for a broken link).
+    """
+
+    def __init__(self, flag: str) -> None:
+        super().__init__(flag)
+        self.flag = flag
 
 
 def require_feature(flag: str):
@@ -44,14 +70,8 @@ def require_feature(flag: str):
         )
     """
 
-    def _require_enabled() -> None:
+    async def _require_enabled(request: Request) -> None:  # noqa: ARG001
         if not feature_enabled(flag):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=(
-                    "This feature is not available on this deployment "
-                    f"({flag}=false)"
-                ),
-            )
+            raise FeatureDisabledError(flag)
 
     return _require_enabled
