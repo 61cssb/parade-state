@@ -150,7 +150,7 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 - **2026-08-20:** Environment banner: `ENVIRONMENT_BANNER` renders a thin
   fixed top strip on every page (login included) naming the environment;
-  set in dev, unset in prod — offset-only layout impact when shown
+  set in dev, unset in prod — pure overlay, page below pixel-identical
 - **2026-08-20:** Env-var feature flags (Issue 18): Deferments and
   Grouping hidden entirely (nav, pages, API — 404 for all roles
   including super-admins) until ready; enabled in dev via Railway env
