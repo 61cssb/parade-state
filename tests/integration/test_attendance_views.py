@@ -300,3 +300,108 @@ async def test_user_attendance_subunit_filter_is_effective_aware(
     assert r1.status_code == 200
     assert "John Doe" not in r1.text
     assert "Jane Smith" in r1.text  # canonical Platoon 1, untagged
+
+
+@pytest.mark.asyncio
+async def test_attendance_hides_non_called_up_personnel(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_attendance_scope,
+    sample_personnel,
+    sample_users,
+    db_session,
+    monkeypatch,
+):
+    """Only Called Up personnel render on the attendance page; every other
+    callup status is filtered out of the roster (issue 06)."""
+    from parade_state.web import attendance as web_attendance
+    from parade_state.models import User
+
+    # John Doe → Deferred, Jane Smith stays Called Up.
+    sample_personnel[0].callup_status = "Deferred"
+    db_session.add(sample_personnel[0])
+    await db_session.commit()
+
+    super_admin = User(
+        email="super-callup@example.com",
+        name="Super Admin",
+        role="super_admin",
+        status="active",
+    )
+    db_session.add(super_admin)
+    await db_session.commit()
+
+    async def _fake_current_user(_request):
+        return super_admin
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
+
+    response = client.get(
+        "/attendance", params={"nominal_roll_id": str(sample_nominal_roll.id)}
+    )
+    assert response.status_code == 200
+    assert "Jane Smith" in response.text  # Called Up → visible
+    assert "John Doe" not in response.text  # Deferred → hidden
+
+
+@pytest.mark.asyncio
+async def test_attendance_hidden_person_records_preserved(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_attendance_scope,
+    sample_personnel,
+    sample_users,
+    db_session,
+    monkeypatch,
+):
+    """Flipping a person off Called Up is non-destructive: existing
+    attendance records survive untouched, the person is simply hidden from
+    the attendance view (and rendered with no special treatment anywhere)."""
+    from parade_state.web import attendance as web_attendance
+    from parade_state.models import Attendance, User
+    from parade_state.utils import utc_dt
+
+    p = sample_personnel[0]
+    record = Attendance(
+        personnel_id=str(p.id),
+        nominal_roll_id=str(sample_nominal_roll.id),
+        date=utc_dt.utcnow().date(),
+        status_am="present",
+        remarks_am="marked earlier",
+        status_pm="present",
+        created_by=str(sample_users["admin"].id),
+        updated_by=str(sample_users["admin"].id),
+    )
+    db_session.add(record)
+    await db_session.commit()
+
+    # Post-hoc status change away from Called Up.
+    p.callup_status = "MR"
+    db_session.add(p)
+    await db_session.commit()
+
+    super_admin = User(
+        email="super-hidden@example.com",
+        name="Super Admin",
+        role="super_admin",
+        status="active",
+    )
+    db_session.add(super_admin)
+    await db_session.commit()
+
+    async def _fake_current_user(_request):
+        return super_admin
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
+
+    response = client.get(
+        "/attendance", params={"nominal_roll_id": str(sample_nominal_roll.id)}
+    )
+    assert response.status_code == 200
+    assert p.full_name not in response.text  # hidden from the view
+
+    # The attendance record itself is untouched.
+    await db_session.refresh(record)
+    assert record.status_am == "present"
+    assert record.remarks_am == "marked earlier"
+    assert record.status_pm == "present"
