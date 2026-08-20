@@ -2,7 +2,7 @@
 
 When ENVIRONMENT_BANNER is set (Railway development), every page —
 including pre-auth standalone pages like the login screen — carries a
-thin fixed strip at the very top naming the environment, so users never
+thin fixed overlay strip at the very top naming the environment, so users never
 have to read the URL to know where they are. Unset (production, local
 dev default): no markup, no body class, no layout change at all.
 """
@@ -64,13 +64,13 @@ async def test_no_banner_markup_when_unset(
     response = client.get("/auth/login")
     assert response.status_code == 200
     assert '<div class="env-banner"' not in response.text
-    assert '<body class="has-env-banner">' not in response.text
+    assert "has-env-banner" not in response.text
 
     await _sign_in(client, db_session, sample_users["admin"])
     app_page = client.get("/admin")
     assert app_page.status_code == 200
     assert '<div class="env-banner"' not in app_page.text
-    assert '<body class="has-env-banner">' not in app_page.text
+    assert "has-env-banner" not in app_page.text
 
 
 @pytest.mark.asyncio
@@ -82,7 +82,6 @@ async def test_banner_shown_pre_auth_on_login_page(client: TestClient, monkeypat
     response = client.get("/auth/login")
 
     assert response.status_code == 200
-    assert '<body class="has-env-banner">' in response.text
     assert '<div class="env-banner"' in response.text
     assert "Development environment" in response.text
 
@@ -98,11 +97,11 @@ async def test_banner_shown_on_app_and_no_access_pages(
 
     app_page = client.get("/admin")
     assert app_page.status_code == 200
-    assert '<body class="has-env-banner">' in app_page.text
+    assert '<div class="env-banner"' in app_page.text
 
     no_access = client.get("/auth/no-access")
     assert no_access.status_code == 403
-    assert '<body class="has-env-banner">' in no_access.text
+    assert '<div class="env-banner"' in no_access.text
     assert "Development environment" in no_access.text
 
 
