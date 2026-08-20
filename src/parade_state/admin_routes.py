@@ -11,6 +11,7 @@ from parade_state.auth.admin_dependencies import (
     require_admin_user_flexible,
 )
 from parade_state.db import get_session_maker
+from parade_state.features import require_feature
 from parade_state.models import (
     AccessLevel,
     AuditLog,
@@ -371,7 +372,11 @@ async def admin_csv_upload(
     return HTMLResponse(content=html_content)
 
 
-@router.get("/admin/deferments", response_class=HTMLResponse)
+@router.get(
+    "/admin/deferments",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_feature("FEATURE_DEFERMENTS"))],
+)
 async def admin_deferments(
     request: Request,
     status_filter: str | None = None,

@@ -92,6 +92,23 @@ class Settings:
             "PURGE_ENABLED", default=not self.is_production
         )
 
+        # Feature flags: features that are not ready for a deployment are
+        # hidden entirely — no nav entry, page and API routes unreachable —
+        # for every role including super admins. Default off; the
+        # development environment opts in via env vars. Toggling is an
+        # env-var change plus service restart (see parade_state.features).
+        self.FEATURE_DEFERMENTS: bool = env.get_bool(
+            "FEATURE_DEFERMENTS", default=False
+        )
+        self.FEATURE_GROUPING: bool = env.get_bool("FEATURE_GROUPING", default=False)
+
+        # Non-production identifier banner: when set (e.g. on the Railway
+        # development environment), a thin fixed strip at the very top of
+        # every page shows this text, so users never have to read the URL
+        # to know which environment they are on. Unset in production —
+        # no markup, no CSS, no layout change at all.
+        self.ENVIRONMENT_BANNER: str = env.get("ENVIRONMENT_BANNER", "") or ""
+
     @property
     def is_production(self) -> bool:
         """Whether the app runs in the production environment."""

@@ -98,6 +98,8 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 - `tests/integration/test_attendance_api.py` - Attendance management, snapshots, constraints (40 tests)
 - `tests/integration/test_csv_upload_api.py` - CSV upload pipeline, hash dedup, mapping (9 tests)
 - `tests/integration/test_deferments_api.py` - Deferment CRUD, callup_status transitions, super_admin auth (15 tests)
+- `tests/integration/test_feature_flags.py` - Flag-off hides Deferments/Grouping entirely (nav, pages, API) for every role incl. super-admin; flag-on restore; env-var defaults (8 tests)
+- `tests/integration/test_environment_banner.py` - ENVIRONMENT_BANNER renders the top strip pre-auth (login) and post-auth, escapes its text, and emits no markup when unset (5 tests)
 - `tests/integration/test_groupings_api.py` - Grouping lifecycle, CRUD operations (18 tests)
 - `tests/integration/test_grouping_exclusions_api.py` - Personnel exclusion management (9 tests)
 - `tests/integration/test_nominal_rolls_api.py` - Nominal Roll lifecycle (attendance activation auto-switch/deactivate, delete, label updates)
@@ -185,12 +187,13 @@ async def test_example(client, sample_users, sample_grouping):
 - User pre-provisioning: super-admins can create accounts by email (Add User form on /admin/users) before first sign-in; promotion to super_admin/admin auto-activates unrecognised accounts
 - **Endpoints:** 7 authentication + 6 user management = 13 total
 
-**Grouping Management (✅ Complete)**
+**Grouping Management (✅ Complete — feature-flagged)**
 - Grouping lifecycle (draft → active → inactive → closed → finalized)
 - Personnel assignment overrides per grouping
 - Grouping notes with version tracking
 - Validity window enforcement
 - Manual activation/deactivation
+- **Feature flag:** hidden entirely (nav, `/grouping` pages, `/api/v1/groupings/*`, NR-browser Create Grouping) unless `FEATURE_GROUPING=true` — 404 for all roles including super-admins
 - **Grouping date editing:** UI supports editing valid_from/valid_until via an inline form; API validates that no sessions fall outside the new date range
 - **Grouping management lives on `/grouping`** in the collapsed-by-default
   "Grouping management" expander below the selector (merged from the retired
@@ -308,7 +311,7 @@ async def test_example(client, sample_users, sample_grouping):
 - **Endpoints:** 3 personnel management endpoints
 - **Tests:** 23 comprehensive tests
 
-**Deferments (✅ Super-admin MVP)**
+**Deferments (✅ Super-admin MVP — feature-flagged)**
 - Personnel deferment CRUD linked to a single nominal roll personnel record
 - `rank_name` and `sub_unit` snapshotted at creation from the linked personnel
 - Reason enum (12 values) and status enum (8 values)
@@ -319,8 +322,9 @@ async def test_example(client, sample_users, sample_grouping):
   - Deleting an Approved deferment reverts to `Called Up`
 - Super-admin-only: API and admin UI enforce `role == "super_admin"`
 - Admin UI under `/admin/deferments` (nav link gated by super_admin role)
+- **Feature flag:** hidden entirely (nav, page, `/api/v1/deferments/*`) unless `FEATURE_DEFERMENTS=true` — 404 for all roles including super-admins
 - **Endpoints:** 5 deferment endpoints under `/api/v1/deferments`
-- **Tests:** 15 behavioral tests
+- **Tests:** 15 behavioral tests + flag gating (test_feature_flags.py)
 
 **Taggings (✅ 1:1 with Nominal Roll — model simplification)**
 - Tagging overlay: **exactly one Tagging per Nominal Roll** (DB unique
@@ -669,6 +673,7 @@ parade-state/
 │   ├── __init__.py
 │   ├── main.py                  # FastAPI app setup and router registration
 │   ├── config.py                # Configuration management
+│   ├── features.py              # Feature-flag gate (require_feature dependency)
 │   ├── admin_routes.py          # Admin section Jinja2 routes (/admin/*)
 │   ├── api/                     # REST API endpoints (JSON)
 │   │   ├── __init__.py

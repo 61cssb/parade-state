@@ -102,7 +102,34 @@ DEBUG=false
 # downstream data (Settings page; audit-logged). Defaults to false in
 # production, true elsewhere. Keep disabled on the production deployment.
 # PURGE_ENABLED=false
+
+# Optional: feature flags — see "Feature Flags" below. Default off.
+# FEATURE_DEFERMENTS=false
+# FEATURE_GROUPING=false
+
+# Optional: environment-identifier banner — a thin amber strip fixed at
+# the top of every page (login screen included) showing this text. Set
+# on the development environment so users don't have to read the URL;
+# leave unset in production (no markup, no layout change).
+# ENVIRONMENT_BANNER="Development environment"
 ```
+
+### Feature Flags
+
+Env-var booleans hide not-yet-ready features **entirely**: no nav entry,
+and page + API routes return 404 for every role including super admins
+(the gate sits above role checks, so direct URLs are unreachable too).
+Defaults are off; development enables flags via Railway env vars, and a
+toggle is an env-var change plus service restart (no deploy).
+
+| Flag | Gates | Default | Development | Production |
+|---|---|---|---|---|
+| `FEATURE_DEFERMENTS` | `/admin/deferments` page, `/api/v1/deferments/*`, nav entry | off | `true` | unset (off) |
+| `FEATURE_GROUPING` | `/grouping` pages, `/api/v1/groupings/*`, nav entry, NR-browser "Create Grouping", dashboard grouping card | off | `true` | unset (off) |
+
+Adding a new flag is a one-line `Settings` addition plus gating
+(`require_feature(...)` dependencies on routes, `{% if request.app.state.settings.FEATURE_* %}` in templates); see
+`src/parade_state/features.py`.
 
 ### Production Hardening Behavior
 
@@ -326,6 +353,8 @@ schema (the shared-DB approach was considered and rejected in issue #15).
 | `SESSION_SECRET` | own value | **own value** (never share between environments) |
 | `ALLOWED_ORIGINS` / `APP_BASE_URL` | production domain | development domain |
 | `PURGE_ENABLED` | `false` | `true` (admin-UI data purge for testing) |
+| `FEATURE_DEFERMENTS` / `FEATURE_GROUPING` | unset (`false`) | per feature readiness |
+| `ENVIRONMENT_BANNER` | unset (no banner) | `Development environment` (top strip on every page) |
 
 `DATABASE_URL` is the environment-scoped reference
 `${{Postgres.DATABASE_URL}}` in both environments — it resolves to that
