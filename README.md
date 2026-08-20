@@ -130,7 +130,7 @@ Once running, visit:
 ## Current System Status
 
 ✅ **Production-Ready** with admin + user-facing interface:
-- 481 tests passing (100% pass rate)
+- 512 tests passing (4 skipped, 100% pass rate)
 - 57 API endpoints fully implemented and tested
 - **Admin interface with Jinja2 templates** (Unit Strength report at `/admin`, Upload NR, Taggings, Deferments, Users, Settings, Audit Log, Restore Backup, plus the grouping personnel sub-view)
 - **User-facing views** (deployment summary, attendance marking, nominal roll browser)

@@ -41,7 +41,11 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   (hidden during the tester window) and unset in prod; flip per feature
   readiness ([DEPLOYMENT.md](DEPLOYMENT.md) › Feature Flags).
   `FEATURE_STRENGTH` (Unit Strength at `/admin`) is on in both
-  environments.
+  environments. **Core-feature kill switches** (issue 23):
+  `FEATURE_NOMINALROLL` / `FEATURE_ATTENDANCE` default **on** (unset =
+  available) and hide their feature entirely only on an explicit `false`
+  — the emergency path for taking a shipped core feature offline
+  mid-window without a deploy. Both are `true` in dev and prod.
   **Environment banner:** dev sets `ENVIRONMENT_BANNER` so a thin amber
   strip at the top of every page (login included) names the environment;
   prod leaves it unset (zero markup, zero layout impact).
