@@ -1,9 +1,10 @@
 # Roadmap & Open Work
 
 **Last Updated:** 2026-08-20
-**Status:** In production on Railway (admin-only access). Test users
-(admins) coming on the weekend of 2026-08-22; annual intensive-use
-window ~2026-09-10.
+**Status:** In production on Railway (admin-only access), with a separate
+hosted development environment (Issue 15) where test users try changes
+first. Test users (admins) coming on the weekend of 2026-08-22; annual
+intensive-use window ~2026-09-10.
 
 This is the living roadmap. Feature behavior lives in
 [SPECIFICATION.md](SPECIFICATION.md), endpoints in [api.yaml](api.yaml),
@@ -28,6 +29,11 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   kill switch. Testing-only super-admin **data purge** at Settings
   (`/admin/settings`, deletes all NRs + downstream data; audit-logged;
   `PURGE_ENABLED` gate, default off in production).
+- **Environments:** production (`main`) and development (`dev`) run as
+  separate Railway environments with isolated databases
+  ([DEPLOYMENT.md](DEPLOYMENT.md) › Environments). Dev is the empty-start
+  playground for test users (purge enabled); promotion to prod is
+  PR `dev` → `main`.
 
 ### What the app does today
 
@@ -131,6 +137,10 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-20:** Hosted development environment stood up on Railway
+  (Issue 15): separate `development` environment + Postgres tracking the
+  `dev` branch, empty-start DB with purge enabled; test users use dev
+  first, prod stays baseline
 - **2026-08-20:** NR browser cell edits staged client-side with an
   Apply/Discard bar (Issue 17) — misclick-safe, refresh-persistent
 - **2026-08-20:** Sidebar restructured into ICT/Admin sections; NR and
