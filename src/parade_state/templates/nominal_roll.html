@@ -145,18 +145,17 @@
             {% endfor %}
         </select>
     </form>
-</div>
 
-{% if selected_nominal_roll %}
-{# Roll management (merged from the retired admin nominal rolls page).
-   It is an action on the selected roll, so it sits directly below the
-   roll selector — its own card, above Filters — not inside the results
-   card where admins didn't look for it. Collapsed by default; the panel
-   overlays so expanding never shifts the page. Label/remarks editing and
-   Create Grouping are available to all admins; attendance toggle and
-   delete are super-admin-only. #}
-<div class="card">
-    <details class="mgmt-details">
+    {% if selected_nominal_roll %}
+    {# Roll management (merged from the retired admin nominal rolls page).
+       It is an action on the selected roll, so it sits directly below the
+       roll selector inside the selector card — same pattern as the
+       Grouping page's management expander — not inside the results card
+       where admins didn't look for it. Collapsed by default; the panel
+       overlays so expanding never shifts the page. Label/remarks editing
+       and Create Grouping are available to all admins; attendance toggle
+       and delete are super-admin-only. #}
+    <details class="mgmt-details" style="margin: 0.75rem 0 0;">
         <summary style="cursor: pointer; font-size: 0.85rem; color: #374151; font-weight: 600;">Roll management</summary>
         <div>
             <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; font-size: 0.875rem; color: #374151;">
@@ -203,8 +202,10 @@
             <div id="page-status" style="margin-top: 0.6rem;"></div>
         </div>
     </details>
+    {% endif %}
 </div>
 
+{% if selected_nominal_roll %}
 <!-- Filters -->
 <div class="card">
     <form method="get" action="/nominal-roll" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
