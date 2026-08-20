@@ -13,6 +13,7 @@ from parade_state.models.grouping import (
 )
 from parade_state.models.csv_ingestion import NominalRoll
 from parade_state.models.personnel import Personnel
+from parade_state.models.audit import AuditLog
 from tests.test_utils import (
     assert_404_response,
     assert_pagination_works,
@@ -1479,3 +1480,396 @@ async def test_update_personnel_callup_fields_as_user_forbidden(
             json=payload,
         )
         assert response.status_code == 403, payload
+
+
+# ============================================================================
+# Manual serviceman creation (issue 26)
+# ============================================================================
+
+
+def _create_payload(nominal_roll_id: str, **overrides) -> dict:
+    """Minimal valid PersonnelCreate body for the given roll."""
+    payload = {
+        "nominal_roll_id": str(nominal_roll_id),
+        "rank": "PTE",
+        "name": "Manual Person",
+        "unit": "Coy A",
+    }
+    payload.update(overrides)
+    return payload
+
+
+@pytest.mark.asyncio
+async def test_create_personnel_manual_without_pers_no(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_nominal_roll,
+    sample_personnel,
+    db_session,
+):
+    """Super-admin can add a serviceman with unknown pers_no. The row carries
+    source="manual", the defaults make it manageable like any other row, the
+    roll's personnel_count increments, and the create is audited."""
+    admin_id = str(sample_users["admin"].id)
+
+    response = client.post(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params={"user_id": admin_id, "user_role": "super_admin"},
+        json=_create_payload(sample_nominal_roll.id),
+    )
+
+    assert response.status_code == 201, response.text
+    data = response.json()
+    assert data["pers_no"] is None
+    assert data["source"] == "manual"
+    assert data["status"] == "active"
+    assert data["callup_status"] == "Called Up"
+    assert data["category"] == "WOSE"  # inferred from PTE
+    assert data["created_by"] == admin_id
+
+    await db_session.refresh(sample_nominal_roll)
+    assert sample_nominal_roll.personnel_count == 4  # 3 sample rows + 1
+
+    audit = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.entity_type == "personnel",
+                AuditLog.entity_id == data["id"],
+                AuditLog.action == "create",
+            )
+        )
+    ).scalar_one()
+    assert "Manually added" in audit.description
+    assert audit.user_id == admin_id
+
+    # Multiple unknown-pers_no rows per roll are legal (NULLs are distinct).
+    second = client.post(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params={"user_id": admin_id, "user_role": "super_admin"},
+        json=_create_payload(sample_nominal_roll.id, name="Second Manual"),
+    )
+    assert second.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_create_personnel_manual_with_pers_no_and_fields(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_nominal_roll,
+    db_session,
+):
+    """Full-field manual create: pers_no, sub-units, callup override and
+    remarks (whitespace-normalised) round-trip."""
+    response = client.post(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params={
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "super_admin",
+        },
+        json=_create_payload(
+            sample_nominal_roll.id,
+            rank="LTA",
+            name="Manual Officer",
+            pers_no="  88880001  ",
+            unit="Coy B",
+            sub_unit_1="Platoon 3",
+            sub_unit_2="  ",
+            callup_status="Deferred",
+            remarks="  On course  ",
+        ),
+    )
+
+    assert response.status_code == 201, response.text
+    data = response.json()
+    assert data["pers_no"] == "88880001"  # stripped
+    assert data["rank"] == "LTA"
+    assert data["category"] == "Officer"
+    assert data["unit"] == "Coy B"
+    assert data["sub_unit_1"] == "Platoon 3"
+    assert data["sub_unit_2"] is None  # blank becomes NULL
+    assert data["callup_status"] == "Deferred"
+    assert data["remarks"] == "On course"
+
+    row = (
+        await db_session.execute(
+            select(Personnel).where(Personnel.id == data["id"])
+        )
+    ).scalar_one()
+    assert row.source == "manual"
+
+
+@pytest.mark.asyncio
+async def test_create_personnel_permission_gates(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    user_token_headers: dict[str, str],
+    sample_users,
+    sample_nominal_roll,
+):
+    """Manual creation is super-admin only: admins and users get 403."""
+    for headers, role in (
+        (admin_token_headers, "admin"),
+        (user_token_headers, "user"),
+    ):
+        response = client.post(
+            "/api/v1/personnel",
+            headers=headers,
+            params={
+                "user_id": str(sample_users["admin"].id),
+                "user_role": role,
+            },
+            json=_create_payload(sample_nominal_roll.id),
+        )
+        assert response.status_code == 403, role
+        assert "super-admin" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_personnel_unknown_nominal_roll(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+):
+    """An unknown nominal_roll_id is a 404, not a 500 (FK guard)."""
+    response = client.post(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params={
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "super_admin",
+        },
+        json=_create_payload("00000000-0000-0000-0000-000000000000"),
+    )
+    assert response.status_code == 404
+    assert "Nominal roll not found" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_personnel_invalid_rank(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_nominal_roll,
+):
+    """Unknown ranks are rejected with 400 and the valid rank list."""
+    response = client.post(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params={
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "super_admin",
+        },
+        json=_create_payload(sample_nominal_roll.id, rank="SGT"),
+    )
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "Invalid rank" in detail
+    assert "CPL" in detail and "LTA" in detail  # valid ranks are listed
+
+
+@pytest.mark.asyncio
+async def test_create_personnel_duplicate_pers_no_within_roll(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_nominal_roll,
+    sample_personnel,
+    db_session,
+):
+    """Duplicate pers_no on the same roll is a 409; the same pers_no on a
+    different roll stays allowed (matches CSV semantics)."""
+    admin_id = str(sample_users["admin"].id)
+    super_params = {"user_id": admin_id, "user_role": "super_admin"}
+
+    dup = client.post(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params=super_params,
+        json=_create_payload(
+            sample_nominal_roll.id, pers_no="10000001"  # sample_personnel[0]
+        ),
+    )
+    assert dup.status_code == 409
+    assert "10000001" in dup.json()["detail"]
+
+    other_roll = NominalRoll(
+        caa=date(2024, 2, 1),
+        csv_hash="hash-26",
+        personnel_count=0,
+        uploaded_by=admin_id,
+    )
+    db_session.add(other_roll)
+    await db_session.commit()
+
+    ok = client.post(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params=super_params,
+        json=_create_payload(other_roll.id, pers_no="10000001"),
+    )
+    assert ok.status_code == 201
+
+
+# ============================================================================
+# PATCH pers_no: super-admin fill-in-later flow (issue 26)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_pers_no_set_and_clear(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    db_session,
+    sample_personnel,
+):
+    """Super-admin can fill in pers_no later and clear it again (empty or
+    explicit null); updates stamp updated_at/updated_by."""
+    p = sample_personnel[0]
+    base_params = {
+        "user_id": str(sample_users["admin"].id),
+        "user_role": "super_admin",
+    }
+
+    r1 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"pers_no": " 77770001 "},
+    )
+    assert r1.status_code == 200, r1.text
+    assert r1.json()["pers_no"] == "77770001"  # stripped
+    await db_session.refresh(p)
+    assert p.pers_no == "77770001"
+    assert p.updated_by == str(sample_users["admin"].id)
+    assert p.updated_at is not None
+
+    r2 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"pers_no": ""},
+    )
+    assert r2.status_code == 200
+    await db_session.refresh(p)
+    assert p.pers_no is None
+
+    r3 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"pers_no": "77770002"},
+    )
+    assert r3.status_code == 200
+    r4 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"pers_no": None},
+    )
+    assert r4.status_code == 200
+    await db_session.refresh(p)
+    assert p.pers_no is None
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_pers_no_duplicate_rejected(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_personnel,
+    db_session,
+):
+    """Setting a pers_no already used on the same roll (by another person)
+    is a 409 with a clear message."""
+    p = sample_personnel[0]  # 10000001
+    response = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params={
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "super_admin",
+        },
+        json={"pers_no": "10000002"},  # sample_personnel[1]
+    )
+    assert response.status_code == 409
+    assert "10000002" in response.json()["detail"]
+    await db_session.refresh(p)
+    assert p.pers_no == "10000001"  # unchanged
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_pers_no_as_admin_forbidden(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_personnel,
+):
+    """Admins cannot change pers_no (403) but keep the other PATCH fields."""
+    p = sample_personnel[0]
+    params = {"user_id": str(sample_users["admin"].id), "user_role": "admin"}
+
+    blocked = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=params,
+        json={"pers_no": "12345678"},
+    )
+    assert blocked.status_code == 403
+    assert "personnel numbers" in blocked.json()["detail"].lower()
+
+    allowed = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=params,
+        json={"remarks": "admins keep this"},
+    )
+    assert allowed.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_pers_no_as_user_forbidden(
+    client: TestClient,
+    user_token_headers: dict[str, str],
+    sample_personnel,
+):
+    """Regular users hit the admin gate for pers_no like every PATCH."""
+    response = client.patch(
+        f"/api/v1/personnel/{sample_personnel[0].id}",
+        headers=user_token_headers,
+        params={"user_id": "user-id", "user_role": "user"},
+        json={"pers_no": "12345678"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_personnel_response_includes_source(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_personnel,
+):
+    """The source provenance field is part of every personnel response."""
+    params = {
+        "user_id": str(sample_users["admin"].id),
+        "user_role": "admin",
+    }
+
+    listing = client.get("/api/v1/personnel", headers=admin_token_headers, params=params)
+    assert listing.status_code == 200
+    assert all("source" in row for row in listing.json())
+    assert all(row["source"] is None for row in listing.json())  # CSV rows
+
+    single = client.get(
+        f"/api/v1/personnel/{sample_personnel[0].id}",
+        headers=admin_token_headers,
+        params=params,
+    )
+    assert single.status_code == 200
+    assert single.json()["source"] is None

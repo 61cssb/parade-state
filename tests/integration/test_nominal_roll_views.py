@@ -64,9 +64,11 @@ async def test_nominal_roll_super_admin_cell_editor_wiring(
     assert 'data-field="unit"' in response.text
     assert 'data-field="sub_unit_1"' in response.text
     assert 'data-field="sub_unit_3"' in response.text
-    # Custom panel: embedded option map, no native datalist popups.
+    # Custom panel for the cell editor: embedded option map, not native
+    # datalist popups (datalists are fine in the Add Serviceman modal, but
+    # no cell input may carry one).
     assert "EDIT_OPTIONS" in response.text
-    assert "<datalist" not in response.text
+    assert 'class="cell-edit-input" list=' not in response.text
     assert "Coy A" in response.text  # unit suggestions (sample personnel)
     assert "Platoon 2" in response.text  # sub-unit 1 suggestions
     assert "BLANK_FIELDS" in response.text
@@ -220,3 +222,155 @@ async def test_nominal_roll_redirects_non_admins(
     )
     assert response.status_code == 302
     assert "/auth/no-access" in response.headers["location"]
+
+
+# ============================================================================
+# Add Serviceman (issue 26): manual creation from the NR admin view
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_nominal_roll_add_serviceman_wiring(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_users,
+    db_session,
+    monkeypatch,
+):
+    """Super-admins get the Add Serviceman button + modal (datalists for
+    rank/unit/sub-units, callup defaulting to Called Up), a "manual" badge
+    beside UI-added names, and an inline-editable pers_no cell."""
+    from parade_state.web import nominal_roll as web_nominal_roll
+
+    sample_personnel[0].source = "manual"  # a UI-added row
+    db_session.add(sample_personnel[0])
+    await db_session.commit()
+
+    super_admin = User(
+        email="super-add@example.com",
+        name="Super Admin",
+        role="super_admin",
+        status="active",
+    )
+    db_session.add(super_admin)
+    await db_session.commit()
+
+    async def _fake_current_user(_request):
+        return super_admin
+
+    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+
+    response = client.get(
+        "/nominal-roll", params={"nominal_roll_id": str(sample_nominal_roll.id)}
+    )
+    assert response.status_code == 200
+    # Button + modal + submit wiring.
+    assert "Add Serviceman" in response.text
+    assert 'id="add-modal"' in response.text
+    assert "openAddModal" in response.text
+    assert "submitAddServiceman" in response.text
+    assert "closeAddModal" in response.text
+    # Modal datalists: rank choices (officer + WOSE) and unit/sub-unit options.
+    assert 'id="rank-choices"' in response.text
+    assert '<option value="PTE">' in response.text
+    assert '<option value="2LT">' in response.text
+    assert 'id="svc-unit-choices"' in response.text
+    assert 'id="svc-sub3-choices"' in response.text
+    assert "Coy A" in response.text  # unit suggestion from sample personnel
+    # Provenance badge on UI-added rows (only source="manual" rows).
+    assert 'class="manual-badge"' in response.text
+    assert "manual-badge" in response.text
+    # Inline pers_no editor: super-admins PATCH directly on change.
+    assert "onPersNoChange" in response.text
+    assert 'data-prev="' in response.text
+
+
+@pytest.mark.asyncio
+async def test_nominal_roll_add_serviceman_hidden_for_admins(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_users,
+    monkeypatch,
+):
+    """Admins get no Add Serviceman button/modal and a static pers_no cell."""
+    from parade_state.web import nominal_roll as web_nominal_roll
+
+    async def _fake_current_user(_request):
+        return sample_users["admin"]
+
+    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+
+    response = client.get(
+        "/nominal-roll", params={"nominal_roll_id": str(sample_nominal_roll.id)}
+    )
+    assert response.status_code == 200
+    assert "John Doe" in response.text  # roster still renders
+    assert "10000001" in response.text  # pers_no renders as plain text
+    # No manual-create surface at all.
+    assert 'id="add-modal"' not in response.text
+    assert "Add Serviceman" not in response.text
+    assert "submitAddServiceman" not in response.text
+    assert 'id="rank-choices"' not in response.text
+    # No inline pers_no editor for non-super-admins.
+    assert "onPersNoChange" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_manual_personnel_appears_in_attendance_view(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_attendance_scope,
+    sample_users,
+    db_session,
+    monkeypatch,
+):
+    """A manually added serviceman with the defaults (active + Called Up)
+    shows up in the attendance view immediately; a non-Called-Up manual add
+    stays hidden there (the NR view remains the management surface)."""
+    from parade_state.web import attendance as web_attendance
+
+    nr = sample_attendance_scope
+    admin_id = str(sample_users["admin"].id)
+    super_params = {"user_id": admin_id, "user_role": "super_admin"}
+
+    def _add(name: str, **overrides) -> dict:
+        payload = {
+            "nominal_roll_id": str(nr.id),
+            "rank": "PTE",
+            "name": name,
+            "unit": "Coy A",
+        }
+        payload.update(overrides)
+        response = client.post(
+            "/api/v1/personnel",
+            headers=admin_token_headers,
+            params=super_params,
+            json=payload,
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    attending = _add("Immediate Manual")
+    assert attending["callup_status"] == "Called Up"
+    _add("Deferred Manual", callup_status="Deferred")
+
+    super_admin = User(
+        email="super-att@example.com",
+        name="Super Admin",
+        role="super_admin",
+        status="active",
+    )
+    db_session.add(super_admin)
+    await db_session.commit()
+
+    async def _fake_current_user(_request):
+        return super_admin
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
+
+    response = client.get("/attendance", params={"nominal_roll_id": str(nr.id)})
+    assert response.status_code == 200
+    assert "Immediate Manual" in response.text
+    assert "Deferred Manual" not in response.text
