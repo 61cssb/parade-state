@@ -62,7 +62,7 @@ def feature_flags_enabled(monkeypatch):
     once test_production_hardening clears the settings cache.
     """
     for settings_obj in {get_settings(), app.state.settings}:
-        for flag in ("FEATURE_DEFERMENTS", "FEATURE_GROUPING"):
+        for flag in ("FEATURE_DEFERMENTS", "FEATURE_GROUPING", "FEATURE_STRENGTH"):
             monkeypatch.setattr(settings_obj, flag, True)
 
 
