@@ -106,6 +106,7 @@ DEBUG=false
 # Optional: feature flags — see "Feature Flags" below. Default off.
 # FEATURE_DEFERMENTS=false
 # FEATURE_GROUPING=false
+# FEATURE_STRENGTH=false
 
 # Optional: environment-identifier banner — a thin amber strip fixed at
 # the top of every page (login screen included) showing this text. Set
@@ -128,7 +129,8 @@ toggle is an env-var change plus service restart (no deploy).
 | Flag | Gates | Default | Development | Production |
 |---|---|---|---|---|
 | `FEATURE_DEFERMENTS` | `/admin/deferments` page, `/api/v1/deferments/*`, nav entry | off | `true` | unset (off) |
-| `FEATURE_GROUPING` | `/grouping` pages, `/api/v1/groupings/*`, nav entry, NR-browser "Create Grouping", dashboard grouping card | off | `true` | unset (off) |
+| `FEATURE_GROUPING` | `/grouping` pages, `/api/v1/groupings/*`, nav entry, NR-browser "Create Grouping" | off | `true` | unset (off) |
+| `FEATURE_STRENGTH` | Unit Strength report at `/admin`, nav entry | off | `true` | `true` (shipped; unset only to hide) |
 
 Adding a new flag is a one-line `Settings` addition plus gating
 (`require_feature(...)` dependencies on routes, `{% if request.app.state.settings.FEATURE_* %}` in templates); see

@@ -90,11 +90,12 @@ uvicorn (single process)
   - SSE for real-time updates
   - Progressive Web App capabilities
 
-#### Admin UI (NiceGUI)
-- **Technology:** NiceGUI (Quasar components)
-- **Served at:** `/admin`
-- **Purpose:** System administration
+#### Admin UI (Jinja2 templates)
+- **Technology:** Jinja2 templates (shared `base.html` shell)
+- **Served at:** `/admin` (Unit Strength report), `/admin/*` pages
+- **Purpose:** System administration + strength reporting
 - **Features:**
+  - Unit Strength report (issue 25, `FEATURE_STRENGTH`-gated)
   - CSV upload pipeline
   - Grouping management
   - User management

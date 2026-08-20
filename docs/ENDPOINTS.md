@@ -4,7 +4,8 @@ This document clarifies the different types of endpoints in the Parade State app
 
 > **Feature flags:** the Deferments and Grouping features (web pages and
 > `/api/v1/deferments/*`, `/api/v1/groupings/*`) are gated by the
-> `FEATURE_DEFERMENTS` / `FEATURE_GROUPING` env vars — flag-off means 404
+> `FEATURE_DEFERMENTS` / `FEATURE_GROUPING` env vars, and the Unit Strength
+> report (`/admin`) by `FEATURE_STRENGTH` — flag-off means 404
 > for every role including super-admins, and their UI entry points are not
 > rendered. On in development; off in production. See
 > [DEPLOYMENT.md](DEPLOYMENT.md) › Feature Flags.
@@ -27,7 +28,7 @@ This document clarifies the different types of endpoints in the Parade State app
 - `GET /nominal-roll` - Nominal Roll browser (row-numbered roster table with unit/sub-unit columns, search, unit filter) — nominal roll selector dropdown plus an expandable roll-management panel (label/remarks editing, Create Grouping, attendance toggle, Delete — merged from the retired admin nominal rolls page)
 
 **Admin Interface Routes:**
-- `GET /admin` - Admin dashboard
+- `GET /admin` - Unit Strength report (aggregated In/Out/Current/% by effective sub-unit; date + AM/PM slot params; subunit-scoped for regular admins) — replaced the admin dashboard; flag-gated by `FEATURE_STRENGTH`
 - `GET /admin/users` - Users management page
 - `GET /admin/csv-upload` - Upload NR page (CSV upload with automatic processing into Nominal Rolls)
 - `GET /admin/settings` - Settings page
@@ -36,7 +37,7 @@ This document clarifies the different types of endpoints in the Parade State app
 - `GET /admin/deferments` - Deferments management (super-admin only; in-page no-access message for plain admins)
 - `GET /admin/database-restore` - Restore Backup page (super-admin only; in-page no-access message for plain admins)
 
-**Note:** The sidebar lists the workflow pages flat (Dashboard, Upload NR, Nominal Roll, Taggings, Deferments, Attendance, Grouping), then an **Admin** section (Users, Settings, Audit Log, Restore Backup). The former `/admin/nominal-rolls`, `/admin/groupings`, `/admin/groupings/{id}/personnel`, and `/admin/sessions` pages were retired when their management moved into the user-facing views. Sessions (AM/PM) are hardcoded; the REST APIs `/api/v1/groupings/*` and `/api/v1/sessions/*` remain separate.
+**Note:** The sidebar lists the workflow pages flat (Unit Strength, Upload NR, Nominal Roll, Taggings, Deferments, Attendance, Grouping), then an **Admin** section (Users, Settings, Audit Log, Restore Backup). The former `/admin/nominal-rolls`, `/admin/groupings`, `/admin/groupings/{id}/personnel`, and `/admin/sessions` pages were retired when their management moved into the user-facing views; the Dashboard was replaced by the Unit Strength report. Sessions (AM/PM) are hardcoded; the REST APIs `/api/v1/groupings/*` and `/api/v1/sessions/*` remain separate.
 
 **Characteristics:**
 - Return HTML responses (Jinja2 templates)

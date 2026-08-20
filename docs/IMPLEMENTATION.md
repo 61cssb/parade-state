@@ -265,8 +265,28 @@ async def test_example(client, sample_users, sample_grouping):
   admin page's metadata columns (source file, uploaded at, CSV hash) were
   dropped — upload provenance stays on the Upload NR page's Recent Uploads.
 
+**Unit Strength Report (✅ Complete — feature-flagged, issue #25)**
+- `/admin` now serves the **Unit Strength** report and the old admin
+  dashboard (stat cards + recent audit activity) is removed; the post-login
+  redirect to `/admin` is unchanged.
+- Aggregates the attendance-active NR's Called Up personnel by effective
+  (tagging-aware) sub_unit_1/sub_unit_2 into the strength reporting format:
+  Officer/WOSE/Total column groups of In/Out/Current/% (In = Called Up,
+  Current = present/late for the selected slot, Out = everything else
+  including unmarked-as-absent, % = Current ÷ In), with SUBTOTAL per
+  sub_unit_1 (shown once per section), a unit TOTAL, and a `(none)` bucket
+  for personnel without subunits. `unit` and `sub_unit_3` are ignored.
+- Date picker + AM/PM slot selector (URL params; server defaults today/AM,
+  re-defaulted from the browser's local datetime on first visit).
+- Super-admins see the whole unit; regular admins see only their assigned
+  sub_unit_1 sections (same deny-by-default UserSubunitAssignment machinery
+  as attendance marking) with TOTAL summing visible rows.
+- **Feature flag:** hidden entirely (nav entry, `/admin` page — 404 for all
+  roles including super-admins) unless `FEATURE_STRENGTH=true`.
+
 **Sidebar Restructure (✅ workflow pages + Admin section)**
-- The sidebar lists the workflow pages flat in order — Dashboard, Upload NR
+- The sidebar lists the workflow pages flat in order — Unit Strength (at
+  `/admin`, flag-gated; formerly the Dashboard), Upload NR
   (relabelled from "CSV Upload"; route unchanged), Nominal Roll, Taggings,
   Deferments, Attendance, Grouping — followed by an **Admin** section:
   Users, Settings, Audit Log, Restore Backup (relabelled from "DB
