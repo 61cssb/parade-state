@@ -29,6 +29,7 @@ from parade_state.config import get_settings
 FEATURE_LABELS = {
     "FEATURE_DEFERMENTS": "Deferments",
     "FEATURE_GROUPING": "Grouping",
+    "FEATURE_STRENGTH": "Unit Strength",
 }
 
 

@@ -16,7 +16,7 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ## Current Snapshot
 
-- **Tests:** 452 SQLite passing (flags-on posture; flags-off gating has
+- **Tests:** 481 SQLite passing (flags-on posture; flags-off gating has
   dedicated tests). The suite runs against
   Postgres by setting `TEST_DATABASE_URL` (per-test databases).
 - **Access model:** `super_admin` + `admin` only. Unknown Google
@@ -40,6 +40,8 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   roles, super-admins included) until ready. Currently `false` in dev
   (hidden during the tester window) and unset in prod; flip per feature
   readiness ([DEPLOYMENT.md](DEPLOYMENT.md) › Feature Flags).
+  `FEATURE_STRENGTH` (Unit Strength at `/admin`) is on in both
+  environments.
   **Environment banner:** dev sets `ENVIRONMENT_BANNER` so a thin amber
   strip at the top of every page (login included) names the environment;
   prod leaves it unset (zero markup, zero layout impact).
@@ -60,17 +62,22 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   existing attendance records are preserved)
 - Attendance access control by effective sub-unit 1
   (`UserSubunitAssignment`; deny-by-default; super_admin bypasses)
+- **Unit Strength** report at `/admin` (replaced the dashboard): the
+  parade state rolled up by effective sub-unit 1/2 into the Officer/WOSE/
+  Total × In/Out/Current/% strength format (In = Called Up, Current =
+  present/late, Out = rest); date + AM/PM slot; regular admins scoped to
+  their assigned sub-units; on via `FEATURE_STRENGTH` in dev and prod
 - Groupings: lifecycle, personnel exclusions/overrides, date editing —
   managed from the `/grouping` view's expander (admin groupings page
   retired); **feature-flagged** (`FEATURE_GROUPING`, dev-only until ready)
 - Deferments (super-admin CRUD; `Personnel.callup_status`);
   **feature-flagged** (`FEATURE_DEFERMENTS`, dev-only until ready)
-- Sidebar: workflow pages flat (Dashboard, Upload NR, Nominal Roll,
+- Sidebar: workflow pages flat (Unit Strength, Upload NR, Nominal Roll,
   Taggings, Deferments, Attendance, Grouping) + **Admin** section
   (Users, Settings, Audit Log, Restore Backup); SA-only pages show an
   in-page no-access message for plain admins; flag-gated entries
-  (Deferments, Grouping) render only when their flag is on
-- Admin UI: dashboard, users, audit log, taggings, deferments,
+  (Deferments, Grouping, Unit Strength) render only when their flag is on
+- Admin UI: Unit Strength, users, audit log, taggings, deferments,
   Upload NR (CSV upload), DB restore, Settings purge (testing-only);
   NR and grouping management live in expanders on their views
 - User-facing views — `/grouping`, `/attendance`, `/nominal-roll` —
@@ -97,7 +104,9 @@ regression) indefinitely deferred.
 Exception/summary reporting needs real usage patterns. First step:
 collect format requests from the test users (admins) coming on the
 weekend of 2026-08-22, then design reports around what they actually
-need during the window.
+need during the window. The first such request — the unit's strength
+reporting spreadsheet — is already shipped as the Unit Strength page
+(Issue 25); CSV export of it can follow if wanted.
 
 ### 4. CSV Step 3: diff confirmation — after the season (2026)
 
@@ -150,6 +159,10 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-20:** Unit Strength report (Issue 25) at `/admin` (replaces the
+  dashboard): parade state aggregated by effective sub-unit into the
+  Officer/WOSE/Total × In/Out/Current/% reporting format; date + AM/PM
+  slot selector; subunit-scoped for regular admins; `FEATURE_STRENGTH`-gated
 - **2026-08-20:** NR status & remarks columns (Issue 06, vastly simplified
   from the funnel model): `callup_status` widened to six values + per-person
   `remarks`; CSV `Callup Decision`/`Reason`/`Remarks` mapped on ingest;

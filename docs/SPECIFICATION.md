@@ -505,6 +505,32 @@ Attendance
 - Writes are refused (400) unless the NR is the one active for attendance
 - AM/PM slots are counted independently toward attendance-rate totals
 
+#### 3.5.2 Unit Strength Report
+
+**The parade state aggregated into the strength reporting format** — page
+at `/admin` (it replaced the old admin dashboard), gated by
+`FEATURE_STRENGTH`.
+
+Rows group by **effective sub_unit_1** (tagging-overlay-aware; shown once
+per section) and **effective sub_unit_2**, with a SUBTOTAL per sub_unit_1
+and a unit-wide TOTAL. `unit` and `sub_unit_3` are ignored — attached
+personnel from other units report with the unit; personnel without
+subunits fall into a `(none)` bucket. Columns: **Officer / WOSE / Total**
+(`Personnel.category`), each **In / Out / Current / %**:
+
+- **In** — personnel on the NR active for attendance with
+  `callup_status = Called Up` (active personnel rows only)
+- **Current** — slot status `present` or `late` (present-like)
+- **Out** — every other status; unmarked personnel count as `absent`
+- **%** — `Current ÷ In`, whole percent; 0% when In is 0
+
+The date and AM/PM slot are URL params (server default: today, AM); a
+first-visit script re-defaults them from the browser's local datetime.
+Super-admins see the whole unit; regular admins see only their assigned
+sub_unit_1 sections (deny-by-default, the same `UserSubunitAssignment`
+machinery as attendance marking), with TOTAL summing the visible rows and
+a guidance message for admins with no assignments.
+
 ---
 
 ## 4. Business Rules & Constraints
@@ -701,17 +727,17 @@ Env-var booleans (`FEATURE_<NAME>`, default off) hide not-yet-ready
 features from a deployment **entirely**:
 
 - **Nav/templates:** the feature's sidebar entry and every other entry
-  point (e.g. the NR-browser *Create Grouping* button, the dashboard
-  grouping card) are not rendered.
+  point (e.g. the NR-browser *Create Grouping* button) are not rendered.
 - **Routes:** page and API routes return 404 for **every role, including
   super admins** — the gate (`parade_state.features.require_feature`)
   sits above role checks, so direct URLs are unreachable. Pages answer
   with a styled HTML 404 ("switched off on this deployment"); APIs keep
   a JSON 404 naming the env var.
 
-Current flags: `FEATURE_DEFERMENTS` (Deferments page + API) and
-`FEATURE_GROUPING` (Grouping pages + API). Development enables both via
-Railway env vars; production leaves them unset until each feature ships.
+Current flags: `FEATURE_DEFERMENTS` (Deferments page + API),
+`FEATURE_GROUPING` (Grouping pages + API), and `FEATURE_STRENGTH` (Unit
+Strength report at `/admin`). Development enables them via Railway env
+vars; production leaves them unset until each feature ships.
 Toggling is an env-var change plus service restart — no deploy. Railway's
 managed feature-flag offering was rejected (paid early access with
 breaking-change risk, TypeScript-only SDK, rollout targeting this

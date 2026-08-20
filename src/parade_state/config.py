@@ -101,6 +101,7 @@ class Settings:
             "FEATURE_DEFERMENTS", default=False
         )
         self.FEATURE_GROUPING: bool = env.get_bool("FEATURE_GROUPING", default=False)
+        self.FEATURE_STRENGTH: bool = env.get_bool("FEATURE_STRENGTH", default=False)
 
         # Non-production identifier banner: when set (e.g. on the Railway
         # development environment), a thin fixed strip at the very top of

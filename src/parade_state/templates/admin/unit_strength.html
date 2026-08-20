@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+
+{% block title %}Unit Strength - Parade State Admin{% endblock %}
+
+{% block page_title %}Unit Strength{% endblock %}
+
+{% block content %}
+<style>
+    .strength-controls {
+        display: flex;
+        gap: 1.5rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .strength-controls label {
+        font-weight: 600;
+        color: #374151;
+    }
+    .slot-toggle {
+        display: inline-flex;
+        gap: 0.75rem;
+        align-items: center;
+    }
+    .slot-toggle label {
+        display: inline-flex;
+        gap: 0.3rem;
+        align-items: center;
+        font-weight: 400;
+        cursor: pointer;
+    }
+    .strength-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+    }
+    .strength-table th,
+    .strength-table td {
+        padding: 0.5rem 0.6rem;
+        border-bottom: 1px solid #e5e7eb;
+        text-align: right;
+        white-space: nowrap;
+    }
+    .strength-table th:first-child,
+    .strength-table td:first-child {
+        text-align: left;
+    }
+    .strength-table thead th {
+        background-color: #f9fafb;
+        font-weight: 600;
+        color: #374151;
+    }
+    .strength-table .group-h {
+        text-align: center;
+    }
+    .strength-table .str-section td {
+        background-color: #f3f4f6;
+        font-weight: 600;
+        color: #111827;
+    }
+    .strength-table .str-subtotal td {
+        background-color: #f9fafb;
+        font-weight: 600;
+        border-top: 2px solid #d1d5db;
+    }
+    .strength-table .str-total td {
+        font-weight: 700;
+        border-top: 2px solid #111827;
+        border-bottom: none;
+    }
+</style>
+
+<div class="card">
+    <form method="get" action="/admin" id="strength-form" class="strength-controls">
+        <label for="date">Date:</label>
+        <input type="date" name="date" id="date" value="{{ target_date.strftime('%Y-%m-%d') }}"
+               onchange="this.form.submit()">
+        <div class="slot-toggle" role="group" aria-label="Attendance slot">
+            <span style="font-weight: 600; color: #374151;">Slot:</span>
+            <label><input type="radio" name="slot" value="am"
+                {% if slot == 'am' %}checked{% endif %}
+                onchange="this.form.submit()"> AM</label>
+            <label><input type="radio" name="slot" value="pm"
+                {% if slot == 'pm' %}checked{% endif %}
+                onchange="this.form.submit()"> PM</label>
+        </div>
+    </form>
+    <p style="color: #6b7280; margin-top: 1rem; margin-bottom: 0;">
+        In = Called Up on the nominal roll · Current = Present/Late ·
+        Out = all other statuses (unmarked = absent).
+    </p>
+</div>
+
+{% if nr_label is none %}
+<div class="card">
+    <h3>Unit Strength</h3>
+    <p style="color: #6b7280;">
+        No nominal roll is active for attendance. A super-admin must mark a
+        roll as “Use for Attendance” before strength can be reported.
+    </p>
+</div>
+{% elif no_assignments %}
+<div class="card">
+    <h3>Unit Strength</h3>
+    <p style="color: #6b7280;">
+        You have no Subunit-1 assignments on the active nominal roll
+        ({{ nr_label }}), so there is nothing to report. Ask a super-admin
+        to grant you access.
+    </p>
+</div>
+{% elif not sections %}
+<div class="card">
+    <h3>Unit Strength</h3>
+    <p style="color: #6b7280;">
+        No Called Up personnel are visible to you on the active nominal roll
+        ({{ nr_label }}) for {{ target_date.strftime('%Y-%m-%d') }}.
+    </p>
+</div>
+{% else %}
+<div class="card">
+    <h3>Unit Strength — {{ nr_label }}
+        · {{ target_date.strftime('%Y-%m-%d') }} · {{ slot|upper }}</h3>
+    <div class="table-wrap">
+        <table class="strength-table">
+            <thead>
+                <tr>
+                    <th rowspan="2">Sub-Unit 2</th>
+                    <th colspan="4" class="group-h">Officer</th>
+                    <th colspan="4" class="group-h">WOSE</th>
+                    <th colspan="4" class="group-h">Total</th>
+                </tr>
+                <tr>
+                    {% for _ in range(3) %}
+                    <th>In</th><th>Out</th><th>Current</th><th>%</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for section in sections %}
+                <tr class="str-section">
+                    <td colspan="13">{{ section.name }}</td>
+                </tr>
+                {% for row in section.rows %}
+                <tr>
+                    <td>{{ row.name }}</td>
+                    {% for cell in [row.cells.officer, row.cells.wose, row.cells.total] %}
+                    <td>{{ cell.in }}</td><td>{{ cell.out }}</td>
+                    <td>{{ cell.current }}</td><td>{{ cell.pct }}%</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+                <tr class="str-subtotal">
+                    <td>SUBTOTAL</td>
+                    {% for cell in [section.subtotal.officer, section.subtotal.wose, section.subtotal.total] %}
+                    <td>{{ cell.in }}</td><td>{{ cell.out }}</td>
+                    <td>{{ cell.current }}</td><td>{{ cell.pct }}%</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+                <tr class="str-total">
+                    <td>TOTAL</td>
+                    {% for cell in [total.officer, total.wose, total.total] %}
+                    <td>{{ cell.in }}</td><td>{{ cell.out }}</td>
+                    <td>{{ cell.current }}</td><td>{{ cell.pct }}%</td>
+                    {% endfor %}
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Default date/slot from the browser's local datetime on first visit
+    // (URL without params): the server cannot know the viewer's timezone.
+    // Reloads once at most — after submit both params are in the URL.
+    (function () {
+        var params = new URLSearchParams(window.location.search);
+        if (params.has('date') && params.has('slot')) return;
+        var form = document.getElementById('strength-form');
+        var now = new Date();
+        var changed = false;
+
+        if (!params.has('date')) {
+            var localDate = now.getFullYear() + '-' +
+                String(now.getMonth() + 1).padStart(2, '0') + '-' +
+                String(now.getDate()).padStart(2, '0');
+            if (form.elements.date.value !== localDate) {
+                form.elements.date.value = localDate;
+                changed = true;
+            }
+        }
+        if (!params.has('slot')) {
+            var localSlot = now.getHours() < 12 ? 'am' : 'pm';
+            var checked = form.querySelector('input[name="slot"]:checked');
+            if (checked && checked.value !== localSlot) {
+                form.elements.slot.value = localSlot;
+                changed = true;
+            }
+        }
+        if (changed) form.submit();
+    })();
+</script>
+{% endblock %}
