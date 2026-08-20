@@ -24,7 +24,7 @@ This document clarifies the different types of endpoints in the Parade State app
 **User-Facing View Routes (Phase 9D / 9F):**
 - `GET /grouping` - Grouping summary (today's AM/PM session counts, unit breakdown) — grouping selector dropdown plus an expandable grouping-management panel (metadata, Edit Dates, lifecycle transitions, Delete, Manage Personnel link — merged from the retired admin groupings page)
 - `GET /grouping/{id}/personnel` - Grouping personnel management (checkbox-based include/exclude, draft-only editing)
-- `GET /attendance` - Attendance marking table (inline status/remarks editing) — grouping + session selector
+- `GET /attendance` - Attendance marking table (per-row autosave on status change / remarks blur; Copy Remarks modal with explicit source/destination day + AM/PM) — NR + date + effective sub-unit-1 filters
 - `GET /nominal-roll` - Nominal Roll browser (row-numbered roster table with unit/sub-unit columns, search, unit filter) — nominal roll selector dropdown plus an expandable roll-management panel (label/remarks editing, Create Grouping, attendance toggle, Delete — merged from the retired admin nominal rolls page)
 
 **Admin Interface Routes:**

@@ -122,7 +122,8 @@ async def test_user_attendance_overlays_active_tagging_values(
     monkeypatch,
 ):
     """With the NR active for attendance, the roster shows effective (to_*)
-    values, Copy Remarks (super-admin), and the changed-row highlight."""
+    values, per-row autosave (no Save button, no tagged-row highlight —
+    issue 19), and the Copy Remarks modal (issue 20)."""
     from parade_state.web import attendance as web_attendance
     from parade_state.models import Tagging, TaggingEntry, User
 
@@ -171,11 +172,15 @@ async def test_user_attendance_overlays_active_tagging_values(
         "/attendance", params={"nominal_roll_id": str(sample_nominal_roll.id)}
     )
     assert response.status_code == 200
-    # Save controls only render when the NR is active for attendance.
-    assert "Save Attendance" in response.text
-    # Copy Remarks is super-admin-only now that the admin page is gone.
+    # Autosave replaces the bulk Save flow; rows highlight only on failure.
+    assert "Save Attendance" not in response.text
+    assert "saveAttendance" not in response.text
+    assert "onStatusChange" in response.text  # autosave hook on statuses
+    # Yellow tagged-row highlight is gone from attendance (NR view keeps it).
+    assert "changed-row" not in response.text
+    # Copy Remarks modal is offered (write perms enforced server-side).
     assert "Copy Remarks" in response.text
-    assert "changed-row" in response.text
+    assert 'id="copy-modal"' in response.text
     # Sub-unit 2/3 columns are shown; effective values come from the
     # tagging entry, not the canonical row.
     assert "Sub-unit 2" in response.text
@@ -186,7 +191,7 @@ async def test_user_attendance_overlays_active_tagging_values(
 
 
 @pytest.mark.asyncio
-async def test_user_attendance_copy_remarks_hidden_for_non_super_admins(
+async def test_user_attendance_copy_remarks_available_to_all_admins(
     client: TestClient,
     sample_nominal_roll,
     sample_personnel,
@@ -194,7 +199,8 @@ async def test_user_attendance_copy_remarks_hidden_for_non_super_admins(
     sample_users,
     monkeypatch,
 ):
-    """Copy Remarks is super-admin-only; other admins get Save alone."""
+    """Copy Remarks is open to every admin (issue 20): the endpoint enforces
+    sub-unit write access, so the button is no longer super-admin-only."""
     from parade_state.web import attendance as web_attendance
     from parade_state.models import UserSubunitAssignment
 
@@ -224,9 +230,10 @@ async def test_user_attendance_copy_remarks_hidden_for_non_super_admins(
         "/attendance", params={"nominal_roll_id": str(sample_nominal_roll.id)}
     )
     assert response.status_code == 200
-    assert "Save Attendance" in response.text
-    # The button (not the JS helper) is what's gated.
-    assert 'onclick="copyRemarks()"' not in response.text
+    assert "Save Attendance" not in response.text
+    # The button and modal render for plain admins too.
+    assert "Copy Remarks" in response.text
+    assert 'id="copy-modal"' in response.text
 
 
 @pytest.mark.asyncio

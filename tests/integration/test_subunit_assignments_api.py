@@ -374,7 +374,10 @@ async def test_copy_remarks_denied_without_assignment(
         "/api/v1/attendance/copy-remarks",
         params={
             "nominal_roll_id": str(sample_nominal_roll.id),
-            "date": today,
+            "source_date": today,
+            "source_slot": "am",
+            "dest_date": today,
+            "dest_slot": "pm",
             "user_id": regular_id,
             "user_role": "user",
         },

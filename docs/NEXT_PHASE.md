@@ -16,7 +16,7 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ## Current Snapshot
 
-- **Tests:** 481 SQLite passing (flags-on posture; flags-off gating has
+- **Tests:** 488 SQLite passing (flags-on posture; flags-off gating has
   dedicated tests). The suite runs against
   Postgres by setting `TEST_DATABASE_URL` (per-test databases).
 - **Access model:** `super_admin` + `admin` only. Unknown Google
@@ -159,6 +159,15 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-20:** Attendance autosave (Issue 19): Save button removed, rows
+  PUT themselves on status change / remarks blur with a Saving…/Saved
+  indicator and a red-edge retry state on failure; yellow tagged-row
+  highlight now only in the NR view
+- **2026-08-20:** Copy Remarks modal (Issue 20): explicit source/destination
+  (day + AM/PM) with plain-language confirmation, sub-unit view filter
+  respected server-side; button open to all admins (write perms enforced
+  per sub-unit); endpoint takes explicit source/dest params (old
+  time-of-day logic survives as the modal prefill)
 - **2026-08-20:** Unit Strength report (Issue 25) at `/admin` (replaces the
   dashboard): parade state aggregated by effective sub-unit into the
   Officer/WOSE/Total × In/Out/Current/% reporting format; date + AM/PM

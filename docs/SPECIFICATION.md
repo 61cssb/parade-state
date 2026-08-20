@@ -170,15 +170,24 @@ Attendance (one row per personnel/day)
   play no part in attendance access or scoping. The user-facing marking view
   (`/attendance`) defaults to the active NR and shows the tagging-overlaid
   roster — Unit, Sub-unit 1, Sub-unit 2, and Sub-unit 3 columns all display
-  effective (overlay) values, and tagged rows are highlighted; with no
-  active NR it shows an inactive message instead of the marking table. Write
-  access is gated per-NR by `UserSubunitAssignment` on the effective
-  `sub_unit_1`.
+  effective (overlay) values. Rows **autosave** (issue 19): each row PUTs
+  itself on status change or remarks blur — no Save button; a failed save
+  marks the row (red edge) and retries on the next edit. Tagged rows are
+  highlighted yellow only in the NR view, never here. With no active NR the
+  page shows an inactive message instead of the marking table. Write access
+  is gated per-NR by `UserSubunitAssignment` on the effective `sub_unit_1`.
 
-**"Copy Remarks" semantics (issue #4 Q3):**
-- Before 12pm: copy previous day's `remarks_pm` → today's `remarks_am`
-- After 12pm: copy today's `remarks_am` → today's `remarks_pm`
-- On the NR's first day (no prior-day rows) the AM copy is a no-op
+**"Copy Remarks" semantics (issue 20):**
+- Explicit source (date + AM/PM) and destination (date + AM/PM), chosen in
+  a modal that confirms the effect in plain language; the old time-of-day
+  behaviour (before noon: previous-day PM → today AM; after noon: today AM
+  → today PM) survives only as the modal's prefill
+- Scope: the active Called Up roster ∩ the page's effective-sub_unit_1
+  filter (optional `sub_unit_1` param) ∩ the caller's write access
+  (super_admin bypasses; deny-by-default: no assignments → 403)
+- Blank/missing source remarks are skipped — the destination keeps its
+  remark; missing destination rows are created on demand (statuses default
+  `absent`); source and destination must differ (400 otherwise)
 
 ---
 

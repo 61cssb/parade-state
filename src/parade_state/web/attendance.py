@@ -9,7 +9,7 @@ of the marking table.
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, select
 
 from parade_state.api.attendance import attendance_counts_for_date
 from parade_state.api.subunit_access import (
@@ -88,7 +88,6 @@ async def attendance_view(
         # Build roster + attendance rows.
         attendance_rows = []
         subunit_options: list[str] = []
-        has_prior_attendance = False
         no_assignments = False
         applied_tagging_id: str | None = None
         if selected_nr_id:
@@ -180,7 +179,6 @@ async def attendance_view(
                         "sub_unit_3": (
                             entry.to_sub_unit_3 if entry else person.sub_unit_3
                         ),
-                        "is_changed": entry is not None,
                         "status_am": record.status_am if record else "absent",
                         "remarks_am": record.remarks_am if record else "",
                         "status_pm": record.status_pm if record else "absent",
@@ -201,17 +199,6 @@ async def attendance_view(
                 attendance_rows = [
                     r for r in attendance_rows if r["sub_unit_1"] == sub_unit_1
                 ]
-
-            has_prior_attendance = (
-                await db.execute(
-                    select(func.count())
-                    .select_from(Attendance)
-                    .where(
-                        Attendance.nominal_roll_id == selected_nr_id,
-                        Attendance.date < target_date,
-                    )
-                )
-            ).scalar_one() > 0
 
         counts = (
             await attendance_counts_for_date(selected_nr_id, target_date, db)
@@ -244,7 +231,7 @@ async def attendance_view(
         subunit_options=subunit_options,
         attendance_rows=attendance_rows,
         counts=counts,
-        has_prior_attendance=has_prior_attendance,
+        nr_caa=selected.caa.isoformat() if (selected and selected.caa) else "",
         no_assignments=no_assignments,
     )
 
