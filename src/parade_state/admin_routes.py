@@ -397,7 +397,11 @@ async def admin_users(
     return HTMLResponse(content=html_content)
 
 
-@router.get("/admin/csv-upload", response_class=HTMLResponse)
+@router.get(
+    "/admin/csv-upload",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_feature("FEATURE_NOMINALROLL"))],
+)
 async def admin_csv_upload(
     request: Request,
 ):
@@ -610,7 +614,11 @@ async def admin_deferments(
     return HTMLResponse(content=html_content)
 
 
-@router.get("/admin/taggings", response_class=HTMLResponse)
+@router.get(
+    "/admin/taggings",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_feature("FEATURE_NOMINALROLL"))],
+)
 async def admin_taggings(
     request: Request,
     nominal_roll_id: str | None = None,
