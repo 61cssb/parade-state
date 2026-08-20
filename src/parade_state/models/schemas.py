@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from parade_state.utils import utc_dt
 
+from .personnel import CALLUP_STATUSES
+
 AttendanceStatus = Literal[
     "present",
     "absent",
@@ -338,6 +340,8 @@ class PersonnelResponse(PersonnelBase):
     id: str
     nominal_roll_id: str
     status: str
+    callup_status: str
+    remarks: str | None
     created_at: utc_dt.datetime
     updated_at: utc_dt.datetime | None
     created_by: str
@@ -367,6 +371,30 @@ class PersonnelUpdate(BaseModel):
         pattern="^(active|archived)$",
         description="Personnel status (active or archived)",
     )
+    callup_status: str | None = Field(
+        None,
+        description=f"Callup decision status (one of: {', '.join(CALLUP_STATUSES)})",
+    )
+    remarks: str | None = Field(
+        None, max_length=2000, description="Per-person remarks (empty clears)"
+    )
+
+    @field_validator("callup_status")
+    @classmethod
+    def _callup_status_must_be_known(cls, v: str | None) -> str | None:
+        if v is not None and v not in CALLUP_STATUSES:
+            raise ValueError(
+                f"callup_status must be one of: {', '.join(CALLUP_STATUSES)}"
+            )
+        return v
+
+    @field_validator("remarks")
+    @classmethod
+    def _remarks_normalized(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        stripped = v.strip()
+        return stripped or None
 
 
 class PersonnelListParams(BaseModel):
@@ -399,6 +427,8 @@ class PersonnelResponseWithGrouping(PersonnelBase):
     id: str
     nominal_roll_id: str
     status: str
+    callup_status: str
+    remarks: str | None
     created_at: utc_dt.datetime
     updated_at: utc_dt.datetime | None
     created_by: str

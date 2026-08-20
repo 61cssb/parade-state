@@ -100,6 +100,10 @@ async def attendance_view(
                     and_(
                         Personnel.nominal_roll_id == selected_nr_id,
                         Personnel.status == "active",
+                        # Only Called Up personnel attend; other callup
+                        # statuses (Deferred, MR, ...) are hidden — existing
+                        # attendance records for them are preserved untouched.
+                        Personnel.callup_status == "Called Up",
                     )
                 ).order_by(
                     Personnel.unit,
