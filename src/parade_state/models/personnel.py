@@ -20,6 +20,10 @@ CALLUP_STATUSES: tuple[str, ...] = (
     "Other",
 )
 
+# Provenance marker for UI-added personnel rows. NULL means the row came from
+# CSV ingestion; "manual" marks a super-admin "Add Serviceman" creation.
+SOURCE_MANUAL: str = "manual"
+
 if TYPE_CHECKING:
     from .attendance import Attendance
     from .csv_ingestion import NominalRoll
@@ -28,7 +32,8 @@ if TYPE_CHECKING:
 
 
 class Personnel(Base):
-    """Individual personnel record, sourced from a CSV nominal roll.
+    """Individual personnel record on a nominal roll (CSV-sourced or,
+    when ``source`` is ``"manual"``, super-admin added via the UI).
 
     Identity: ``id`` is the row PK (one row per nominal-roll-person pairing) and
     the FK target for dependent tables. ``pers_no`` is the canonical cross-roll
@@ -67,6 +72,8 @@ class Personnel(Base):
         index=True,
     )
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Provenance: NULL = CSV row, "manual" = UI-added (see SOURCE_MANUAL).
+    source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     updated_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True, index=True)

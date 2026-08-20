@@ -51,7 +51,9 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 - Google OAuth sign-in (host-independent), admin-only auth, audit log
 - CSV upload → process into Nominal Roll + Personnel + auto-tagging
   (fixed canonical column map from the WY2627 fixture — see CSV Step 2);
-  taggings importable across NRs by `pers_no`
+  taggings importable across NRs by `pers_no`; super-admins can also add a
+  missing serviceman manually from the NR view (`source='manual'`, pers_no
+  fill-in-later inline; per-roll, not propagated to future CSV rolls)
 - Tagging overlay, 1:1 per NR: unit/subunit edits land on the overlay;
   reads serve effective (`to_*`-overlaid) values; CSV-sourced NR data
   itself is read-only
@@ -159,6 +161,10 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-20:** Add Serviceman (Issue 26): super-admin manual personnel
+  creation from the NR view — `Personnel.source` provenance ('manual'
+  badge), `POST /api/v1/personnel`, pers_no nullable + super-admin
+  fill-in-later PATCH (inline cell); per-roll only (no propagation)
 - **2026-08-20:** Attendance autosave (Issue 19): Save button removed, rows
   PUT themselves on status change / remarks blur with a Saving…/Saved
   indicator and a red-edge retry state on failure; yellow tagged-row
