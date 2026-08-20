@@ -102,6 +102,13 @@ class Settings:
         )
         self.FEATURE_GROUPING: bool = env.get_bool("FEATURE_GROUPING", default=False)
 
+        # Non-production identifier banner: when set (e.g. on the Railway
+        # development environment), a thin fixed strip at the very top of
+        # every page shows this text, so users never have to read the URL
+        # to know which environment they are on. Unset in production —
+        # no markup, no CSS, no layout change at all.
+        self.ENVIRONMENT_BANNER: str = env.get("ENVIRONMENT_BANNER", "") or ""
+
     @property
     def is_production(self) -> bool:
         """Whether the app runs in the production environment."""

@@ -99,6 +99,7 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 - `tests/integration/test_csv_upload_api.py` - CSV upload pipeline, hash dedup, mapping (9 tests)
 - `tests/integration/test_deferments_api.py` - Deferment CRUD, callup_status transitions, super_admin auth (15 tests)
 - `tests/integration/test_feature_flags.py` - Flag-off hides Deferments/Grouping entirely (nav, pages, API) for every role incl. super-admin; flag-on restore; env-var defaults (8 tests)
+- `tests/integration/test_environment_banner.py` - ENVIRONMENT_BANNER renders the top strip pre-auth (login) and post-auth, escapes its text, and emits no markup when unset (5 tests)
 - `tests/integration/test_groupings_api.py` - Grouping lifecycle, CRUD operations (18 tests)
 - `tests/integration/test_grouping_exclusions_api.py` - Personnel exclusion management (9 tests)
 - `tests/integration/test_nominal_rolls_api.py` - Nominal Roll lifecycle (attendance activation auto-switch/deactivate, delete, label updates)

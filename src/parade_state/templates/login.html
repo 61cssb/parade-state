@@ -79,9 +79,38 @@
         .info p:last-child {
             margin-bottom: 0;
         }
+
+        /* Environment banner (mirrors base.html; shown only when
+           ENVIRONMENT_BANNER is set — never in production). */
+        .env-banner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1.5rem;
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #f59e0b;
+            color: #111827;
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        body.env-banner {
+            padding-top: 1.5rem;
+        }
     </style>
 </head>
-<body>
+<body class="{% if request.app.state.settings.ENVIRONMENT_BANNER %}env-banner{% endif %}">
+    {% if request.app.state.settings.ENVIRONMENT_BANNER %}
+    <div class="env-banner" role="note">{{ request.app.state.settings.ENVIRONMENT_BANNER | e }}</div>
+    {% endif %}
     <div class="login-container">
         <div class="logo">🎖️</div>
         <h1>Parade State Admin</h1>

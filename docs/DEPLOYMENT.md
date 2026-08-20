@@ -106,6 +106,12 @@ DEBUG=false
 # Optional: feature flags — see "Feature Flags" below. Default off.
 # FEATURE_DEFERMENTS=false
 # FEATURE_GROUPING=false
+
+# Optional: environment-identifier banner — a thin amber strip fixed at
+# the top of every page (login screen included) showing this text. Set
+# on the development environment so users don't have to read the URL;
+# leave unset in production (no markup, no layout change).
+# ENVIRONMENT_BANNER="Development environment"
 ```
 
 ### Feature Flags
@@ -347,7 +353,8 @@ schema (the shared-DB approach was considered and rejected in issue #15).
 | `SESSION_SECRET` | own value | **own value** (never share between environments) |
 | `ALLOWED_ORIGINS` / `APP_BASE_URL` | production domain | development domain |
 | `PURGE_ENABLED` | `false` | `true` (admin-UI data purge for testing) |
-| `FEATURE_DEFERMENTS` / `FEATURE_GROUPING` | unset (`false`) | `true` (features testable in dev) |
+| `FEATURE_DEFERMENTS` / `FEATURE_GROUPING` | unset (`false`) | per feature readiness |
+| `ENVIRONMENT_BANNER` | unset (no banner) | `Development environment` (top strip on every page) |
 
 `DATABASE_URL` is the environment-scoped reference
 `${{Postgres.DATABASE_URL}}` in both environments — it resolves to that
