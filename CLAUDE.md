@@ -257,6 +257,11 @@ uv run pytest -k "personnel"
 - **Database:** File-based SQLite (not `:memory:`) for proper isolation
 - **Async tests:** Use `@pytest.mark.asyncio`
 - **HTTP testing:** Use `client` fixture, never create TestClient directly
+- **Browser/layout checks:** `scripts/visual_check.py` — seeded throwaway
+  SQLite + minted session cookie + headless system Chrome, run via
+  `uv run --with playwright scripts/visual_check.py ...` (its header has
+  usage and retirement criteria). Machine-specific wrappers (Railway CLI,
+  local SQLite server) live in gitignored `local/`
 
 ---
 
