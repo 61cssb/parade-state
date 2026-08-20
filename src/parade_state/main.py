@@ -132,14 +132,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(web_auth_router, prefix="/auth", tags=["web-auth"])
 
     # User-facing web routes (non-admin views). The grouping pages are
-    # feature-flagged: flag-off means 404 for every role.
+    # feature-flagged: flag-off means 404 for every role. The two core
+    # features carry default-on kill switches (issue 23) with the same
+    # flag-off behavior.
     app.include_router(
         web_grouping_router,
         tags=["web-grouping"],
         dependencies=[Depends(require_feature("FEATURE_GROUPING"))],
     )
-    app.include_router(web_attendance_router, tags=["web-attendance"])
-    app.include_router(web_nominal_roll_router, tags=["web-nominal-roll"])
+    app.include_router(
+        web_attendance_router,
+        tags=["web-attendance"],
+        dependencies=[Depends(require_feature("FEATURE_ATTENDANCE"))],
+    )
+    app.include_router(
+        web_nominal_roll_router,
+        tags=["web-nominal-roll"],
+        dependencies=[Depends(require_feature("FEATURE_NOMINALROLL"))],
+    )
 
     # Admin interface routes
     app.include_router(admin_router, tags=["admin"])
@@ -155,15 +165,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.include_router(sessions.router, prefix="/api/v1/sessions", tags=["sessions"])
     app.include_router(
-        attendance.router, prefix="/api/v1/attendance", tags=["attendance"]
+        attendance.router,
+        prefix="/api/v1/attendance",
+        tags=["attendance"],
+        dependencies=[Depends(require_feature("FEATURE_ATTENDANCE"))],
     )
     app.include_router(personnel.router, prefix="/api/v1", tags=["personnel"])
     app.include_router(
         access_control.router, prefix="/api/v1/access-control", tags=["access-control"]
     )
-    app.include_router(csv_upload.router, prefix="/api/v1/csv", tags=["csv-upload"])
     app.include_router(
-        nominal_rolls.router, prefix="/api/v1/nominal-rolls", tags=["nominal-rolls"]
+        csv_upload.router,
+        prefix="/api/v1/csv",
+        tags=["csv-upload"],
+        dependencies=[Depends(require_feature("FEATURE_NOMINALROLL"))],
+    )
+    app.include_router(
+        nominal_rolls.router,
+        prefix="/api/v1/nominal-rolls",
+        tags=["nominal-rolls"],
+        dependencies=[Depends(require_feature("FEATURE_NOMINALROLL"))],
     )
     app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
     app.include_router(
@@ -172,7 +193,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tags=["deferments"],
         dependencies=[Depends(require_feature("FEATURE_DEFERMENTS"))],
     )
-    app.include_router(tagging.router, prefix="/api/v1/taggings", tags=["taggings"])
+    app.include_router(
+        tagging.router,
+        prefix="/api/v1/taggings",
+        tags=["taggings"],
+        dependencies=[Depends(require_feature("FEATURE_NOMINALROLL"))],
+    )
     app.include_router(
         db_restore.router, prefix="/api/v1/admin", tags=["db-restore"]
     )

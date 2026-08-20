@@ -777,6 +777,24 @@ managed feature-flag offering was rejected (paid early access with
 breaking-change risk, TypeScript-only SDK, rollout targeting this
 coarse on/off switch does not need).
 
+**Core-feature kill switches** (issue 23) invert the default:
+`FEATURE_NOMINALROLL` and `FEATURE_ATTENDANCE` default **on**, because a
+missing env var must never hide a shipped core feature. Only an explicit
+`false` takes the feature offline (same mechanics as above) — the
+emergency use case is a data-corrupting bug appearing mid-window:
+
+- `FEATURE_NOMINALROLL=false` hides the Nominal Roll stack: `/nominal-roll`
+  page, `/admin/csv-upload` (the upload pipeline — without it the roll
+  cannot be recreated), `/admin/taggings` (taggings are a per-NR overlay),
+  `/api/v1/nominal-rolls/*`, `/api/v1/csv/*`, `/api/v1/taggings/*`, and
+  their nav entries. Admin surfaces that merely *display* NR data (Unit
+  Strength report, audit log) stay up — they read the database directly.
+- `FEATURE_ATTENDANCE=false` hides the `/attendance` page,
+  `/api/v1/attendance/*`, and the nav entry.
+
+Both vars are set to `true` in both Railway environments, so toggling is
+an env-var change plus restart with no other action.
+
 ### 4.9 Key Constraints Summary
 
 | Table | Unique | Index | Purpose |

@@ -10,6 +10,11 @@ booleans, default off, and are enabled per environment via env vars
 (dev and prod are separate Railway environments with separate env vars).
 Toggling a flag is an env-var change plus a service restart.
 
+The exception is the core-feature kill switches (FEATURE_NOMINALROLL,
+FEATURE_ATTENDANCE): shipped features must never disappear because an env
+var is missing, so these default ON — explicit ``false`` takes the feature
+offline (issue 23).
+
 Adding a new flag is a one-line ``Settings`` change plus gating:
 
 - routes: ``APIRouter(dependencies=[Depends(require_feature("FEATURE_X"))])``
@@ -30,6 +35,8 @@ FEATURE_LABELS = {
     "FEATURE_DEFERMENTS": "Deferments",
     "FEATURE_GROUPING": "Grouping",
     "FEATURE_STRENGTH": "Unit Strength",
+    "FEATURE_NOMINALROLL": "Nominal Roll",
+    "FEATURE_ATTENDANCE": "Attendance",
 }
 
 

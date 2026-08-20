@@ -60,6 +60,11 @@ def feature_flags_enabled(monkeypatch):
     cached ``get_settings()`` instance while nav templates read the
     module-level app's ``app.state.settings`` snapshot — the two diverge
     once test_production_hardening clears the settings cache.
+
+    The core-feature kill switches (FEATURE_NOMINALROLL,
+    FEATURE_ATTENDANCE) are intentionally absent: they default ON, so the
+    everywhere posture needs no override (issue 23; flag-off coverage
+    lives in tests/integration/test_core_feature_kill_switches.py).
     """
     for settings_obj in {get_settings(), app.state.settings}:
         for flag in ("FEATURE_DEFERMENTS", "FEATURE_GROUPING", "FEATURE_STRENGTH"):

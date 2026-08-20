@@ -54,7 +54,11 @@ tags:
   - name: subunit-enums
     description: Valid values for unit/subunit hierarchy levels (admin)
   - name: csv-upload
-    description: CSV estab upload pipeline — upload, mapping, diff, confirm
+    description: >
+      CSV estab upload pipeline — upload, mapping, diff, confirm.
+      Kill-switched: every /api/v1/csv/* route returns 404 for all roles
+      (super-admins included) when FEATURE_NOMINALROLL=false
+      (default on; unset = available).
   - name: column-mappings
     description: Global raw→canonical column mapping table (admin)
   - name: column-metadata
@@ -85,11 +89,17 @@ tags:
       require the target NR to be the active one (400 otherwise) and are
       gated by Subunit-1 assignment (403; super_admin bypasses;
       tagging-aware effective sub_unit_1).
+      Kill-switched: every /api/v1/attendance/* route returns 404 for all
+      roles (super-admins included) when FEATURE_ATTENDANCE=false
+      (default on; unset = available).
   - name: nominal-rolls
     description: >
       Nominal Roll management. Super-admin attendance activation:
       exactly one NR is active for attendance at a time (auto-switch on
       activate). The NR confirm/unconfirm workflow is removed.
+      Kill-switched: every /api/v1/nominal-rolls/* route returns 404 for
+      all roles (super-admins included) when FEATURE_NOMINALROLL=false
+      (default on; unset = available).
   - name: subunit-assignments
     description: >
       NR-scoped Subunit-1 attendance access (issue #4 PR 2). Super-admin-only
@@ -108,9 +118,17 @@ tags:
       all roles (super-admins included) unless FEATURE_DEFERMENTS=true
       (on in development, off in production).
   - name: taggings
-    description: Tagging overlays — super-admin only; person→subunit remappings on a Nominal Roll (1:1 with the NR)
+    description: >
+      Tagging overlays — super-admin only; person→subunit remappings on a
+      Nominal Roll (1:1 with the NR). Kill-switched with the NR stack:
+      every /api/v1/taggings/* route returns 404 for all roles
+      (super-admins included) when FEATURE_NOMINALROLL=false
+      (default on; unset = available).
   - name: csv
-    description: CSV upload and processing into Nominal Rolls
+    description: >
+      CSV upload and processing into Nominal Rolls. Kill-switched with
+      the NR stack: 404 for all roles (super-admins included) when
+      FEATURE_NOMINALROLL=false (default on; unset = available).
 
 # =============================================================================
 # PATHS

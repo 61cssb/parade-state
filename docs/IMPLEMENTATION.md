@@ -108,8 +108,9 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 - `tests/integration/test_sessions_410.py` - Sessions endpoints return 410 Gone (sessions removed in issue #4)
 - `tests/integration/test_users_api.py` - User CRUD, role/status transitions (3 tests)
 - `tests/integration/test_audit_api.py` - Audit log filtering and pagination (10 tests)
+- `tests/integration/test_core_feature_kill_switches.py` - FEATURE_NOMINALROLL/FEATURE_ATTENDANCE default-on kill switches: unset = fully available; explicit false hides page+API+nav for every role incl. super-admin; independent gating (9 tests)
 
-**Total:** 292 tests, 100% pass rate ✅ UPDATED
+**Total:** 516 collected (512 passing, 4 skipped) ✅ UPDATED
 **Coverage:** Comprehensive integration test coverage across all major features
 **Performance:** ~23 seconds for full integration test suite
 
