@@ -27,7 +27,7 @@ from .grouping import (
     GroupingPersonnelExclusion,
     GroupingPersonnelOverride,
 )
-from .personnel import Personnel
+from .personnel import CALLUP_STATUSES, Personnel
 from .tagging import Tagging, TaggingEntry
 
 __all__ = [
@@ -38,6 +38,7 @@ __all__ = [
     "UserSubunitScope",
     "ATTENDANCE_STATUSES",
     "PRESENT_LIKE_STATUSES",
+    "CALLUP_STATUSES",
     "Attendance",
     "AuditLog",
     "UserSession",
