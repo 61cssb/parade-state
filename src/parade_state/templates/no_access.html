@@ -111,12 +111,12 @@
             overflow: hidden;
         }
 
-        body.env-banner {
+        body.has-env-banner {
             padding-top: 1.5rem;
         }
     </style>
 </head>
-<body class="{% if request.app.state.settings.ENVIRONMENT_BANNER %}env-banner{% endif %}">
+<body class="{% if request.app.state.settings.ENVIRONMENT_BANNER %}has-env-banner{% endif %}">
     {% if request.app.state.settings.ENVIRONMENT_BANNER %}
     <div class="env-banner" role="note">{{ request.app.state.settings.ENVIRONMENT_BANNER | e }}</div>
     {% endif %}

@@ -23,7 +23,11 @@
            shown the page shifts down by exactly its height (uniform
            offset, no reflow) so nothing is ever covered. Convention:
            any future element pinned to the viewport top must sit below
-           this strip — add it to the body.env-banner offset rules. */
+           this strip — add it to the body.has-env-banner offset rules.
+           NOTE: the body modifier class (has-env-banner) must stay
+           distinct from the strip class (.env-banner) — a body class
+           matching the strip selector would turn <body> itself into a
+           fixed, clipped, flex-centered box and kill page scrolling. */
         .env-banner {
             position: fixed;
             top: 0;
@@ -44,16 +48,16 @@
             overflow: hidden;
         }
 
-        body.env-banner {
+        body.has-env-banner {
             padding-top: 1.5rem;
         }
 
-        body.env-banner .sidebar {
+        body.has-env-banner .sidebar {
             top: 1.5rem;
             height: calc(100vh - 1.5rem);
         }
 
-        body.env-banner .topbar {
+        body.has-env-banner .topbar {
             top: 1.5rem;
         }
 
@@ -531,7 +535,7 @@
         }
     </style>
 </head>
-<body class="{% if request.app.state.settings.ENVIRONMENT_BANNER %}env-banner{% endif %}">
+<body class="{% if request.app.state.settings.ENVIRONMENT_BANNER %}has-env-banner{% endif %}">
     {% if request.app.state.settings.ENVIRONMENT_BANNER %}
     <div class="env-banner" role="note">{{ request.app.state.settings.ENVIRONMENT_BANNER | e }}</div>
     {% endif %}
