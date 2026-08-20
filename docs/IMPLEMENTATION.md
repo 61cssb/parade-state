@@ -222,10 +222,13 @@ async def test_example(client, sample_users, sample_grouping):
   page (`POST /api/v1/nominal-rolls/{id}/activate-attendance` /
   `deactivate-attendance`); activating another NR auto-switches. With no
   active NR the user view shows an inactive message and writes are refused.
-- Bulk upsert endpoint (`PUT /api/v1/attendance/upsert`) with snapshot capture.
-- "Copy Remarks" endpoint (`POST /api/v1/attendance/copy-remarks`): before 12pm
-  copies previous day's `remarks_pm` → today's `remarks_am`; after 12pm copies
-  today's `remarks_am` → `remarks_pm`.
+- Bulk upsert endpoint (`PUT /api/v1/attendance/upsert`) with snapshot capture;
+  the same endpoint serves the per-row autosave payloads (single-record PUT).
+- "Copy Remarks" endpoint (`POST /api/v1/attendance/copy-remarks`, issue 20):
+  explicit source (date + slot) and destination (date + slot) — same
+  source/destination is rejected (400); an optional `sub_unit_1` param narrows
+  the copy to the attendance page's view filter (effective-value aware).
+  Blank source remarks are skipped; missing destination rows are created.
 - Tagging delete guarded (409) when its NR has attendance rows.
 - Attendance status enum: present, absent, time_off, mc, yet_to_inpro, outpro,
   reporting_sick, late, att_out (default: absent).
@@ -254,9 +257,17 @@ async def test_example(client, sample_users, sample_grouping):
   the caller's assigned subunits (tagging-aware effective sub_unit_1;
   super_admin sees all) and shows the tagging overlay (yellow rows). With no
   active NR it shows an inactive message instead of the marking table.
-- **Copy Remarks** lives on `/attendance`, visible to **super-admins only**
-  (before noon → previous day's PM remarks into today's AM; after noon →
-  today's AM into PM; the AM copy is disabled on the NR's first day).
+- **Copy Remarks** lives on `/attendance` behind a modal (issue 20): explicit
+  source/destination day + AM/PM pickers (clamped to the NR's CAA → the
+  viewed day; prefilled with the old time-of-day pair), same source and
+  destination blocked, an earlier destination warns and needs a second
+  click, and the confirmation names the scope ("for N personnel in current
+  view. Existing destination remarks will be overwritten."). Open to all
+  admins — write perms are enforced server-side (sub-unit assignments, 403).
+- **Autosave (issue 19):** no Save button — each row PUTs itself on status
+  change or remarks blur (a "Saving…/Saved" indicator near the table; a
+  failed save red-edges the row and retries on the next edit). Tagged rows
+  are no longer highlighted here; yellow stays an NR-view-only signal.
 - Nominal Roll management lives on `/nominal-roll` in the collapsed-by-default
   "Roll management" expander below the roll selector (merged from the retired
   admin Nominal Rolls page): inline label/remarks editing and Create Grouping

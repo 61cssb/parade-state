@@ -78,10 +78,13 @@ tags:
   - name: attendance
     description: >
       Attendance with hardcoded AM/PM slots, taken against the Nominal Roll
-      currently active for attendance (with its 1:1 tagging applied). Bulk
-      upsert and copy-remarks; writes require the target NR to be the active
-      one (400 otherwise) and are gated by Subunit-1 assignment (403;
-      super_admin bypasses; tagging-aware effective sub_unit_1).
+      currently active for attendance (with its 1:1 tagging applied).
+      Per-row and bulk upsert; copy-remarks copies an explicit source
+      (date + slot) to a destination (date + slot), optionally narrowed to
+      an effective sub_unit_1 (the attendance page's view filter). Writes
+      require the target NR to be the active one (400 otherwise) and are
+      gated by Subunit-1 assignment (403; super_admin bypasses;
+      tagging-aware effective sub_unit_1).
   - name: nominal-rolls
     description: >
       Nominal Roll management. Super-admin attendance activation:
