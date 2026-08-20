@@ -2,6 +2,13 @@
 
 This document clarifies the different types of endpoints in the Parade State application.
 
+> **Feature flags:** the Deferments and Grouping features (web pages and
+> `/api/v1/deferments/*`, `/api/v1/groupings/*`) are gated by the
+> `FEATURE_DEFERMENTS` / `FEATURE_GROUPING` env vars — flag-off means 404
+> for every role including super-admins, and their UI entry points are not
+> rendered. On in development; off in production. See
+> [DEPLOYMENT.md](DEPLOYMENT.md) › Feature Flags.
+
 ## Endpoint Types
 
 ### 1. Web Views (HTML Responses)

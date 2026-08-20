@@ -16,7 +16,8 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ## Current Snapshot
 
-- **Tests:** 438 SQLite passing. The suite runs against
+- **Tests:** 447 SQLite passing (flags-on posture; flags-off gating has
+  dedicated tests). The suite runs against
   Postgres by setting `TEST_DATABASE_URL` (per-test databases).
 - **Access model:** `super_admin` + `admin` only. Unknown Google
   sign-ins auto-register as `unrecognised` (no access, no session);
@@ -34,6 +35,10 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   ([DEPLOYMENT.md](DEPLOYMENT.md) › Environments). Dev is the empty-start
   playground for test users (purge enabled); promotion to prod is
   PR `dev` → `main`.
+- **Feature flags:** `FEATURE_DEFERMENTS` / `FEATURE_GROUPING` env-var
+  booleans hide those features entirely (nav, pages, API — 404 for all
+  roles, super-admins included) until ready. Dev sets both `true`; prod
+  leaves them off ([DEPLOYMENT.md](DEPLOYMENT.md) › Feature Flags).
 
 ### What the app does today
 
@@ -51,12 +56,14 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   (`UserSubunitAssignment`; deny-by-default; super_admin bypasses)
 - Groupings: lifecycle, personnel exclusions/overrides, date editing —
   managed from the `/grouping` view's expander (admin groupings page
-  retired)
-- Deferments (super-admin CRUD; `Personnel.callup_status`)
+  retired); **feature-flagged** (`FEATURE_GROUPING`, dev-only until ready)
+- Deferments (super-admin CRUD; `Personnel.callup_status`);
+  **feature-flagged** (`FEATURE_DEFERMENTS`, dev-only until ready)
 - Sidebar: workflow pages flat (Dashboard, Upload NR, Nominal Roll,
   Taggings, Deferments, Attendance, Grouping) + **Admin** section
   (Users, Settings, Audit Log, Restore Backup); SA-only pages show an
-  in-page no-access message for plain admins
+  in-page no-access message for plain admins; flag-gated entries
+  (Deferments, Grouping) render only when their flag is on
 - Admin UI: dashboard, users, audit log, taggings, deferments,
   Upload NR (CSV upload), DB restore, Settings purge (testing-only);
   NR and grouping management live in expanders on their views
@@ -137,6 +144,10 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-20:** Env-var feature flags (Issue 18): Deferments and
+  Grouping hidden entirely (nav, pages, API — 404 for all roles
+  including super-admins) until ready; enabled in dev via Railway env
+  vars, off in prod
 - **2026-08-20:** Hosted development environment stood up on Railway
   (Issue 15): separate `development` environment + Postgres tracking the
   `dev` branch, empty-start DB with purge enabled; test users use dev

@@ -60,7 +60,11 @@ tags:
   - name: column-metadata
     description: Per-CSV-version column registry and sensitivity labels (admin)
   - name: groupings
-    description: Grouping lifecycle — create, clone, migrate, activate
+    description: >
+      Grouping lifecycle — create, clone, migrate, activate.
+      Feature-flagged: every /api/v1/groupings/* route returns 404 for
+      all roles (super-admins included) unless FEATURE_GROUPING=true
+      (on in development, off in production).
   - name: grouping-overrides
     description: Personnel subunit overrides within a grouping
   - name: grouping-notes
@@ -95,7 +99,11 @@ tags:
   - name: events
     description: Server-Sent Events for stale data detection
   - name: deferments
-    description: Personnel deferments — super-admin only; drives callup_status
+    description: >
+      Personnel deferments — super-admin only; drives callup_status.
+      Feature-flagged: every /api/v1/deferments/* route returns 404 for
+      all roles (super-admins included) unless FEATURE_DEFERMENTS=true
+      (on in development, off in production).
   - name: taggings
     description: Tagging overlays — super-admin only; person→subunit remappings on a Nominal Roll (1:1 with the NR)
   - name: csv

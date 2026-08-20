@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import RedirectResponse
@@ -33,6 +33,7 @@ from parade_state.api import (
 )
 from parade_state.config import Settings, get_settings
 from parade_state.db import init_database
+from parade_state.features import require_feature
 from parade_state.web.attendance import router as web_attendance_router
 from parade_state.web.auth import router as web_auth_router
 from parade_state.web.grouping import router as web_grouping_router
@@ -89,6 +90,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     templates_dir = Path(__file__).parent / "templates"
     app.state.templates_dir = str(templates_dir)  # Store directory path instead
 
+    # Live settings for templates: nav entries gate on feature flags via
+    # ``request.app.state.settings.FEATURE_*`` (see parade_state.features).
+    app.state.settings = settings
+
     # CORS middleware: credentialed requests are accepted only from the
     # configured origins. Production validation rejects "*".
     app.add_middleware(
@@ -123,8 +128,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # User-facing web routes (OAuth flows, redirects)
     app.include_router(web_auth_router, prefix="/auth", tags=["web-auth"])
 
-    # User-facing web routes (non-admin views)
-    app.include_router(web_grouping_router, tags=["web-grouping"])
+    # User-facing web routes (non-admin views). The grouping pages are
+    # feature-flagged: flag-off means 404 for every role.
+    app.include_router(
+        web_grouping_router,
+        tags=["web-grouping"],
+        dependencies=[Depends(require_feature("FEATURE_GROUPING"))],
+    )
     app.include_router(web_attendance_router, tags=["web-attendance"])
     app.include_router(web_nominal_roll_router, tags=["web-nominal-roll"])
 
@@ -134,7 +144,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # REST API endpoints (JSON responses)
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["api-auth"])
     app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
-    app.include_router(groupings.router, prefix="/api/v1/groupings", tags=["groupings"])
+    app.include_router(
+        groupings.router,
+        prefix="/api/v1/groupings",
+        tags=["groupings"],
+        dependencies=[Depends(require_feature("FEATURE_GROUPING"))],
+    )
     app.include_router(sessions.router, prefix="/api/v1/sessions", tags=["sessions"])
     app.include_router(
         attendance.router, prefix="/api/v1/attendance", tags=["attendance"]
@@ -149,7 +164,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
     app.include_router(
-        deferments.router, prefix="/api/v1/deferments", tags=["deferments"]
+        deferments.router,
+        prefix="/api/v1/deferments",
+        tags=["deferments"],
+        dependencies=[Depends(require_feature("FEATURE_DEFERMENTS"))],
     )
     app.include_router(tagging.router, prefix="/api/v1/taggings", tags=["taggings"])
     app.include_router(

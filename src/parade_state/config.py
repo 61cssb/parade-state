@@ -92,6 +92,16 @@ class Settings:
             "PURGE_ENABLED", default=not self.is_production
         )
 
+        # Feature flags: features that are not ready for a deployment are
+        # hidden entirely — no nav entry, page and API routes unreachable —
+        # for every role including super admins. Default off; the
+        # development environment opts in via env vars. Toggling is an
+        # env-var change plus service restart (see parade_state.features).
+        self.FEATURE_DEFERMENTS: bool = env.get_bool(
+            "FEATURE_DEFERMENTS", default=False
+        )
+        self.FEATURE_GROUPING: bool = env.get_bool("FEATURE_GROUPING", default=False)
+
     @property
     def is_production(self) -> bool:
         """Whether the app runs in the production environment."""
