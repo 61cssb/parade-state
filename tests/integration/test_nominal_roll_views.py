@@ -265,8 +265,10 @@ async def test_nominal_roll_add_serviceman_wiring(
         "/nominal-roll", params={"nominal_roll_id": str(sample_nominal_roll.id)}
     )
     assert response.status_code == 200
-    # Button + modal + submit wiring.
+    # Button + modal + submit wiring. The button is a roster action, so it
+    # sits below the personnel table — not inside Roll management.
     assert "Add Serviceman" in response.text
+    assert response.text.rindex('onclick="openAddModal') > response.text.rindex("</table>")
     assert 'id="add-modal"' in response.text
     assert "openAddModal" in response.text
     assert "submitAddServiceman" in response.text

@@ -396,12 +396,14 @@ async def test_example(client, sample_users, sample_grouping):
   super-admin only (403 otherwise), membership semantics like `remarks`
   (explicit null / blank clears), per-roll uniqueness pre-check excluding
   self → 409. Admins retain status/callup/remarks.
-- NR browser (super-admin block of Roll management): "Add Serviceman" modal
-  cloned from Create Grouping (backdrop, Esc, inline status errors, reload
-  on success) with datalists for rank (OFFICER ∪ WOSE) and unit/sub-units;
-  "manual" badge beside the full name for `source='manual'` rows;
-  inline-editable pers_no cell (onchange → PATCH, blank clears, revert on
-  error) for super-admins, static text for others.
+- NR browser: "Add Serviceman" button below the personnel table (a roster
+  action — kept out of Roll management, which acts on the roll entity;
+  shown even when filters match nothing, since that's the add flow) opens a
+  modal cloned from Create Grouping (backdrop, Esc, inline status errors,
+  reload on success) with datalists for rank (OFFICER ∪ WOSE) and
+  unit/sub-units; "manual" badge beside the full name for
+  `source='manual'` rows; inline-editable pers_no cell (onchange → PATCH,
+  blank clears, revert on error) for super-admins, static text for others.
 - Manual adds are per-roll: the next CSV upload's new roll will not include
   them (propagation out of scope).
 - **Tests:** POST happy paths (with/without pers_no), permission gates,
