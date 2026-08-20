@@ -267,7 +267,7 @@ UserSubunitScope
 
 #### 3.2.1 Personnel
 
-**Individual personnel record, sourced from CSV nominal roll.**
+**Individual personnel record on a nominal roll (CSV-sourced or manual).**
 
 ```
 Personnel
@@ -278,6 +278,8 @@ Personnel
 │       One pers_no is one person globally — no two distinct persons ever share
 │       one (guaranteed by the external system that mints the numbers). NULL
 │       when the CSV row omitted it; never an empty string. Human-facing identifier.
+│       NULL also for manual "Add Serviceman" rows until a super-admin fills
+│       it in later (PATCH; super-admin only).
 ├── nominal_roll_id: UUID (FK Nominal Roll, on_delete=CASCADE)
 ├── rank: str
 ├── category: str ENUM ['Officer', 'WOSE']  ← inferred from rank at ingest; never manually set
@@ -293,6 +295,7 @@ Personnel
 ├── status: str ENUM ['active', 'archived']
 ├── callup_status: str ENUM ['Called Up', 'Deferred', 'Disrupted', 'MR', 'Age Limit', 'Other']  (default: 'Called Up')
 ├── remarks: text (nullable; per-person remarks, distinct from the roll-level NominalRoll.remarks)
+├── source: str | null (max 16) ← Provenance: NULL = CSV row, 'manual' = UI-added
 ├── created_at: datetime
 └── created_by: UUID (FK User; typically system)
 ```
@@ -327,6 +330,28 @@ Personnel
 - Admins (admin + super_admin) can edit `callup_status` and `remarks` inline
   in the NR management table (PATCH `/personnel/{id}`; enum-invalid values
   are rejected with 422).
+
+**Manual creation & pers_no fill-in-later (issue 26):**
+- `POST /api/v1/personnel` (super-admin only) creates a row on an existing
+  nominal roll with `source='manual'`, `status='active'`, and
+  `callup_status` defaulting to `Called Up` — so the person appears in the
+  attendance view immediately and is otherwise managed like any CSV row
+  (callup/remarks editing, tagging overlay, groupings). `rank` must map to
+  a category (400 otherwise, valid ranks listed); unknown NR → 404;
+  duplicate `pers_no` within the roll → 409 (same pers_no on a *different*
+  roll stays allowed, matching CSV semantics). Side effects:
+  `NominalRoll.personnel_count` increments and an AuditLog
+  (`entity_type='personnel'`, `action='create'`) entry is written.
+- Manual adds live only on the roll they were added to; the next CSV upload
+  creates a new roll that will not include them (accepted; propagation is
+  out of scope).
+- The NR view marks `source='manual'` rows with a "manual" badge beside the
+  full name; super-admins also get an inline-editable pers_no cell
+  (PATCH `{pers_no: value || null}` on change — blank clears). `pers_no` in
+  PATCH is super-admin-only (403 otherwise, including admins); membership
+  semantics like `remarks` (explicit null clears); per-roll uniqueness
+  pre-check excluding self → 409. Identity fields (`rank`, `name`) remain
+  rejected for everyone (the NR stays read-only).
 
 ### 3.3 Deferments
 

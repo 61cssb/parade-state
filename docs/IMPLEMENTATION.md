@@ -378,6 +378,36 @@ async def test_example(client, sample_users, sample_grouping):
 - **Tests:** personnel PATCH (parametrised enum + 403), CSV mapping,
   attendance hiding + record preservation, NR view wiring
 
+**Add Serviceman: manual creation (✅ issue 26)**
+- New nullable `Personnel.source` provenance column (NULL = CSV row,
+  `'manual'` = UI-added); migration `r8e9f0a1b2c3` (add_column only, chains
+  on `q7d8e9f0a1b2`), exposed in Personnel responses.
+- `POST /api/v1/personnel` (super-admin only; 403 otherwise): creates a row
+  on an existing NR with `source='manual'`, `status='active'`,
+  `callup_status` default `Called Up`, category inferred via
+  `ranks.category_for_rank` (invalid rank → 400 listing valid ranks;
+  unknown NR → 404; duplicate pers_no within the roll → 409 with
+  IntegrityError fallback; same pers_no on a different roll allowed).
+  Increments `NominalRoll.personnel_count` and writes an AuditLog
+  (`personnel` / `create`) entry. pers_no may be NULL — multiple
+  unknown-pers_no rows per roll are legal (unique constraint treats NULLs
+  as distinct).
+- `PATCH /api/v1/personnel/{id}` gains `pers_no` (fill-in-later):
+  super-admin only (403 otherwise), membership semantics like `remarks`
+  (explicit null / blank clears), per-roll uniqueness pre-check excluding
+  self → 409. Admins retain status/callup/remarks.
+- NR browser (super-admin block of Roll management): "Add Serviceman" modal
+  cloned from Create Grouping (backdrop, Esc, inline status errors, reload
+  on success) with datalists for rank (OFFICER ∪ WOSE) and unit/sub-units;
+  "manual" badge beside the full name for `source='manual'` rows;
+  inline-editable pers_no cell (onchange → PATCH, blank clears, revert on
+  error) for super-admins, static text for others.
+- Manual adds are per-roll: the next CSV upload's new roll will not include
+  them (propagation out of scope).
+- **Tests:** POST happy paths (with/without pers_no), permission gates,
+  404/400/409, cross-roll pers_no, PATCH pers_no set/clear/duplicate/
+  permissions, response `source`, NR + attendance view wiring
+
 **Taggings (✅ 1:1 with Nominal Roll — model simplification)**
 - Tagging overlay: **exactly one Tagging per Nominal Roll** (DB unique
   constraint on `nominal_roll_id`, mirroring `AttendanceScope`). Auto-created
@@ -412,7 +442,7 @@ async def test_example(client, sample_users, sample_grouping):
   process endpoint under `/api/v1/csv/{id}/process`
 - **Tests:** tagging (24) + personnel remap/409 + CSV process (7)
 
-**Total API Endpoints:** 63 fully implemented and tested endpoints ✨ UPDATED
+**Total API Endpoints:** 64 fully implemented and tested endpoints ✨ UPDATED
 
 ### 3.2 Next Phase: Personnel Detail View & Attendance History (🎯 NEXT)
 
