@@ -269,7 +269,9 @@ async def test_example(client, sample_users, sample_grouping):
   failed save red-edges the row and retries on the next edit). Tagged rows
   are no longer highlighted here; yellow stays an NR-view-only signal.
 - Nominal Roll management lives on `/nominal-roll` in the collapsed-by-default
-  "Roll management" expander below the roll selector (merged from the retired
+  "Roll management" expander directly below the roll selector dropdown inside
+  the selector card (the Grouping page's pattern; issue 22 — it acts on the
+  selected roll, so it sits next to the selector; merged from the retired
   admin Nominal Rolls page): inline label/remarks editing and Create Grouping
   for all admins; "Use for Attendance" (auto-switch) / "Deactivate Attendance"
   / Delete for super-admins, with the same confirm dialogs as before. The

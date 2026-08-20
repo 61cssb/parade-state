@@ -105,7 +105,24 @@
         white-space: nowrap;
     }
     /* Management panel: the expanded <details> body is absolutely positioned
-       so expanding it never shifts the personnel table below. */
+       so expanding it never shifts the cards below (it overlays them). */
+    /* Panel body: label/value rows share a grid so Label, Attendance and
+       Remarks align like a form; action buttons sized to their text (the
+       base .btn padding makes 0.8rem-label buttons look top-heavy). */
+    .mgmt-grid {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 0.5rem 1.25rem;
+        align-items: center;
+        font-size: 0.875rem;
+        color: #374151;
+    }
+    .mgmt-grid .mgmt-label { color: #6b7280; }
+    .mgmt-details .mgmt-btn {
+        font-size: 0.8rem;
+        padding: 0.2rem 0.75rem;
+        line-height: 1.2;
+    }
     .mgmt-details { position: relative; }
     .mgmt-details > div {
         position: absolute;
@@ -145,6 +162,67 @@
             {% endfor %}
         </select>
     </form>
+
+    {% if selected_nominal_roll %}
+    {# Roll management (merged from the retired admin nominal rolls page).
+       It is an action on the selected roll, so it sits directly below the
+       roll selector inside the selector card — same pattern as the
+       Grouping page's management expander — not inside the results card
+       where admins didn't look for it. Collapsed by default; the panel
+       overlays so expanding never shifts the page. Label/remarks editing
+       and Create Grouping are available to all admins; attendance toggle
+       and delete are super-admin-only. #}
+    <details class="mgmt-details" style="margin: 0.75rem 0 0;">
+        <summary style="cursor: pointer; font-size: 0.85rem; color: #374151; font-weight: 600;">Roll management</summary>
+        <div>
+            <div class="mgmt-grid">
+                <span class="mgmt-label">Label</span>
+                <span id="label-cell">
+                    <span id="label-display" class="inline-edit-chip"
+                          data-value="{{ selected_nominal_roll.label or '' }}"
+                          onclick="editLabel()" title="Click to edit label">{{ selected_nominal_roll.label or '—' }}</span>
+                </span>
+
+                <span class="mgmt-label">Attendance</span>
+                <span id="attendance-state">
+                    {% if selected_nominal_roll.attendance_active %}
+                    <span class="btn btn-success" style="font-size: 0.75rem; padding: 0.2rem 0.5rem; line-height: 1.25;">Active for attendance</span>
+                    {% else %}
+                    <span style="font-size: 0.75rem; color: #9ca3af;">Not used for attendance</span>
+                    {% endif %}
+                </span>
+
+                <span class="mgmt-label">Remarks</span>
+                <span id="remarks-cell">
+                    <span id="remarks-display" class="inline-edit-chip"
+                          data-value="{{ selected_nominal_roll.remarks or '' }}"
+                          onclick="editRemarks()" title="Click to edit remarks"
+                          style="max-width: 30rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;">{{ selected_nominal_roll.remarks or '—' }}</span>
+                </span>
+            </div>
+
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.85rem;">
+                {% if request.app.state.settings.FEATURE_GROUPING %}
+                <button class="btn btn-primary mgmt-btn"
+                        onclick="openCreateModal('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}', {{ selected_nominal_roll.personnel_count }})">Create Grouping</button>
+                {% endif %}
+                {% if user.role == 'super_admin' %}
+                {% if selected_nominal_roll.attendance_active %}
+                <button class="btn mgmt-btn" style="background: #f59e0b; color: white;"
+                        onclick="deactivateAttendance('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}')">Deactivate Attendance</button>
+                {% else %}
+                <button class="btn btn-success mgmt-btn"
+                        onclick="useForAttendance('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}')">Use for Attendance</button>
+                {% endif %}
+                <button class="btn mgmt-btn" style="background: #ef4444; color: white;"
+                        onclick="deleteNominalRoll('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}')">Delete</button>
+                {% endif %}
+            </div>
+
+            <div id="page-status" style="margin-top: 0.6rem;"></div>
+        </div>
+    </details>
+    {% endif %}
 </div>
 
 {% if selected_nominal_roll %}
@@ -202,58 +280,6 @@
             — {{ total_count }} personnel match
         </span>
     </h3>
-    {# Roll management (merged from the retired admin nominal rolls page).
-       Collapsed by default; the panel overlays so expanding never shifts
-       the table. Label/remarks editing and Create Grouping are available
-       to all admins; attendance toggle and delete are super-admin-only. #}
-    <details class="mgmt-details" style="margin: 0.5rem 0 0;">
-        <summary style="cursor: pointer; font-size: 0.85rem; color: #374151; font-weight: 600;">Roll management</summary>
-        <div>
-            <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; font-size: 0.875rem; color: #374151;">
-                <span id="label-cell">Label:
-                    <span id="label-display" class="inline-edit-chip"
-                          data-value="{{ selected_nominal_roll.label or '' }}"
-                          onclick="editLabel()" title="Click to edit label">{{ selected_nominal_roll.label or '—' }}</span>
-                </span>
-                <span id="attendance-state">
-                    {% if selected_nominal_roll.attendance_active %}
-                    <span class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">Active for attendance</span>
-                    {% else %}
-                    <span style="font-size: 0.75rem; color: #9ca3af;">Not used for attendance</span>
-                    {% endif %}
-                </span>
-            </div>
-
-            <div id="remarks-cell" style="margin-top: 0.6rem; font-size: 0.875rem; color: #374151;">
-                Remarks:
-                <span id="remarks-display" class="inline-edit-chip"
-                      data-value="{{ selected_nominal_roll.remarks or '' }}"
-                      onclick="editRemarks()" title="Click to edit remarks"
-                      style="max-width: 30rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;">{{ selected_nominal_roll.remarks or '—' }}</span>
-            </div>
-
-            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.85rem;">
-                {% if request.app.state.settings.FEATURE_GROUPING %}
-                <button class="btn btn-primary" style="font-size: 0.8rem; padding: 0.3rem 0.6rem;"
-                        onclick="openCreateModal('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}', {{ selected_nominal_roll.personnel_count }})">Create Grouping</button>
-                {% endif %}
-                {% if user.role == 'super_admin' %}
-                {% if selected_nominal_roll.attendance_active %}
-                <button class="btn" style="background: #f59e0b; color: white; font-size: 0.8rem; padding: 0.3rem 0.6rem;"
-                        onclick="deactivateAttendance('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}')">Deactivate Attendance</button>
-                {% else %}
-                <button class="btn btn-success" style="font-size: 0.8rem; padding: 0.3rem 0.6rem;"
-                        onclick="useForAttendance('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}')">Use for Attendance</button>
-                {% endif %}
-                <button class="btn" style="background: #ef4444; color: white; font-size: 0.8rem; padding: 0.3rem 0.6rem;"
-                        onclick="deleteNominalRoll('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}')">Delete</button>
-                {% endif %}
-            </div>
-
-            <div id="page-status" style="margin-top: 0.6rem;"></div>
-        </div>
-    </details>
-
     {% if user.role == 'super_admin' %}
     <p style="margin: 0.5rem 0 0; font-size: 0.8rem; color: #6b7280;">
         Yellow rows carry a tagging overlay. As super-admin you can click a

@@ -326,6 +326,37 @@ async def test_nominal_roll_add_serviceman_hidden_for_admins(
 
 
 @pytest.mark.asyncio
+async def test_roll_management_panel_placement(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_users,
+    monkeypatch,
+):
+    """Roll management acts on the selected roll, so it sits directly below
+    the roll selector dropdown inside the selector card (the Grouping page's
+    pattern), above the Filters card — not inside the results card where
+    admins didn't look for it (issue 22)."""
+    from parade_state.web import nominal_roll as web_nominal_roll
+
+    async def _fake_current_user(_request):
+        return sample_users["admin"]
+
+    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+
+    response = client.get(
+        "/nominal-roll", params={"nominal_roll_id": str(sample_nominal_roll.id)}
+    )
+    assert response.status_code == 200
+    text = response.text
+    selector = text.index('id="nominal_roll_id"')
+    mgmt = text.index("Roll management")
+    filters = text.index('name="search"')
+    results = text.index("personnel match")
+    assert selector < mgmt < filters < results
+
+
+@pytest.mark.asyncio
 async def test_manual_personnel_appears_in_attendance_view(
     client: TestClient,
     admin_token_headers: dict[str, str],

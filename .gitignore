@@ -223,8 +223,9 @@ __marimo__/
 /experiments
 /issues
 
-# Local tooling (not project-related)
-/railway.sh
+# Local tooling (not project-related): machine-specific wrappers such as
+# railway.sh (Railway CLI scoping) and sqlite.sh (local SQLite dev server).
+/local
 
 # Playwright MCP debug artifacts (screenshots, console logs, snapshots)
 .playwright-mcp/
