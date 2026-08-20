@@ -305,11 +305,13 @@ class AttendanceBulkUpsert(BaseModel):
 
 
 class CopyRemarksResponse(BaseModel):
-    """Schema for the copy-remarks endpoint result."""
+    """Schema for the copy-remarks endpoint result (explicit source/dest)."""
 
     nominal_roll_id: str
-    date: utc_dt.date
-    slot: Literal["am", "pm"]
+    source_date: utc_dt.date
+    source_slot: Literal["am", "pm"]
+    dest_date: utc_dt.date
+    dest_slot: Literal["am", "pm"]
     updated: int
     skipped: int
 
