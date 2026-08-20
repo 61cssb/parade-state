@@ -273,10 +273,16 @@ async def test_nominal_roll_add_serviceman_wiring(
     assert "openAddModal" in response.text
     assert "submitAddServiceman" in response.text
     assert "closeAddModal" in response.text
-    # Modal datalists: rank choices (officer + WOSE) and unit/sub-unit options.
-    assert 'id="rank-choices"' in response.text
+    # Rank is a closed set — a plain select with optgroups (no native
+    # datalist popup: placement is browser-controlled and mispositions),
+    # matching the Callup Status select styling.
+    assert "<select id=\"svc-rank\"" in response.text
+    assert '<optgroup label="Officer">' in response.text
+    assert '<optgroup label="WOSE">' in response.text
     assert '<option value="PTE">' in response.text
     assert '<option value="2LT">' in response.text
+    assert '<option value="ME4">' in response.text
+    # Open-vocab fields keep datalist suggestions.
     assert 'id="svc-unit-choices"' in response.text
     assert 'id="svc-sub3-choices"' in response.text
     assert "Coy A" in response.text  # unit suggestion from sample personnel
@@ -314,7 +320,7 @@ async def test_nominal_roll_add_serviceman_hidden_for_admins(
     assert 'id="add-modal"' not in response.text
     assert "Add Serviceman" not in response.text
     assert "submitAddServiceman" not in response.text
-    assert 'id="rank-choices"' not in response.text
+    assert 'id="svc-rank"' not in response.text
     # No inline pers_no editor for non-super-admins.
     assert "onPersNoChange" not in response.text
 

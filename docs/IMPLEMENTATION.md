@@ -400,8 +400,10 @@ async def test_example(client, sample_users, sample_grouping):
   action — kept out of Roll management, which acts on the roll entity;
   shown even when filters match nothing, since that's the add flow) opens a
   modal cloned from Create Grouping (backdrop, Esc, inline status errors,
-  reload on success) with datalists for rank (OFFICER ∪ WOSE) and
-  unit/sub-units; "manual" badge beside the full name for
+  reload on success). Rank is a select with Officer/WOSE/Military Expert
+  optgroups (closed set — the native datalist popup mispositions and
+  mismatched the Callup Status select); open-vocab unit/sub-units keep
+  datalist suggestions; "manual" badge beside the full name for
   `source='manual'` rows; inline-editable pers_no cell (onchange → PATCH,
   blank clears, revert on error) for super-admins, static text for others.
 - Manual adds are per-roll: the next CSV upload's new roll will not include

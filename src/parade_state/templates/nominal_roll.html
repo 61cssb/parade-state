@@ -407,11 +407,6 @@
    modal: backdrop click + Esc close, showStatus-style errors, reload on
    success. Pers No may be blank at creation (fill in later inline). #}
 {% if user.role == 'super_admin' and selected_nominal_roll %}
-<datalist id="rank-choices">
-    {% for r in rank_choices %}
-    <option value="{{ r }}"></option>
-    {% endfor %}
-</datalist>
 <datalist id="svc-unit-choices">
     {% for u in edit_unit_options %}
     <option value="{{ u }}"></option>
@@ -448,7 +443,16 @@
         <div style="display: flex; gap: 0.75rem; margin-bottom: 0.75rem;">
             <div style="flex: 0 0 8rem;">
                 <label for="svc-rank" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Rank <span style="color: #ef4444;">*</span></label>
-                <input type="text" id="svc-rank" list="rank-choices" required maxlength="50" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" placeholder="e.g. PTE">
+                <select id="svc-rank" required style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: #fff;">
+                    <option value="" selected disabled>— rank —</option>
+                    {% for group_label, group_ranks in rank_choices %}
+                    <optgroup label="{{ group_label }}">
+                        {% for r in group_ranks %}
+                        <option value="{{ r }}">{{ r }}</option>
+                        {% endfor %}
+                    </optgroup>
+                    {% endfor %}
+                </select>
             </div>
             <div style="flex: 1;">
                 <label for="svc-name" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Full Name <span style="color: #ef4444;">*</span></label>

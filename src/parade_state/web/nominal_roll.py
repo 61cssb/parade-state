@@ -286,7 +286,11 @@ async def nominal_roll_view(
         edit_sub1_options=edit_sub1_options,
         edit_sub2_options=edit_sub2_options,
         edit_sub3_options=edit_sub3_options,
-        rank_choices=sorted(ranks.OFFICER_RANKS | ranks.WOSE_RANKS),
+        rank_choices=[
+            ("Officer", sorted(ranks.OFFICER_RANKS)),
+            ("WOSE", sorted(ranks.WOSE_RANKS)),
+            ("Military Expert", [f"ME{i}" for i in range(1, 10)]),
+        ],
         callup_statuses=list(CALLUP_STATUSES),
         personnel=personnel_data,
         search=search or "",
