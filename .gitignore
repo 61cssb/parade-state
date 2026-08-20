@@ -223,5 +223,8 @@ __marimo__/
 /experiments
 /issues
 
+# Local tooling (not project-related)
+/railway.sh
+
 # Playwright MCP debug artifacts (screenshots, console logs, snapshots)
 .playwright-mcp/

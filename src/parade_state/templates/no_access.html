@@ -90,33 +90,31 @@
         }
 
         /* Environment banner (mirrors base.html; shown only when
-           ENVIRONMENT_BANNER is set — never in production). */
+           ENVIRONMENT_BANNER is set — never in production). Pure
+           overlay: centered content here never reaches the top strip. */
         .env-banner {
             position: fixed;
             top: 0;
             left: 0;
             right: 0;
-            height: 1.5rem;
+            height: 0.75rem;
+            line-height: 0.75rem;
             z-index: 200;
             display: flex;
             align-items: center;
             justify-content: center;
             background-color: #f59e0b;
             color: #111827;
-            font-size: 0.72rem;
+            font-size: 0.62rem;
             font-weight: 600;
             letter-spacing: 0.04em;
             text-transform: uppercase;
             white-space: nowrap;
             overflow: hidden;
         }
-
-        body.has-env-banner {
-            padding-top: 1.5rem;
-        }
     </style>
 </head>
-<body class="{% if request.app.state.settings.ENVIRONMENT_BANNER %}has-env-banner{% endif %}">
+<body>
     {% if request.app.state.settings.ENVIRONMENT_BANNER %}
     <div class="env-banner" role="note">{{ request.app.state.settings.ENVIRONMENT_BANNER | e }}</div>
     {% endif %}
