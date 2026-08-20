@@ -16,7 +16,7 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ## Current Snapshot
 
-- **Tests:** 447 SQLite passing (flags-on posture; flags-off gating has
+- **Tests:** 452 SQLite passing (flags-on posture; flags-off gating has
   dedicated tests). The suite runs against
   Postgres by setting `TEST_DATABASE_URL` (per-test databases).
 - **Access model:** `super_admin` + `admin` only. Unknown Google
@@ -37,8 +37,12 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   PR `dev` → `main`.
 - **Feature flags:** `FEATURE_DEFERMENTS` / `FEATURE_GROUPING` env-var
   booleans hide those features entirely (nav, pages, API — 404 for all
-  roles, super-admins included) until ready. Dev sets both `true`; prod
-  leaves them off ([DEPLOYMENT.md](DEPLOYMENT.md) › Feature Flags).
+  roles, super-admins included) until ready. Currently `false` in dev
+  (hidden during the tester window) and unset in prod; flip per feature
+  readiness ([DEPLOYMENT.md](DEPLOYMENT.md) › Feature Flags).
+  **Environment banner:** dev sets `ENVIRONMENT_BANNER` so a thin amber
+  strip at the top of every page (login included) names the environment;
+  prod leaves it unset (zero markup, zero layout impact).
 
 ### What the app does today
 
@@ -144,6 +148,9 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-20:** Environment banner: `ENVIRONMENT_BANNER` renders a thin
+  fixed top strip on every page (login included) naming the environment;
+  set in dev, unset in prod — offset-only layout impact when shown
 - **2026-08-20:** Env-var feature flags (Issue 18): Deferments and
   Grouping hidden entirely (nav, pages, API — 404 for all roles
   including super-admins) until ready; enabled in dev via Railway env
