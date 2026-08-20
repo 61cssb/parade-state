@@ -14,6 +14,7 @@ from sqlalchemy import ColumnElement, func, or_, select
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
 from parade_state.models import CALLUP_STATUSES, NominalRoll, Personnel, TaggingEntry
+from parade_state.utils import ranks
 
 router = APIRouter()
 
@@ -150,6 +151,7 @@ async def nominal_roll_view(
                 rank_options=[],
                 edit_unit_options=[], edit_sub1_options=[],
                 edit_sub2_options=[], edit_sub3_options=[],
+                rank_choices=[],
                 callup_statuses=list(CALLUP_STATUSES),
                 personnel=[], search=search or "",
                 unit=unit or "", sub_unit_1=sub_unit_1 or "",
@@ -252,6 +254,7 @@ async def nominal_roll_view(
                 "sub_unit_3": entry.to_sub_unit_3 if entry else p.sub_unit_3,
                 "callup_status": p.callup_status,
                 "remarks": p.remarks,
+                "source": p.source,
                 "is_changed": is_changed,
             }
         )
@@ -283,6 +286,7 @@ async def nominal_roll_view(
         edit_sub1_options=edit_sub1_options,
         edit_sub2_options=edit_sub2_options,
         edit_sub3_options=edit_sub3_options,
+        rank_choices=sorted(ranks.OFFICER_RANKS | ranks.WOSE_RANKS),
         callup_statuses=list(CALLUP_STATUSES),
         personnel=personnel_data,
         search=search or "",
@@ -309,6 +313,7 @@ def _render(
     edit_sub1_options: list,
     edit_sub2_options: list,
     edit_sub3_options: list,
+    rank_choices: list,
     callup_statuses: list,
     personnel: list,
     search: str,
@@ -345,6 +350,7 @@ def _render(
         edit_sub1_options=edit_sub1_options,
         edit_sub2_options=edit_sub2_options,
         edit_sub3_options=edit_sub3_options,
+        rank_choices=rank_choices,
         callup_statuses=callup_statuses,
         personnel=personnel,
         search=search,

@@ -3,12 +3,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
 from parade_state.models import (
     PRESENT_LIKE_STATUSES,
     Attendance,
+    AuditLog,
     Grouping,
     GroupingNotes,
     GroupingPersonnelExclusion,
@@ -16,6 +18,7 @@ from parade_state.models import (
     GroupingUserAccess,
     NominalRoll,
     Personnel,
+    SOURCE_MANUAL,
     Tagging,
     TaggingEntry,
 )
@@ -23,11 +26,12 @@ from parade_state.models.schemas import (
     PersonnelAttendanceHistoryItem,
     PersonnelAttendanceHistoryResponse,
     PersonnelAttendanceHistoryStats,
+    PersonnelCreate,
     PersonnelListParams,
     PersonnelResponseWithGrouping,
     PersonnelUpdate,
 )
-from parade_state.utils import utc_dt
+from parade_state.utils import ranks, utc_dt
 
 router = APIRouter()
 
@@ -375,6 +379,7 @@ async def get_grouping_personnel_with_overrides(
             status=personnel.status,
             callup_status=personnel.callup_status,
             remarks=personnel.remarks,
+            source=personnel.source,
             created_at=personnel.created_at,
             updated_at=personnel.updated_at,
             created_by=personnel.created_by,
@@ -553,6 +558,7 @@ async def list_personnel(
             status=p.status,
             callup_status=p.callup_status,
             remarks=p.remarks,
+            source=p.source,
             created_at=p.created_at,
             updated_at=p.updated_at,
             created_by=p.created_by,
@@ -565,6 +571,150 @@ async def list_personnel(
     ]
 
     return personnel_responses
+
+
+@router.post(
+    "/personnel",
+    response_model=PersonnelResponseWithGrouping,
+    status_code=http_status.HTTP_201_CREATED,
+)
+async def create_personnel(
+    personnel_create: PersonnelCreate,
+    user_id: str = Query(..., description="User ID for authorization"),
+    user_role: str = Query(..., description="User role for authorization"),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Manually add a serviceman to a nominal roll (super-admin only).
+
+    Covers the gap where a person is missing from the ingested CSV: the row
+    is created with ``source="manual"`` and otherwise behaves like any other
+    serviceman (attendance, callup/remarks editing, groupings). ``pers_no``
+    may be NULL when not yet known — the per-roll unique constraint treats
+    NULLs as distinct, and a super-admin can fill it in later via PATCH.
+    Manual adds live only on the roll they were added to; the next CSV
+    upload creates a new roll that will not include them.
+    """
+    if user_role != "super_admin":
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Only super-admins can add personnel manually",
+        )
+
+    nr = (
+        await db.execute(
+            select(NominalRoll).where(
+                NominalRoll.id == personnel_create.nominal_roll_id
+            )
+        )
+    ).scalar_one_or_none()
+    if nr is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Nominal roll not found",
+        )
+
+    # Category is inferred from the rank — never manually set.
+    try:
+        category = ranks.category_for_rank(personnel_create.rank)
+    except ValueError as exc:
+        valid_ranks = ", ".join(sorted(ranks.OFFICER_RANKS | ranks.WOSE_RANKS))
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Invalid rank: {personnel_create.rank!r}. Valid ranks: "
+                f"{valid_ranks} (or ME1-ME9)"
+            ),
+        ) from exc
+
+    # Per-roll pers_no uniqueness pre-check (matches CSV semantics: the same
+    # pers_no on a *different* roll remains allowed).
+    if personnel_create.pers_no is not None:
+        duplicate = (
+            await db.execute(
+                select(Personnel).where(
+                    Personnel.nominal_roll_id == str(nr.id),
+                    Personnel.pers_no == personnel_create.pers_no,
+                )
+            )
+        ).scalar_one_or_none()
+        if duplicate is not None:
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Personnel with pers_no {personnel_create.pers_no} "
+                    "already exists on this nominal roll"
+                ),
+            )
+
+    personnel = Personnel(
+        nominal_roll_id=str(nr.id),
+        pers_no=personnel_create.pers_no,
+        rank=personnel_create.rank,
+        category=category,
+        full_name=personnel_create.name,
+        unit=personnel_create.unit,
+        sub_unit_1=personnel_create.sub_unit_1,
+        sub_unit_2=personnel_create.sub_unit_2,
+        sub_unit_3=personnel_create.sub_unit_3,
+        callup_status=personnel_create.callup_status or "Called Up",
+        remarks=personnel_create.remarks,
+        source=SOURCE_MANUAL,
+        created_by=user_id,
+    )
+    db.add(personnel)
+    await db.flush()
+
+    nr.personnel_count = (nr.personnel_count or 0) + 1
+    db.add(
+        AuditLog(
+            user_id=user_id,
+            entity_type="personnel",
+            entity_id=str(personnel.id),
+            action="create",
+            description=(
+                f"Manually added {personnel_create.rank} {personnel_create.name} "
+                f"(pers_no {personnel_create.pers_no or 'unknown'}) to nominal "
+                f"roll CAA {nr.caa.isoformat()}"
+            ),
+        )
+    )
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Race on the unique constraint despite the pre-check above.
+        await db.rollback()
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                f"Personnel with pers_no {personnel_create.pers_no} "
+                "already exists on this nominal roll"
+            ),
+        )
+    await db.refresh(personnel)
+
+    return PersonnelResponseWithGrouping(
+        id=personnel.id,
+        nominal_roll_id=personnel.nominal_roll_id,
+        pers_no=personnel.pers_no,
+        rank=personnel.rank,
+        category=personnel.category,
+        name=personnel.full_name,
+        unit=personnel.unit,
+        sub_unit_1=personnel.sub_unit_1,
+        sub_unit_2=personnel.sub_unit_2,
+        sub_unit_3=personnel.sub_unit_3,
+        status=personnel.status,
+        callup_status=personnel.callup_status,
+        remarks=personnel.remarks,
+        source=personnel.source,
+        created_at=personnel.created_at,
+        updated_at=personnel.updated_at,
+        created_by=personnel.created_by,
+        updated_by=personnel.updated_by,
+        grouping_id=None,
+        has_override=False,
+        grouping_notes=None,
+    )
 
 
 @router.get("/personnel/{personnel_id}", response_model=PersonnelResponseWithGrouping)
@@ -600,6 +750,7 @@ async def get_personnel(
             status=personnel.status,
             callup_status=personnel.callup_status,
             remarks=personnel.remarks,
+            source=personnel.source,
             created_at=personnel.created_at,
             updated_at=personnel.updated_at,
             created_by=personnel.created_by,
@@ -639,6 +790,7 @@ async def get_personnel(
             status=personnel.status,
             callup_status=personnel.callup_status,
             remarks=personnel.remarks,
+            source=personnel.source,
             created_at=personnel.created_at,
             updated_at=personnel.updated_at,
             created_by=personnel.created_by,
@@ -689,6 +841,15 @@ async def update_personnel(
             ),
         )
 
+    # pers_no is the fill-in-later flow for manual adds: super-admin only.
+    # Admins keep every other PATCH field (status / callup_status / remarks).
+    pers_no_update_present = "pers_no" in update_data
+    if pers_no_update_present and user_role != "super_admin":
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Only super-admins can change personnel numbers",
+        )
+
     # Partition the remaining update into remap (-> tagging) vs direct
     # personnel-column updates (status / callup_status / remarks).
     remap_updates = {
@@ -736,10 +897,47 @@ async def update_personnel(
         personnel.updated_at = utc_dt.db_utcnow()
         personnel.updated_by = user_id
 
+    # pers_no fill-in-later: explicit null / empty clears (membership
+    # semantics like remarks). Uniqueness is per-roll, excluding self.
+    if pers_no_update_present:
+        new_pers_no = update_data.get("pers_no")
+        if new_pers_no is not None:
+            duplicate = (
+                await db.execute(
+                    select(Personnel).where(
+                        Personnel.nominal_roll_id == personnel.nominal_roll_id,
+                        Personnel.pers_no == new_pers_no,
+                        Personnel.id != personnel.id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if duplicate is not None:
+                raise HTTPException(
+                    status_code=http_status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Personnel with pers_no {new_pers_no} already exists "
+                        "on this nominal roll"
+                    ),
+                )
+        personnel.pers_no = new_pers_no
+        personnel.updated_at = utc_dt.db_utcnow()
+        personnel.updated_by = user_id
+
     # Redirect unit/subunit edits to the tagging entry overlay.
     await _redirect_remap_to_tagging_entry(db, personnel, remap_updates, user_id)
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Race on the per-roll unique constraint despite the pre-check above.
+        await db.rollback()
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                f"Personnel with pers_no {update_data.get('pers_no')} already "
+                "exists on this nominal roll"
+            ),
+        )
     await db.refresh(personnel)
 
     # Compute effective values for the response.
@@ -759,6 +957,7 @@ async def update_personnel(
         status=personnel.status,
         callup_status=personnel.callup_status,
         remarks=personnel.remarks,
+        source=personnel.source,
         created_at=personnel.created_at,
         updated_at=personnel.updated_at,
         created_by=personnel.created_by,

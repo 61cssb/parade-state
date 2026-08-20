@@ -27,7 +27,7 @@ from .grouping import (
     GroupingPersonnelExclusion,
     GroupingPersonnelOverride,
 )
-from .personnel import CALLUP_STATUSES, Personnel
+from .personnel import CALLUP_STATUSES, SOURCE_MANUAL, Personnel
 from .tagging import Tagging, TaggingEntry
 
 __all__ = [

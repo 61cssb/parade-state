@@ -344,6 +344,7 @@ class PersonnelResponse(PersonnelBase):
     status: str
     callup_status: str
     remarks: str | None
+    source: str | None = None
     created_at: utc_dt.datetime
     updated_at: utc_dt.datetime | None
     created_by: str
@@ -351,6 +352,64 @@ class PersonnelResponse(PersonnelBase):
 
     class Config:
         from_attributes = True
+
+
+class PersonnelCreate(BaseModel):
+    """Schema for manually creating a personnel row (super-admin only).
+
+    ``pers_no`` may be unknown at creation time (NULL) and filled in later
+    via PATCH; the per-roll unique constraint treats NULLs as distinct, so
+    multiple unknown-pers_no rows per roll are legal.
+    """
+
+    nominal_roll_id: str = Field(..., min_length=1)
+    rank: str = Field(..., min_length=1, max_length=50, description="Personnel rank")
+    name: str = Field(..., min_length=1, max_length=255, description="Full name")
+    unit: str = Field(..., min_length=1, max_length=255, description="Unit assignment")
+    pers_no: str | None = Field(
+        None, max_length=20, description="Personnel number (empty becomes NULL)"
+    )
+    sub_unit_1: str | None = Field(None, max_length=255, description="Sub-unit level 1")
+    sub_unit_2: str | None = Field(None, max_length=255, description="Sub-unit level 2")
+    sub_unit_3: str | None = Field(None, max_length=255, description="Sub-unit level 3")
+    callup_status: str | None = Field(
+        "Called Up",
+        description=f"Callup decision status (one of: {', '.join(CALLUP_STATUSES)})",
+    )
+    remarks: str | None = Field(
+        None, max_length=2000, description="Per-person remarks (empty clears)"
+    )
+
+    @field_validator("rank", "name", "unit", mode="before")
+    @classmethod
+    def _required_text_stripped(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+    @field_validator("pers_no", "sub_unit_1", "sub_unit_2", "sub_unit_3", mode="before")
+    @classmethod
+    def _optional_text_normalized(cls, v):
+        if isinstance(v, str):
+            return v.strip() or None
+        return v
+
+    @field_validator("callup_status")
+    @classmethod
+    def _callup_status_must_be_known(cls, v: str | None) -> str | None:
+        if v is not None and v not in CALLUP_STATUSES:
+            raise ValueError(
+                f"callup_status must be one of: {', '.join(CALLUP_STATUSES)}"
+            )
+        return v
+
+    @field_validator("remarks")
+    @classmethod
+    def _remarks_normalized(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        stripped = v.strip()
+        return stripped or None
 
 
 class PersonnelUpdate(BaseModel):
@@ -380,6 +439,11 @@ class PersonnelUpdate(BaseModel):
     remarks: str | None = Field(
         None, max_length=2000, description="Per-person remarks (empty clears)"
     )
+    pers_no: str | None = Field(
+        None,
+        max_length=20,
+        description="Personnel number (super-admin only; explicit null clears)",
+    )
 
     @field_validator("callup_status")
     @classmethod
@@ -390,9 +454,9 @@ class PersonnelUpdate(BaseModel):
             )
         return v
 
-    @field_validator("remarks")
+    @field_validator("remarks", "pers_no")
     @classmethod
-    def _remarks_normalized(cls, v: str | None) -> str | None:
+    def _text_normalized(cls, v: str | None) -> str | None:
         if v is None:
             return None
         stripped = v.strip()
@@ -431,6 +495,7 @@ class PersonnelResponseWithGrouping(PersonnelBase):
     status: str
     callup_status: str
     remarks: str | None
+    source: str | None = None
     created_at: utc_dt.datetime
     updated_at: utc_dt.datetime | None
     created_by: str
