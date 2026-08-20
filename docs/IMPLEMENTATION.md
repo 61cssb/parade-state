@@ -315,7 +315,9 @@ async def test_example(client, sample_users, sample_grouping):
 - Personnel deferment CRUD linked to a single nominal roll personnel record
 - `rank_name` and `sub_unit` snapshotted at creation from the linked personnel
 - Reason enum (12 values) and status enum (8 values)
-- Personnel `callup_status` field (`Called Up` / `Not Called Up` / `Deferred`):
+- Personnel `callup_status` field (`Called Up` / `Deferred` / `Disrupted` /
+  `MR` / `Age Limit` / `Other`; the original three-value enum was widened and
+  per-person `remarks` added — issue 06):
   - Approved deferment → `Deferred`
   - Reverting from Approved to a non-neutral status → `Called Up`
   - `Not called up` / `Do not call up` deferment statuses are neutral (no callup change)
@@ -325,6 +327,25 @@ async def test_example(client, sample_users, sample_grouping):
 - **Feature flag:** hidden entirely (nav, page, `/api/v1/deferments/*`) unless `FEATURE_DEFERMENTS=true` — 404 for all roles including super-admins
 - **Endpoints:** 5 deferment endpoints under `/api/v1/deferments`
 - **Tests:** 15 behavioral tests + flag gating (test_feature_flags.py)
+
+**Callup status & remarks columns (✅ issue 06)**
+- `callup_status` widened to six values (`Called Up` default, `Deferred`,
+  `Disrupted`, `MR`, `Age Limit`, `Other`); legacy `Not Called Up` rows
+  migrated to `Other` (migration `q7d8e9f0a1b2`).
+- New per-person `Personnel.remarks` text column (distinct from roll-level
+  `NominalRoll.remarks`).
+- CSV ingest maps `Callup Decision` → `callup_status` (case-insensitive
+  exact match; blank → `Called Up`; unrecognised → `Other`, raw kept in
+  `extra_fields`) and joins `Reason` + first `Remarks` → `remarks`.
+- Attendance roster/view filters to `callup_status = 'Called Up'`; hiding is
+  non-destructive — existing attendance records are never deleted or altered
+  and hidden rows render with no special treatment.
+- `PATCH /api/v1/personnel/{id}` accepts `callup_status` (422 on invalid) and
+  `remarks` (empty/null clears); admin + super_admin.
+- NR browser table shows Callup + Remarks columns with inline editing
+  (select / text input, immediate PATCH) for admins and above.
+- **Tests:** personnel PATCH (parametrised enum + 403), CSV mapping,
+  attendance hiding + record preservation, NR view wiring
 
 **Taggings (✅ 1:1 with Nominal Roll — model simplification)**
 - Tagging overlay: **exactly one Tagging per Nominal Roll** (DB unique

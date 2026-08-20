@@ -2171,6 +2171,14 @@ paths:
         `source_nominal_roll_id` copies the source NR's tagging entries
         across by `pers_no` matching instead of starting empty; unmatched
         source personnel are surfaced in the response.
+
+        Per-person callup data (issue 06): `Personnel.callup_status` is
+        parsed from the CSV `Callup Decision` column (exact case-insensitive
+        match against ['Called Up', 'Deferred', 'Disrupted', 'MR',
+        'Age Limit', 'Other']; blank → 'Called Up'; unrecognised → 'Other'
+        with the raw value kept in extra_fields). `Personnel.remarks` joins
+        the non-empty `Reason` + first `Remarks` columns with '; '. Only
+        'Called Up' personnel appear in the attendance view.
       parameters:
         - name: uploadId
           in: path

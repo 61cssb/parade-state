@@ -282,7 +282,8 @@ Personnel
 ├── sub_unit_3: str
 ├── extra_fields: JSON (other CSV columns not mapped to canonical names; JSONB in PostgreSQL)
 ├── status: str ENUM ['active', 'archived']
-├── callup_status: str ENUM ['Called Up', 'Not Called Up', 'Deferred']  (default: 'Called Up')
+├── callup_status: str ENUM ['Called Up', 'Deferred', 'Disrupted', 'MR', 'Age Limit', 'Other']  (default: 'Called Up')
+├── remarks: text (nullable; per-person remarks, distinct from the roll-level NominalRoll.remarks)
 ├── created_at: datetime
 └── created_by: UUID (FK User; typically system)
 ```
@@ -300,6 +301,23 @@ Personnel
   the process request (IntegrityError).
 - Notes, overrides, and attendance link to `Personnel.id` (the row PK). Cross-roll continuity
   (tagging transfer, history) follows the person via `pers_no`.
+
+**Callup status & remarks (issue 06):**
+- On ingest, `callup_status` is parsed from the CSV `Callup Decision` column:
+  exact (case-insensitive) match against the enum passes through; blank →
+  `Called Up`; any other non-blank value → `Other` (raw value preserved in
+  `extra_fields.callup_decision`).
+- `remarks` joins the non-empty CSV `Reason` + first `Remarks` columns with
+  `"; "`; NULL when both are empty.
+- **Attendance visibility:** the attendance roster/view includes only
+  personnel with `callup_status = 'Called Up'`. All other statuses are hidden.
+- **Post-hoc changes are non-destructive:** changing a person's status away
+  from `Called Up` never deletes or alters existing attendance records — it
+  only hides the person from the attendance view, with no distinct rendering
+  of hidden rows anywhere.
+- Admins (admin + super_admin) can edit `callup_status` and `remarks` inline
+  in the NR management table (PATCH `/personnel/{id}`; enum-invalid values
+  are rejected with 422).
 
 ### 3.3 Deferments
 
@@ -625,7 +643,9 @@ Compute diff (current CSV vs prior CSV)
   ↓
 Create NominalRoll (CAA parsed from the filename, e.g. caaYYMMDD; no status
 workflow — every NR is equal)
-Populate Personnel records (callup_status defaults to 'Called Up')
+Populate Personnel records (callup_status from the CSV 'Callup Decision'
+column — blank → 'Called Up', unrecognised → 'Other'; remarks from
+'Reason' + first 'Remarks' joined with '; ')
 Persist ColumnMetadata for the source columns
 Auto-create the NR's empty 1:1 Tagging
 Optionally import taggings from another NR (chosen by the admin; entries
