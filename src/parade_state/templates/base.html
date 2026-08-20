@@ -500,8 +500,10 @@
         <nav class="sidebar-nav">
             {% if user %}
             {# Workflow pages. Per-item gating is enforced in-page:
-               super-admin-only surfaces (Taggings, Deferments) render a
-               no-access message for plain admins. #}
+               super-admin-only surfaces (Taggings) render a no-access
+               message for plain admins, while flag-gated features
+               (Deferments, Grouping) are hidden entirely when their
+               FEATURE_* env flag is off. #}
             <a href="/admin" title="Dashboard"
                class="{% if active_page == 'dashboard' %}active{% endif %}">
                 <span class="icon">🏠</span><span>Dashboard</span>
@@ -518,18 +520,22 @@
                class="{% if active_page == 'taggings' %}active{% endif %}">
                 <span class="icon">🏷️</span><span>Taggings</span>
             </a>
+            {% if request.app.state.settings.FEATURE_DEFERMENTS %}
             <a href="/admin/deferments" title="Deferments"
                class="{% if active_page == 'deferments' %}active{% endif %}">
                 <span class="icon">🕓</span><span>Deferments</span>
             </a>
+            {% endif %}
             <a href="/attendance" title="Attendance"
                class="{% if active_page == 'attendance' %}active{% endif %}">
                 <span class="icon">✅</span><span>Attendance</span>
             </a>
+            {% if request.app.state.settings.FEATURE_GROUPING %}
             <a href="/grouping" title="Grouping"
                class="{% if active_page == 'grouping' %}active{% endif %}">
                 <span class="icon">📊</span><span>Grouping</span>
             </a>
+            {% endif %}
             <div class="nav-section-label">Admin</div>
             <a href="/admin/users" title="Users"
                class="{% if active_page == 'users' %}active{% endif %}">

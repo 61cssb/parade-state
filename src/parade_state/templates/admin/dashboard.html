@@ -6,10 +6,12 @@
 
 {% block content %}
 <div class="stats">
+    {% if request.app.state.settings.FEATURE_GROUPING %}
     <div class="stat-card">
         <div class="stat-label">Active Groupings</div>
         <div class="stat-value">{{ active_groupings }}</div>
     </div>
+    {% endif %}
     <div class="stat-card">
         <div class="stat-label">Active for Attendance</div>
         <div class="stat-value green">{{ active_scopes }}</div>
@@ -27,7 +29,9 @@
 <div class="card">
     <h3>Quick Actions</h3>
     <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+        {% if request.app.state.settings.FEATURE_GROUPING %}
         <button class="btn btn-primary">New Grouping</button>
+        {% endif %}
         <button class="btn btn-success">Open Session</button>
         <button class="btn btn-primary" onclick="window.location.href='/admin/csv-upload'">Upload CSV</button>
         <button class="btn btn-success">Add User</button>
