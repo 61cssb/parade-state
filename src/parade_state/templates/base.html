@@ -17,6 +17,46 @@
             min-height: 100vh;
         }
 
+        /* ---------- Environment banner (dev etc.) ----------
+           Rendered only when ENVIRONMENT_BANNER is set (never in
+           production). The strip is fixed at the very top; while it is
+           shown the page shifts down by exactly its height (uniform
+           offset, no reflow) so nothing is ever covered. Convention:
+           any future element pinned to the viewport top must sit below
+           this strip — add it to the body.env-banner offset rules. */
+        .env-banner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1.5rem;
+            z-index: 200; /* above the sidebar (100) and topbar (50) */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #f59e0b;
+            color: #111827;
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        body.env-banner {
+            padding-top: 1.5rem;
+        }
+
+        body.env-banner .sidebar {
+            top: 1.5rem;
+            height: calc(100vh - 1.5rem);
+        }
+
+        body.env-banner .topbar {
+            top: 1.5rem;
+        }
+
         /* ---------- Sidebar ---------- */
         .sidebar {
             position: fixed;
@@ -491,7 +531,10 @@
         }
     </style>
 </head>
-<body>
+<body class="{% if request.app.state.settings.ENVIRONMENT_BANNER %}env-banner{% endif %}">
+    {% if request.app.state.settings.ENVIRONMENT_BANNER %}
+    <div class="env-banner" role="note">{{ request.app.state.settings.ENVIRONMENT_BANNER | e }}</div>
+    {% endif %}
     <aside class="sidebar" id="sidebar" aria-label="Main navigation">
         <a class="brand" href="/" title="Parade State">
             <span class="brand-icon">🎖️</span>

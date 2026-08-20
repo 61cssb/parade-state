@@ -79,7 +79,7 @@ logger = logging.getLogger(__name__)
 ADMIN_ROLES = ("admin", "super_admin")
 
 
-def _render_no_access(user_email: str | None = None) -> HTMLResponse:
+def _render_no_access(request: Request, user_email: str | None = None) -> HTMLResponse:
     """Render the 'no access' page shown to non-admin sign-ins.
 
     The system is admin-only: sign-ins that are not active admins get this
@@ -92,7 +92,7 @@ def _render_no_access(user_email: str | None = None) -> HTMLResponse:
     )
     template = template_env.get_template("no_access.html")
     return HTMLResponse(
-        content=template.render(user_email=user_email),
+        content=template.render(request=request, user_email=user_email),
         status_code=status.HTTP_403_FORBIDDEN,
     )
 
@@ -176,7 +176,7 @@ async def logout(request: Request):
 
 
 @router.get("/no-access")
-async def no_access():
+async def no_access(request: Request):
     """Render the 'no access' page for non-admin users.
 
     Reached via redirects from viewer-facing routes (gated on admin role)
@@ -184,7 +184,7 @@ async def no_access():
     callback renders this page directly (with the sign-in email) instead
     of redirecting.
     """
-    return _render_no_access()
+    return _render_no_access(request)
 
 
 @router.get("/callback")
@@ -286,7 +286,7 @@ async def auth_callback(
         # no-access page and no session (so they cannot reach any
         # authenticated page until promoted).
         if user.status != "active" or user.role not in ADMIN_ROLES:
-            return _render_no_access(user_email=user.email)
+            return _render_no_access(request, user_email=user.email)
 
         # Create session
         user_session = await create_user_session(
