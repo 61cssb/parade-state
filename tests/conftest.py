@@ -22,6 +22,7 @@ import parade_state.models.deferments  # noqa: F401
 import parade_state.models.grouping  # noqa: F401
 import parade_state.models.personnel  # noqa: F401
 import parade_state.models.tagging  # noqa: F401
+from parade_state.config import get_settings
 from parade_state.db import Base, get_session_maker, init_database, normalize_database_url
 from parade_state.main import app
 from parade_state.models import (
@@ -43,6 +44,26 @@ from parade_state.models import (
     UserSubunitScope,
 )
 from parade_state.utils import env, ids, utc_dt
+
+
+@pytest.fixture(autouse=True)
+def feature_flags_enabled(monkeypatch):
+    """Run every test with the full feature set (the dev-environment posture).
+
+    Feature flags (FEATURE_DEFERMENTS, FEATURE_GROUPING, ...) default to
+    off, so without this fixture the flag-gated routes and nav entries
+    would 404/hide across the whole suite. Flag-off behavior gets
+    dedicated coverage in tests/integration/test_feature_flags.py, which
+    overrides specific flags to False.
+
+    Both live Settings objects are patched: route dependencies read the
+    cached ``get_settings()`` instance while nav templates read the
+    module-level app's ``app.state.settings`` snapshot — the two diverge
+    once test_production_hardening clears the settings cache.
+    """
+    for settings_obj in {get_settings(), app.state.settings}:
+        for flag in ("FEATURE_DEFERMENTS", "FEATURE_GROUPING"):
+            monkeypatch.setattr(settings_obj, flag, True)
 
 
 @pytest.fixture(scope="session")
