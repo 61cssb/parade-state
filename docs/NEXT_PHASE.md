@@ -55,7 +55,9 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   itself is read-only
 - One system-wide **active-for-attendance** Nominal Roll (super-admin
   switch); `Attendance` rows per (personnel, date) with AM/PM
-  status + remarks; writes gated to the active NR
+  status + remarks; writes gated to the active NR; roster shows only
+  `callup_status = 'Called Up'` personnel (hiding is non-destructive —
+  existing attendance records are preserved)
 - Attendance access control by effective sub-unit 1
   (`UserSubunitAssignment`; deny-by-default; super_admin bypasses)
 - Groupings: lifecycle, personnel exclusions/overrides, date editing —
@@ -148,6 +150,11 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-20:** NR status & remarks columns (Issue 06, vastly simplified
+  from the funnel model): `callup_status` widened to six values + per-person
+  `remarks`; CSV `Callup Decision`/`Reason`/`Remarks` mapped on ingest;
+  attendance view shows only Called Up (non-destructive); inline admin
+  editing in the NR browser
 - **2026-08-20:** Environment banner: `ENVIRONMENT_BANNER` renders a thin
   fixed top strip on every page (login included) naming the environment;
   set in dev, unset in prod — pure overlay, page below pixel-identical

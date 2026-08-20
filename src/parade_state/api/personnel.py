@@ -373,6 +373,8 @@ async def get_grouping_personnel_with_overrides(
             sub_unit_2=personnel.sub_unit_2,
             sub_unit_3=personnel.sub_unit_3,
             status=personnel.status,
+            callup_status=personnel.callup_status,
+            remarks=personnel.remarks,
             created_at=personnel.created_at,
             updated_at=personnel.updated_at,
             created_by=personnel.created_by,
@@ -549,6 +551,8 @@ async def list_personnel(
             sub_unit_2=p.sub_unit_2,
             sub_unit_3=p.sub_unit_3,
             status=p.status,
+            callup_status=p.callup_status,
+            remarks=p.remarks,
             created_at=p.created_at,
             updated_at=p.updated_at,
             created_by=p.created_by,
@@ -594,6 +598,8 @@ async def get_personnel(
             sub_unit_2=personnel.sub_unit_2,
             sub_unit_3=personnel.sub_unit_3,
             status=personnel.status,
+            callup_status=personnel.callup_status,
+            remarks=personnel.remarks,
             created_at=personnel.created_at,
             updated_at=personnel.updated_at,
             created_by=personnel.created_by,
@@ -631,6 +637,8 @@ async def get_personnel(
             sub_unit_2=personnel.sub_unit_2,
             sub_unit_3=personnel.sub_unit_3,
             status=personnel.status,
+            callup_status=personnel.callup_status,
+            remarks=personnel.remarks,
             created_at=personnel.created_at,
             updated_at=personnel.updated_at,
             created_by=personnel.created_by,
@@ -681,13 +689,17 @@ async def update_personnel(
             ),
         )
 
-    # Partition the remaining update into remap (-> tagging) vs status (-> personnel).
+    # Partition the remaining update into remap (-> tagging) vs direct
+    # personnel-column updates (status / callup_status / remarks).
     remap_updates = {
         field: value
         for field, value in update_data.items()
         if field in _REMAP_FIELDS
     }
     status_update = update_data.get("status")
+    callup_status_update = update_data.get("callup_status")
+    # Membership check (not `is not None`): an explicit null clears remarks.
+    remarks_update_present = "remarks" in update_data
 
     # Load the personnel (with optional grouping context for the response shape).
     override = None
@@ -707,9 +719,20 @@ async def update_personnel(
                 detail="Personnel not found",
             )
 
-    # Apply status directly to the personnel row (still allowed).
+    # Apply status / callup_status / remarks directly to the personnel row
+    # (still allowed). Changing callup_status away from "Called Up" only
+    # hides the person from the attendance view — existing attendance
+    # records are never touched.
     if status_update is not None:
         personnel.status = status_update
+        personnel.updated_at = utc_dt.db_utcnow()
+        personnel.updated_by = user_id
+    if callup_status_update is not None:
+        personnel.callup_status = callup_status_update
+        personnel.updated_at = utc_dt.db_utcnow()
+        personnel.updated_by = user_id
+    if remarks_update_present:
+        personnel.remarks = update_data.get("remarks")
         personnel.updated_at = utc_dt.db_utcnow()
         personnel.updated_by = user_id
 
@@ -734,6 +757,8 @@ async def update_personnel(
         sub_unit_2=entry.to_sub_unit_2 if entry else personnel.sub_unit_2,
         sub_unit_3=entry.to_sub_unit_3 if entry else personnel.sub_unit_3,
         status=personnel.status,
+        callup_status=personnel.callup_status,
+        remarks=personnel.remarks,
         created_at=personnel.created_at,
         updated_at=personnel.updated_at,
         created_by=personnel.created_by,

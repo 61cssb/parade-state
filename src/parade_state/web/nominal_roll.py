@@ -13,7 +13,7 @@ from sqlalchemy import ColumnElement, func, or_, select
 
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
-from parade_state.models import NominalRoll, Personnel, TaggingEntry
+from parade_state.models import CALLUP_STATUSES, NominalRoll, Personnel, TaggingEntry
 
 router = APIRouter()
 
@@ -150,6 +150,7 @@ async def nominal_roll_view(
                 rank_options=[],
                 edit_unit_options=[], edit_sub1_options=[],
                 edit_sub2_options=[], edit_sub3_options=[],
+                callup_statuses=list(CALLUP_STATUSES),
                 personnel=[], search=search or "",
                 unit=unit or "", sub_unit_1=sub_unit_1 or "",
                 sub_unit_2=sub_unit_2 or "", category=category or "",
@@ -249,7 +250,8 @@ async def nominal_roll_view(
                 "sub_unit_1": entry.to_sub_unit_1 if entry else p.sub_unit_1,
                 "sub_unit_2": entry.to_sub_unit_2 if entry else p.sub_unit_2,
                 "sub_unit_3": entry.to_sub_unit_3 if entry else p.sub_unit_3,
-                "remarks": (p.extra_fields or {}).get("remarks"),
+                "callup_status": p.callup_status,
+                "remarks": p.remarks,
                 "is_changed": is_changed,
             }
         )
@@ -281,6 +283,7 @@ async def nominal_roll_view(
         edit_sub1_options=edit_sub1_options,
         edit_sub2_options=edit_sub2_options,
         edit_sub3_options=edit_sub3_options,
+        callup_statuses=list(CALLUP_STATUSES),
         personnel=personnel_data,
         search=search or "",
         unit=unit or "",
@@ -306,6 +309,7 @@ def _render(
     edit_sub1_options: list,
     edit_sub2_options: list,
     edit_sub3_options: list,
+    callup_statuses: list,
     personnel: list,
     search: str,
     unit: str,
@@ -341,6 +345,7 @@ def _render(
         edit_sub1_options=edit_sub1_options,
         edit_sub2_options=edit_sub2_options,
         edit_sub3_options=edit_sub3_options,
+        callup_statuses=callup_statuses,
         personnel=personnel,
         search=search,
         unit=unit,

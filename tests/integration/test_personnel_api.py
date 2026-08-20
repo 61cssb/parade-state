@@ -1341,3 +1341,141 @@ async def test_list_personnel_with_filters_and_sorting(
     # Should be sorted by name
     names = [p["name"] for p in data]
     assert names == sorted(names)
+
+
+# ============================================================================
+# Callup status & remarks (issue 06 — NR status & remarks columns)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "callup_status",
+    ["Called Up", "Deferred", "Disrupted", "MR", "Age Limit", "Other"],
+)
+async def test_update_personnel_callup_status_all_values(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    db_session,
+    sample_personnel,
+    callup_status: str,
+):
+    """Admins can set any of the six callup statuses; the row and response
+    reflect the change immediately."""
+    p = sample_personnel[0]
+
+    response = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params={
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "admin",
+        },
+        json={"callup_status": callup_status},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["callup_status"] == callup_status
+
+    await db_session.refresh(p)
+    assert p.callup_status == callup_status
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_value", ["Not Called Up", "deferred", "called", ""])
+async def test_update_personnel_callup_status_invalid_rejected(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_personnel,
+    bad_value: str,
+):
+    """Values outside the six-status enum are rejected with 422. The check is
+    case-sensitive: 'deferred' is not 'Deferred'."""
+    p = sample_personnel[0]
+
+    response = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params={
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "admin",
+        },
+        json={"callup_status": bad_value},
+    )
+
+    assert response.status_code == 422, bad_value
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_remarks_set_and_clear(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    db_session,
+    sample_personnel,
+):
+    """Remarks are settable, whitespace-normalised, and clearable (empty
+    string or explicit null both clear)."""
+    p = sample_personnel[0]
+    base_params = {
+        "user_id": str(sample_users["admin"].id),
+        "user_role": "admin",
+    }
+
+    r1 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"remarks": "  On course until Friday  "},
+    )
+    assert r1.status_code == 200
+    assert r1.json()["remarks"] == "On course until Friday"
+
+    r2 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"remarks": ""},
+    )
+    assert r2.status_code == 200
+    await db_session.refresh(p)
+    assert p.remarks is None
+
+    r3 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"remarks": "temp"},
+    )
+    assert r3.status_code == 200
+    r4 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"remarks": None},
+    )
+    assert r4.status_code == 200
+    await db_session.refresh(p)
+    assert p.remarks is None
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_callup_fields_as_user_forbidden(
+    client: TestClient,
+    user_token_headers: dict[str, str],
+    sample_personnel,
+):
+    """Non-admins cannot change callup_status or remarks."""
+    p = sample_personnel[0]
+
+    for payload in ({"callup_status": "Deferred"}, {"remarks": "nope"}):
+        response = client.patch(
+            f"/api/v1/personnel/{p.id}",
+            headers=user_token_headers,
+            params={"user_id": "user-id", "user_role": "user"},
+            json=payload,
+        )
+        assert response.status_code == 403, payload

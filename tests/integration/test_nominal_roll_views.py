@@ -147,3 +147,76 @@ async def test_nominal_roll_read_only_for_non_super_admins(
     # (The inert CSS ships for everyone; the JS wiring is what matters.)
     assert "stageCellEdit" not in response.text
     assert "ps:nr-edits" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_nominal_roll_shows_callup_column_for_all_statuses(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_users,
+    db_session,
+    monkeypatch,
+):
+    """The NR table shows every callup status — the NR is the management
+    surface; only the attendance view filters (issue 06)."""
+    from parade_state.web import nominal_roll as web_nominal_roll
+    from parade_state.models import User
+
+    sample_personnel[0].callup_status = "Deferred"
+    sample_personnel[0].remarks = "Course till Friday"
+    db_session.add(sample_personnel[0])
+    await db_session.commit()
+
+    super_admin = User(
+        email="super-callup-nr@example.com",
+        name="Super Admin",
+        role="super_admin",
+        status="active",
+    )
+    db_session.add(super_admin)
+    await db_session.commit()
+
+    async def _fake_current_user(_request):
+        return super_admin
+
+    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+
+    response = client.get(
+        "/nominal-roll", params={"nominal_roll_id": str(sample_nominal_roll.id)}
+    )
+    assert response.status_code == 200
+    assert "Callup" in response.text  # column header
+    # All six options are offered to admins/super-admins.
+    for status in ("Called Up", "Deferred", "Disrupted", "MR", "Age Limit", "Other"):
+        assert f">{status}</option>" in response.text
+    # Remarks come from the personnel column, not extra_fields.
+    assert "Course till Friday" in response.text
+    # Inline-edit wiring: immediate PATCH handlers for admins and above.
+    assert "onCallupChange" in response.text
+    assert "onPersonnelRemarksChange" in response.text
+
+
+@pytest.mark.asyncio
+async def test_nominal_roll_redirects_non_admins(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_users,
+    monkeypatch,
+):
+    """The viewer role is deferred — non-admins get the no-access redirect
+    (so callup editing being admin+ effectively covers every page viewer)."""
+    from parade_state.web import nominal_roll as web_nominal_roll
+
+    async def _fake_current_user(_request):
+        return sample_users["user"]
+
+    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+
+    response = client.get(
+        "/nominal-roll",
+        params={"nominal_roll_id": str(sample_nominal_roll.id)},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert "/auth/no-access" in response.headers["location"]

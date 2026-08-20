@@ -2,12 +2,23 @@
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, Enum, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, Enum, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from parade_state.utils import utc_dt
 
 from ..db import Base
+
+# Callup decision statuses. Only "Called Up" personnel appear in attendance;
+# every other status is hidden from the attendance view (non-destructively).
+CALLUP_STATUSES: tuple[str, ...] = (
+    "Called Up",
+    "Deferred",
+    "Disrupted",
+    "MR",
+    "Age Limit",
+    "Other",
+)
 
 if TYPE_CHECKING:
     from .attendance import Attendance
@@ -51,10 +62,11 @@ class Personnel(Base):
         index=True,
     )
     callup_status: Mapped[str] = mapped_column(
-        Enum("Called Up", "Not Called Up", "Deferred", name="personnel_callup_status"),
+        Enum(*CALLUP_STATUSES, name="personnel_callup_status"),
         default="Called Up",
         index=True,
     )
+    remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     updated_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True, index=True)

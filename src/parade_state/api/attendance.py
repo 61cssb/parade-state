@@ -78,11 +78,16 @@ async def get_roster_for_scope(
     nominal_roll_id: str,
     db: AsyncSession,
 ) -> list[Personnel]:
-    """Active personnel on an NR (the attendance roster)."""
+    """Active, Called Up personnel on an NR (the attendance roster).
+
+    Non-Called-Up callup statuses are hidden; their attendance records
+    (if any) are preserved untouched.
+    """
     result = await db.execute(
         select(Personnel).where(
             Personnel.nominal_roll_id == nominal_roll_id,
             Personnel.status == "active",
+            Personnel.callup_status == "Called Up",
         )
     )
     return list(result.scalars().all())

@@ -267,6 +267,7 @@
                     <th style="padding: 0.5rem;">Rank</th>
                     <th style="padding: 0.5rem;">Full Name</th>
                     <th style="padding: 0.5rem;">Pers No</th>
+                    <th style="padding: 0.5rem;">Callup</th>
                     <th style="padding: 0.5rem;">Remarks</th>
                 </tr>
             </thead>
@@ -282,7 +283,24 @@
                     <td style="padding: 0.5rem; white-space: nowrap;">{{ p.rank }}</td>
                     <td style="padding: 0.5rem;">{{ p.full_name }}</td>
                     <td style="padding: 0.5rem; font-family: monospace; font-size: 0.85rem;">{{ p.pers_no or '—' }}</td>
-                    <td style="padding: 0.5rem; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ p.remarks or '' }}">{{ p.remarks or '—' }}</td>
+                    <td style="padding: 0.5rem; white-space: nowrap;">
+                        {% if user.role == 'admin' or user.role == 'super_admin' %}
+                        <select data-pid="{{ p.id }}" data-prev="{{ p.callup_status }}" onchange="onCallupChange(this)" style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem; background: #fff; color: #111827;" title="Callup decision status">
+                            {% for s in callup_statuses %}
+                            <option value="{{ s }}"{% if s == p.callup_status %} selected{% endif %}>{{ s }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
+                        {{ p.callup_status }}
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.5rem; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        {% if user.role == 'admin' or user.role == 'super_admin' %}
+                        <input value="{{ (p.remarks or '')|e }}" data-pid="{{ p.id }}" onchange="onPersonnelRemarksChange(this)" title="{{ (p.remarks or '')|e }}" placeholder="—" style="width: 100%; max-width: 17rem; padding: 0.25rem 0.4rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem; background: #fff; color: #111827;">
+                        {% else %}
+                        <span title="{{ (p.remarks or '')|e }}">{{ p.remarks or '—' }}</span>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -751,6 +769,54 @@
         if (wrap) wrap.remove();
         display.style.display = '';
     }
+
+    // --- Per-person callup status & remarks (admin / super_admin) ---
+    // Immediate PATCH on change, like the roll-management saves above.
+    // The staged-edits flow below is super_admin-only unit/subunit remapping.
+    {% if user.role == 'admin' or user.role == 'super_admin' %}
+    async function patchPersonnel(pid, body) {
+        try {
+            const response = await fetch(
+                '/api/v1/personnel/' + pid + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                }
+            );
+            if (response.ok) return null;
+            const data = await response.json().catch(function() { return {}; });
+            return data.detail || ('HTTP ' + response.status);
+        } catch (error) {
+            return 'Network error: ' + error.message;
+        }
+    }
+
+    async function onCallupChange(sel) {
+        const pid = sel.getAttribute('data-pid');
+        const prev = sel.getAttribute('data-prev');
+        const value = sel.value;
+        const err = await patchPersonnel(pid, { callup_status: value });
+        if (err) {
+            sel.value = prev;  // revert — the DB kept the old value
+            showPageStatus('Callup status update failed: ' + err, 'error');
+            return;
+        }
+        sel.setAttribute('data-prev', value);
+        showPageStatus('Callup status updated.', 'success');
+    }
+
+    async function onPersonnelRemarksChange(input) {
+        const pid = input.getAttribute('data-pid');
+        const value = input.value;
+        const err = await patchPersonnel(pid, { remarks: value });
+        if (err) {
+            showPageStatus('Remarks update failed: ' + err, 'error');
+            return;
+        }
+        showPageStatus('Remarks updated.', 'success');
+    }
+    {% endif %}
 
     function escapeAttr(s) {
         return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
