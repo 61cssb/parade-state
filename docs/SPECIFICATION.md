@@ -110,6 +110,9 @@ Nominal Roll
 
 **Operational grouping based on an nominal roll, with overrides and validity window.**
 
+*Not yet shipped: hidden behind the `FEATURE_GROUPING` env-var flag (see
+[4.8 Feature Flags](#48-feature-flags-env-var-kill-switches)).*
+
 ```
 Grouping
 ├── id: UUID (PK)
@@ -299,6 +302,9 @@ Personnel
   (tagging transfer, history) follows the person via `pers_no`.
 
 ### 3.3 Deferments
+
+*Not yet shipped: hidden behind the `FEATURE_DEFERMENTS` env-var flag (see
+[4.8 Feature Flags](#48-feature-flags-env-var-kill-switches)).*
 
 #### 3.3.1 Deferment
 
@@ -669,7 +675,27 @@ reject re-uploading the same test file. The feature is testing-only and
 may be disabled (`PURGE_ENABLED=false`) or removed entirely before
 production use.
 
-### 4.8 Key Constraints Summary
+### 4.8 Feature Flags (Env-Var Kill Switches)
+
+Env-var booleans (`FEATURE_<NAME>`, default off) hide not-yet-ready
+features from a deployment **entirely**:
+
+- **Nav/templates:** the feature's sidebar entry and every other entry
+  point (e.g. the NR-browser *Create Grouping* button, the dashboard
+  grouping card) are not rendered.
+- **Routes:** page and API routes return 404 for **every role, including
+  super admins** — the gate (`parade_state.features.require_feature`)
+  sits above role checks, so direct URLs are unreachable.
+
+Current flags: `FEATURE_DEFERMENTS` (Deferments page + API) and
+`FEATURE_GROUPING` (Grouping pages + API). Development enables both via
+Railway env vars; production leaves them unset until each feature ships.
+Toggling is an env-var change plus service restart — no deploy. Railway's
+managed feature-flag offering was rejected (paid early access with
+breaking-change risk, TypeScript-only SDK, rollout targeting this
+coarse on/off switch does not need).
+
+### 4.9 Key Constraints Summary
 
 | Table | Unique | Index | Purpose |
 |-------|--------|-------|---------|
