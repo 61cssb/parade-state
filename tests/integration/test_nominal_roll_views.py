@@ -333,9 +333,10 @@ async def test_roll_management_panel_placement(
     sample_users,
     monkeypatch,
 ):
-    """Roll management acts on the selected roll, so its card sits directly
-    below the roll selector and above the Filters card — not inside the
-    results card where admins didn't look for it (issue 22)."""
+    """Roll management acts on the selected roll, so it sits directly below
+    the roll selector dropdown inside the selector card (the Grouping page's
+    pattern), above the Filters card — not inside the results card where
+    admins didn't look for it (issue 22)."""
     from parade_state.web import nominal_roll as web_nominal_roll
 
     async def _fake_current_user(_request):
