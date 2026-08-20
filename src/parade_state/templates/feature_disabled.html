@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}{{ feature_label }} unavailable - Parade State{% endblock %}
+
+{% block page_title %}{{ feature_label }} unavailable{% endblock %}
+
+{% block content %}
+<div class="card" style="text-align: center; padding: 3rem 1.5rem;">
+    <div style="font-size: 3rem; margin-bottom: 1rem;">🚧</div>
+    <h2 style="color: #111827; margin-bottom: 0.5rem;">
+        {{ feature_label }} is switched off on this deployment
+    </h2>
+    <p style="color: #6b7280; margin-bottom: 1.5rem;">
+        Your link is fine — this feature has been deliberately disabled
+        here for now. It will return when it is ready.
+    </p>
+    <p style="font-size: 0.875rem; color: #6b7280;">
+        Contact a system administrator if you expected it to be available.
+    </p>
+</div>
+{% endblock %}

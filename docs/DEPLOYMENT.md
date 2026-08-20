@@ -119,6 +119,9 @@ DEBUG=false
 Env-var booleans hide not-yet-ready features **entirely**: no nav entry,
 and page + API routes return 404 for every role including super admins
 (the gate sits above role checks, so direct URLs are unreachable too).
+Flag-off page routes answer with a styled HTML 404 page ("switched off
+on this deployment") so bookmarked links do not read as broken; API
+routes return the JSON 404 naming the env var.
 Defaults are off; development enables flags via Railway env vars, and a
 toggle is an env-var change plus service restart (no deploy).
 

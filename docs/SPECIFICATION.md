@@ -685,7 +685,9 @@ features from a deployment **entirely**:
   grouping card) are not rendered.
 - **Routes:** page and API routes return 404 for **every role, including
   super admins** — the gate (`parade_state.features.require_feature`)
-  sits above role checks, so direct URLs are unreachable.
+  sits above role checks, so direct URLs are unreachable. Pages answer
+  with a styled HTML 404 ("switched off on this deployment"); APIs keep
+  a JSON 404 naming the env var.
 
 Current flags: `FEATURE_DEFERMENTS` (Deferments page + API) and
 `FEATURE_GROUPING` (Grouping pages + API). Development enables both via
