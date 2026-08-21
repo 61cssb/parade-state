@@ -16,7 +16,7 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ## Current Snapshot
 
-- **Tests:** 452 SQLite passing (flags-on posture; flags-off gating has
+- **Tests:** 503 SQLite passing (flags-on posture; flags-off gating has
   dedicated tests). The suite runs against
   Postgres by setting `TEST_DATABASE_URL` (per-test databases).
 - **Access model:** `super_admin` + `admin` only. Unknown Google
@@ -40,6 +40,12 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   roles, super-admins included) until ready. Currently `false` in dev
   (hidden during the tester window) and unset in prod; flip per feature
   readiness ([DEPLOYMENT.md](DEPLOYMENT.md) › Feature Flags).
+  `FEATURE_STRENGTH` (Unit Strength at `/admin`) is on in both
+  environments. **Core-feature kill switches** (issue 23):
+  `FEATURE_NOMINALROLL` / `FEATURE_ATTENDANCE` default **on** (unset =
+  available) and hide their feature entirely only on an explicit `false`
+  — the emergency path for taking a shipped core feature offline
+  mid-window without a deploy. Both are `true` in dev and prod.
   **Environment banner:** dev sets `ENVIRONMENT_BANNER` so a thin amber
   strip at the top of every page (login included) names the environment;
   prod leaves it unset (zero markup, zero layout impact).
@@ -49,28 +55,42 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 - Google OAuth sign-in (host-independent), admin-only auth, audit log
 - CSV upload → process into Nominal Roll + Personnel + auto-tagging
   (fixed canonical column map from the WY2627 fixture — see CSV Step 2);
-  taggings importable across NRs by `pers_no`
+  taggings importable across NRs by `pers_no`; super-admins can also add a
+  missing serviceman manually from the NR view (`source='manual'`, pers_no
+  fill-in-later inline; per-roll, not propagated to future CSV rolls)
 - Tagging overlay, 1:1 per NR: unit/subunit edits land on the overlay;
   reads serve effective (`to_*`-overlaid) values; CSV-sourced NR data
   itself is read-only
 - One system-wide **active-for-attendance** Nominal Roll (super-admin
   switch); `Attendance` rows per (personnel, date) with AM/PM
-  status + remarks; writes gated to the active NR
+  status + remarks; writes gated to the active NR; roster shows only
+  `callup_status = 'Called Up'` personnel (hiding is non-destructive —
+  existing attendance records are preserved)
 - Attendance access control by effective sub-unit 1
   (`UserSubunitAssignment`; deny-by-default; super_admin bypasses)
-- Groupings: lifecycle, personnel exclusions/overrides, date editing —
-  managed from the `/grouping` view's expander (admin groupings page
-  retired); **feature-flagged** (`FEATURE_GROUPING`, dev-only until ready)
+- **Unit Strength** report at `/admin` (replaced the dashboard): the
+  parade state rolled up by effective sub-unit 1/2 into the Officer/WOSE/
+  Total × In/Out/Current/% strength format (In = Called Up, Current =
+  present/late, Out = rest); date + AM/PM slot; regular admins scoped to
+  their assigned sub-units; on via `FEATURE_STRENGTH` in dev and prod
+- Groupings (issue 26 redesign, implemented on this branch): a labelled
+  set of groups on the attendance-active NR with memberships, per-person
+  checkbox/remarks, clone, copy-from-previous-NR, slim CSV export —
+  super-admin-only mutations, all-role reads, no attendance interaction;
+  the old lifecycle/overrides/exclusions/notes/access-scoping design and
+  the `/grouping/{id}/personnel` page are gone; **feature-flagged**
+  (`FEATURE_GROUPING`, default off)
 - Deferments (super-admin CRUD; `Personnel.callup_status`);
   **feature-flagged** (`FEATURE_DEFERMENTS`, dev-only until ready)
-- Sidebar: workflow pages flat (Dashboard, Upload NR, Nominal Roll,
+- Sidebar: workflow pages flat (Unit Strength, Upload NR, Nominal Roll,
   Taggings, Deferments, Attendance, Grouping) + **Admin** section
   (Users, Settings, Audit Log, Restore Backup); SA-only pages show an
   in-page no-access message for plain admins; flag-gated entries
-  (Deferments, Grouping) render only when their flag is on
-- Admin UI: dashboard, users, audit log, taggings, deferments,
+  (Deferments, Grouping, Unit Strength) render only when their flag is on
+- Admin UI: Unit Strength, users, audit log, taggings, deferments,
   Upload NR (CSV upload), DB restore, Settings purge (testing-only);
-  NR and grouping management live in expanders on their views
+  NR management lives in an expander on its view, grouping management on
+  the Grouping page
 - User-facing views — `/grouping`, `/attendance`, `/nominal-roll` —
   built, but admin-gated pending the viewer role (below)
 
@@ -95,7 +115,9 @@ regression) indefinitely deferred.
 Exception/summary reporting needs real usage patterns. First step:
 collect format requests from the test users (admins) coming on the
 weekend of 2026-08-22, then design reports around what they actually
-need during the window.
+need during the window. The first such request — the unit's strength
+reporting spreadsheet — is already shipped as the Unit Strength page
+(Issue 25); CSV export of it can follow if wanted.
 
 ### 4. CSV Step 3: diff confirmation — after the season (2026)
 
@@ -148,6 +170,35 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-20:** Add Serviceman (Issue 26): super-admin manual personnel
+  creation from the NR view — `Personnel.source` provenance ('manual'
+  badge), `POST /api/v1/personnel`, pers_no nullable + super-admin
+  fill-in-later PATCH (inline cell); per-roll only (no propagation)
+- **2026-08-20:** Attendance autosave (Issue 19): Save button removed, rows
+  PUT themselves on status change / remarks blur with a Saving…/Saved
+  indicator and a red-edge retry state on failure; yellow tagged-row
+  highlight now only in the NR view
+- **2026-08-20:** Copy Remarks modal (Issue 20): explicit source/destination
+  (day + AM/PM) with plain-language confirmation, sub-unit view filter
+  respected server-side; button open to all admins (write perms enforced
+  per sub-unit); endpoint takes explicit source/dest params (old
+  time-of-day logic survives as the modal prefill)
+- **2026-08-20:** Unit Strength report (Issue 25) at `/admin` (replaces the
+  dashboard): parade state aggregated by effective sub-unit into the
+  Officer/WOSE/Total × In/Out/Current/% reporting format; date + AM/PM
+  slot selector; subunit-scoped for regular admins; `FEATURE_STRENGTH`-gated
+- **2026-08-20:** NR status & remarks columns (Issue 06, vastly simplified
+  from the funnel model): `callup_status` widened to six values + per-person
+  `remarks`; CSV `Callup Decision`/`Reason`/`Remarks` mapped on ingest;
+  attendance view shows only Called Up (non-destructive); inline admin
+  editing in the NR browser
+- **2026-08-20:** Groupings redesigned (issue 26): the old
+  modes/lifecycle/overrides/exclusions/notes/access-scoping design was
+  replaced wholesale with a labelled set of groups per nominal roll —
+  memberships, per-person checkbox/remarks, clone,
+  copy-from-previous-NR, slim CSV export; super-admin-only mutations,
+  all-role reads; no attendance interaction; `FEATURE_GROUPING` still
+  default off
 - **2026-08-20:** Environment banner: `ENVIRONMENT_BANNER` renders a thin
   fixed top strip on every page (login included) naming the environment;
   set in dev, unset in prod — pure overlay, page below pixel-identical

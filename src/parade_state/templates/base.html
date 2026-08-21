@@ -534,11 +534,16 @@
                super-admin-only surfaces (Taggings) render a no-access
                message for plain admins, while flag-gated features
                (Deferments, Grouping) are hidden entirely when their
-               FEATURE_* env flag is off. #}
-            <a href="/admin" title="Dashboard"
-               class="{% if active_page == 'dashboard' %}active{% endif %}">
-                <span class="icon">🏠</span><span>Dashboard</span>
+               FEATURE_* env flag is off. The core-feature flags
+               (Nominal Roll, Attendance) are default-on kill switches:
+               they hide their entries only on an explicit "false". #}
+            {% if request.app.state.settings.FEATURE_STRENGTH %}
+            <a href="/admin" title="Unit Strength"
+               class="{% if active_page == 'strength' %}active{% endif %}">
+                <span class="icon">🪖</span><span>Unit Strength</span>
             </a>
+            {% endif %}
+            {% if request.app.state.settings.FEATURE_NOMINALROLL %}
             <a href="/admin/csv-upload" title="Upload NR"
                class="{% if active_page == 'csv-upload' %}active{% endif %}">
                 <span class="icon">📤</span><span>Upload NR</span>
@@ -551,16 +556,19 @@
                class="{% if active_page == 'taggings' %}active{% endif %}">
                 <span class="icon">🏷️</span><span>Taggings</span>
             </a>
+            {% endif %}
             {% if request.app.state.settings.FEATURE_DEFERMENTS %}
             <a href="/admin/deferments" title="Deferments"
                class="{% if active_page == 'deferments' %}active{% endif %}">
                 <span class="icon">🕓</span><span>Deferments</span>
             </a>
             {% endif %}
+            {% if request.app.state.settings.FEATURE_ATTENDANCE %}
             <a href="/attendance" title="Attendance"
                class="{% if active_page == 'attendance' %}active{% endif %}">
                 <span class="icon">✅</span><span>Attendance</span>
             </a>
+            {% endif %}
             {% if request.app.state.settings.FEATURE_GROUPING %}
             <a href="/grouping" title="Grouping"
                class="{% if active_page == 'grouping' %}active{% endif %}">

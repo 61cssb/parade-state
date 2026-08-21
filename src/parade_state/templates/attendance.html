@@ -6,8 +6,8 @@
 
 {% block content %}
 <style>
-    .changed-row { background: #fef3c7 !important; }
-    .changed-row td { background: #fef3c7 !important; }
+    /* A row whose latest autosave failed: red edge until it saves. */
+    .unsaved-row td { box-shadow: inset 3px 0 0 #ef4444; }
 
     /* Group headers replace the context columns on narrow screens
        (the columns are hidden there via the media query below). */
@@ -35,6 +35,64 @@
         #attendance-table .group-header {
             display: table-row;
         }
+    }
+
+    /* Copy Remarks modal (issue 20). */
+    .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(17, 24, 39, 0.45);
+        z-index: 150;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-card {
+        background: white;
+        border-radius: 0.5rem;
+        width: 100%;
+        max-width: 28rem;
+        padding: 1.5rem;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+    .copy-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+    }
+    @media (max-width: 480px) {
+        .copy-grid { grid-template-columns: 1fr; }
+    }
+    .copy-fieldset {
+        border: 1px solid #e5e7eb;
+        border-radius: 0.375rem;
+        padding: 0.6rem 0.75rem 0.75rem;
+        margin: 0;
+    }
+    .copy-fieldset legend {
+        font-weight: 600;
+        font-size: 0.85rem;
+        padding: 0 0.25rem;
+    }
+    .copy-fieldset input[type="date"] {
+        width: 100%;
+        padding: 0.35rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+    }
+    .slot-toggle {
+        display: flex;
+        gap: 0.75rem;
+        margin-top: 0.5rem;
+        font-size: 0.9rem;
+    }
+    .slot-toggle label {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        cursor: pointer;
     }
 </style>
 
@@ -142,9 +200,7 @@
                     <td colspan="11">{{ r.unit or '—' }}{% if r.sub_unit_1 %} — {{ r.sub_unit_1 }}{% endif %}</td>
                 </tr>
                 {% endif %}
-                <tr class="{% if r.is_changed %}changed-row{% endif %}" style="border-bottom: 1px solid #e5e7eb;" data-personnel-id="{{ r.personnel_id }}"
-                    data-unit="{{ r.unit }}" data-sub1="{{ r.sub_unit_1 or '' }}"
-                    data-category="{{ r.category }}" data-rank="{{ r.rank }}" data-name="{{ r.full_name }}">
+                <tr style="border-bottom: 1px solid #e5e7eb;" data-personnel-id="{{ r.personnel_id }}" data-name="{{ r.full_name }}">
                     <td class="col-unit" style="padding: 0.5rem;">{{ r.unit }}</td>
                     <td class="col-sub1" style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_1 or '' }}</td>
                     <td class="col-sub2" style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">{{ r.sub_unit_2 or '' }}</td>
@@ -155,7 +211,7 @@
                     <td style="padding: 0.5rem;">
                         <select class="status-select" data-slot="am" data-pid="{{ r.personnel_id }}"
                                 {% if not attendance_active %}disabled{% endif %}
-                                onchange="markDirty(this)"
+                                onchange="onStatusChange(this)"
                                 style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-weight: 600;">
                             <option value="present" {% if r.status_am == 'present' %}selected{% endif %}>Present</option>
                             <option value="absent" {% if r.status_am == 'absent' %}selected{% endif %}>Absent</option>
@@ -172,13 +228,13 @@
                         <input type="text" data-slot="am" data-field="remarks" data-pid="{{ r.personnel_id }}"
                                value="{{ r.remarks_am }}"
                                {% if not attendance_active %}disabled{% endif %}
-                               onchange="markDirty(this)"
+                               onblur="onRemarksBlur(this)"
                                style="width: 100%; min-width: 160px; padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
                     </td>
                     <td style="padding: 0.5rem;">
                         <select class="status-select" data-slot="pm" data-pid="{{ r.personnel_id }}"
                                 {% if not attendance_active %}disabled{% endif %}
-                                onchange="markDirty(this)"
+                                onchange="onStatusChange(this)"
                                 style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-weight: 600;">
                             <option value="present" {% if r.status_pm == 'present' %}selected{% endif %}>Present</option>
                             <option value="absent" {% if r.status_pm == 'absent' %}selected{% endif %}>Absent</option>
@@ -195,7 +251,7 @@
                         <input type="text" data-slot="pm" data-field="remarks" data-pid="{{ r.personnel_id }}"
                                value="{{ r.remarks_pm }}"
                                {% if not attendance_active %}disabled{% endif %}
-                               onchange="markDirty(this)"
+                               onblur="onRemarksBlur(this)"
                                style="width: 100%; min-width: 160px; padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
                     </td>
                 </tr>
@@ -205,16 +261,55 @@
     </div>
 
     {% if attendance_active %}
-    <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
-        <button class="btn btn-primary" onclick="saveAttendance()">Save Attendance</button>
-        {% if user.role == 'super_admin' %}
-        <button class="btn" style="background: #6366f1; color: white;"
-                onclick="copyRemarks()"
-                title="Copies previous day PM → today AM (before noon), or today AM → today PM (after noon). Disabled on the NR's first day.">
+    <div style="margin-top: 1rem; display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+        <span id="save-state" style="font-size: 0.85rem; color: #6b7280;"></span>
+        <button class="btn" style="background: #6366f1; color: white; margin-left: auto;"
+                onclick="openCopyModal()"
+                title="Copy remarks from one day/session to another for the personnel in the current view.">
             Copy Remarks
         </button>
-        {% endif %}
-        <span id="dirty-count" style="font-size: 0.8rem; color: #6b7280;"></span>
+    </div>
+
+    <div class="modal-overlay" id="copy-modal" role="dialog" aria-modal="true"
+         aria-labelledby="copy-modal-title">
+        <div class="modal-card">
+            <h3 id="copy-modal-title" style="margin: 0 0 1rem;">Copy Remarks</h3>
+            <div class="copy-grid">
+                <fieldset class="copy-fieldset">
+                    <legend>Source</legend>
+                    <input type="date" id="copy-src-date" min="{{ nr_caa }}"
+                           max="{{ target_date.strftime('%Y-%m-%d') }}"
+                           onchange="onCopyInput()">
+                    <div class="slot-toggle">
+                        <label><input type="radio" name="copy-src-slot" value="am"
+                                      onchange="onCopyInput()"> AM</label>
+                        <label><input type="radio" name="copy-src-slot" value="pm"
+                                      onchange="onCopyInput()"> PM</label>
+                    </div>
+                </fieldset>
+                <fieldset class="copy-fieldset">
+                    <legend>Destination</legend>
+                    <input type="date" id="copy-dst-date" min="{{ nr_caa }}"
+                           max="{{ target_date.strftime('%Y-%m-%d') }}"
+                           onchange="onCopyInput()">
+                    <div class="slot-toggle">
+                        <label><input type="radio" name="copy-dst-slot" value="am"
+                                      onchange="onCopyInput()"> AM</label>
+                        <label><input type="radio" name="copy-dst-slot" value="pm"
+                                      onchange="onCopyInput()"> PM</label>
+                    </div>
+                </fieldset>
+            </div>
+            <p id="copy-summary" style="font-size: 0.9rem; color: #374151; margin: 1rem 0 0;"></p>
+            <p id="copy-warning" style="font-size: 0.85rem; color: #b45309; margin: 0.5rem 0 0; display: none;"></p>
+            <div style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.25rem;">
+                <button class="btn" style="background: #e5e7eb; color: #374151;"
+                        onclick="closeCopyModal()">Cancel</button>
+                <button class="btn btn-primary" id="copy-confirm" onclick="confirmCopy()">
+                    Copy remarks
+                </button>
+            </div>
+        </div>
     </div>
     {% endif %}
     {% else %}
@@ -237,75 +332,206 @@
     const USER_ROLE = "{{ user.role }}";
     const NOMINAL_ROLL_ID = "{{ selected_nominal_roll_id }}";
     const TARGET_DATE = "{{ target_date.strftime('%Y-%m-%d') }}";
-    const HAS_PRIOR = {{ has_prior_attendance | tojson }};
-    const dirtyPids = new Set();
+    const NR_CAA = "{{ nr_caa }}";
+    const SUBUNIT_FILTER = "{{ sub_unit_1_filter }}";
 
-    function markDirty(el) {
-        dirtyPids.add(el.dataset.pid);
-        document.getElementById('dirty-count').textContent =
-            dirtyPids.size + ' row(s) pending save';
-        updateStatusColors();
+    // --- Per-row autosave (issue 19) -------------------------------------
+    //
+    // Each row PUTs itself on status change or remarks blur (only when the
+    // remarks value moved off the last-saved value). Saves per row are
+    // serialized through a promise chain so overlapping edits cannot
+    // interleave stale writes.
+
+    const rowSavers = {};
+
+    function cssEscape(s) { return s.replace(/[^a-zA-Z0-9_-]/g, function(c){ return '\\' + c; }); }
+
+    function setSaveState(message, tone) {
+        const span = document.getElementById('save-state');
+        if (!span) return;
+        span.textContent = message;
+        span.style.color = tone === 'success' ? '#10b981'
+            : (tone === 'error' ? '#ef4444' : '#6b7280');
+        if (tone !== 'error') {
+            setTimeout(function() { if (span.textContent === message) span.textContent = ''; }, 2500);
+        }
     }
 
-    async function saveAttendance() {
-        if (!dirtyPids.size) {
-            showStatus('Nothing to save.', 'info');
-            return;
-        }
-        const records = [];
-        dirtyPids.forEach(function(pid) {
-            const row = document.querySelector('tr[data-personnel-id="' + cssEscape(pid) + '"]');
-            if (!row) return;
-            const amStatus = row.querySelector('select.status-select[data-slot="am"]');
-            const amRemarks = row.querySelector('input[data-slot="am"][data-field="remarks"]');
-            const pmStatus = row.querySelector('select.status-select[data-slot="pm"]');
-            const pmRemarks = row.querySelector('input[data-slot="pm"][data-field="remarks"]');
-            records.push({
-                personnel_id: pid,
-                date: TARGET_DATE,
-                status_am: amStatus.value,
-                remarks_am: amRemarks.value,
-                status_pm: pmStatus.value,
-                remarks_pm: pmRemarks.value,
-            });
-        });
+    function onStatusChange(sel) {
+        updateStatusColors();
+        scheduleRowSave(sel.dataset.pid);
+    }
 
+    function onRemarksBlur(input) {
+        if (input.value === (input.dataset.saved || '')) return;
+        scheduleRowSave(input.dataset.pid);
+    }
+
+    function scheduleRowSave(pid) {
+        const row = document.querySelector('tr[data-personnel-id="' + cssEscape(pid) + '"]');
+        if (row) row.classList.remove('unsaved-row');
+        rowSavers[pid] = (rowSavers[pid] || Promise.resolve()).then(function() { return saveRow(pid); });
+    }
+
+    async function saveRow(pid) {
+        const row = document.querySelector('tr[data-personnel-id="' + cssEscape(pid) + '"]');
+        if (!row) return;
+        const payload = {
+            personnel_id: pid,
+            date: TARGET_DATE,
+            status_am: row.querySelector('select.status-select[data-slot="am"]').value,
+            remarks_am: row.querySelector('input[data-slot="am"][data-field="remarks"]').value,
+            status_pm: row.querySelector('select.status-select[data-slot="pm"]').value,
+            remarks_pm: row.querySelector('input[data-slot="pm"][data-field="remarks"]').value,
+        };
+        setSaveState('Saving…', 'info');
         try {
             const response = await fetch('/api/v1/attendance/upsert?user_id=' + USER_ID + '&user_role=' + USER_ROLE, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ nominal_roll_id: NOMINAL_ROLL_ID, records: records }),
+                body: JSON.stringify({ nominal_roll_id: NOMINAL_ROLL_ID, records: [payload] }),
             });
             if (response.ok) {
-                showStatus('Attendance saved (' + records.length + ' rows).', 'success');
-                dirtyPids.clear();
-                document.getElementById('dirty-count').textContent = '';
+                row.querySelectorAll('input[data-field="remarks"]').forEach(function(i) { i.dataset.saved = i.value; });
+                setSaveState('Saved', 'success');
             } else {
-                const data = await response.json();
-                showStatus('Save failed: ' + (data.detail || 'Unknown error'), 'error');
+                const data = await response.json().catch(function() { return {}; });
+                failRow(row, data.detail || 'Unknown error');
             }
         } catch (error) {
-            showStatus('Network error: ' + error.message, 'error');
+            failRow(row, 'Network error: ' + error.message);
         }
     }
 
-    async function copyRemarks() {
-        // Before noon copies prev-day PM → today AM; requires prior attendance.
+    function failRow(row, reason) {
+        row.classList.add('unsaved-row');
+        setSaveState('Save failed (' + (row.dataset.name || 'row') + '): ' + reason
+            + ' — edit the row again to retry.', 'error');
+    }
+
+    // --- Copy Remarks modal (issue 20) -----------------------------------
+    //
+    // Explicit source (day + AM/PM) and destination (day + AM/PM) with a
+    // plain-language confirmation. Defaults follow the old time-of-day
+    // behaviour: before noon previous-day PM → today AM, after noon
+    // today AM → today PM.
+
+    let copyWarned = false;
+
+    function isoDate(d) {
+        return d.getFullYear() + '-' +
+            String(d.getMonth() + 1).padStart(2, '0') + '-' +
+            String(d.getDate()).padStart(2, '0');
+    }
+
+    function openCopyModal() {
+        copyWarned = false;
         const beforeNoon = new Date().getHours() < 12;
-        if (beforeNoon && !HAS_PRIOR) {
-            showStatus('Copy Remarks unavailable on the NR first day (no prior remarks).', 'info');
+        const target = new Date(TARGET_DATE + 'T00:00:00');
+        const prev = new Date(target);
+        prev.setDate(prev.getDate() - 1);
+        let srcDate = beforeNoon ? isoDate(prev) : TARGET_DATE;
+        let srcSlot = beforeNoon ? 'pm' : 'am';
+        const dstDate = TARGET_DATE;
+        const dstSlot = beforeNoon ? 'am' : 'pm';
+        if (NR_CAA && srcDate < NR_CAA) {
+            // First day: no earlier source exists — offer today AM → PM.
+            srcDate = TARGET_DATE; srcSlot = 'am';
+        }
+        document.getElementById('copy-src-date').value = srcDate;
+        document.getElementById('copy-dst-date').value = dstDate;
+        setCheckedRadio('copy-src-slot', srcSlot);
+        setCheckedRadio('copy-dst-slot', dstSlot);
+        document.getElementById('copy-modal').classList.add('open');
+        updateCopySummary();
+    }
+
+    function closeCopyModal() {
+        document.getElementById('copy-modal').classList.remove('open');
+    }
+
+    function setCheckedRadio(name, value) {
+        document.querySelectorAll('input[name="' + name + '"]').forEach(function(r) {
+            r.checked = r.value === value;
+        });
+    }
+
+    function checkedRadio(name) {
+        const r = document.querySelector('input[name="' + name + '"]:checked');
+        return r ? r.value : 'am';
+    }
+
+    function copyState() {
+        return {
+            sd: document.getElementById('copy-src-date').value,
+            ss: checkedRadio('copy-src-slot'),
+            dd: document.getElementById('copy-dst-date').value,
+            ds: checkedRadio('copy-dst-slot'),
+        };
+    }
+
+    function copyIsSame(st) { return st.sd === st.dd && st.ss === st.ds; }
+
+    function copyIsEarlier(st) {
+        if (st.dd < st.sd) return true;
+        return st.dd === st.sd && st.ss === 'pm' && st.ds === 'am';
+    }
+
+    function onCopyInput() {
+        copyWarned = false;
+        updateCopySummary();
+    }
+
+    function updateCopySummary() {
+        const st = copyState();
+        const n = document.querySelectorAll('#attendance-body tr[data-personnel-id]').length;
+        const summary = document.getElementById('copy-summary');
+        const warning = document.getElementById('copy-warning');
+        const confirmBtn = document.getElementById('copy-confirm');
+
+        summary.textContent = 'Copy ' + st.ss.toUpperCase() + ' remarks from ' + st.sd +
+            ' to ' + st.ds.toUpperCase() + ' on ' + st.dd + ' for ' + n +
+            ' personnel in current view. Existing destination remarks will be ' +
+            'overwritten; blank source remarks are skipped.';
+
+        if (copyIsSame(st)) {
+            warning.style.display = 'block';
+            warning.textContent = 'Source and destination must differ.';
+            confirmBtn.disabled = true;
+        } else if (copyIsEarlier(st)) {
+            warning.style.display = 'block';
+            warning.textContent = copyWarned
+                ? 'Copying to an earlier session — click Copy remarks again to confirm.'
+                : 'The destination is earlier than the source — likely a mistake. Check your pick.';
+            confirmBtn.disabled = false;
+        } else {
+            warning.style.display = 'none';
+            confirmBtn.disabled = false;
+        }
+    }
+
+    async function confirmCopy() {
+        const st = copyState();
+        if (copyIsSame(st)) return;
+        if (copyIsEarlier(st) && !copyWarned) {
+            copyWarned = true;
+            updateCopySummary();
             return;
         }
+        let url = '/api/v1/attendance/copy-remarks?nominal_roll_id=' + NOMINAL_ROLL_ID +
+            '&source_date=' + st.sd + '&source_slot=' + st.ss +
+            '&dest_date=' + st.dd + '&dest_slot=' + st.ds +
+            '&user_id=' + USER_ID + '&user_role=' + USER_ROLE;
+        if (SUBUNIT_FILTER) url += '&sub_unit_1=' + encodeURIComponent(SUBUNIT_FILTER);
         try {
-            const response = await fetch('/api/v1/attendance/copy-remarks?nominal_roll_id=' + NOMINAL_ROLL_ID + '&date=' + TARGET_DATE + '&user_id=' + USER_ID + '&user_role=' + USER_ROLE, {
-                method: 'POST',
-            });
+            const response = await fetch(url, { method: 'POST' });
             if (response.ok) {
                 const data = await response.json();
-                showStatus('Copied ' + data.updated + ' remark(s) (' + data.slot.toUpperCase() + '); ' + data.skipped + ' skipped.', 'success');
-                setTimeout(function() { location.reload(); }, 1000);
+                closeCopyModal();
+                showStatus('Copied ' + data.updated + ' remark(s), skipped ' + data.skipped + '.', 'success');
+                setTimeout(function() { location.reload(); }, 800);
             } else {
-                const data = await response.json();
+                const data = await response.json().catch(function() { return {}; });
                 showStatus('Copy failed: ' + (data.detail || 'Unknown error'), 'error');
             }
         } catch (error) {
@@ -313,8 +539,14 @@
         }
     }
 
-    // CSS.escape shim for UUID strings (safe subset).
-    function cssEscape(s) { return s.replace(/[^a-zA-Z0-9_-]/g, function(c){ return '\\' + c; }); }
+    document.getElementById('copy-modal').addEventListener('click', function(e) {
+        if (e.target === this) closeCopyModal();
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeCopyModal();
+    });
+
+    // --- Shared helpers ----------------------------------------------------
 
     function showStatus(message, type) {
         const div = document.getElementById('statusMessage');
@@ -344,6 +576,10 @@
 
     document.addEventListener('DOMContentLoaded', function() {
         updateStatusColors();
+        // Remarks blur only saves when the value left the last-saved one.
+        document.querySelectorAll('input[data-field="remarks"]').forEach(function(i) {
+            i.dataset.saved = i.value;
+        });
     });
 </script>
 {% endblock %}

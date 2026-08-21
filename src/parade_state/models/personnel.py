@@ -2,22 +2,37 @@
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, Enum, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, Enum, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from parade_state.utils import utc_dt
 
 from ..db import Base
 
+# Callup decision statuses. Only "Called Up" personnel appear in attendance;
+# every other status is hidden from the attendance view (non-destructively).
+CALLUP_STATUSES: tuple[str, ...] = (
+    "Called Up",
+    "Deferred",
+    "Disrupted",
+    "MR",
+    "Age Limit",
+    "Other",
+)
+
+# Provenance marker for UI-added personnel rows. NULL means the row came from
+# CSV ingestion; "manual" marks a super-admin "Add Serviceman" creation.
+SOURCE_MANUAL: str = "manual"
+
 if TYPE_CHECKING:
     from .attendance import Attendance
     from .csv_ingestion import NominalRoll
     from .deferments import Deferment
-    from .grouping import GroupingNotes, GroupingPersonnelOverride
 
 
 class Personnel(Base):
-    """Individual personnel record, sourced from a CSV nominal roll.
+    """Individual personnel record on a nominal roll (CSV-sourced or,
+    when ``source`` is ``"manual"``, super-admin added via the UI).
 
     Identity: ``id`` is the row PK (one row per nominal-roll-person pairing) and
     the FK target for dependent tables. ``pers_no`` is the canonical cross-roll
@@ -51,10 +66,13 @@ class Personnel(Base):
         index=True,
     )
     callup_status: Mapped[str] = mapped_column(
-        Enum("Called Up", "Not Called Up", "Deferred", name="personnel_callup_status"),
+        Enum(*CALLUP_STATUSES, name="personnel_callup_status"),
         default="Called Up",
         index=True,
     )
+    remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Provenance: NULL = CSV row, "manual" = UI-added (see SOURCE_MANUAL).
+    source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     updated_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True, index=True)
@@ -64,12 +82,6 @@ class Personnel(Base):
 
     # Relationships
     nominal_roll: Mapped["NominalRoll"] = relationship(back_populates="personnel")
-    grouping_overrides: Mapped[list["GroupingPersonnelOverride"]] = relationship(
-        back_populates="personnel", cascade="all, delete-orphan"
-    )
-    grouping_notes: Mapped[list["GroupingNotes"]] = relationship(
-        back_populates="personnel", cascade="all, delete-orphan"
-    )
     attendance: Mapped[list["Attendance"]] = relationship(
         back_populates="personnel", cascade="all, delete-orphan"
     )

@@ -1,12 +1,12 @@
 """Nominal Roll API endpoints."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
-from parade_state.models import AuditLog, CsvUpload, NominalRoll
+from parade_state.models import AuditLog, CsvUpload, Grouping, NominalRoll
 from parade_state.models.schemas import (
     NominalRollListItem,
     NominalRollResponse,
@@ -160,8 +160,10 @@ async def delete_nominal_roll(
 ) -> dict:
     """Delete a nominal roll and cascade-delete all dependent data.
 
-    Requires super_admin role. Cascades to personnel, groupings, attendance
-    records, tagging, and related data.
+    Requires super_admin role. Cascades to personnel, attendance records,
+    tagging, and related data. Groupings do NOT cascade — their FK is
+    RESTRICT (issue 26) — so a roll with groupings based on it must have
+    them deleted first.
     """
     if user_role != "super_admin":
         raise HTTPException(
@@ -177,6 +179,21 @@ async def delete_nominal_roll(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Nominal roll not found: {nominal_roll_id}",
+        )
+
+    grouping_count = await db.scalar(
+        select(func.count()).select_from(Grouping).where(
+            Grouping.nominal_roll_id == nominal_roll_id
+        )
+    )
+    if grouping_count:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"{grouping_count} grouping(s) are based on this nominal roll. "
+                "Delete them first — groupings are preserved when a roll is "
+                "not in use."
+            ),
         )
 
     await db.delete(nominal_roll)

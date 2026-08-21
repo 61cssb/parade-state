@@ -122,7 +122,8 @@ async def test_user_attendance_overlays_active_tagging_values(
     monkeypatch,
 ):
     """With the NR active for attendance, the roster shows effective (to_*)
-    values, Copy Remarks (super-admin), and the changed-row highlight."""
+    values, per-row autosave (no Save button, no tagged-row highlight —
+    issue 19), and the Copy Remarks modal (issue 20)."""
     from parade_state.web import attendance as web_attendance
     from parade_state.models import Tagging, TaggingEntry, User
 
@@ -171,11 +172,15 @@ async def test_user_attendance_overlays_active_tagging_values(
         "/attendance", params={"nominal_roll_id": str(sample_nominal_roll.id)}
     )
     assert response.status_code == 200
-    # Save controls only render when the NR is active for attendance.
-    assert "Save Attendance" in response.text
-    # Copy Remarks is super-admin-only now that the admin page is gone.
+    # Autosave replaces the bulk Save flow; rows highlight only on failure.
+    assert "Save Attendance" not in response.text
+    assert "saveAttendance" not in response.text
+    assert "onStatusChange" in response.text  # autosave hook on statuses
+    # Yellow tagged-row highlight is gone from attendance (NR view keeps it).
+    assert "changed-row" not in response.text
+    # Copy Remarks modal is offered (write perms enforced server-side).
     assert "Copy Remarks" in response.text
-    assert "changed-row" in response.text
+    assert 'id="copy-modal"' in response.text
     # Sub-unit 2/3 columns are shown; effective values come from the
     # tagging entry, not the canonical row.
     assert "Sub-unit 2" in response.text
@@ -186,7 +191,7 @@ async def test_user_attendance_overlays_active_tagging_values(
 
 
 @pytest.mark.asyncio
-async def test_user_attendance_copy_remarks_hidden_for_non_super_admins(
+async def test_user_attendance_copy_remarks_available_to_all_admins(
     client: TestClient,
     sample_nominal_roll,
     sample_personnel,
@@ -194,7 +199,8 @@ async def test_user_attendance_copy_remarks_hidden_for_non_super_admins(
     sample_users,
     monkeypatch,
 ):
-    """Copy Remarks is super-admin-only; other admins get Save alone."""
+    """Copy Remarks is open to every admin (issue 20): the endpoint enforces
+    sub-unit write access, so the button is no longer super-admin-only."""
     from parade_state.web import attendance as web_attendance
     from parade_state.models import UserSubunitAssignment
 
@@ -224,9 +230,10 @@ async def test_user_attendance_copy_remarks_hidden_for_non_super_admins(
         "/attendance", params={"nominal_roll_id": str(sample_nominal_roll.id)}
     )
     assert response.status_code == 200
-    assert "Save Attendance" in response.text
-    # The button (not the JS helper) is what's gated.
-    assert 'onclick="copyRemarks()"' not in response.text
+    assert "Save Attendance" not in response.text
+    # The button and modal render for plain admins too.
+    assert "Copy Remarks" in response.text
+    assert 'id="copy-modal"' in response.text
 
 
 @pytest.mark.asyncio
@@ -300,3 +307,108 @@ async def test_user_attendance_subunit_filter_is_effective_aware(
     assert r1.status_code == 200
     assert "John Doe" not in r1.text
     assert "Jane Smith" in r1.text  # canonical Platoon 1, untagged
+
+
+@pytest.mark.asyncio
+async def test_attendance_hides_non_called_up_personnel(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_attendance_scope,
+    sample_personnel,
+    sample_users,
+    db_session,
+    monkeypatch,
+):
+    """Only Called Up personnel render on the attendance page; every other
+    callup status is filtered out of the roster (issue 06)."""
+    from parade_state.web import attendance as web_attendance
+    from parade_state.models import User
+
+    # John Doe → Deferred, Jane Smith stays Called Up.
+    sample_personnel[0].callup_status = "Deferred"
+    db_session.add(sample_personnel[0])
+    await db_session.commit()
+
+    super_admin = User(
+        email="super-callup@example.com",
+        name="Super Admin",
+        role="super_admin",
+        status="active",
+    )
+    db_session.add(super_admin)
+    await db_session.commit()
+
+    async def _fake_current_user(_request):
+        return super_admin
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
+
+    response = client.get(
+        "/attendance", params={"nominal_roll_id": str(sample_nominal_roll.id)}
+    )
+    assert response.status_code == 200
+    assert "Jane Smith" in response.text  # Called Up → visible
+    assert "John Doe" not in response.text  # Deferred → hidden
+
+
+@pytest.mark.asyncio
+async def test_attendance_hidden_person_records_preserved(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_attendance_scope,
+    sample_personnel,
+    sample_users,
+    db_session,
+    monkeypatch,
+):
+    """Flipping a person off Called Up is non-destructive: existing
+    attendance records survive untouched, the person is simply hidden from
+    the attendance view (and rendered with no special treatment anywhere)."""
+    from parade_state.web import attendance as web_attendance
+    from parade_state.models import Attendance, User
+    from parade_state.utils import utc_dt
+
+    p = sample_personnel[0]
+    record = Attendance(
+        personnel_id=str(p.id),
+        nominal_roll_id=str(sample_nominal_roll.id),
+        date=utc_dt.utcnow().date(),
+        status_am="present",
+        remarks_am="marked earlier",
+        status_pm="present",
+        created_by=str(sample_users["admin"].id),
+        updated_by=str(sample_users["admin"].id),
+    )
+    db_session.add(record)
+    await db_session.commit()
+
+    # Post-hoc status change away from Called Up.
+    p.callup_status = "MR"
+    db_session.add(p)
+    await db_session.commit()
+
+    super_admin = User(
+        email="super-hidden@example.com",
+        name="Super Admin",
+        role="super_admin",
+        status="active",
+    )
+    db_session.add(super_admin)
+    await db_session.commit()
+
+    async def _fake_current_user(_request):
+        return super_admin
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
+
+    response = client.get(
+        "/attendance", params={"nominal_roll_id": str(sample_nominal_roll.id)}
+    )
+    assert response.status_code == 200
+    assert p.full_name not in response.text  # hidden from the view
+
+    # The attendance record itself is untouched.
+    await db_session.refresh(record)
+    assert record.status_am == "present"
+    assert record.remarks_am == "marked earlier"
+    assert record.status_pm == "present"

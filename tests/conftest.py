@@ -33,15 +33,13 @@ from parade_state.models import (
     ColumnMetadata,
     CsvUpload,
     Grouping,
-    GroupingNotes,
-    GroupingPersonnelExclusion,
-    GroupingPersonnelOverride,
-    GroupingUserAccess,
+    GroupingGroup,
+    GroupingMemberState,
+    GroupingMembership,
     NominalRoll,
     Personnel,
     User,
     UserSession,
-    UserSubunitScope,
 )
 from parade_state.utils import env, ids, utc_dt
 
@@ -60,9 +58,14 @@ def feature_flags_enabled(monkeypatch):
     cached ``get_settings()`` instance while nav templates read the
     module-level app's ``app.state.settings`` snapshot — the two diverge
     once test_production_hardening clears the settings cache.
+
+    The core-feature kill switches (FEATURE_NOMINALROLL,
+    FEATURE_ATTENDANCE) are intentionally absent: they default ON, so the
+    everywhere posture needs no override (issue 23; flag-off coverage
+    lives in tests/integration/test_core_feature_kill_switches.py).
     """
     for settings_obj in {get_settings(), app.state.settings}:
-        for flag in ("FEATURE_DEFERMENTS", "FEATURE_GROUPING"):
+        for flag in ("FEATURE_DEFERMENTS", "FEATURE_GROUPING", "FEATURE_STRENGTH"):
             monkeypatch.setattr(settings_obj, flag, True)
 
 
@@ -313,35 +316,54 @@ async def sample_personnel(db_session: AsyncSession, sample_nominal_roll, sample
 
 @pytest.fixture
 async def sample_grouping(db_session: AsyncSession, sample_nominal_roll, sample_users):
-    """Create a sample grouping for testing."""
+    """Create a sample grouping (issue 26 model) for testing.
+
+    Two groups ("Grp 1", "Grp 2" in that display order); membership rules
+    default to single-membership with ungrouped allowed.
+    """
     admin_id = str(sample_users["admin"].id)
-    nominal_roll_id = str(sample_nominal_roll.id)
 
     grouping = Grouping(
-        name="Test Grouping",
-        nominal_roll_id=nominal_roll_id,
-        mode="standard",
-        status="active",
-        valid_from=utc_dt.db_utcnow() - timedelta(days=1),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        personnel_count=3,
+        label="Test Grouping",
+        nominal_roll_id=str(sample_nominal_roll.id),
+        multiple_membership=False,
+        allow_ungrouped=True,
         created_by=admin_id,
-        activated_at=utc_dt.db_utcnow(),
     )
-
+    grouping.groups.append(GroupingGroup(label="Grp 1", position=0))
+    grouping.groups.append(GroupingGroup(label="Grp 2", position=1))
     db_session.add(grouping)
     await db_session.commit()
 
-    # Grant admin access to this grouping for testing
-    admin_access = GroupingUserAccess(
-        user_id=admin_id,
-        grouping_id=str(grouping.id),
-        granted_by=admin_id,
-    )
-    db_session.add(admin_access)
-    await db_session.commit()
-
     return grouping
+
+
+@pytest.fixture
+async def sample_grouping_memberships(
+    db_session: AsyncSession, sample_grouping, sample_personnel
+):
+    """Assign the sample personnel to the sample grouping's groups.
+
+    First person → "Grp 1", second → "Grp 2", third left ungrouped.
+    Returns the grouping's groups by label for assertions.
+    """
+    groups = {group.label: group for group in sample_grouping.groups}
+    db_session.add_all(
+        [
+            GroupingMembership(
+                grouping_id=sample_grouping.id,
+                group_id=groups["Grp 1"].id,
+                personnel_id=str(sample_personnel[0].id),
+            ),
+            GroupingMembership(
+                grouping_id=sample_grouping.id,
+                group_id=groups["Grp 2"].id,
+                personnel_id=str(sample_personnel[1].id),
+            ),
+        ]
+    )
+    await db_session.commit()
+    return groups
 
 
 @pytest.fixture

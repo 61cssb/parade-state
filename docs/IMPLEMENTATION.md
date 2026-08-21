@@ -93,23 +93,22 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 ### 2.2 Test Categories
 
 **Current Test Suite:**
-- `tests/integration/test_access_control_api.py` - Access level hierarchy, user access control, column visibility (19 tests)
 - `tests/integration/test_api.py` - Authentication, user management, role management (18 tests)
 - `tests/integration/test_attendance_api.py` - Attendance management, snapshots, constraints (40 tests)
 - `tests/integration/test_csv_upload_api.py` - CSV upload pipeline, hash dedup, mapping (9 tests)
 - `tests/integration/test_deferments_api.py` - Deferment CRUD, callup_status transitions, super_admin auth (15 tests)
 - `tests/integration/test_feature_flags.py` - Flag-off hides Deferments/Grouping entirely (nav, pages, API) for every role incl. super-admin; flag-on restore; env-var defaults (8 tests)
 - `tests/integration/test_environment_banner.py` - ENVIRONMENT_BANNER renders the top strip pre-auth (login) and post-auth, escapes its text, and emits no markup when unset (5 tests)
-- `tests/integration/test_groupings_api.py` - Grouping lifecycle, CRUD operations (18 tests)
-- `tests/integration/test_grouping_exclusions_api.py` - Personnel exclusion management (9 tests)
+- `tests/integration/test_groupings_api.py` - Groupings (issue 26 redesign): CRUD, group-enum set replacement, memberships, member state, clone, copy-from-previous-NR, CSV export, super-admin-only mutations, flag gating
 - `tests/integration/test_nominal_rolls_api.py` - Nominal Roll lifecycle (attendance activation auto-switch/deactivate, delete, label updates)
 - `tests/integration/test_personnel_api.py` - Personnel management, search, filtering (12 tests)
 - `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (NR/Tagging-scoped, AM/PM slots)
 - `tests/integration/test_sessions_410.py` - Sessions endpoints return 410 Gone (sessions removed in issue #4)
 - `tests/integration/test_users_api.py` - User CRUD, role/status transitions (3 tests)
 - `tests/integration/test_audit_api.py` - Audit log filtering and pagination (10 tests)
+- `tests/integration/test_core_feature_kill_switches.py` - FEATURE_NOMINALROLL/FEATURE_ATTENDANCE default-on kill switches: unset = fully available; explicit false hides page+API+nav for every role incl. super-admin; independent gating (9 tests)
 
-**Total:** 292 tests, 100% pass rate ✅ UPDATED
+**Total:** 516 collected (512 passing, 4 skipped) ✅ UPDATED
 **Coverage:** Comprehensive integration test coverage across all major features
 **Performance:** ~23 seconds for full integration test suite
 
@@ -154,7 +153,7 @@ sample_access_levels    # Creates: unit, coy, platoon, section
 sample_users            # Creates: admin user, regular user
 sample_nominal_roll            # Creates: sample establishment
 sample_personnel        # Creates: 3 sample personnel records
-sample_grouping       # Creates: sample active grouping
+sample_grouping       # Creates: sample grouping (with groups) on the sample NR
 sample_sessions         # Creates: multiple session records
 sample_attendance_records  # Creates: attendance records
 ```
@@ -187,22 +186,28 @@ async def test_example(client, sample_users, sample_grouping):
 - User pre-provisioning: super-admins can create accounts by email (Add User form on /admin/users) before first sign-in; promotion to super_admin/admin auto-activates unrecognised accounts
 - **Endpoints:** 7 authentication + 6 user management = 13 total
 
-**Grouping Management (✅ Complete — feature-flagged)**
-- Grouping lifecycle (draft → active → inactive → closed → finalized)
-- Personnel assignment overrides per grouping
-- Grouping notes with version tracking
-- Validity window enforcement
-- Manual activation/deactivation
-- **Feature flag:** hidden entirely (nav, `/grouping` pages, `/api/v1/groupings/*`, NR-browser Create Grouping) unless `FEATURE_GROUPING=true` — 404 for all roles including super-admins
-- **Grouping date editing:** UI supports editing valid_from/valid_until via an inline form; API validates that no sessions fall outside the new date range
-- **Grouping management lives on `/grouping`** in the collapsed-by-default
-  "Grouping management" expander below the selector (merged from the retired
-  admin groupings page): read-only mode/validity/notes metadata, Edit Dates,
-  per-status lifecycle buttons, Manage Personnel link (draft-only), and
-  super-admin Delete — same gating and confirm dialogs as before. The page's
-  status filter is absorbed by the selector, which lists every grouping with
-  its status.
-- **Endpoints:** 7 grouping management endpoints
+**Grouping Management (✅ Redesigned in issue 26 — feature-flagged, default off)**
+- A grouping is a labelled, closed vocabulary of groups based on the
+  nominal roll active for attendance; servicemen hold memberships in the
+  groups plus a per-grouping checkbox and free-text remarks
+- Full replacement of the old design: no modes, no status lifecycle, no
+  validity windows, no scheduled activation, no overrides, exclusions,
+  notes, or per-grouping access scoping (those tables and endpoints were
+  dropped in migration `s9f0a1b2c3d4`)
+- `multiple_membership` / `allow_ungrouped` flags, immutable after creation;
+  single-membership and no-ungrouped rules enforced with 400s
+- Clone (same roll, optional memberships + member state) and
+  copy-from-previous-NR (memberships re-linked by `pers_no`; member state
+  not copied)
+- Slim CSV export (Group, Rank, Name, Unit, Sub Unit, Checkbox, Remarks);
+  groupings never read or write attendance
+- **Feature flag:** hidden entirely (nav, `/grouping` page,
+  `/api/v1/groupings/*`) unless `FEATURE_GROUPING=true` — 404 for all
+  roles including super-admins; default-off posture unchanged
+- Mutations super-admin only (403 otherwise); reads open to every
+  authenticated role; groupings on non-active rolls unreachable (404)
+- **Endpoints:** 9 grouping endpoints (CRUD, membership set, member
+  state, clone, copy-from-previous, export)
 
 **Attendance Session Management (🗑 Removed in issue #4)**
 - The user-managed `Session` model (open/closed/finalized) has been removed.
@@ -222,10 +227,13 @@ async def test_example(client, sample_users, sample_grouping):
   page (`POST /api/v1/nominal-rolls/{id}/activate-attendance` /
   `deactivate-attendance`); activating another NR auto-switches. With no
   active NR the user view shows an inactive message and writes are refused.
-- Bulk upsert endpoint (`PUT /api/v1/attendance/upsert`) with snapshot capture.
-- "Copy Remarks" endpoint (`POST /api/v1/attendance/copy-remarks`): before 12pm
-  copies previous day's `remarks_pm` → today's `remarks_am`; after 12pm copies
-  today's `remarks_am` → `remarks_pm`.
+- Bulk upsert endpoint (`PUT /api/v1/attendance/upsert`) with snapshot capture;
+  the same endpoint serves the per-row autosave payloads (single-record PUT).
+- "Copy Remarks" endpoint (`POST /api/v1/attendance/copy-remarks`, issue 20):
+  explicit source (date + slot) and destination (date + slot) — same
+  source/destination is rejected (400); an optional `sub_unit_1` param narrows
+  the copy to the attendance page's view filter (effective-value aware).
+  Blank source remarks are skipped; missing destination rows are created.
 - Tagging delete guarded (409) when its NR has attendance rows.
 - Attendance status enum: present, absent, time_off, mc, yet_to_inpro, outpro,
   reporting_sick, late, att_out (default: absent).
@@ -254,19 +262,49 @@ async def test_example(client, sample_users, sample_grouping):
   the caller's assigned subunits (tagging-aware effective sub_unit_1;
   super_admin sees all) and shows the tagging overlay (yellow rows). With no
   active NR it shows an inactive message instead of the marking table.
-- **Copy Remarks** lives on `/attendance`, visible to **super-admins only**
-  (before noon → previous day's PM remarks into today's AM; after noon →
-  today's AM into PM; the AM copy is disabled on the NR's first day).
+- **Copy Remarks** lives on `/attendance` behind a modal (issue 20): explicit
+  source/destination day + AM/PM pickers (clamped to the NR's CAA → the
+  viewed day; prefilled with the old time-of-day pair), same source and
+  destination blocked, an earlier destination warns and needs a second
+  click, and the confirmation names the scope ("for N personnel in current
+  view. Existing destination remarks will be overwritten."). Open to all
+  admins — write perms are enforced server-side (sub-unit assignments, 403).
+- **Autosave (issue 19):** no Save button — each row PUTs itself on status
+  change or remarks blur (a "Saving…/Saved" indicator near the table; a
+  failed save red-edges the row and retries on the next edit). Tagged rows
+  are no longer highlighted here; yellow stays an NR-view-only signal.
 - Nominal Roll management lives on `/nominal-roll` in the collapsed-by-default
-  "Roll management" expander below the roll selector (merged from the retired
-  admin Nominal Rolls page): inline label/remarks editing and Create Grouping
+  "Roll management" expander directly below the roll selector dropdown inside
+  the selector card (the Grouping page's pattern; issue 22 — it acts on the
+  selected roll, so it sits next to the selector; merged from the retired
+  admin Nominal Rolls page): inline label/remarks editing
   for all admins; "Use for Attendance" (auto-switch) / "Deactivate Attendance"
   / Delete for super-admins, with the same confirm dialogs as before. The
   admin page's metadata columns (source file, uploaded at, CSV hash) were
   dropped — upload provenance stays on the Upload NR page's Recent Uploads.
 
+**Unit Strength Report (✅ Complete — feature-flagged, issue #25)**
+- `/admin` now serves the **Unit Strength** report and the old admin
+  dashboard (stat cards + recent audit activity) is removed; the post-login
+  redirect to `/admin` is unchanged.
+- Aggregates the attendance-active NR's Called Up personnel by effective
+  (tagging-aware) sub_unit_1/sub_unit_2 into the strength reporting format:
+  Officer/WOSE/Total column groups of In/Out/Current/% (In = Called Up,
+  Current = present/late for the selected slot, Out = everything else
+  including unmarked-as-absent, % = Current ÷ In), with SUBTOTAL per
+  sub_unit_1 (shown once per section), a unit TOTAL, and a `(none)` bucket
+  for personnel without subunits. `unit` and `sub_unit_3` are ignored.
+- Date picker + AM/PM slot selector (URL params; server defaults today/AM,
+  re-defaulted from the browser's local datetime on first visit).
+- Super-admins see the whole unit; regular admins see only their assigned
+  sub_unit_1 sections (same deny-by-default UserSubunitAssignment machinery
+  as attendance marking) with TOTAL summing visible rows.
+- **Feature flag:** hidden entirely (nav entry, `/admin` page — 404 for all
+  roles including super-admins) unless `FEATURE_STRENGTH=true`.
+
 **Sidebar Restructure (✅ workflow pages + Admin section)**
-- The sidebar lists the workflow pages flat in order — Dashboard, Upload NR
+- The sidebar lists the workflow pages flat in order — Unit Strength (at
+  `/admin`, flag-gated; formerly the Dashboard), Upload NR
   (relabelled from "CSV Upload"; route unchanged), Nominal Roll, Taggings,
   Deferments, Attendance, Grouping — followed by an **Admin** section:
   Users, Settings, Audit Log, Restore Backup (relabelled from "DB
@@ -276,11 +314,11 @@ async def test_example(client, sample_users, sample_grouping):
   for plain admins too, but render an in-page no-access message (403, page
   shell intact) instead of silently redirecting to /admin.
 - The admin Nominal Rolls and Groupings pages were retired — their
-  management controls moved into expandable panels on `/nominal-roll` and
-  `/grouping` (see the Grouping Management and Attendance UI notes above).
-  Manage Personnel moved
-  from `/admin/groupings/{id}/personnel` to `/grouping/{id}/personnel`. The
-  orphaned `/admin/sessions` redirect route was removed.
+  management controls moved into the user-facing views. The issue 26
+  groupings redesign later replaced the `/grouping` management expander
+  with the redesigned Grouping page and deleted `/grouping/{id}/personnel`
+  (see the Grouping Management notes above). The orphaned
+  `/admin/sessions` redirect route was removed.
 
 **Remap Editing (✅ comboboxes, ✅ staged edits)**
 - Public NR browser: super-admins click a unit / sub-unit cell to remap it —
@@ -299,23 +337,26 @@ async def test_example(client, sample_users, sample_grouping):
   datalist inputs — remap targets may be values that don't exist on
   the NR yet (e.g. standing up a new subunit).
 
-**Personnel Management (✅ Session 1 Complete)**
-- Grouping-based personnel listing with filtering
-- Personnel detail view with grouping context
+**Personnel Management (✅ Session 1 Complete; grouping scoping removed in issue 26)**
+- Personnel listing with filtering (NR-scoped)
+- Personnel detail view
 - Unit hierarchy filtering (unit, sub_unit_1, sub_unit_2, sub_unit_3)
 - Search functionality (name and service number)
-- Personnel override awareness (shows effective assignments)
-- Grouping notes integration
 - Personnel update operations (admin only)
 - Role-based access control (admin/super_admin/user)
+- The old grouping-scoped query surface (`grouping_id` params, grouping
+  overrides/context in responses, grouping access checks) was removed with
+  the issue 26 groupings redesign
 - **Endpoints:** 3 personnel management endpoints
-- **Tests:** 23 comprehensive tests
+- **Tests:** 12+ behavioral tests
 
 **Deferments (✅ Super-admin MVP — feature-flagged)**
 - Personnel deferment CRUD linked to a single nominal roll personnel record
 - `rank_name` and `sub_unit` snapshotted at creation from the linked personnel
 - Reason enum (12 values) and status enum (8 values)
-- Personnel `callup_status` field (`Called Up` / `Not Called Up` / `Deferred`):
+- Personnel `callup_status` field (`Called Up` / `Deferred` / `Disrupted` /
+  `MR` / `Age Limit` / `Other`; the original three-value enum was widened and
+  per-person `remarks` added — issue 06):
   - Approved deferment → `Deferred`
   - Reverting from Approved to a non-neutral status → `Called Up`
   - `Not called up` / `Do not call up` deferment statuses are neutral (no callup change)
@@ -326,6 +367,59 @@ async def test_example(client, sample_users, sample_grouping):
 - **Endpoints:** 5 deferment endpoints under `/api/v1/deferments`
 - **Tests:** 15 behavioral tests + flag gating (test_feature_flags.py)
 
+**Callup status & remarks columns (✅ issue 06)**
+- `callup_status` widened to six values (`Called Up` default, `Deferred`,
+  `Disrupted`, `MR`, `Age Limit`, `Other`); legacy `Not Called Up` rows
+  migrated to `Other` (migration `q7d8e9f0a1b2`).
+- New per-person `Personnel.remarks` text column (distinct from roll-level
+  `NominalRoll.remarks`).
+- CSV ingest maps `Callup Decision` → `callup_status` (case-insensitive
+  exact match; blank → `Called Up`; unrecognised → `Other`, raw kept in
+  `extra_fields`) and joins `Reason` + first `Remarks` → `remarks`.
+- Attendance roster/view filters to `callup_status = 'Called Up'`; hiding is
+  non-destructive — existing attendance records are never deleted or altered
+  and hidden rows render with no special treatment.
+- `PATCH /api/v1/personnel/{id}` accepts `callup_status` (422 on invalid) and
+  `remarks` (empty/null clears); admin + super_admin.
+- NR browser table shows Callup + Remarks columns with inline editing
+  (select / text input, immediate PATCH) for admins and above.
+- **Tests:** personnel PATCH (parametrised enum + 403), CSV mapping,
+  attendance hiding + record preservation, NR view wiring
+
+**Add Serviceman: manual creation (✅ issue 26)**
+- New nullable `Personnel.source` provenance column (NULL = CSV row,
+  `'manual'` = UI-added); migration `r8e9f0a1b2c3` (add_column only, chains
+  on `q7d8e9f0a1b2`), exposed in Personnel responses.
+- `POST /api/v1/personnel` (super-admin only; 403 otherwise): creates a row
+  on an existing NR with `source='manual'`, `status='active'`,
+  `callup_status` default `Called Up`, category inferred via
+  `ranks.category_for_rank` (invalid rank → 400 listing valid ranks;
+  unknown NR → 404; duplicate pers_no within the roll → 409 with
+  IntegrityError fallback; same pers_no on a different roll allowed).
+  Increments `NominalRoll.personnel_count` and writes an AuditLog
+  (`personnel` / `create`) entry. pers_no may be NULL — multiple
+  unknown-pers_no rows per roll are legal (unique constraint treats NULLs
+  as distinct).
+- `PATCH /api/v1/personnel/{id}` gains `pers_no` (fill-in-later):
+  super-admin only (403 otherwise), membership semantics like `remarks`
+  (explicit null / blank clears), per-roll uniqueness pre-check excluding
+  self → 409. Admins retain status/callup/remarks.
+- NR browser: "Add Serviceman" button below the personnel table (a roster
+  action — kept out of Roll management, which acts on the roll entity;
+  shown even when filters match nothing, since that's the add flow) opens a
+  modal (backdrop, Esc, inline status errors,
+  reload on success). Rank is a select with Officer/WOSE/Military Expert
+  optgroups (closed set — the native datalist popup mispositions and
+  mismatched the Callup Status select); open-vocab unit/sub-units keep
+  datalist suggestions; "manual" badge beside the full name for
+  `source='manual'` rows; inline-editable pers_no cell (onchange → PATCH,
+  blank clears, revert on error) for super-admins, static text for others.
+- Manual adds are per-roll: the next CSV upload's new roll will not include
+  them (propagation out of scope).
+- **Tests:** POST happy paths (with/without pers_no), permission gates,
+  404/400/409, cross-roll pers_no, PATCH pers_no set/clear/duplicate/
+  permissions, response `source`, NR + attendance view wiring
+
 **Taggings (✅ 1:1 with Nominal Roll — model simplification)**
 - Tagging overlay: **exactly one Tagging per Nominal Roll** (DB unique
   constraint on `nominal_roll_id`, mirroring `AttendanceScope`). Auto-created
@@ -333,8 +427,7 @@ async def test_example(client, sample_users, sample_grouping):
   `TaggingEntry` rows — the NR itself is read-only.
 - Two entities: `Tagging` (optional informational label, NR FK CASCADE,
   audit fields) and `TaggingEntry` (one remap per person per tagging;
-  4-string `from_*` / `to_*` subunit tuple mirroring
-  `GroupingPersonnelOverride`).
+  4-string `from_*` / `to_*` subunit tuple).
 - `from_*` auto-snapshotted from the linked personnel when omitted at
   create/edit time.
 - `PATCH /api/v1/personnel/{id}` redirects unit/subunit edits to a
@@ -360,201 +453,25 @@ async def test_example(client, sample_users, sample_grouping):
   process endpoint under `/api/v1/csv/{id}/process`
 - **Tests:** tagging (24) + personnel remap/409 + CSV process (7)
 
-**Total API Endpoints:** 63 fully implemented and tested endpoints ✨ UPDATED
+**Total API Endpoints:** 64 fully implemented and tested endpoints ✨ UPDATED
 
-### 3.2 Next Phase: Personnel Detail View & Attendance History (🎯 NEXT)
+### 3.2 Personnel API (historical note)
 
-**Why Attendance History Next?**
-- Completes personnel management functionality
-- Provides valuable insights for decision makers
-- Foundation for reporting and analytics
-- High user value for attendance tracking
+The Personnel API was originally built grouping-scoped (grouping_id
+params, per-grouping personnel overrides, grouping access checks). The
+issue 26 groupings redesign removed that surface wholesale: personnel
+endpoints take no grouping parameters, responses carry no grouping
+fields, and access is nominal-roll-scoped via UserSubunitAssignment.
+The attendance-history endpoint (added later) is NR/Tagging-scoped with
+AM/PM slots.
 
-**Completed Endpoints (Session 1):**
 ```python
-# ✅ List personnel within a grouping context
-GET /api/v1/personnel?grouping_id=xxx&unit=Alpha&sub_unit_1=1stPlatoon&search=John
-
-# ✅ Get specific personnel record (shows grouping context)
-GET /api/v1/personnel/{id}?grouping_id=xxx
-
-# ✅ Update personnel record (admin only, within grouping context)
-PATCH /api/v1/personnel/{id}?grouping_id=xxx
+# ✅ Current personnel endpoints (no grouping parameters)
+GET /api/v1/personnel?unit=Alpha&sub_unit_1=1stPlatoon&search=John
+GET /api/v1/personnel/{id}
+PATCH /api/v1/personnel/{id}
+GET /api/v1/personnel/{id}/attendance-history?date_from=xxx&date_to=xxx
 ```
-
-**Proposed Endpoints (Session 2):**
-```python
-# 🎯 Get personnel attendance history (within grouping)
-GET /api/v1/personnel/{id}/attendance-history?grouping_id=xxx&date_from=xxx&date_to=xxx
-```
-
-### 3.3 Personnel API Implementation Details (Session 1)
-
-**Architecture Overview:**
-The Personnel API is built on the principle of grouping-scoped access, ensuring all personnel operations respect grouping boundaries and personnel overrides.
-
-**Key Implementation Features:**
-
-**1. Override-Aware Queries:**
-```python
-# Personnel overrides take precedence over base assignments
-# Effective assignments = override data if exists, else base data
-def get_effective_assignment(personnel, grouping_id):
-    override = get_personnel_override(personnel.id, grouping_id)
-    if override:
-        return override.unit, override.sub_unit_1, override.sub_unit_2, override.sub_unit_3
-    return personnel.unit, personnel.sub_unit_1, personnel.sub_unit_2, personnel.sub_unit_3
-```
-
-**2. Grouping Access Control:**
-```python
-# Verify user has access to grouping before querying personnel
-async def verify_grouping_access(grouping_id, user_id, user_role, db):
-    # Super admins have full access
-    # Admins can access all groupings
-    # Regular users need explicit grouping access (TODO)
-    if user_role == "super_admin":
-        return get_grouping(grouping_id)
-    elif user_role == "admin":
-        return get_grouping(grouping_id)
-    else:
-        raise HTTPException(403, "Insufficient permissions")
-```
-
-**3. Comprehensive Filtering:**
-```python
-# Filter by unit hierarchy with override awareness
-query = select(Personnel).where(Personnel.nominal_roll_id == grouping.nominal_roll_id)
-
-# Apply filters to effective assignments (overrides take precedence)
-for personnel in personnel_list:
-    effective_unit = override.unit if override else personnel.unit
-    if filter_unit and effective_unit != filter_unit:
-        continue  # Skip personnel not matching filter
-```
-
-**4. Search Functionality:**
-```python
-# Full-text search across name and pers_no
-if search_term:
-    query = query.where(
-        or_(
-            Personnel.full_name.ilike(f"%{search_term}%"),
-            Personnel.pers_no.ilike(f"%{search_term}%")
-        )
-    )
-```
-
-**Database Performance Optimizations:**
-- Composite indexes on frequently queried fields
-- Efficient LEFT JOIN for override data
-- Pagination support for large groupings
-- Single-query grouping validation
-
-**Testing Strategy:**
-- 23 comprehensive tests covering all functionality
-- Tests for override handling, filtering, search, and access control
-- Edge cases (invalid grouping_id, different nominal roll, etc.)
-- Role-based access control testing
-
-**Files Modified/Created:**
-- `src/parade_state/api/personnel.py` - Main API implementation
-- `src/parade_state/models/schemas.py` - Added PersonnelResponseWithGrouping
-- `tests/test_personnel_api.py` - Comprehensive test suite
-- `src/parade_state/main.py` - Integrated personnel router
-
-**Key Features:**
-- **Grouping-Scoped Querying:** All personnel operations within grouping context
-- **Override Awareness:** Shows grouping-specific unit assignments (not base nominal roll)
-- **Filtering Capabilities:** By unit, subunit hierarchy, name, service number
-- **Access Control:** Users can only see personnel in groupings they have access to
-- **Attendance Integration:** Shows attendance history and current status
-- **Search:** Full-text search across name and service number
-
-**Implementation Priority:**
-1. **Session 1:** Core grouping-based listing and filtering
-2. **Session 2:** Personnel detail view and attendance history
-3. **Session 3:** Personnel update operations and advanced filtering
-
-**Future Phases:**
-- **Advanced Access Control** (Phase 5): Grouping/subunit scope refinement **MOVED UP**
-- **Reporting & Analytics** (Phase 6): Attendance summaries and trends **MOVED DOWN**
-- **Performance & Scalability** (Phase 7): Database optimization and caching
-- **Frontend Integration Support** (Phase 8): Mobile optimization and offline sync
-
-**Implementation Priority:**
-1. **Session 1:** ✅ Core grouping-based listing and filtering **COMPLETE**
-2. **Session 2:** Personnel detail view and attendance history
-3. **Session 3:** Personnel update operations and advanced filtering
-
-**Why Access Control Before Reports:**
-- Reports need proper grouping/subunit scoping to prevent unauthorized access
-- Security foundation must be solid before exposing analytics
-- Grouping-based access control ensures users only see relevant data
-- Subunit scope filtering is essential for meaningful reports
-
-### 3.3 Implementation Strategy: Grouping-Based Personnel API
-
-**Session 1: Core Personnel Listing & Filtering**
-- Create `src/parade_state/api/personnel.py`
-- Implement `GET /api/v1/personnel` with grouping-based filtering
-- Filter parameters: `grouping_id` (required), `unit`, `sub_unit_1`, `sub_unit_2`, `sub_unit_3`, `search`
-- Integrate with grouping personnel overrides (show overridden assignments, not base)
-- Add Pydantic schemas for personnel response models
-- Implement basic access control (user must have grouping access)
-- Write comprehensive tests (12-15 tests expected)
-
-**Session 2: Personnel Detail View & History**
-- Implement `GET /api/v1/personnel/{id}` with grouping context
-- Show personnel details with grouping-specific assignments
-- Implement `GET /api/v1/personnel/{id}/attendance-history`
-- Filter attendance history by grouping and date range
-- Add attendance summary statistics (present-like/absent-like bucket counts)
-- Implement personnel search functionality
-- Write tests for detail views and history (8-10 tests expected)
-
-**Session 3: Personnel Update Operations**
-- Implement `PATCH /api/v1/personnel/{id}` for admin-only updates
-- Validate updates are within grouping context
-- Add audit trail for personnel changes
-- Implement advanced filtering and sorting
-- Add pagination support for large result sets
-- Performance optimization (database indexing)
-- Complete test coverage (5-8 tests expected)
-
-**Technical Considerations:**
-- **Override Handling:** Query must join with `GroupingPersonnelOverride` table
-- **Access Control:** Check user's grouping access before returning personnel
-- **Performance:** Add database indexes on `grouping_id`, `unit`, `sub_unit_*` fields
-- **Search:** Use database `LIKE` or full-text search for name/service_number
-- **Pagination:** Implement cursor-based pagination for large groupings
-
-**Database Queries to Implement:**
-```python
-# Base query for grouping personnel (with overrides)
-SELECT p.*, dop.unit as override_unit, dop.sub_unit_1 as override_sub_unit_1, ...
-FROM personnel p
-LEFT JOIN grouping_personnel_overrides dop
-  ON dop.personnel_id = p.id AND dop.grouping_id = :grouping_id
-WHERE p.nominal_roll_id = (SELECT nominal_roll_id FROM groupings WHERE id = :grouping_id)
-  AND (p.unit = :filter_unit OR :filter_unit IS NULL)
-  AND (p.full_name LIKE :search OR p.pers_no LIKE :search OR :search IS NULL)
-
-# Attendance history query
-SELECT ar.*, s.date, s.session_type
-FROM attendance_records ar
-JOIN sessions s ON s.id = ar.session_id
-WHERE ar.personnel_id = :personnel_id
-  AND s.grouping_id = :grouping_id
-ORDER BY s.date DESC, s.session_type ASC
-```
-
-**Expected Outcomes:**
-- **3 new API endpoints** for personnel management
-- **25-33 new tests** for comprehensive coverage
-- **Enhanced grouping roster** functionality for mobile UI
-- **Foundation for reporting** and analytics features
-- **Improved total test count:** ~135-140 tests
 
 ---
 
@@ -677,13 +594,13 @@ parade-state/
 │   ├── admin_routes.py          # Admin section Jinja2 routes (/admin/*)
 │   ├── api/                     # REST API endpoints (JSON)
 │   │   ├── __init__.py
-│   │   ├── access_control.py    # Grouping access grants + subunit scopes
+│   │   ├── access_control.py    # NR-scoped subunit assignments
 │   │   ├── attendance.py        # Attendance record CRUD + bulk ops
 │   │   ├── audit.py             # Audit log query
 │   │   ├── auth.py              # Google OAuth flow, login/logout
 │   │   ├── csv_upload.py        # CSV upload pipeline
 │   │   ├── deferments.py        # Deferment CRUD (super_admin only)
-│   │   ├── groupings.py      # Grouping lifecycle
+│   │   ├── groupings.py      # Groupings (issue 26 redesign)
 │   │   ├── nominal_rolls.py            # Nominal Roll list/get/update (status, notes, label)/delete
 │   │   ├── personnel.py         # Personnel listing + attendance history
 │   │   ├── sessions.py          # Session open/close/reopen/finalize
@@ -700,13 +617,13 @@ parade-state/
 │   │   └── versions/
 │   ├── models/                  # SQLAlchemy ORM models
 │   │   ├── __init__.py
-│   │   ├── access.py            # User, AccessLevel, UserSubunitScope, GroupingUserAccess
+│   │   ├── access.py            # User, AccessLevel, UserSubunitAssignment
 │   │   ├── attendance.py        # Session, AttendanceRecord
 │   │   ├── audit.py             # AuditLog
 │   │   ├── auth_session.py      # UserSession
 │   │   ├── csv_ingestion.py     # Nominal Roll, CsvUpload, ColumnMapping, ColumnMetadata
 │   │   ├── deferments.py        # Deferment
-│   │   ├── grouping.py        # Grouping, overrides, notes, exclusions
+│   │   ├── grouping.py        # Grouping, GroupingGroup, GroupingMembership, GroupingMemberState
 │   │   ├── personnel.py         # Personnel (with callup_status)
 │   │   └── schemas.py           # Pydantic request/response schemas
 │   ├── utils/                   # Shared utilities (see CODE_STYLE.md)
@@ -718,7 +635,7 @@ parade-state/
 │   └── web/                     # User-facing web routes (Jinja2)
 │       ├── attendance.py        # /attendance marking view
 │       ├── auth.py              # /auth login/logout redirects
-│       ├── grouping.py        # /grouping summary view
+│       ├── grouping.py        # /grouping browser view
 │       └── nominal roll.py             # /nominal-roll roster browser
 ├── tests/
 │   ├── conftest.py              # Pytest fixtures (db, client, sample data)

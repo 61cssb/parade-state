@@ -4,7 +4,8 @@ This document clarifies the different types of endpoints in the Parade State app
 
 > **Feature flags:** the Deferments and Grouping features (web pages and
 > `/api/v1/deferments/*`, `/api/v1/groupings/*`) are gated by the
-> `FEATURE_DEFERMENTS` / `FEATURE_GROUPING` env vars — flag-off means 404
+> `FEATURE_DEFERMENTS` / `FEATURE_GROUPING` env vars, and the Unit Strength
+> report (`/admin`) by `FEATURE_STRENGTH` — flag-off means 404
 > for every role including super-admins, and their UI entry points are not
 > rendered. On in development; off in production. See
 > [DEPLOYMENT.md](DEPLOYMENT.md) › Feature Flags.
@@ -21,13 +22,12 @@ This document clarifies the different types of endpoints in the Parade State app
 - `GET /auth/logout` - Logout handler (clears cookies, redirects to login)
 
 **User-Facing View Routes (Phase 9D / 9F):**
-- `GET /grouping` - Grouping summary (today's AM/PM session counts, unit breakdown) — grouping selector dropdown plus an expandable grouping-management panel (metadata, Edit Dates, lifecycle transitions, Delete, Manage Personnel link — merged from the retired admin groupings page)
-- `GET /grouping/{id}/personnel` - Grouping personnel management (checkbox-based include/exclude, draft-only editing)
-- `GET /attendance` - Attendance marking table (inline status/remarks editing) — grouping + session selector
-- `GET /nominal-roll` - Nominal Roll browser (row-numbered roster table with unit/sub-unit columns, search, unit filter) — nominal roll selector dropdown plus an expandable roll-management panel (label/remarks editing, Create Grouping, attendance toggle, Delete — merged from the retired admin nominal rolls page)
+- `GET /grouping` - Grouping browser (issue 26 redesign): grouping dropdown over the groupings on the attendance-active NR, a Group filter (one option per group plus Ungrouped when the grouping allows it), and the servicemen table (Group | Rank | Name | Unit | Sub Unit | Checkbox | Remarks). Visible to all authenticated users; the New/Edit/Clone/Delete controls, inline group assignment, checkbox and remarks editing are super-admin only (403 enforced server-side). Empty state offers copy-from-previous-NR buttons when the previously activated NR has groupings; Export CSV link mirrors the table. The old `/grouping/{id}/personnel` page was removed with the redesign.
+- `GET /attendance` - Attendance marking table (per-row autosave on status change / remarks blur; Copy Remarks modal with explicit source/destination day + AM/PM) — NR + date + effective sub-unit-1 filters
+- `GET /nominal-roll` - Nominal Roll browser (row-numbered roster table with unit/sub-unit columns, search, unit filter) — nominal roll selector dropdown plus an expandable roll-management panel (label/remarks editing, attendance toggle, Delete — merged from the retired admin nominal rolls page; the old Create Grouping modal was removed — grouping creation lives on the Grouping page)
 
 **Admin Interface Routes:**
-- `GET /admin` - Admin dashboard
+- `GET /admin` - Unit Strength report (aggregated In/Out/Current/% by effective sub-unit; date + AM/PM slot params; subunit-scoped for regular admins) — replaced the admin dashboard; flag-gated by `FEATURE_STRENGTH`
 - `GET /admin/users` - Users management page
 - `GET /admin/csv-upload` - Upload NR page (CSV upload with automatic processing into Nominal Rolls)
 - `GET /admin/settings` - Settings page
@@ -36,7 +36,7 @@ This document clarifies the different types of endpoints in the Parade State app
 - `GET /admin/deferments` - Deferments management (super-admin only; in-page no-access message for plain admins)
 - `GET /admin/database-restore` - Restore Backup page (super-admin only; in-page no-access message for plain admins)
 
-**Note:** The sidebar lists the workflow pages flat (Dashboard, Upload NR, Nominal Roll, Taggings, Deferments, Attendance, Grouping), then an **Admin** section (Users, Settings, Audit Log, Restore Backup). The former `/admin/nominal-rolls`, `/admin/groupings`, `/admin/groupings/{id}/personnel`, and `/admin/sessions` pages were retired when their management moved into the user-facing views. Sessions (AM/PM) are hardcoded; the REST APIs `/api/v1/groupings/*` and `/api/v1/sessions/*` remain separate.
+**Note:** The sidebar lists the workflow pages flat (Unit Strength, Upload NR, Nominal Roll, Taggings, Deferments, Attendance, Grouping), then an **Admin** section (Users, Settings, Audit Log, Restore Backup). The former `/admin/nominal-rolls`, `/admin/groupings`, `/admin/groupings/{id}/personnel`, and `/admin/sessions` pages were retired when their management moved into the user-facing views; the Dashboard was replaced by the Unit Strength report. Sessions (AM/PM) are hardcoded; the REST APIs `/api/v1/groupings/*` and `/api/v1/sessions/*` remain separate.
 
 **Characteristics:**
 - Return HTML responses (Jinja2 templates)
@@ -60,11 +60,11 @@ This document clarifies the different types of endpoints in the Parade State app
 - `DELETE /api/v1/users/{id}` - Delete user
 
 **Other APIs:**
-- `/api/v1/groupings/*` - Grouping management (CRUD, lifecycle transitions, personnel exclusions, overrides, notes, status export)
+- `/api/v1/groupings/*` - Grouping management (issue 26 redesign: CRUD, group-enum set replacement, membership set per serviceman, checkbox/remarks member state, clone, copy-from-previous-NR, slim CSV export; super-admin-only mutations, all-role reads, active-NR reachability; never touches attendance)
 - `/api/v1/sessions/*` - Session management
 - `/api/v1/attendance/*` - Attendance records
 - `/api/v1/personnel/*` - Personnel management
-- `/api/v1/access-control/*` - Access control
+- `/api/v1/access-control/*` - Access control (NR-scoped subunit assignments only; the grouping-access and grouping-subunit-scope endpoints were removed)
 - `/api/v1/csv/*` - CSV upload and ingestion
 - `/api/v1/nominal-rolls/*` - Nominal Roll list/detail (admin-only), confirm/unconfirm (PATCH), delete (super_admin, DELETE)
 - `/api/v1/audit/*` - Audit log

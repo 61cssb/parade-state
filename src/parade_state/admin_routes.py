@@ -6,6 +6,8 @@ from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import func, or_, select
 from urllib.parse import urlsplit
 
+from parade_state.api.subunit_access import get_assigned_subunit_1s
+from parade_state.api.tagging import _load_nr_tagging
 from parade_state.auth.admin_dependencies import (
     get_current_admin_user_optional,
     require_admin_user_flexible,
@@ -14,16 +16,19 @@ from parade_state.db import get_session_maker
 from parade_state.features import require_feature
 from parade_state.models import (
     AccessLevel,
+    Attendance,
     AuditLog,
     CsvUpload,
     Deferment,
     Grouping,
     NominalRoll,
+    PRESENT_LIKE_STATUSES,
     Personnel,
     Tagging,
     TaggingEntry,
     User,
 )
+from parade_state.utils import utc_dt
 
 router = APIRouter()
 depends_admin = Depends(require_admin_user_flexible)
@@ -108,69 +113,195 @@ def _no_permission_response(
     return HTMLResponse(content=html, status_code=403)
 
 
-@router.get("/admin", response_class=HTMLResponse)
-async def admin_dashboard(
-    request: Request,
-):
-    """Render the admin dashboard page."""
-    # Check if user is authenticated
-    current_admin = await get_current_admin_user_optional(request)
+def _strength_buckets() -> dict[str, dict[str, int]]:
+    """Zeroed In/Current counters per personnel category (Officer, WOSE)."""
+    return {
+        "Officer": {"in": 0, "current": 0},
+        "WOSE": {"in": 0, "current": 0},
+    }
 
+
+def _strength_cell(bucket: dict[str, int]) -> dict[str, int]:
+    """Render-ready In/Out/Current/% cell from one In/Current counter.
+
+    Out is the complement of Current within In (every Called Up person is
+    exactly one of Current/Out — unmarked attendance counts as absent),
+    and % is Current over In, whole-number, 0 when In is 0.
+    """
+    total_in = bucket["in"]
+    current = bucket["current"]
+    return {
+        "in": total_in,
+        "out": total_in - current,
+        "current": current,
+        "pct": round(current * 100 / total_in) if total_in else 0,
+    }
+
+
+def _strength_cells(buckets: dict[str, dict[str, int]]) -> dict:
+    """Officer/WOSE/Total cells for one report row or rollup."""
+    total = {
+        "in": buckets["Officer"]["in"] + buckets["WOSE"]["in"],
+        "current": buckets["Officer"]["current"] + buckets["WOSE"]["current"],
+    }
+    return {
+        "officer": _strength_cell(buckets["Officer"]),
+        "wose": _strength_cell(buckets["WOSE"]),
+        "total": _strength_cell(total),
+    }
+
+
+@router.get(
+    "/admin",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_feature("FEATURE_STRENGTH"))],
+)
+async def admin_unit_strength(
+    request: Request,
+    date: utc_dt.date | None = None,
+    slot: str = "am",
+):
+    """Render the Unit Strength report (issue 25).
+
+    Aggregates the parade state of the NR active for attendance by
+    effective sub_unit_1/sub_unit_2 into the strength reporting format:
+    Officer/WOSE/Total column groups, each In/Out/Current/%. In counts
+    Called Up personnel; Current those marked present/late in the selected
+    slot; Out everyone else (unmarked = absent). Unit and sub_unit_3 are
+    ignored — attached personnel from other units report here too.
+    Super-admins see the whole unit; regular admins see only the
+    sub_unit_1 sections assigned to them on the NR.
+    """
+    current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
-        # Redirect to login if not authenticated
         return RedirectResponse(url="/auth/login", status_code=302)
 
-    # Fetch real statistics from the database
+    if slot not in ("am", "pm"):
+        slot = "am"
+    target_date = date or utc_dt.utcnow().date()
+
+    sections: list[dict] = []
+    total_cells: dict = {}
+    no_assignments = False
+    nr_label = None
+
     session_maker = get_session_maker()
     async with session_maker() as db:
-        active_groupings = (
+        active_nr = (
             await db.execute(
-                select(func.count(Grouping.id)).where(Grouping.status == "active")
+                select(NominalRoll).where(NominalRoll.attendance_active.is_(True))
             )
-        ).scalar_one()
+        ).scalars().first()
 
-        active_attendance_nrs = (
-            await db.execute(
-                select(func.count(NominalRoll.id)).where(
-                    NominalRoll.attendance_active.is_(True)
+        if active_nr is not None:
+            nr_id = str(active_nr.id)
+            nr_label = (
+                active_nr.caa.isoformat() if active_nr.caa else nr_id[:8]
+            )
+
+            # The strength population is the attendance roster: active
+            # personnel on the NR with callup status Called Up.
+            roster = (
+                await db.execute(
+                    select(Personnel).where(
+                        Personnel.nominal_roll_id == nr_id,
+                        Personnel.status == "active",
+                        Personnel.callup_status == "Called Up",
+                    )
                 )
-            )
-        ).scalar_one()
+            ).scalars().all()
 
-        total_personnel = (
-            await db.execute(
-                select(func.count(Personnel.id)).where(Personnel.status == "active")
-            )
-        ).scalar_one()
+            # Tagging overlay: effective unit/subunits come from the NR's
+            # 1:1 tagging entries where present (as in the attendance view).
+            entry_by_person: dict[str, TaggingEntry] = {}
+            tagging = await _load_nr_tagging(db, nr_id, with_entries=False)
+            if tagging is not None:
+                entries = (
+                    await db.execute(
+                        select(TaggingEntry).where(
+                            TaggingEntry.tagging_id == str(tagging.id)
+                        )
+                    )
+                ).scalars().all()
+                entry_by_person = {str(e.personnel_id): e for e in entries}
 
-        active_users = (
-            await db.execute(
-                select(func.count(User.id)).where(User.status == "active")
-            )
-        ).scalar_one()
+            attendance_rows = (
+                await db.execute(
+                    select(Attendance).where(
+                        Attendance.nominal_roll_id == nr_id,
+                        Attendance.date == target_date,
+                    )
+                )
+            ).scalars().all()
+            att_by_person = {a.personnel_id: a for a in attendance_rows}
 
-        recent_activity_rows = (
-            await db.execute(
-                select(AuditLog, User)
-                .join(User, AuditLog.user_id == User.id, isouter=True)
-                .order_by(AuditLog.timestamp.desc())
-                .limit(10)
-            )
-        ).all()
+            # (effective sub_unit_1, effective sub_unit_2, category, slot
+            # status) per person; no attendance row = absent (model default).
+            per_person: list[tuple[str | None, str | None, str, str]] = []
+            for person in roster:
+                entry = entry_by_person.get(str(person.id))
+                record = att_by_person.get(str(person.id))
+                status = (
+                    record.status_pm if slot == "pm" else record.status_am
+                ) if record is not None else "absent"
+                per_person.append(
+                    (
+                        entry.to_sub_unit_1 if entry is not None else person.sub_unit_1,
+                        entry.to_sub_unit_2 if entry is not None else person.sub_unit_2,
+                        person.category,
+                        status,
+                    )
+                )
 
-    recent_activity = [
-        {
-            "timestamp": log.timestamp,
-            "user_name": user_obj.name if user_obj else "System",
-            "action": log.action,
-            "entity_type": log.entity_type,
-            "description": log.description,
-        }
-        for log, user_obj in recent_activity_rows
-    ]
+            # Subunit-1 access scope (deny-by-default, tagging-aware) —
+            # super-admins bypass and see the whole unit.
+            if current_admin.role != "super_admin":
+                allowed = await get_assigned_subunit_1s(
+                    db, str(current_admin.id), nr_id
+                )
+                no_assignments = not allowed
+                per_person = [t for t in per_person if t[0] in allowed]
+
+            # Aggregate into (sub_unit_1, sub_unit_2) cells, then section
+            # per sub_unit_1 (displayed once) with a SUBTOTAL, plus a
+            # unit-wide TOTAL rollup.
+            cells: dict[tuple[str | None, str | None], dict] = {}
+            for sub1, sub2, category, status in per_person:
+                buckets = cells.setdefault((sub1, sub2), _strength_buckets())
+                bucket = buckets[category]
+                bucket["in"] += 1
+                if status in PRESENT_LIKE_STATUSES:
+                    bucket["current"] += 1
+
+            grand = _strength_buckets()
+            ordered = sorted(
+                cells.items(), key=lambda kv: (kv[0][0] or "", kv[0][1] or "")
+            )
+            for (sub1, sub2), buckets in ordered:
+                if not sections or sections[-1]["name"] != (sub1 or "(none)"):
+                    sections.append(
+                        {
+                            "name": sub1 or "(none)",
+                            "rows": [],
+                            "_buckets": _strength_buckets(),
+                        }
+                    )
+                section = sections[-1]
+                section["rows"].append(
+                    {"name": sub2 or "(none)", "cells": _strength_cells(buckets)}
+                )
+                for category in ("Officer", "WOSE"):
+                    for key in ("in", "current"):
+                        value = buckets[category][key]
+                        section["_buckets"][category][key] += value
+                        grand[category][key] += value
+
+            for section in sections:
+                section["subtotal"] = _strength_cells(section.pop("_buckets"))
+            total_cells = _strength_cells(grand)
 
     env = get_templates(request)
-    template = env.get_template("admin/dashboard.html")
+    template = env.get_template("admin/unit_strength.html")
 
     html_content = template.render(
         request=request,
@@ -180,12 +311,13 @@ async def admin_dashboard(
             "email": current_admin.email,
             "role": current_admin.role,
         },
-        active_page="dashboard",
-        active_groupings=active_groupings,
-        active_scopes=active_attendance_nrs,
-        total_personnel=total_personnel,
-        active_users=active_users,
-        recent_activity=recent_activity,
+        active_page="strength",
+        nr_label=nr_label,
+        target_date=target_date,
+        slot=slot,
+        sections=sections,
+        total=total_cells,
+        no_assignments=no_assignments,
     )
 
     return HTMLResponse(content=html_content)
@@ -265,7 +397,11 @@ async def admin_users(
     return HTMLResponse(content=html_content)
 
 
-@router.get("/admin/csv-upload", response_class=HTMLResponse)
+@router.get(
+    "/admin/csv-upload",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_feature("FEATURE_NOMINALROLL"))],
+)
 async def admin_csv_upload(
     request: Request,
 ):
@@ -478,7 +614,11 @@ async def admin_deferments(
     return HTMLResponse(content=html_content)
 
 
-@router.get("/admin/taggings", response_class=HTMLResponse)
+@router.get(
+    "/admin/taggings",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_feature("FEATURE_NOMINALROLL"))],
+)
 async def admin_taggings(
     request: Request,
     nominal_roll_id: str | None = None,

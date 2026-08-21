@@ -561,3 +561,81 @@ async def test_process_csv_unparseable_filename_400(
     )
     assert response.status_code == 400
     assert "caaYYMMDD" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_process_csv_maps_callup_status_and_remarks(
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
+    admin_id: str,
+    db_session: AsyncSession,
+):
+    """CSV Callup Decision → personnel.callup_status; Reason + first Remarks
+    → personnel.remarks (issue 06).
+
+    - exact values pass through ("Called Up", "MR")
+    - blank decision defaults to "Called Up"
+    - case-insensitive match ("deferred" → "Deferred")
+    - unrecognised non-blank values ("Not Called Up", "Do Not Call Up")
+      collapse to "Other" with the raw value preserved in extra_fields
+    - remarks join the non-empty Reason + first Remarks columns
+    """
+    raw = _make_csv_bytes(
+        [
+            # decision, reason(col9), remarks(col10)
+            ["U", "S1", "", "", "PTE", "Alpha", "PTE Alpha", "p101",
+             "Called Up", "course", "att_out ok", "5", "1", "n", "2024-01-01", "3", "A", "x"],
+            ["U", "S1", "", "", "PTE", "Bravo", "PTE Bravo", "p102",
+             "", "", "mc follow-up", "5", "1", "n", "2024-01-01", "3", "A", "x"],
+            ["U", "S1", "", "", "PTE", "Charlie", "PTE Charlie", "p103",
+             "deferred", "work", "", "5", "1", "n", "2024-01-01", "3", "A", "x"],
+            ["U", "S1", "", "", "PTE", "Delta", "PTE Delta", "p104",
+             "Not Called Up", "", "", "5", "1", "n", "2024-01-01", "3", "A", "x"],
+            ["U", "S1", "", "", "PTE", "Echo", "PTE Echo", "p105",
+             "Do Not Call Up", "medical", "", "5", "1", "n", "2024-01-01", "3", "A", "x"],
+            ["U", "S1", "", "", "PTE", "Foxtrot", "PTE Foxtrot", "p106",
+             "MR", "", "", "5", "1", "n", "2024-01-01", "3", "A", "x"],
+        ]
+    )
+    upload = client.post(
+        "/api/v1/csv/upload",
+        files={"file": ("fixture_caa260330.csv", raw, "text/csv")},
+        params={"user_id": admin_id, "user_role": "admin"},
+        headers=super_admin_token_headers,
+    )
+    upload_id = upload.json()["id"]
+
+    response = client.post(
+        f"/api/v1/csv/{upload_id}/process",
+        headers=super_admin_token_headers,
+        params=SUPER_ADMIN_PARAMS,
+        json={"created_by": admin_id},
+    )
+    assert response.status_code == 201, response.text
+    nr_id = response.json()["nominal_roll_id"]
+
+    rows = (await db_session.execute(
+        select(Personnel).where(Personnel.nominal_roll_id == nr_id)
+    )).scalars().all()
+    by_name = {p.full_name: p for p in rows}
+
+    assert by_name["Alpha"].callup_status == "Called Up"
+    assert by_name["Alpha"].remarks == "course; att_out ok"
+    # Raw CSV values stay in extra_fields for audit.
+    assert by_name["Alpha"].extra_fields["callup_decision"] == "Called Up"
+
+    assert by_name["Bravo"].callup_status == "Called Up"  # blank → default
+    assert by_name["Bravo"].remarks == "mc follow-up"      # reason empty → remarks only
+
+    assert by_name["Charlie"].callup_status == "Deferred"  # case-insensitive match
+    assert by_name["Charlie"].remarks == "work"
+    assert by_name["Charlie"].extra_fields["callup_decision"] == "deferred"
+
+    assert by_name["Delta"].callup_status == "Other"       # unrecognised legacy value
+    assert by_name["Delta"].extra_fields["callup_decision"] == "Not Called Up"
+
+    assert by_name["Echo"].callup_status == "Other"
+    assert by_name["Echo"].remarks == "medical"
+
+    assert by_name["Foxtrot"].callup_status == "MR"
+    assert by_name["Foxtrot"].remarks is None              # both columns empty

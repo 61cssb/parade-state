@@ -121,7 +121,7 @@ async def test_flag_off_hides_nav_and_entry_points(
 
 @pytest.mark.asyncio
 async def test_flag_off_blocks_pages_even_for_super_admin(
-    client: TestClient, db_session: AsyncSession, sample_grouping, monkeypatch
+    client: TestClient, db_session: AsyncSession, monkeypatch
 ):
     """Direct URLs to flag-off pages 404 for a super admin (and therefore
     for every weaker role too — the gate never consults the role)."""
@@ -130,11 +130,9 @@ async def test_flag_off_blocks_pages_even_for_super_admin(
     sa = await _make_super_admin(db_session)
     await _sign_in(client, db_session, sa)
 
-    any_grouping_id = str(sample_grouping.id)
     for path in (
         "/admin/deferments",
         "/grouping",
-        f"/grouping/{any_grouping_id}/personnel",
     ):
         response = client.get(path, follow_redirects=False)
         assert response.status_code == 404, path
@@ -197,7 +195,7 @@ async def test_flag_off_blocks_api_even_for_super_admin(
         ("GET", "/api/v1/deferments"),
         ("DELETE", f"/api/v1/deferments/{any_id}"),
         ("GET", "/api/v1/groupings/"),
-        ("POST", f"/api/v1/groupings/{any_id}/activate"),
+        ("DELETE", f"/api/v1/groupings/{any_id}"),
     ]
     for method, url in requests:
         response = client.request(method, url, params=SUPER_ADMIN_PARAMS)

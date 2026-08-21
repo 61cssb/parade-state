@@ -91,8 +91,38 @@
         color: #2563eb;
         font-size: 0.75rem;
     }
+    /* Provenance badge for UI-added servicemen (source == "manual"). */
+    .manual-badge {
+        display: inline-block;
+        padding: 0.05rem 0.35rem;
+        border-radius: 0.25rem;
+        background: #ede9fe;
+        color: #6d28d9;
+        border: 1px solid #c4b5fd;
+        font-size: 0.7rem;
+        font-weight: 600;
+        vertical-align: middle;
+        white-space: nowrap;
+    }
     /* Management panel: the expanded <details> body is absolutely positioned
-       so expanding it never shifts the personnel table below. */
+       so expanding it never shifts the cards below (it overlays them). */
+    /* Panel body: label/value rows share a grid so Label, Attendance and
+       Remarks align like a form; action buttons sized to their text (the
+       base .btn padding makes 0.8rem-label buttons look top-heavy). */
+    .mgmt-grid {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 0.5rem 1.25rem;
+        align-items: center;
+        font-size: 0.875rem;
+        color: #374151;
+    }
+    .mgmt-grid .mgmt-label { color: #6b7280; }
+    .mgmt-details .mgmt-btn {
+        font-size: 0.8rem;
+        padding: 0.2rem 0.75rem;
+        line-height: 1.2;
+    }
     .mgmt-details { position: relative; }
     .mgmt-details > div {
         position: absolute;
@@ -132,6 +162,63 @@
             {% endfor %}
         </select>
     </form>
+
+    {% if selected_nominal_roll %}
+    {# Roll management (merged from the retired admin nominal rolls page).
+       It is an action on the selected roll, so it sits directly below the
+       roll selector inside the selector card — same pattern as the
+       Grouping page's management expander — not inside the results card
+       where admins didn't look for it. Collapsed by default; the panel
+       overlays so expanding never shifts the page. Label/remarks editing
+       is available to all admins; attendance toggle and delete are
+       super-admin-only. #}
+    <details class="mgmt-details" style="margin: 0.75rem 0 0;">
+        <summary style="cursor: pointer; font-size: 0.85rem; color: #374151; font-weight: 600;">Roll management</summary>
+        <div>
+            <div class="mgmt-grid">
+                <span class="mgmt-label">Label</span>
+                <span id="label-cell">
+                    <span id="label-display" class="inline-edit-chip"
+                          data-value="{{ selected_nominal_roll.label or '' }}"
+                          onclick="editLabel()" title="Click to edit label">{{ selected_nominal_roll.label or '—' }}</span>
+                </span>
+
+                <span class="mgmt-label">Attendance</span>
+                <span id="attendance-state">
+                    {% if selected_nominal_roll.attendance_active %}
+                    <span class="btn btn-success" style="font-size: 0.75rem; padding: 0.2rem 0.5rem; line-height: 1.25;">Active for attendance</span>
+                    {% else %}
+                    <span style="font-size: 0.75rem; color: #9ca3af;">Not used for attendance</span>
+                    {% endif %}
+                </span>
+
+                <span class="mgmt-label">Remarks</span>
+                <span id="remarks-cell">
+                    <span id="remarks-display" class="inline-edit-chip"
+                          data-value="{{ selected_nominal_roll.remarks or '' }}"
+                          onclick="editRemarks()" title="Click to edit remarks"
+                          style="max-width: 30rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;">{{ selected_nominal_roll.remarks or '—' }}</span>
+                </span>
+            </div>
+
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.85rem;">
+                {% if user.role == 'super_admin' %}
+                {% if selected_nominal_roll.attendance_active %}
+                <button class="btn mgmt-btn" style="background: #f59e0b; color: white;"
+                        onclick="deactivateAttendance('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}')">Deactivate Attendance</button>
+                {% else %}
+                <button class="btn btn-success mgmt-btn"
+                        onclick="useForAttendance('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}')">Use for Attendance</button>
+                {% endif %}
+                <button class="btn mgmt-btn" style="background: #ef4444; color: white;"
+                        onclick="deleteNominalRoll('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}')">Delete</button>
+                {% endif %}
+            </div>
+
+            <div id="page-status" style="margin-top: 0.6rem;"></div>
+        </div>
+    </details>
+    {% endif %}
 </div>
 
 {% if selected_nominal_roll %}
@@ -189,58 +276,6 @@
             — {{ total_count }} personnel match
         </span>
     </h3>
-    {# Roll management (merged from the retired admin nominal rolls page).
-       Collapsed by default; the panel overlays so expanding never shifts
-       the table. Label/remarks editing and Create Grouping are available
-       to all admins; attendance toggle and delete are super-admin-only. #}
-    <details class="mgmt-details" style="margin: 0.5rem 0 0;">
-        <summary style="cursor: pointer; font-size: 0.85rem; color: #374151; font-weight: 600;">Roll management</summary>
-        <div>
-            <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; font-size: 0.875rem; color: #374151;">
-                <span id="label-cell">Label:
-                    <span id="label-display" class="inline-edit-chip"
-                          data-value="{{ selected_nominal_roll.label or '' }}"
-                          onclick="editLabel()" title="Click to edit label">{{ selected_nominal_roll.label or '—' }}</span>
-                </span>
-                <span id="attendance-state">
-                    {% if selected_nominal_roll.attendance_active %}
-                    <span class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">Active for attendance</span>
-                    {% else %}
-                    <span style="font-size: 0.75rem; color: #9ca3af;">Not used for attendance</span>
-                    {% endif %}
-                </span>
-            </div>
-
-            <div id="remarks-cell" style="margin-top: 0.6rem; font-size: 0.875rem; color: #374151;">
-                Remarks:
-                <span id="remarks-display" class="inline-edit-chip"
-                      data-value="{{ selected_nominal_roll.remarks or '' }}"
-                      onclick="editRemarks()" title="Click to edit remarks"
-                      style="max-width: 30rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;">{{ selected_nominal_roll.remarks or '—' }}</span>
-            </div>
-
-            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.85rem;">
-                {% if request.app.state.settings.FEATURE_GROUPING %}
-                <button class="btn btn-primary" style="font-size: 0.8rem; padding: 0.3rem 0.6rem;"
-                        onclick="openCreateModal('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}', {{ selected_nominal_roll.personnel_count }})">Create Grouping</button>
-                {% endif %}
-                {% if user.role == 'super_admin' %}
-                {% if selected_nominal_roll.attendance_active %}
-                <button class="btn" style="background: #f59e0b; color: white; font-size: 0.8rem; padding: 0.3rem 0.6rem;"
-                        onclick="deactivateAttendance('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}')">Deactivate Attendance</button>
-                {% else %}
-                <button class="btn btn-success" style="font-size: 0.8rem; padding: 0.3rem 0.6rem;"
-                        onclick="useForAttendance('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}')">Use for Attendance</button>
-                {% endif %}
-                <button class="btn" style="background: #ef4444; color: white; font-size: 0.8rem; padding: 0.3rem 0.6rem;"
-                        onclick="deleteNominalRoll('{{ selected_nominal_roll.id }}', '{{ selected_nominal_roll.caa }}')">Delete</button>
-                {% endif %}
-            </div>
-
-            <div id="page-status" style="margin-top: 0.6rem;"></div>
-        </div>
-    </details>
-
     {% if user.role == 'super_admin' %}
     <p style="margin: 0.5rem 0 0; font-size: 0.8rem; color: #6b7280;">
         Yellow rows carry a tagging overlay. As super-admin you can click a
@@ -267,6 +302,7 @@
                     <th style="padding: 0.5rem;">Rank</th>
                     <th style="padding: 0.5rem;">Full Name</th>
                     <th style="padding: 0.5rem;">Pers No</th>
+                    <th style="padding: 0.5rem;">Callup</th>
                     <th style="padding: 0.5rem;">Remarks</th>
                 </tr>
             </thead>
@@ -280,9 +316,32 @@
                     <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_3', p.sub_unit_3) if user.role == 'super_admin' else (p.sub_unit_3 or '—') }}</td>
                     <td style="padding: 0.5rem; white-space: nowrap;">{{ p.category }}</td>
                     <td style="padding: 0.5rem; white-space: nowrap;">{{ p.rank }}</td>
-                    <td style="padding: 0.5rem;">{{ p.full_name }}</td>
-                    <td style="padding: 0.5rem; font-family: monospace; font-size: 0.85rem;">{{ p.pers_no or '—' }}</td>
-                    <td style="padding: 0.5rem; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ p.remarks or '' }}">{{ p.remarks or '—' }}</td>
+                    <td style="padding: 0.5rem;">{{ p.full_name }}{% if p.source == 'manual' %} <span class="manual-badge" title="Added manually — not from the CSV">manual</span>{% endif %}</td>
+                    <td style="padding: 0.5rem; font-family: monospace; font-size: 0.85rem;">
+                        {% if user.role == 'super_admin' %}
+                        <input value="{{ p.pers_no or '' }}" data-pid="{{ p.id }}" data-prev="{{ p.pers_no or '' }}" onchange="onPersNoChange(this)" title="Pers No — editable, blank clears" placeholder="—" maxlength="20" style="width: 7rem; padding: 0.25rem 0.4rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem; background: #fff; color: #111827;">
+                        {% else %}
+                        {{ p.pers_no or '—' }}
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.5rem; white-space: nowrap;">
+                        {% if user.role == 'admin' or user.role == 'super_admin' %}
+                        <select data-pid="{{ p.id }}" data-prev="{{ p.callup_status }}" onchange="onCallupChange(this)" style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem; background: #fff; color: #111827;" title="Callup decision status">
+                            {% for s in callup_statuses %}
+                            <option value="{{ s }}"{% if s == p.callup_status %} selected{% endif %}>{{ s }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
+                        {{ p.callup_status }}
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.5rem; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        {% if user.role == 'admin' or user.role == 'super_admin' %}
+                        <input value="{{ (p.remarks or '')|e }}" data-pid="{{ p.id }}" onchange="onPersonnelRemarksChange(this)" title="{{ (p.remarks or '')|e }}" placeholder="—" style="width: 100%; max-width: 17rem; padding: 0.25rem 0.4rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem; background: #fff; color: #111827;">
+                        {% else %}
+                        <span title="{{ (p.remarks or '')|e }}">{{ p.remarks or '—' }}</span>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -296,6 +355,17 @@
     {% else %}
     <p style="color: #6b7280; margin-top: 1rem;">No personnel match the current filters.</p>
     {% endif %}
+
+    {# Manual personnel create (super-admin): a roster action, so it lives at
+       the bottom of the table — not under Roll management (which acts on the
+       roll entity). Shown even when filters match nothing: searching for a
+       missing person and finding none is exactly the add flow. #}
+    {% if user.role == 'super_admin' %}
+    <div style="margin-top: 1rem;">
+        <button class="btn btn-primary" style="font-size: 0.8rem; padding: 0.3rem 0.6rem;"
+                onclick="openAddModal('{{ selected_nominal_roll.caa }}')">Add Serviceman</button>
+    </div>
+    {% endif %}
 </div>
 {% endif %}
 {% else %}
@@ -304,52 +374,107 @@
 </div>
 {% endif %}
 
-{# Create Grouping modal (merged from the retired admin nominal rolls page).
-   Hidden entirely while the Grouping feature flag is off. #}
-{% if selected_nominal_roll and request.app.state.settings.FEATURE_GROUPING %}
-<div id="create-modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeCreateModal()"></div>
-<div id="create-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 500px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;">
+{# Add Serviceman modal (super-admin only). Pers No may be blank at
+   creation (fill in later inline). #}
+{% if user.role == 'super_admin' and selected_nominal_roll %}
+<datalist id="svc-unit-choices">
+    {% for u in edit_unit_options %}
+    <option value="{{ u }}"></option>
+    {% endfor %}
+</datalist>
+<datalist id="svc-sub1-choices">
+    {% for s in edit_sub1_options %}
+    <option value="{{ s }}"></option>
+    {% endfor %}
+</datalist>
+<datalist id="svc-sub2-choices">
+    {% for s in edit_sub2_options %}
+    <option value="{{ s }}"></option>
+    {% endfor %}
+</datalist>
+<datalist id="svc-sub3-choices">
+    {% for s in edit_sub3_options %}
+    <option value="{{ s }}"></option>
+    {% endfor %}
+</datalist>
+<div id="add-modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeAddModal()"></div>
+<div id="add-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 500px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <h3 style="margin: 0;">Create Grouping</h3>
-        <button type="button" onclick="closeCreateModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
+        <h3 style="margin: 0;">Add Serviceman</h3>
+        <button type="button" onclick="closeAddModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
     </div>
 
     <div style="background: #f9fafb; border-radius: 0.375rem; padding: 0.75rem; margin-bottom: 1rem; font-size: 0.875rem;">
-        <strong>Source Nominal Roll:</strong> CAA <span id="modal-nominal-roll-caa">—</span> &middot; <span id="modal-nominal-roll-personnel">—</span> personnel
+        <strong>Added to Nominal Roll:</strong> CAA <span id="add-modal-nr-caa">—</span>
+        &middot; manual adds live only on this roll
     </div>
 
-    <form id="create-grouping-form" onsubmit="event.preventDefault(); submitCreateGrouping();">
-        <div style="margin-bottom: 0.75rem;">
-            <label for="grp-name" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Grouping Name <span style="color: #ef4444;">*</span></label>
-            <input type="text" id="grp-name" required style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" placeholder="e.g. MVT, FTX">
+    <form id="add-serviceman-form" onsubmit="event.preventDefault(); submitAddServiceman();">
+        <div style="display: flex; gap: 0.75rem; margin-bottom: 0.75rem;">
+            <div style="flex: 0 0 8rem;">
+                <label for="svc-rank" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Rank <span style="color: #ef4444;">*</span></label>
+                <select id="svc-rank" required style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: #fff;">
+                    <option value="" selected disabled>— rank —</option>
+                    {% for group_label, group_ranks in rank_choices %}
+                    <optgroup label="{{ group_label }}">
+                        {% for r in group_ranks %}
+                        <option value="{{ r }}">{{ r }}</option>
+                        {% endfor %}
+                    </optgroup>
+                    {% endfor %}
+                </select>
+            </div>
+            <div style="flex: 1;">
+                <label for="svc-name" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Full Name <span style="color: #ef4444;">*</span></label>
+                <input type="text" id="svc-name" required maxlength="255" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            </div>
         </div>
 
-        <div style="margin-bottom: 0.75rem;">
-            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Valid From <span style="color: #9ca3af; font-weight: normal;">(YYYYMMDD HHMM, Singapore time)</span></label>
-            <div style="display: flex; gap: 0.5rem;">
-                <input type="text" id="grp-from-date" pattern="\d{8}" maxlength="8" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 9rem;" placeholder="YYYYMMDD" onchange="onFromDateChange()">
-                <input type="text" id="grp-from-time" pattern="\d{4}" maxlength="4" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 7rem;" placeholder="HHMM">
+        <div style="display: flex; gap: 0.75rem; margin-bottom: 0.75rem;">
+            <div style="flex: 1;">
+                <label for="svc-pers-no" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Pers No</label>
+                <input type="text" id="svc-pers-no" maxlength="20" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-family: monospace;" placeholder="Leave blank if not yet known">
+            </div>
+            <div style="flex: 1;">
+                <label for="svc-callup" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Callup Status</label>
+                <select id="svc-callup" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: #fff;">
+                    {% for s in callup_statuses %}
+                    <option value="{{ s }}"{% if s == 'Called Up' %} selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                </select>
             </div>
         </div>
 
         <div style="margin-bottom: 0.75rem;">
-            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Valid Until <span style="color: #9ca3af; font-weight: normal;">(YYYYMMDD HHMM, Singapore time)</span></label>
-            <div style="display: flex; gap: 0.5rem;">
-                <input type="text" id="grp-until-date" pattern="\d{8}" maxlength="8" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 9rem;" placeholder="YYYYMMDD">
-                <input type="text" id="grp-until-time" pattern="\d{4}" maxlength="4" style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; width: 7rem;" placeholder="HHMM">
+            <label for="svc-unit" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Unit <span style="color: #ef4444;">*</span></label>
+            <input type="text" id="svc-unit" list="svc-unit-choices" required maxlength="255" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; margin-bottom: 0.75rem;">
+            <div style="flex: 1;">
+                <label for="svc-sub1" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Sub Unit 1</label>
+                <input type="text" id="svc-sub1" list="svc-sub1-choices" maxlength="255" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            </div>
+            <div style="flex: 1;">
+                <label for="svc-sub2" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Sub Unit 2</label>
+                <input type="text" id="svc-sub2" list="svc-sub2-choices" maxlength="255" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            </div>
+            <div style="flex: 1;">
+                <label for="svc-sub3" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Sub Unit 3</label>
+                <input type="text" id="svc-sub3" list="svc-sub3-choices" maxlength="255" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
             </div>
         </div>
 
         <div style="margin-bottom: 1rem;">
-            <label for="grp-notes" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Notes</label>
-            <textarea id="grp-notes" rows="2" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-family: inherit;" placeholder="Optional"></textarea>
+            <label for="svc-remarks" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Remarks</label>
+            <textarea id="svc-remarks" rows="2" maxlength="2000" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-family: inherit;" placeholder="Optional"></textarea>
         </div>
 
-        <div id="modal-status" style="margin-bottom: 0.75rem;"></div>
+        <div id="add-modal-status" style="margin-bottom: 0.75rem;"></div>
 
         <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
-            <button type="button" onclick="closeCreateModal()" style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: white; cursor: pointer;">Cancel</button>
-            <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1rem;">Create Grouping</button>
+            <button type="button" onclick="closeAddModal()" style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: white; cursor: pointer;">Cancel</button>
+            <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1rem;">Add Serviceman</button>
         </div>
     </form>
 </div>
@@ -366,12 +491,6 @@
     const SINGAPORE_OFFSET = "+08:00";
     // Acts on the selected roll; openCreateModal re-affirms it for the modal.
     let activeNominalRollId = "{{ selected_nominal_roll.id }}";
-
-    function showStatus(message, type) {
-        const div = document.getElementById('modal-status');
-        const color = type === 'success' ? '#10b981' : '#ef4444';
-        div.innerHTML = '<p style="color: ' + color + '; font-size: 0.875rem; margin: 0;">' + message + '</p>';
-    }
 
     function showPageStatus(message, type) {
         const div = document.getElementById('page-status');
@@ -420,10 +539,9 @@
     async function deleteNominalRoll(nominalRollId, caa) {
         const message =
             'Delete nominal roll with CAA date ' + caa + '?\n\n' +
-            'This will permanently delete:\n' +
-            '  - All personnel records in this nominal roll\n' +
-            '  - All groupings based on this nominal roll\n' +
-            '  - All sessions and attendance records under those groupings\n\n' +
+            'This will permanently delete all personnel, attendance and\n' +
+            'tagging data on this roll. Groupings based on it are preserved\n' +
+            'and must be deleted first (the delete is blocked otherwise).\n\n' +
             'This cannot be undone.';
         if (!confirm(message)) return;
         try {
@@ -443,139 +561,74 @@
         }
     }
 
-    function openCreateModal(nominalRollId, caa, personnelCount) {
-        activeNominalRollId = nominalRollId;
-        document.getElementById('modal-nominal-roll-caa').textContent = caa;
-        document.getElementById('modal-nominal-roll-personnel').textContent = personnelCount;
-        document.getElementById('modal-status').innerHTML = '';
-        document.getElementById('create-grouping-form').reset();
-        // Autofill valid_from/until to next day with default ops hours
-        const nextDay = tomorrowYYYYMMDD();
-        document.getElementById('grp-from-date').value = nextDay;
-        document.getElementById('grp-from-time').value = '0800';
-        document.getElementById('grp-until-date').value = nextDay;
-        document.getElementById('grp-until-time').value = '1700';
-        document.getElementById('create-modal-backdrop').style.display = 'block';
-        document.getElementById('create-modal').style.display = 'block';
-        document.getElementById('grp-name').focus();
+    {% if user.role == 'super_admin' %}
+    // --- Add Serviceman modal (markup above is super-admin only too) ---
+    function showAddStatus(message, type) {
+        const div = document.getElementById('add-modal-status');
+        if (!div) return;
+        const color = type === 'success' ? '#10b981' : '#ef4444';
+        div.innerHTML = '<p style="color: ' + color + '; font-size: 0.875rem; margin: 0;">' + message + '</p>';
     }
 
-    function todayYYYYMMDD() {
-        const d = new Date();
-        return '' + d.getFullYear()
-            + String(d.getMonth() + 1).padStart(2, '0')
-            + String(d.getDate()).padStart(2, '0');
+    function openAddModal(caa) {
+        const modal = document.getElementById('add-modal');
+        if (!modal) return;
+        document.getElementById('add-modal-nr-caa').textContent = caa;
+        document.getElementById('add-modal-status').innerHTML = '';
+        document.getElementById('add-serviceman-form').reset();
+        document.getElementById('svc-callup').value = 'Called Up';
+        document.getElementById('add-modal-backdrop').style.display = 'block';
+        modal.style.display = 'block';
+        document.getElementById('svc-rank').focus();
     }
 
-    function tomorrowYYYYMMDD() {
-        const d = new Date();
-        d.setDate(d.getDate() + 1);
-        return '' + d.getFullYear()
-            + String(d.getMonth() + 1).padStart(2, '0')
-            + String(d.getDate()).padStart(2, '0');
-    }
-
-    function onFromDateChange() {
-        const fromDate = document.getElementById('grp-from-date').value.trim();
-        const untilDate = document.getElementById('grp-until-date').value.trim();
-        if (/^\d{8}$/.test(fromDate) && /^\d{8}$/.test(untilDate) && fromDate > untilDate) {
-            document.getElementById('grp-until-date').value = fromDate;
-        }
-    }
-
-    function closeCreateModal() {
-        document.getElementById('create-modal-backdrop').style.display = 'none';
-        document.getElementById('create-modal').style.display = 'none';
+    function closeAddModal() {
+        const backdrop = document.getElementById('add-modal-backdrop');
+        const modal = document.getElementById('add-modal');
+        if (!modal) return;
+        backdrop.style.display = 'none';
+        modal.style.display = 'none';
     }
 
     document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape' && document.getElementById('create-modal').style.display === 'block') {
-            closeCreateModal();
+        const modal = document.getElementById('add-modal');
+        if (e.key === 'Escape' && modal && modal.style.display === 'block') {
+            closeAddModal();
         }
     });
 
-    function toIso8601(dateStr, timeStr) {
-        // YYYYMMDD + HHMM -> YYYY-MM-DDTHH:MM:00+08:00 (Singapore time)
-        const yyyy = dateStr.slice(0, 4);
-        const mm = dateStr.slice(4, 6);
-        const dd = dateStr.slice(6, 8);
-        const hh = timeStr.slice(0, 2);
-        const min = timeStr.slice(2, 4);
-        return yyyy + '-' + mm + '-' + dd + 'T' + hh + ':' + min + ':00' + SINGAPORE_OFFSET;
-    }
+    async function submitAddServiceman() {
+        const rank = document.getElementById('svc-rank').value.trim();
+        const name = document.getElementById('svc-name').value.trim();
+        const persNo = document.getElementById('svc-pers-no').value.trim();
+        const unit = document.getElementById('svc-unit').value.trim();
+        const sub1 = document.getElementById('svc-sub1').value.trim();
+        const sub2 = document.getElementById('svc-sub2').value.trim();
+        const sub3 = document.getElementById('svc-sub3').value.trim();
+        const callup = document.getElementById('svc-callup').value;
+        const remarks = document.getElementById('svc-remarks').value.trim();
 
-    function validateDateTime(dateStr, timeStr, label) {
-        if (!/^\d{8}$/.test(dateStr)) {
-            return label + ' date must be YYYYMMDD.';
-        }
-        if (!/^\d{4}$/.test(timeStr)) {
-            return label + ' time must be HHMM.';
-        }
-        const month = parseInt(dateStr.slice(4, 6), 10);
-        const day = parseInt(dateStr.slice(6, 8), 10);
-        const hour = parseInt(timeStr.slice(0, 2), 10);
-        const minute = parseInt(timeStr.slice(2, 4), 10);
-        if (month < 1 || month > 12) return label + ' month must be 01-12.';
-        if (day < 1 || day > 31) return label + ' day must be 01-31.';
-        if (hour > 23) return label + ' hour must be 00-23.';
-        if (minute > 59) return label + ' minute must be 00-59.';
-        return null;
-    }
-
-    async function submitCreateGrouping() {
-        const name = document.getElementById('grp-name').value.trim();
-        const fromDate = document.getElementById('grp-from-date').value.trim();
-        const fromTime = document.getElementById('grp-from-time').value.trim();
-        const untilDate = document.getElementById('grp-until-date').value.trim();
-        const untilTime = document.getElementById('grp-until-time').value.trim();
-        const notes = document.getElementById('grp-notes').value.trim();
-
-        if (!name) {
-            showStatus('Grouping name is required.', 'error');
+        if (!rank || !name || !unit) {
+            showAddStatus('Rank, full name and unit are required.', 'error');
             return;
         }
 
-        // Dates are optional (for adhoc groupings); validate only if provided
-        let validFrom = null;
-        let validUntil = null;
-
-        if (fromDate || fromTime || untilDate || untilTime) {
-            let err = validateDateTime(fromDate, fromTime, 'Valid from');
-            if (err) { showStatus(err, 'error'); return; }
-            err = validateDateTime(untilDate, untilTime, 'Valid until');
-            if (err) { showStatus(err, 'error'); return; }
-
-            if (fromDate < todayYYYYMMDD()) {
-                showStatus('Valid from date cannot be earlier than today.', 'error');
-                return;
-            }
-            if (untilDate < fromDate) {
-                showStatus('Valid until date cannot be earlier than valid from.', 'error');
-                return;
-            }
-
-            validFrom = toIso8601(fromDate, fromTime);
-            validUntil = toIso8601(untilDate, untilTime);
-
-            if (validUntil <= validFrom) {
-                showStatus('Valid until must be after valid from.', 'error');
-                return;
-            }
-        }
-
         const payload = {
-            name: name,
             nominal_roll_id: activeNominalRollId,
-            mode: 'standard',
-            valid_from: validFrom,
-            valid_until: validUntil,
-            status: 'draft',
-            notes: notes || null,
+            rank: rank,
+            name: name,
+            pers_no: persNo || null,
+            unit: unit,
+            sub_unit_1: sub1 || null,
+            sub_unit_2: sub2 || null,
+            sub_unit_3: sub3 || null,
+            callup_status: callup,
+            remarks: remarks || null,
         };
 
         try {
             const response = await fetch(
-                '/api/v1/groupings/?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/personnel?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -583,16 +636,17 @@
                 }
             );
             if (response.ok) {
-                showStatus('Grouping created. Redirecting…', 'success');
-                setTimeout(function() { window.location.href = '/grouping'; }, 700);
+                showAddStatus('Serviceman added. Reloading…', 'success');
+                setTimeout(function() { location.reload(); }, 700);
             } else {
                 const data = await response.json();
-                showStatus('Create failed: ' + (data.detail || 'Unknown error'), 'error');
+                showAddStatus('Add failed: ' + (data.detail || 'Unknown error'), 'error');
             }
         } catch (error) {
-            showStatus('Network error: ' + error.message, 'error');
+            showAddStatus('Network error: ' + error.message, 'error');
         }
     }
+    {% endif %}
 
     // --- Inline label editing ---
     function editLabel() {
@@ -751,6 +805,72 @@
         if (wrap) wrap.remove();
         display.style.display = '';
     }
+
+    // --- Per-person callup status & remarks (admin / super_admin) ---
+    // Immediate PATCH on change, like the roll-management saves above.
+    // The staged-edits flow below is super_admin-only unit/subunit remapping.
+    {% if user.role == 'admin' or user.role == 'super_admin' %}
+    async function patchPersonnel(pid, body) {
+        try {
+            const response = await fetch(
+                '/api/v1/personnel/' + pid + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                }
+            );
+            if (response.ok) return null;
+            const data = await response.json().catch(function() { return {}; });
+            return data.detail || ('HTTP ' + response.status);
+        } catch (error) {
+            return 'Network error: ' + error.message;
+        }
+    }
+
+    async function onCallupChange(sel) {
+        const pid = sel.getAttribute('data-pid');
+        const prev = sel.getAttribute('data-prev');
+        const value = sel.value;
+        const err = await patchPersonnel(pid, { callup_status: value });
+        if (err) {
+            sel.value = prev;  // revert — the DB kept the old value
+            showPageStatus('Callup status update failed: ' + err, 'error');
+            return;
+        }
+        sel.setAttribute('data-prev', value);
+        showPageStatus('Callup status updated.', 'success');
+    }
+
+    async function onPersonnelRemarksChange(input) {
+        const pid = input.getAttribute('data-pid');
+        const value = input.value;
+        const err = await patchPersonnel(pid, { remarks: value });
+        if (err) {
+            showPageStatus('Remarks update failed: ' + err, 'error');
+            return;
+        }
+        showPageStatus('Remarks updated.', 'success');
+    }
+
+    // Pers no fill-in-later (super-admin only; the input is not rendered
+    // for anyone else). Blank clears — PATCH carries an explicit null.
+    {% if user.role == 'super_admin' %}
+    async function onPersNoChange(input) {
+        const pid = input.getAttribute('data-pid');
+        const prev = input.getAttribute('data-prev');
+        const value = input.value.trim();
+        const err = await patchPersonnel(pid, { pers_no: value || null });
+        if (err) {
+            input.value = prev;  // revert — the DB kept the old value
+            showPageStatus('Pers no update failed: ' + err, 'error');
+            return;
+        }
+        input.setAttribute('data-prev', value);
+        showPageStatus('Pers no updated.', 'success');
+    }
+    {% endif %}
+    {% endif %}
 
     function escapeAttr(s) {
         return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')

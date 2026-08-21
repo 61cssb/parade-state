@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from parade_state.db import get_db_session
 from parade_state.models import (
+    CALLUP_STATUSES,
     AuditLog,
     ColumnMetadata,
     CsvUpload,
@@ -43,6 +44,29 @@ router = APIRouter()
 
 # Maximum upload size: 10 MB
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024
+
+# Case-insensitive lookup for the CSV "Callup Decision" column.
+_CALLUP_BY_CASEFOLD: dict[str, str] = {s.casefold(): s for s in CALLUP_STATUSES}
+
+
+def _resolve_callup_status(raw_decision: str | int | None) -> str:
+    """Map the raw CSV Callup Decision onto the callup_status enum.
+
+    Blank → "Called Up" (model default); an exact (case-insensitive) match
+    passes through; any other non-blank value → "Other" (the raw value is
+    preserved in ``extra_fields`` for audit).
+    """
+    if not raw_decision:
+        return "Called Up"
+    return _CALLUP_BY_CASEFOLD.get(str(raw_decision).casefold(), "Other")
+
+
+def _join_personnel_remarks(
+    reason: str | int | None, remarks: str | int | None
+) -> str | None:
+    """Join the CSV Reason and first Remarks column into one remarks string."""
+    joined = "; ".join(str(part) for part in (reason, remarks) if part)
+    return joined or None
 
 
 def _parse_csv_columns(raw_bytes: bytes) -> tuple[list[str], int]:
@@ -504,6 +528,13 @@ async def _process_upload_into_nr(
                 sub_unit_3=core_values.get("sub_unit_3") or None,
                 extra_fields=extra_fields,
                 status="active",
+                callup_status=_resolve_callup_status(
+                    extra_fields.get("callup_decision")
+                ),
+                remarks=_join_personnel_remarks(
+                    extra_fields.get("reason"),
+                    extra_fields.get("remarks"),
+                ),
                 created_by=created_by,
             )
         )

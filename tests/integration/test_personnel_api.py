@@ -6,56 +6,14 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from parade_state.models.grouping import (
-    Grouping,
-    GroupingNotes,
-    GroupingPersonnelOverride,
-)
 from parade_state.models.csv_ingestion import NominalRoll
 from parade_state.models.personnel import Personnel
+from parade_state.models.audit import AuditLog
 from tests.test_utils import (
     assert_404_response,
     assert_pagination_works,
     assert_permission_denied,
 )
-
-
-@pytest.mark.asyncio
-async def test_list_personnel_with_grouping_context(
-    client: TestClient,
-    admin_token_headers: dict[str, str],
-    db_session,
-    sample_grouping: Grouping,
-    sample_personnel,
-    sample_users,
-):
-    """Test listing personnel with grouping context."""
-    admin_id = str(sample_users["admin"].id)
-
-    response = client.get(
-        "/api/v1/personnel",
-        headers=admin_token_headers,
-        params={
-            "grouping_id": str(sample_grouping.id),
-            "user_id": admin_id,
-            "user_role": "admin",
-        },
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert isinstance(data, list)
-    assert len(data) > 0
-
-    # Check first personnel has grouping context
-    first_personnel = data[0]
-    assert "id" in first_personnel
-    assert "name" in first_personnel
-    assert "pers_no" in first_personnel
-    assert "grouping_id" in first_personnel
-    assert first_personnel["grouping_id"] == str(sample_grouping.id)
-    assert "has_override" in first_personnel
-    assert "grouping_notes" in first_personnel
 
 
 @pytest.mark.asyncio
@@ -80,13 +38,10 @@ async def test_list_personnel_without_grouping_context_as_admin(
     assert isinstance(data, list)
     assert len(data) > 0
 
-    # Check personnel don't have grouping context
     first_personnel = data[0]
     assert "id" in first_personnel
     assert "name" in first_personnel
-    assert first_personnel["grouping_id"] is None
-    assert first_personnel["has_override"] is False
-    assert first_personnel["grouping_notes"] is None
+    assert "grouping_id" not in first_personnel
 
 
 @pytest.mark.asyncio
@@ -100,7 +55,7 @@ async def test_list_personnel_without_grouping_context_as_user_forbidden(
         "get",
         "/api/v1/personnel",
         user_token_headers,
-        expected_detail="Only admins can list personnel without grouping context",
+        expected_detail="Only admins can list personnel",
         params={
             "user_id": "user-id",
             "user_role": "user",
@@ -114,7 +69,6 @@ async def test_list_personnel_with_unit_filter(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test listing personnel with unit filter."""
@@ -125,7 +79,6 @@ async def test_list_personnel_with_unit_filter(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "unit": first_unit,
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
@@ -147,7 +100,6 @@ async def test_list_personnel_with_sub_unit_filter(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test listing personnel with sub-unit filter."""
@@ -163,8 +115,7 @@ async def test_list_personnel_with_sub_unit_filter(
             "/api/v1/personnel",
             headers=admin_token_headers,
             params={
-                "grouping_id": str(sample_grouping.id),
-                "sub_unit_1": sub_unit,
+                    "sub_unit_1": sub_unit,
                 "user_id": str(sample_users["admin"].id),
                 "user_role": "admin",
             },
@@ -185,7 +136,6 @@ async def test_list_personnel_with_search(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test listing personnel with search functionality."""
@@ -196,7 +146,6 @@ async def test_list_personnel_with_search(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "search": search_term,
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
@@ -223,7 +172,6 @@ async def test_list_personnel_with_search_by_pers_no(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test listing personnel with search by pers_no."""
@@ -234,7 +182,6 @@ async def test_list_personnel_with_search_by_pers_no(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "search": search_term,
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
@@ -253,127 +200,6 @@ async def test_list_personnel_with_search_by_pers_no(
             found = True
             break
     assert found, "Search term should match at least one personnel pers_no"
-
-
-@pytest.mark.asyncio
-async def test_list_personnel_with_overrides(
-    client: TestClient,
-    admin_token_headers: dict[str, str],
-    db_session,
-    sample_grouping: Grouping,
-    sample_personnel,
-    sample_users,
-):
-    """Test listing personnel with grouping overrides."""
-    # Create override for first personnel
-    override = GroupingPersonnelOverride(
-        grouping_id=str(sample_grouping.id),
-        personnel_id=str(sample_personnel[0].id),
-        unit="Override Unit",
-        sub_unit_1="Override Subunit",
-        created_by=str(sample_users["admin"].id),
-    )
-
-    db_session.add(override)
-    await db_session.commit()
-
-    response = client.get(
-        "/api/v1/personnel",
-        headers=admin_token_headers,
-        params={
-            "grouping_id": str(sample_grouping.id),
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-
-    # Find the personnel with override
-    personnel_with_override = None
-    for personnel in data:
-        if personnel["id"] == str(sample_personnel[0].id):
-            personnel_with_override = personnel
-            break
-
-    assert personnel_with_override is not None
-    assert personnel_with_override["has_override"] is True
-
-
-@pytest.mark.asyncio
-async def test_list_personnel_with_grouping_notes(
-    client: TestClient,
-    admin_token_headers: dict[str, str],
-    db_session,
-    sample_grouping: Grouping,
-    sample_personnel,
-    sample_users,
-):
-    """Test listing personnel with grouping notes."""
-    # Create grouping notes for first personnel
-    notes = GroupingNotes(
-        grouping_id=str(sample_grouping.id),
-        personnel_id=str(sample_personnel[0].id),
-        notes="Medical exemption granted",
-        created_by=str(sample_users["admin"].id),
-        updated_by=str(sample_users["admin"].id),
-    )
-
-    db_session.add(notes)
-    await db_session.commit()
-
-    response = client.get(
-        "/api/v1/personnel",
-        headers=admin_token_headers,
-        params={
-            "grouping_id": str(sample_grouping.id),
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-
-    # Find the personnel with notes
-    personnel_with_notes = None
-    for personnel in data:
-        if personnel["id"] == str(sample_personnel[0].id):
-            personnel_with_notes = personnel
-            break
-
-    assert personnel_with_notes is not None
-    assert personnel_with_notes["grouping_notes"] == "Medical exemption granted"
-
-
-@pytest.mark.asyncio
-async def test_get_personnel_by_id_with_grouping_context(
-    client: TestClient,
-    admin_token_headers: dict[str, str],
-    sample_users,
-    db_session,
-    sample_grouping: Grouping,
-    sample_personnel,
-):
-    """Test getting personnel by ID with grouping context."""
-    response = client.get(
-        f"/api/v1/personnel/{sample_personnel[0].id}",
-        headers=admin_token_headers,
-        params={
-            "grouping_id": str(sample_grouping.id),
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["id"] == str(sample_personnel[0].id)
-    assert data["name"] == sample_personnel[0].full_name
-    assert data["grouping_id"] == str(sample_grouping.id)
-    assert "has_override" in data
-    assert "grouping_notes" in data
 
 
 @pytest.mark.asyncio
@@ -397,9 +223,7 @@ async def test_get_personnel_by_id_without_grouping_context_as_admin(
     data = response.json()
     assert data["id"] == str(sample_personnel[0].id)
     assert data["name"] == sample_personnel[0].full_name
-    assert data["grouping_id"] is None
-    assert data["has_override"] is False
-    assert data["grouping_notes"] is None
+    assert "grouping_id" not in data
 
 
 async def test_get_personnel_by_id_without_grouping_context_as_user_forbidden(
@@ -413,7 +237,7 @@ async def test_get_personnel_by_id_without_grouping_context_as_user_forbidden(
         "get",
         f"/api/v1/personnel/{sample_personnel[0].id}",
         user_token_headers,
-        expected_detail="Only admins can view personnel without grouping context",
+        expected_detail="Only admins can view personnel",
         params={
             "user_id": "user-id",
             "user_role": "user",
@@ -422,62 +246,11 @@ async def test_get_personnel_by_id_without_grouping_context_as_user_forbidden(
 
 
 @pytest.mark.asyncio
-async def test_get_personnel_by_id_with_override_and_notes(
-    client: TestClient,
-    admin_token_headers: dict[str, str],
-    db_session,
-    sample_grouping: Grouping,
-    sample_personnel,
-    sample_users,
-):
-    """Test getting personnel by ID with override and notes."""
-    # Create override
-    override = GroupingPersonnelOverride(
-        grouping_id=str(sample_grouping.id),
-        personnel_id=str(sample_personnel[0].id),
-        unit="Override Unit",
-        sub_unit_1="Override Subunit",
-        created_by=str(sample_users["admin"].id),
-    )
-
-    db_session.add(override)
-
-    # Create notes
-    notes = GroupingNotes(
-        grouping_id=str(sample_grouping.id),
-        personnel_id=str(sample_personnel[0].id),
-        notes="Medical exemption granted",
-        created_by=str(sample_users["admin"].id),
-        updated_by=str(sample_users["admin"].id),
-    )
-
-    db_session.add(notes)
-    await db_session.commit()
-
-    response = client.get(
-        f"/api/v1/personnel/{sample_personnel[0].id}",
-        headers=admin_token_headers,
-        params={
-            "grouping_id": str(sample_grouping.id),
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["id"] == str(sample_personnel[0].id)
-    assert data["has_override"] is True
-    assert data["grouping_notes"] == "Medical exemption granted"
-
-
-@pytest.mark.asyncio
 async def test_update_personnel_as_admin(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Unit/subunit edits are redirected to a TaggingEntry overlay; the
@@ -491,7 +264,6 @@ async def test_update_personnel_as_admin(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -514,7 +286,6 @@ async def test_update_personnel_remap_upserts_tagging_entry(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Two sequential remaps on the same person produce ONE tagging entry
@@ -552,7 +323,6 @@ async def test_update_personnel_identity_fields_rejected(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Rank/name edits are rejected with 409 — the NR is read-only."""
@@ -561,8 +331,7 @@ async def test_update_personnel_identity_fields_rejected(
             f"/api/v1/personnel/{sample_personnel[0].id}",
             headers=admin_token_headers,
             params={
-                "grouping_id": str(sample_grouping.id),
-                "user_id": str(sample_users["admin"].id),
+                    "user_id": str(sample_users["admin"].id),
                 "user_role": "admin",
             },
             json=payload,
@@ -630,7 +399,6 @@ async def test_list_personnel_with_status_filter(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test listing personnel with status filter."""
@@ -642,7 +410,6 @@ async def test_list_personnel_with_status_filter(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "status": "archived",
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
@@ -664,7 +431,6 @@ async def test_list_personnel_with_category_filter(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test listing personnel filtered by category (Officer / WOSE).
@@ -676,7 +442,6 @@ async def test_list_personnel_with_category_filter(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "category": "Officer",
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
@@ -693,7 +458,6 @@ async def test_list_personnel_with_category_filter(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "category": "WOSE",
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
@@ -710,7 +474,6 @@ async def test_list_personnel_with_category_filter(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -726,7 +489,6 @@ async def test_update_personnel_status_only_does_not_touch_tagging(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Updating only ``status`` mutates the personnel row directly and does
@@ -762,7 +524,6 @@ async def test_update_personnel_recomputes_category(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Under the 1:1 read-only NR model, rank changes are rejected (409)
@@ -771,7 +532,6 @@ async def test_update_personnel_recomputes_category(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -780,34 +540,10 @@ async def test_update_personnel_recomputes_category(
     assert response.status_code == 409
 
 
-@pytest.mark.asyncio
-async def test_update_personnel_invalid_rank_rejected(
-    client: TestClient,
-    admin_token_headers: dict[str, str],
-    sample_users,
-    sample_grouping: Grouping,
-    sample_personnel,
-):
-    """Rank edits are identity edits — rejected with 409 under the read-only
-    NR model (no rank-validation 400 path is reachable via PATCH)."""
-    response = client.patch(
-        f"/api/v1/personnel/{sample_personnel[0].id}",
-        headers=admin_token_headers,
-        params={
-            "grouping_id": str(sample_grouping.id),
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
-        json={"rank": "SGT"},
-    )
-    assert response.status_code == 409
-
-
 async def test_list_personnel_with_pagination(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
-    sample_grouping: Grouping,
 ):
     """Test listing personnel with pagination."""
     assert_pagination_works(
@@ -815,26 +551,6 @@ async def test_list_personnel_with_pagination(
         "/api/v1/personnel",
         admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
-    )
-
-
-async def test_list_personnel_invalid_grouping_id(
-    client: TestClient,
-    admin_token_headers: dict[str, str],
-    sample_users,
-):
-    """Test listing personnel with invalid grouping ID."""
-    assert_404_response(
-        client,
-        "get",
-        "/api/v1/personnel",
-        admin_token_headers,
-        params={
-            "grouping_id": "invalid-grouping-id",
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -879,112 +595,6 @@ async def test_update_personnel_invalid_id(
     assert response.status_code == 404
 
 
-@pytest.mark.asyncio
-async def test_list_personnel_from_different_nominal_roll_forbidden(
-    client: TestClient,
-    admin_token_headers: dict[str, str],
-    sample_users,
-    db_session,
-    sample_grouping: Grouping,
-    sample_nominal_roll,
-):
-    """Test that personnel from different nominal_roll are not returned."""
-    # Create a real second nominal roll (Postgres enforces the FK) and
-    # personnel belonging to it
-    other_roll = NominalRoll(
-        caa=date(2024, 2, 1),
-        csv_hash="other_hash",
-        personnel_count=1,
-        uploaded_by=str(sample_users["admin"].id),
-    )
-    db_session.add(other_roll)
-    await db_session.commit()
-
-    other_personnel = Personnel(
-        nominal_roll_id=str(other_roll.id),
-        rank="Private",
-        category="WOSE",
-        full_name="Other Person",
-        unit="Other Unit",
-        created_by="admin-user-id",
-    )
-
-    db_session.add(other_personnel)
-    await db_session.commit()
-
-    response = client.get(
-        "/api/v1/personnel",
-        headers=admin_token_headers,
-        params={
-            "grouping_id": str(sample_grouping.id),
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-
-    # Other personnel should not be in the list
-    other_found = False
-    for personnel in data:
-        if personnel["id"] == str(other_personnel.id):
-            other_found = True
-            break
-
-    assert other_found is False
-
-
-@pytest.mark.asyncio
-async def test_get_personnel_from_different_nominal_roll_forbidden(
-    client: TestClient,
-    admin_token_headers: dict[str, str],
-    sample_users,
-    db_session,
-    sample_grouping: Grouping,
-    sample_nominal_roll,
-):
-    """Test that getting personnel from different nominal_roll returns error."""
-    # Create a real second nominal roll (Postgres enforces the FK) and
-    # personnel belonging to it
-    other_roll = NominalRoll(
-        caa=date(2024, 2, 1),
-        csv_hash="other_hash",
-        personnel_count=1,
-        uploaded_by=str(sample_users["admin"].id),
-    )
-    db_session.add(other_roll)
-    await db_session.commit()
-
-    other_personnel = Personnel(
-        nominal_roll_id=str(other_roll.id),
-        rank="Private",
-        category="WOSE",
-        full_name="Other Person",
-        unit="Other Unit",
-        created_by="admin-user-id",
-    )
-
-    db_session.add(other_personnel)
-    await db_session.commit()
-
-    response = client.get(
-        f"/api/v1/personnel/{other_personnel.id}",
-        headers=admin_token_headers,
-        params={
-            "grouping_id": str(sample_grouping.id),
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
-    )
-
-    assert response.status_code == 400
-    assert (
-        "does not belong to this grouping's nominal roll"
-        in response.json()["detail"]
-    )
-
-
 # ============================================================================
 # Session 3 Tests: Audit Trail, Sorting, and Enhanced Validation
 # ============================================================================
@@ -996,7 +606,6 @@ async def test_update_personnel_sets_audit_trail(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """A status update sets audit fields on the personnel row. (Under the
@@ -1007,7 +616,6 @@ async def test_update_personnel_sets_audit_trail(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -1023,7 +631,6 @@ async def test_update_personnel_sets_audit_trail(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -1047,7 +654,6 @@ async def test_list_personnel_sort_by_name_asc(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test sorting personnel by name ascending."""
@@ -1055,7 +661,6 @@ async def test_list_personnel_sort_by_name_asc(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
             "sort_by": "name",
@@ -1077,7 +682,6 @@ async def test_list_personnel_sort_by_name_desc(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test sorting personnel by name descending."""
@@ -1085,7 +689,6 @@ async def test_list_personnel_sort_by_name_desc(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
             "sort_by": "name",
@@ -1107,7 +710,6 @@ async def test_list_personnel_sort_by_rank(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test sorting personnel by rank."""
@@ -1115,7 +717,6 @@ async def test_list_personnel_sort_by_rank(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
             "sort_by": "rank",
@@ -1137,7 +738,6 @@ async def test_list_personnel_sort_by_status(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test sorting personnel by status."""
@@ -1145,7 +745,6 @@ async def test_list_personnel_sort_by_status(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
             "sort_by": "status",
@@ -1167,7 +766,6 @@ async def test_list_personnel_invalid_sort_field_ignored(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test that invalid sort field is ignored (doesn't cause error)."""
@@ -1175,7 +773,6 @@ async def test_list_personnel_invalid_sort_field_ignored(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
             "sort_by": "invalid_field",  # Invalid field
@@ -1194,7 +791,6 @@ async def test_update_personnel_invalid_status(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test that updating personnel with invalid status fails validation."""
@@ -1206,7 +802,6 @@ async def test_update_personnel_invalid_status(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -1223,7 +818,6 @@ async def test_update_personnel_empty_rank(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test that updating personnel with empty rank fails validation."""
@@ -1235,7 +829,6 @@ async def test_update_personnel_empty_rank(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -1252,7 +845,6 @@ async def test_update_personnel_too_long_name(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test that updating personnel with too long name fails validation."""
@@ -1264,7 +856,6 @@ async def test_update_personnel_too_long_name(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -1281,7 +872,6 @@ async def test_personnel_response_includes_audit_fields(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test that personnel responses include audit trail fields."""
@@ -1289,7 +879,6 @@ async def test_personnel_response_includes_audit_fields(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
         },
@@ -1311,7 +900,6 @@ async def test_list_personnel_with_filters_and_sorting(
     admin_token_headers: dict[str, str],
     sample_users,
     db_session,
-    sample_grouping: Grouping,
     sample_personnel,
 ):
     """Test combining filters with sorting."""
@@ -1323,7 +911,6 @@ async def test_list_personnel_with_filters_and_sorting(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "grouping_id": str(sample_grouping.id),
             "user_id": str(sample_users["admin"].id),
             "user_role": "admin",
             "status": "archived",
@@ -1341,3 +928,534 @@ async def test_list_personnel_with_filters_and_sorting(
     # Should be sorted by name
     names = [p["name"] for p in data]
     assert names == sorted(names)
+
+
+# ============================================================================
+# Callup status & remarks (issue 06 — NR status & remarks columns)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "callup_status",
+    ["Called Up", "Deferred", "Disrupted", "MR", "Age Limit", "Other"],
+)
+async def test_update_personnel_callup_status_all_values(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    db_session,
+    sample_personnel,
+    callup_status: str,
+):
+    """Admins can set any of the six callup statuses; the row and response
+    reflect the change immediately."""
+    p = sample_personnel[0]
+
+    response = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params={
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "admin",
+        },
+        json={"callup_status": callup_status},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["callup_status"] == callup_status
+
+    await db_session.refresh(p)
+    assert p.callup_status == callup_status
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_value", ["Not Called Up", "deferred", "called", ""])
+async def test_update_personnel_callup_status_invalid_rejected(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_personnel,
+    bad_value: str,
+):
+    """Values outside the six-status enum are rejected with 422. The check is
+    case-sensitive: 'deferred' is not 'Deferred'."""
+    p = sample_personnel[0]
+
+    response = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params={
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "admin",
+        },
+        json={"callup_status": bad_value},
+    )
+
+    assert response.status_code == 422, bad_value
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_remarks_set_and_clear(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    db_session,
+    sample_personnel,
+):
+    """Remarks are settable, whitespace-normalised, and clearable (empty
+    string or explicit null both clear)."""
+    p = sample_personnel[0]
+    base_params = {
+        "user_id": str(sample_users["admin"].id),
+        "user_role": "admin",
+    }
+
+    r1 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"remarks": "  On course until Friday  "},
+    )
+    assert r1.status_code == 200
+    assert r1.json()["remarks"] == "On course until Friday"
+
+    r2 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"remarks": ""},
+    )
+    assert r2.status_code == 200
+    await db_session.refresh(p)
+    assert p.remarks is None
+
+    r3 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"remarks": "temp"},
+    )
+    assert r3.status_code == 200
+    r4 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"remarks": None},
+    )
+    assert r4.status_code == 200
+    await db_session.refresh(p)
+    assert p.remarks is None
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_callup_fields_as_user_forbidden(
+    client: TestClient,
+    user_token_headers: dict[str, str],
+    sample_personnel,
+):
+    """Non-admins cannot change callup_status or remarks."""
+    p = sample_personnel[0]
+
+    for payload in ({"callup_status": "Deferred"}, {"remarks": "nope"}):
+        response = client.patch(
+            f"/api/v1/personnel/{p.id}",
+            headers=user_token_headers,
+            params={"user_id": "user-id", "user_role": "user"},
+            json=payload,
+        )
+        assert response.status_code == 403, payload
+
+
+# ============================================================================
+# Manual serviceman creation (issue 26)
+# ============================================================================
+
+
+def _create_payload(nominal_roll_id: str, **overrides) -> dict:
+    """Minimal valid PersonnelCreate body for the given roll."""
+    payload = {
+        "nominal_roll_id": str(nominal_roll_id),
+        "rank": "PTE",
+        "name": "Manual Person",
+        "unit": "Coy A",
+    }
+    payload.update(overrides)
+    return payload
+
+
+@pytest.mark.asyncio
+async def test_create_personnel_manual_without_pers_no(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_nominal_roll,
+    sample_personnel,
+    db_session,
+):
+    """Super-admin can add a serviceman with unknown pers_no. The row carries
+    source="manual", the defaults make it manageable like any other row, the
+    roll's personnel_count increments, and the create is audited."""
+    admin_id = str(sample_users["admin"].id)
+
+    response = client.post(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params={"user_id": admin_id, "user_role": "super_admin"},
+        json=_create_payload(sample_nominal_roll.id),
+    )
+
+    assert response.status_code == 201, response.text
+    data = response.json()
+    assert data["pers_no"] is None
+    assert data["source"] == "manual"
+    assert data["status"] == "active"
+    assert data["callup_status"] == "Called Up"
+    assert data["category"] == "WOSE"  # inferred from PTE
+    assert data["created_by"] == admin_id
+
+    await db_session.refresh(sample_nominal_roll)
+    assert sample_nominal_roll.personnel_count == 4  # 3 sample rows + 1
+
+    audit = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.entity_type == "personnel",
+                AuditLog.entity_id == data["id"],
+                AuditLog.action == "create",
+            )
+        )
+    ).scalar_one()
+    assert "Manually added" in audit.description
+    assert audit.user_id == admin_id
+
+    # Multiple unknown-pers_no rows per roll are legal (NULLs are distinct).
+    second = client.post(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params={"user_id": admin_id, "user_role": "super_admin"},
+        json=_create_payload(sample_nominal_roll.id, name="Second Manual"),
+    )
+    assert second.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_create_personnel_manual_with_pers_no_and_fields(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_nominal_roll,
+    db_session,
+):
+    """Full-field manual create: pers_no, sub-units, callup override and
+    remarks (whitespace-normalised) round-trip."""
+    response = client.post(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params={
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "super_admin",
+        },
+        json=_create_payload(
+            sample_nominal_roll.id,
+            rank="LTA",
+            name="Manual Officer",
+            pers_no="  88880001  ",
+            unit="Coy B",
+            sub_unit_1="Platoon 3",
+            sub_unit_2="  ",
+            callup_status="Deferred",
+            remarks="  On course  ",
+        ),
+    )
+
+    assert response.status_code == 201, response.text
+    data = response.json()
+    assert data["pers_no"] == "88880001"  # stripped
+    assert data["rank"] == "LTA"
+    assert data["category"] == "Officer"
+    assert data["unit"] == "Coy B"
+    assert data["sub_unit_1"] == "Platoon 3"
+    assert data["sub_unit_2"] is None  # blank becomes NULL
+    assert data["callup_status"] == "Deferred"
+    assert data["remarks"] == "On course"
+
+    row = (
+        await db_session.execute(
+            select(Personnel).where(Personnel.id == data["id"])
+        )
+    ).scalar_one()
+    assert row.source == "manual"
+
+
+@pytest.mark.asyncio
+async def test_create_personnel_permission_gates(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    user_token_headers: dict[str, str],
+    sample_users,
+    sample_nominal_roll,
+):
+    """Manual creation is super-admin only: admins and users get 403."""
+    for headers, role in (
+        (admin_token_headers, "admin"),
+        (user_token_headers, "user"),
+    ):
+        response = client.post(
+            "/api/v1/personnel",
+            headers=headers,
+            params={
+                "user_id": str(sample_users["admin"].id),
+                "user_role": role,
+            },
+            json=_create_payload(sample_nominal_roll.id),
+        )
+        assert response.status_code == 403, role
+        assert "super-admin" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_personnel_unknown_nominal_roll(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+):
+    """An unknown nominal_roll_id is a 404, not a 500 (FK guard)."""
+    response = client.post(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params={
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "super_admin",
+        },
+        json=_create_payload("00000000-0000-0000-0000-000000000000"),
+    )
+    assert response.status_code == 404
+    assert "Nominal roll not found" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_personnel_invalid_rank(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_nominal_roll,
+):
+    """Unknown ranks are rejected with 400 and the valid rank list."""
+    response = client.post(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params={
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "super_admin",
+        },
+        json=_create_payload(sample_nominal_roll.id, rank="SGT"),
+    )
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "Invalid rank" in detail
+    assert "CPL" in detail and "LTA" in detail  # valid ranks are listed
+
+
+@pytest.mark.asyncio
+async def test_create_personnel_duplicate_pers_no_within_roll(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_nominal_roll,
+    sample_personnel,
+    db_session,
+):
+    """Duplicate pers_no on the same roll is a 409; the same pers_no on a
+    different roll stays allowed (matches CSV semantics)."""
+    admin_id = str(sample_users["admin"].id)
+    super_params = {"user_id": admin_id, "user_role": "super_admin"}
+
+    dup = client.post(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params=super_params,
+        json=_create_payload(
+            sample_nominal_roll.id, pers_no="10000001"  # sample_personnel[0]
+        ),
+    )
+    assert dup.status_code == 409
+    assert "10000001" in dup.json()["detail"]
+
+    other_roll = NominalRoll(
+        caa=date(2024, 2, 1),
+        csv_hash="hash-26",
+        personnel_count=0,
+        uploaded_by=admin_id,
+    )
+    db_session.add(other_roll)
+    await db_session.commit()
+
+    ok = client.post(
+        "/api/v1/personnel",
+        headers=admin_token_headers,
+        params=super_params,
+        json=_create_payload(other_roll.id, pers_no="10000001"),
+    )
+    assert ok.status_code == 201
+
+
+# ============================================================================
+# PATCH pers_no: super-admin fill-in-later flow (issue 26)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_pers_no_set_and_clear(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    db_session,
+    sample_personnel,
+):
+    """Super-admin can fill in pers_no later and clear it again (empty or
+    explicit null); updates stamp updated_at/updated_by."""
+    p = sample_personnel[0]
+    base_params = {
+        "user_id": str(sample_users["admin"].id),
+        "user_role": "super_admin",
+    }
+
+    r1 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"pers_no": " 77770001 "},
+    )
+    assert r1.status_code == 200, r1.text
+    assert r1.json()["pers_no"] == "77770001"  # stripped
+    await db_session.refresh(p)
+    assert p.pers_no == "77770001"
+    assert p.updated_by == str(sample_users["admin"].id)
+    assert p.updated_at is not None
+
+    r2 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"pers_no": ""},
+    )
+    assert r2.status_code == 200
+    await db_session.refresh(p)
+    assert p.pers_no is None
+
+    r3 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"pers_no": "77770002"},
+    )
+    assert r3.status_code == 200
+    r4 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=base_params,
+        json={"pers_no": None},
+    )
+    assert r4.status_code == 200
+    await db_session.refresh(p)
+    assert p.pers_no is None
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_pers_no_duplicate_rejected(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_personnel,
+    db_session,
+):
+    """Setting a pers_no already used on the same roll (by another person)
+    is a 409 with a clear message."""
+    p = sample_personnel[0]  # 10000001
+    response = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params={
+            "user_id": str(sample_users["admin"].id),
+            "user_role": "super_admin",
+        },
+        json={"pers_no": "10000002"},  # sample_personnel[1]
+    )
+    assert response.status_code == 409
+    assert "10000002" in response.json()["detail"]
+    await db_session.refresh(p)
+    assert p.pers_no == "10000001"  # unchanged
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_pers_no_as_admin_forbidden(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_personnel,
+):
+    """Admins cannot change pers_no (403) but keep the other PATCH fields."""
+    p = sample_personnel[0]
+    params = {"user_id": str(sample_users["admin"].id), "user_role": "admin"}
+
+    blocked = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=params,
+        json={"pers_no": "12345678"},
+    )
+    assert blocked.status_code == 403
+    assert "personnel numbers" in blocked.json()["detail"].lower()
+
+    allowed = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        params=params,
+        json={"remarks": "admins keep this"},
+    )
+    assert allowed.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_pers_no_as_user_forbidden(
+    client: TestClient,
+    user_token_headers: dict[str, str],
+    sample_personnel,
+):
+    """Regular users hit the admin gate for pers_no like every PATCH."""
+    response = client.patch(
+        f"/api/v1/personnel/{sample_personnel[0].id}",
+        headers=user_token_headers,
+        params={"user_id": "user-id", "user_role": "user"},
+        json={"pers_no": "12345678"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_personnel_response_includes_source(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    sample_personnel,
+):
+    """The source provenance field is part of every personnel response."""
+    params = {
+        "user_id": str(sample_users["admin"].id),
+        "user_role": "admin",
+    }
+
+    listing = client.get("/api/v1/personnel", headers=admin_token_headers, params=params)
+    assert listing.status_code == 200
+    assert all("source" in row for row in listing.json())
+    assert all(row["source"] is None for row in listing.json())  # CSV rows
+
+    single = client.get(
+        f"/api/v1/personnel/{sample_personnel[0].id}",
+        headers=admin_token_headers,
+        params=params,
+    )
+    assert single.status_code == 200
+    assert single.json()["source"] is None

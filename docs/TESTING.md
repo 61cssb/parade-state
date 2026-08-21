@@ -51,7 +51,6 @@
 tests/
 ├── conftest.py                 # Shared fixtures and configuration
 ├── integration/                # Integration tests
-│   ├── test_access_control_api.py
 │   ├── test_api.py
 │   ├── test_attendance_api.py
 │   └── test_*.py
@@ -318,7 +317,7 @@ All sample fixtures are function-scoped and use `db_session`:
 - `sample_users`: Creates admin and regular users
 - `sample_nominal_roll`: Creates establishment record
 - `sample_personnel`: Creates personnel records
-- `sample_grouping`: Creates grouping with access grants
+- `sample_grouping`: Creates a grouping (label + groups) on the sample NR
 - `sample_session`: Creates session record
 - `sample_sessions`: Creates multiple session records
 - `sample_attendance_records`: Creates attendance records

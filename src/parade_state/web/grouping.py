@@ -1,33 +1,27 @@
-"""User-facing grouping summary view.
+"""User-facing grouping browser view (issue 26 redesign).
 
-Shows grouping-level attendance summary with AM/PM counts and a unit
-breakdown for the current day, drawn from the NR/Tagging-scoped attendance
-model.
+Shows the groupings based on the nominal roll active for attendance:
+a dropdown selects the grouping, and the roster table carries each
+serviceman's group(s), checkbox and remarks. Visible to all
+authenticated users; every mutation is super-admin only and enforced
+server-side at the API. Groupings never read or write attendance.
 """
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
-from parade_state.api.access_control import (
-    get_user_accessible_groupings,
-    verify_grouping_access_or_admin,
-)
-from parade_state.api.attendance import attendance_counts_for_date
-from parade_state.auth.admin_dependencies import (
-    get_current_admin_user_optional,
-    get_current_user_optional,
-)
+from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
 from parade_state.models import (
-    Attendance,
     Grouping,
-    GroupingPersonnelExclusion,
+    GroupingMemberState,
+    GroupingMembership,
+    NominalRoll,
     Personnel,
 )
-from parade_state.models.attendance import PRESENT_LIKE_STATUSES
-from parade_state.utils import utc_dt
 
 router = APIRouter()
 
@@ -36,94 +30,175 @@ router = APIRouter()
 async def grouping_view(
     request: Request,
     grouping_id: str | None = None,
+    group: str | None = None,
 ):
-    """Render the grouping summary page for non-admin users.
-
-    Shows today's AM/PM attendance counts and a unit breakdown.
-    """
+    """Render the grouping browser page."""
     current_user = await get_current_user_optional(request)
     if not current_user:
         return RedirectResponse(url="/auth/login", status_code=302)
 
-    # Admin-only system: the viewer role is deferred, so gate the viewer
-    # surface on admin role until it exists.
-    if current_user.role not in ("admin", "super_admin"):
-        return RedirectResponse(url="/auth/no-access", status_code=302)
-
     session_maker = get_session_maker()
     async with session_maker() as db:
-        # Get groupings the user can access
-        accessible = await get_user_accessible_groupings(
-            str(current_user.id), current_user.role, db
-        )
+        active_nr = (
+            await db.execute(
+                select(NominalRoll).where(NominalRoll.attendance_active.is_(True))
+            )
+        ).scalar_one_or_none()
 
-        if not accessible:
-            env = _get_templates(request)
-            template = env.get_template("grouping.html")
-            return HTMLResponse(
-                content=template.render(
-                    request=request,
-                    user=_user_dict(current_user),
-                    active_page="grouping",
-                    groupings=[],
-                    selected_grouping=None,
-                    counts=None,
-                    unit_breakdown=[],
+        groupings: list[Grouping] = []
+        selected: Grouping | None = None
+        previous_nr = None
+        previous_groupings: list[Grouping] = []
+
+        if active_nr is not None:
+            groupings = list(
+                (
+                    await db.execute(
+                        select(Grouping)
+                        .where(Grouping.nominal_roll_id == active_nr.id)
+                        .options(selectinload(Grouping.groups))
+                        .order_by(Grouping.created_at)
+                    )
                 )
+                .scalars()
+                .all()
             )
+            if grouping_id:
+                selected = next(
+                    (g for g in groupings if str(g.id) == grouping_id), None
+                )
+            if selected is None and groupings:
+                selected = groupings[0]
 
-        # Resolve selected grouping
-        selected = None
-        if grouping_id:
-            for g in accessible:
-                if str(g.id) == grouping_id:
-                    selected = g
-                    break
+            # Copy-from-previous offer: only meaningful on a blank slate.
+            if not groupings and active_nr.attendance_activated_at is not None:
+                previous_nr = (
+                    await db.execute(
+                        select(NominalRoll)
+                        .where(
+                            NominalRoll.attendance_activated_at.is_not(None),
+                            NominalRoll.attendance_activated_at
+                            < active_nr.attendance_activated_at,
+                        )
+                        .order_by(NominalRoll.attendance_activated_at.desc())
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if previous_nr is not None:
+                    previous_groupings = list(
+                        (
+                            await db.execute(
+                                select(Grouping)
+                                .where(
+                                    Grouping.nominal_roll_id == previous_nr.id
+                                )
+                                .order_by(Grouping.created_at)
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
 
-        if not selected:
-            active_groups = [g for g in accessible if g.status == "active"]
-            if active_groups:
-                selected = active_groups[0]
-            else:
-                selected = accessible[0]
-
-        # Verify access (redundant but consistent)
-        _, has_access = await verify_grouping_access_or_admin(
-            str(selected.id), str(current_user.id), current_user.role, db
-        )
-        if not has_access:
-            return RedirectResponse(url="/auth/login", status_code=302)
-
-        today = utc_dt.utcnow().date()
-
-        counts = await attendance_counts_for_date(
-            selected.nominal_roll_id, today, db
-        )
-
-        # Unit breakdown from today's attendance rows.
-        unit_result = await db.execute(
-            select(Attendance).where(
-                Attendance.nominal_roll_id == selected.nominal_roll_id,
-                Attendance.date == today,
+        personnel_rows: list[dict] = []
+        selected_groups: list[dict] = []
+        if selected is not None:
+            group_rows = list(
+                (
+                    await db.execute(
+                        select(GroupingMembership).where(
+                            GroupingMembership.grouping_id == selected.id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
             )
-        )
-        unit_map: dict[str, dict[str, int]] = {}
-        for row in unit_result.scalars().all():
-            unit = row.unit_snapshot or "—"
-            stats = unit_map.setdefault(unit, {"present": 0, "total": 0})
-            for value in (row.status_am, row.status_pm):
-                stats["total"] += 1
-                if value in PRESENT_LIKE_STATUSES:
-                    stats["present"] += 1
-        unit_rows = [
-            {
-                "unit": unit,
-                "present": s["present"],
-                "absent": s["total"] - s["present"],
-                "total": s["total"],
+            groups_by_person: dict[str, list[str]] = {}
+            for membership in group_rows:
+                groups_by_person.setdefault(
+                    membership.personnel_id, []
+                ).append(membership.group_id)
+
+            state_rows = (
+                await db.execute(
+                    select(GroupingMemberState).where(
+                        GroupingMemberState.grouping_id == selected.id
+                    )
+                )
+            ).scalars().all()
+            state_by_person = {
+                state.personnel_id: state for state in state_rows
             }
-            for unit, s in sorted(unit_map.items())
-        ]
+
+            all_groups = sorted(selected.groups, key=lambda g: g.position)
+            member_counts: dict[str, int] = {}
+            for membership in group_rows:
+                member_counts[membership.group_id] = (
+                    member_counts.get(membership.group_id, 0) + 1
+                )
+            selected_groups = [
+                {
+                    "id": str(group.id),
+                    "label": group.label,
+                    "member_count": member_counts.get(group.id, 0),
+                }
+                for group in all_groups
+            ]
+
+            people = (
+                (
+                    await db.execute(
+                        select(Personnel)
+                        .where(
+                            Personnel.nominal_roll_id == selected.nominal_roll_id,
+                            Personnel.status == "active",
+                        )
+                        .order_by(
+                            Personnel.unit,
+                            Personnel.sub_unit_1,
+                            Personnel.rank,
+                            Personnel.full_name,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for person in people:
+                state = state_by_person.get(person.id)
+                personnel_rows.append(
+                    {
+                        "id": str(person.id),
+                        "rank": person.rank,
+                        "full_name": person.full_name,
+                        "unit": person.unit,
+                        "sub_unit_1": person.sub_unit_1,
+                        "group_ids": [
+                            str(gid) for gid in groups_by_person.get(person.id, [])
+                        ],
+                        "checkbox": bool(state and state.checkbox),
+                        "remarks": state.remarks if state else None,
+                    }
+                )
+
+    # Group filter (NR-filter pattern): a group id keeps only members of
+    # that group; the "ungrouped" sentinel keeps only servicemen with no
+    # group. The ungrouped option is only offered when the grouping allows
+    # it — unknown values fall back to the unfiltered view.
+    total_count = len(personnel_rows)
+    group_filter = ""
+    if selected is not None and group:
+        known = {g["id"] for g in selected_groups}
+        if group == "ungrouped" and selected.allow_ungrouped:
+            group_filter = group
+            personnel_rows = [
+                row for row in personnel_rows if not row["group_ids"]
+            ]
+        elif group in known:
+            group_filter = group
+            personnel_rows = [
+                row for row in personnel_rows if group in row["group_ids"]
+            ]
 
     env = _get_templates(request)
     template = env.get_template("grouping.html")
@@ -132,106 +207,36 @@ async def grouping_view(
         request=request,
         user=_user_dict(current_user),
         active_page="grouping",
+        active_nr=(
+            {"id": str(active_nr.id), "caa": active_nr.caa}
+            if active_nr is not None
+            else None
+        ),
         groupings=[
-            {"id": str(g.id), "name": g.name, "status": g.status} for g in accessible
+            {"id": str(g.id), "label": g.label} for g in groupings
         ],
-        selected_grouping={
-            "id": str(selected.id),
-            "name": selected.name,
-            "status": selected.status,
-            "mode": selected.mode,
-            "valid_from": selected.valid_from,
-            "valid_until": selected.valid_until,
-            "notes": selected.notes,
-        },
-        counts=counts,
-        unit_breakdown=unit_rows,
-        today=today,
-    )
-
-    return HTMLResponse(content=html_content)
-
-
-@router.get("/grouping/{grouping_id}/personnel", response_class=HTMLResponse)
-async def grouping_personnel(
-    request: Request,
-    grouping_id: str,
-):
-    """Render the grouping personnel management page (included/excluded lists).
-
-    Moved from /admin/groupings/{id}/personnel when the admin groupings page
-    was merged into this view; the admin login gate is unchanged.
-    """
-    current_admin = await get_current_admin_user_optional(request)
-    if not current_admin:
-        return RedirectResponse(url="/auth/login", status_code=302)
-
-    session_maker = get_session_maker()
-    async with session_maker() as db:
-        # Fetch grouping
-        result = await db.execute(
-            select(Grouping).where(Grouping.id == grouping_id)
-        )
-        grouping = result.scalar_one_or_none()
-        if not grouping:
-            return RedirectResponse(url="/grouping", status_code=302)
-
-        # Fetch all personnel from the grouping's nominal roll
-        personnel_query = (
-            select(Personnel)
-            .where(Personnel.nominal_roll_id == grouping.nominal_roll_id)
-            .order_by(Personnel.unit, Personnel.sub_unit_1, Personnel.rank, Personnel.full_name)
-        )
-        personnel_result = await db.execute(personnel_query)
-        all_personnel = personnel_result.scalars().all()
-
-        # Fetch exclusion records for this grouping
-        exclusions_result = await db.execute(
-            select(GroupingPersonnelExclusion).where(
-                GroupingPersonnelExclusion.grouping_id == grouping_id
-            )
-        )
-        exclusions = exclusions_result.scalars().all()
-        excluded_map = {str(e.personnel_id) for e in exclusions}
-
-    # Build unified list with is_excluded flag
-    personnel_rows = []
-    included_count = 0
-    excluded_count = 0
-    for p in all_personnel:
-        is_excluded = str(p.id) in excluded_map
-        if is_excluded:
-            excluded_count += 1
-        else:
-            included_count += 1
-        personnel_rows.append({
-            "id": str(p.id),
-            "pers_no": p.pers_no,
-            "rank": p.rank,
-            "category": p.category,
-            "full_name": p.full_name,
-            "unit": p.unit,
-            "sub_unit_1": p.sub_unit_1,
-            "is_excluded": is_excluded,
-        })
-
-    env = _get_templates(request)
-    template = env.get_template("grouping_personnel.html")
-
-    html_content = template.render(
-        request=request,
-        user=_user_dict(current_admin),
-        active_page="grouping",
-        grouping={
-            "id": str(grouping.id),
-            "name": grouping.name,
-            "status": grouping.status,
-        },
-        is_draft=grouping.status == "draft",
+        selected_grouping=(
+            {
+                "id": str(selected.id),
+                "label": selected.label,
+                "multiple_membership": selected.multiple_membership,
+                "allow_ungrouped": selected.allow_ungrouped,
+                "groups": selected_groups,
+            }
+            if selected is not None
+            else None
+        ),
         personnel_rows=personnel_rows,
-        included_count=included_count,
-        excluded_count=excluded_count,
-        total_count=len(all_personnel),
+        total_count=total_count,
+        group_filter=group_filter,
+        previous_nr=(
+            {"id": str(previous_nr.id), "caa": previous_nr.caa}
+            if previous_nr is not None
+            else None
+        ),
+        previous_groupings=[
+            {"id": str(g.id), "label": g.label} for g in previous_groupings
+        ],
     )
 
     return HTMLResponse(content=html_content)

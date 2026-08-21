@@ -1,992 +1,867 @@
-"""Tests for grouping API endpoints."""
+"""Groupings API integration tests (issue 26 redesign).
 
-from datetime import date, datetime, timedelta, timezone
+A grouping is a labelled set of group enums on the attendance-active
+nominal roll, with memberships and per-serviceman checkbox / remarks.
+Groupings never interact with attendance — the export carries no
+attendance columns and no endpoint here touches Attendance.
+
+Mutation endpoints are super-admin only; reads are open to every role.
+"""
+
+import csv
+import io
+from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from parade_state.models.attendance import Attendance
-from parade_state.models.csv_ingestion import NominalRoll
-from parade_state.models.grouping import (
+from parade_state.models import (
     Grouping,
-    GroupingNotes,
-    GroupingPersonnelOverride,
+    GroupingGroup,
+    GroupingMemberState,
+    GroupingMembership,
+    NominalRoll,
+    Personnel,
 )
-from parade_state.models.personnel import Personnel
-from parade_state.models.schemas import GroupingCreate, GroupingUpdate
 from parade_state.utils import utc_dt
-from tests.test_utils import (
-    assert_404_response,
-    assert_pagination_works,
-    assert_permission_denied,
-)
+
+SA = {"user_id": "super-admin-test-id", "user_role": "super_admin"}
+ADMIN = {"user_id": "admin-id", "user_role": "admin"}
+USER = {"user_id": "user-id", "user_role": "user"}
+
+BASE = "/api/v1/groupings"
 
 
-@pytest.fixture(autouse=True)
-async def well_known_nominal_rolls(db_session, sample_users):
-    """Create the nominal rolls referenced by this file's fixed IDs.
+def _groups_by_label(response_body: dict) -> dict[str, dict]:
+    return {g["label"]: g for g in response_body["groups"]}
 
-    Several tests build groupings against "nominal_roll-1"/"nominal_roll-2".
-    Postgres enforces the groupings -> nominal_rolls foreign key that
-    SQLite ignores, so those rows must exist for real.
-    """
-    admin_id = str(sample_users["admin"].id)
-    for index in range(5):
-        db_session.add(
-            NominalRoll(
-                id=f"nominal_roll-{index}",
-                caa=date(2024, 6, index + 1),
-                csv_hash=f"well-known-roll-{index}",
-                personnel_count=0,
-                uploaded_by=admin_id,
-            )
-        )
-    await db_session.commit()
+
+# ============================================================================
+# Create
+# ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_create_grouping_as_admin(
-    client: TestClient, admin_token_headers: dict[str, str], db_session,
-    sample_nominal_roll,
+async def test_create_grouping_on_active_nr(
+    client: TestClient, sample_attendance_scope
 ):
-    """Test grouping creation by admin."""
-    grouping_data = {
-        "name": "Test Grouping",
-        "nominal_roll_id": str(sample_nominal_roll.id),
-        "mode": "standard",
-        "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
-        "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
-        "status": "draft",
-        "notes": "Test grouping notes",
-    }
-
     response = client.post(
-        "/api/v1/groupings/",
-        json=grouping_data,
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        f"{BASE}/",
+        params=SA,
+        json={
+            "label": "Duty Groups",
+            "groups": [{"label": "Grp 10"}, {"label": "Grp 2"}],
+            "multiple_membership": False,
+            "allow_ungrouped": True,
+        },
     )
-
-    assert response.status_code == 201
-    data = response.json()
-    assert data["name"] == "Test Grouping"
-    assert data["status"] == "draft"
-    assert data["nominal_roll_id"] == str(sample_nominal_roll.id)
-
-
-@pytest.mark.asyncio
-async def test_create_grouping_as_regular_user_forbidden(
-    client: TestClient, user_token_headers: dict[str, str], db_session
-):
-    """Test that regular users cannot create groupings."""
-    grouping_data = {
-        "name": "Test Grouping",
-        "nominal_roll_id": "test-nominal_roll-123",
-        "mode": "standard",
-        "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
-        "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
-    }
-
-    assert_permission_denied(
-        client,
-        "post",
-        "/api/v1/groupings/",
-        user_token_headers,
-        expected_detail="Only admins and super admins",
-        params={"user_id": "regular-user-id", "user_role": "user"},
-        json_data=grouping_data,
-    )
-
-
-@pytest.mark.asyncio
-async def test_create_grouping_normalizes_aware_datetimes_to_naive_utc(
-    client: TestClient, admin_token_headers: dict[str, str], db_session,
-    sample_nominal_roll,
-):
-    """Datetimes with offsets are stored as naive UTC.
-
-    The columns are TIMESTAMP WITHOUT TIME ZONE; asyncpg (Postgres) rejects
-    aware values outright, and dropping an offset without converting would
-    corrupt non-UTC wall-clock times. A +08:00 payload must therefore land
-    as the equivalent naive UTC instant.
-    """
-    sgt = timezone(timedelta(hours=8))
-    aware_from = (utc_dt.utcnow() + timedelta(days=1)).astimezone(sgt)
-    aware_until = aware_from + timedelta(days=30)
-    grouping_data = {
-        "name": "TZ Grouping",
-        "nominal_roll_id": str(sample_nominal_roll.id),
-        "mode": "standard",
-        "valid_from": aware_from.isoformat(),
-        "valid_until": aware_until.isoformat(),
-    }
-
-    response = client.post(
-        "/api/v1/groupings/",
-        json=grouping_data,
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
-
     assert response.status_code == 201, response.text
-
-    result = await db_session.execute(
-        select(Grouping).where(Grouping.name == "TZ Grouping")
-    )
-    grouping = result.scalar_one()
-    assert grouping.valid_from is not None
-    assert grouping.valid_from.tzinfo is None
-    assert grouping.valid_from == utc_dt.ensure_naive(utc_dt.to_utc(aware_from))
-    assert grouping.valid_until == utc_dt.ensure_naive(utc_dt.to_utc(aware_until))
+    body = response.json()
+    assert body["label"] == "Duty Groups"
+    assert body["nominal_roll_id"] == str(sample_attendance_scope.id)
+    assert body["multiple_membership"] is False
+    assert body["allow_ungrouped"] is True
+    # Display order follows the payload order, not alphabetical.
+    assert [g["label"] for g in body["groups"]] == ["Grp 10", "Grp 2"]
+    assert [g["position"] for g in body["groups"]] == [0, 1]
 
 
 @pytest.mark.asyncio
-async def test_create_grouping_invalid_date_range(
-    client: TestClient, admin_token_headers: dict[str, str], db_session,
-    sample_nominal_roll,
+async def test_create_grouping_requires_active_nr(
+    client: TestClient, sample_nominal_roll
 ):
-    """Test grouping creation with invalid date range."""
-    grouping_data = {
-        "name": "Test Grouping",
-        "nominal_roll_id": str(sample_nominal_roll.id),
-        "mode": "standard",
-        "valid_from": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
-        "valid_until": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
-    }
-
     response = client.post(
-        "/api/v1/groupings/",
-        json=grouping_data,
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        f"{BASE}/",
+        params=SA,
+        json={"label": "No Roll", "groups": []},
     )
-
     assert response.status_code == 400
-    assert "valid_until must be after valid_from" in response.json()["detail"]
+    assert "active for attendance" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_create_grouping_non_existent_nominal_roll(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
+async def test_create_grouping_duplicate_label(
+    client: TestClient, sample_attendance_scope
 ):
-    """Test grouping creation fails when nominal_roll does not exist."""
-    grouping_data = {
-        "name": "Test Grouping",
-        "nominal_roll_id": "does-not-exist",
-        "mode": "standard",
-        "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
-        "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
-    }
+    first = client.post(f"{BASE}/", params=SA, json={"label": "Same"})
+    assert first.status_code == 201
+    second = client.post(f"{BASE}/", params=SA, json={"label": "Same"})
+    assert second.status_code == 409
 
+
+@pytest.mark.asyncio
+async def test_create_grouping_duplicate_group_labels(
+    client: TestClient, sample_attendance_scope
+):
     response = client.post(
-        "/api/v1/groupings/",
-        json=grouping_data,
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        f"{BASE}/",
+        params=SA,
+        json={
+            "label": "Dupes",
+            "groups": [{"label": "A"}, {"label": "A"}],
+        },
     )
-
     assert response.status_code == 400
-    assert "not found" in response.json()["detail"]
+    assert "Duplicate group label" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_create_grouping_from_any_nominal_roll(
-    client: TestClient, admin_token_headers: dict[str, str], db_session,
-    sample_users,
+async def test_create_grouping_rejects_bad_charset(
+    client: TestClient, sample_attendance_scope
 ):
-    """Grouping creation no longer requires a confirmed NR — all NRs are
-    equal under the active-NR attendance model."""
-    other_nominal_roll = NominalRoll(
-        caa=date(2024, 3, 1),
+    response = client.post(
+        f"{BASE}/",
+        params=SA,
+        json={"label": "Bad <script>", "groups": []},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_grouping_non_super_admin_forbidden(
+    client: TestClient, sample_attendance_scope
+):
+    for params in (ADMIN, USER):
+        response = client.post(f"{BASE}/", params=params, json={"label": "X"})
+        assert response.status_code == 403
+
+
+# ============================================================================
+# List / get — active-NR reachability
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_list_scopes_to_active_nr(
+    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
+    sample_grouping, sample_users,
+):
+    # A grouping on a different (non-active) roll must not be listed.
+    other_roll = NominalRoll(
+        caa=date(2024, 2, 1),
         csv_hash="other-hash",
+        personnel_count=0,
         uploaded_by=str(sample_users["admin"].id),
     )
-    db_session.add(other_nominal_roll)
+    db_session.add(other_roll)
+    await db_session.flush()
+    db_session.add(
+        Grouping(
+            label="Other Roll Grouping",
+            nominal_roll_id=str(other_roll.id),
+            created_by=str(sample_users["admin"].id),
+        )
+    )
     await db_session.commit()
 
-    grouping_data = {
-        "name": "Test Grouping",
-        "nominal_roll_id": str(other_nominal_roll.id),
-        "mode": "standard",
-        "valid_from": (utc_dt.utcnow() + timedelta(days=1)).isoformat(),
-        "valid_until": (utc_dt.utcnow() + timedelta(days=30)).isoformat(),
-    }
-
-    response = client.post(
-        "/api/v1/groupings/",
-        json=grouping_data,
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
-
-    assert response.status_code == 201
-
-
-@pytest.mark.asyncio
-async def test_list_groupings(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
-):
-    """Test listing groupings."""
-    # Create some test groupings
-    grouping1 = Grouping(
-        name="Grouping 1",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
-    )
-    grouping2 = Grouping(
-        name="Grouping 2",
-        nominal_roll_id="nominal_roll-2",
-        mode="standard",
-        status="active",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
-        activated_at=utc_dt.db_utcnow(),
-    )
-
-    db_session.add(grouping1)
-    db_session.add(grouping2)
-    await db_session.commit()
-
-    response = client.get(
-        "/api/v1/groupings/",
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
-
+    response = client.get(f"{BASE}/", params=USER)
     assert response.status_code == 200
-    data = response.json()
-    assert len(data) == 2
-    assert any(d["name"] == "Grouping 1" for d in data)
-    assert any(d["name"] == "Grouping 2" for d in data)
+    labels = [g["label"] for g in response.json()]
+    assert labels == ["Test Grouping"]
 
 
 @pytest.mark.asyncio
-async def test_list_groupings_with_status_filter(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
+async def test_list_empty_without_active_nr(
+    client: TestClient, sample_nominal_roll
 ):
-    """Test listing groupings with status filter."""
-    # Create test groupings with different statuses
-    grouping1 = Grouping(
-        name="Active Grouping",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        status="active",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
-        activated_at=utc_dt.db_utcnow(),
-    )
-    grouping2 = Grouping(
-        name="Draft Grouping",
-        nominal_roll_id="nominal_roll-2",
-        mode="standard",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
-    )
+    response = client.get(f"{BASE}/", params=USER)
+    assert response.status_code == 200
+    assert response.json() == []
 
-    db_session.add(grouping1)
-    db_session.add(grouping2)
-    await db_session.commit()
 
-    response = client.get(
-        "/api/v1/groupings/",
-        headers=admin_token_headers,
-        params={
-            "user_id": "admin-user-id",
-            "user_role": "admin",
-            "status": "active",
+@pytest.mark.asyncio
+async def test_get_grouping_includes_member_counts(
+    client: TestClient, sample_attendance_scope, sample_grouping,
+    sample_grouping_memberships,
+):
+    response = client.get(f"{BASE}/{sample_grouping.id}", params=USER)
+    assert response.status_code == 200
+    groups = _groups_by_label(response.json())
+    assert groups["Grp 1"]["member_count"] == 1
+    assert groups["Grp 2"]["member_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_grouping_on_non_active_nr_404(
+    client: TestClient, sample_grouping, sample_nominal_roll,
+):
+    # sample_grouping's roll is not active for attendance.
+    response = client.get(f"{BASE}/{sample_grouping.id}", params=SA)
+    assert response.status_code == 404
+
+
+# ============================================================================
+# Patch — label, group set, flag immutability
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_patch_renames_label(
+    client: TestClient, sample_attendance_scope, sample_grouping
+):
+    response = client.patch(
+        f"{BASE}/{sample_grouping.id}", params=SA, json={"label": "Renamed"}
+    )
+    assert response.status_code == 200
+    assert response.json()["label"] == "Renamed"
+
+
+@pytest.mark.asyncio
+async def test_patch_label_conflict(
+    client: TestClient, sample_attendance_scope, sample_grouping
+):
+    client.post(f"{BASE}/", params=SA, json={"label": "Taken"})
+    response = client.patch(
+        f"{BASE}/{sample_grouping.id}", params=SA, json={"label": "Taken"}
+    )
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_patch_flags_immutable(
+    client: TestClient, sample_attendance_scope, sample_grouping
+):
+    for payload in (
+        {"multiple_membership": True},
+        {"allow_ungrouped": False},
+    ):
+        response = client.patch(
+            f"{BASE}/{sample_grouping.id}", params=SA, json=payload
+        )
+        assert response.status_code == 400
+        assert "cannot be changed after creation" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_patch_group_set_rename_reorder_add(
+    client: TestClient, sample_attendance_scope, sample_grouping
+):
+    detail = client.get(f"{BASE}/{sample_grouping.id}", params=SA).json()
+    existing = _groups_by_label(detail)
+
+    response = client.patch(
+        f"{BASE}/{sample_grouping.id}",
+        params=SA,
+        json={
+            "groups": [
+                {"id": existing["Grp 2"]["id"], "label": "Second"},   # rename + move up
+                {"id": existing["Grp 1"]["id"], "label": "Grp 1"},    # unchanged, moved down
+                {"label": "Brand New"},                               # addition
+            ]
         },
     )
+    assert response.status_code == 200, response.text
+    groups = response.json()["groups"]
+    assert [(g["label"], g["position"]) for g in groups] == [
+        ("Second", 0),
+        ("Grp 1", 1),
+        ("Brand New", 2),
+    ]
 
+
+@pytest.mark.asyncio
+async def test_patch_rename_propagates_to_memberships(
+    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
+    sample_grouping, sample_grouping_memberships,
+):
+    detail = client.get(f"{BASE}/{sample_grouping.id}", params=SA).json()
+    existing = _groups_by_label(detail)
+    response = client.patch(
+        f"{BASE}/{sample_grouping.id}",
+        params=SA,
+        json={"groups": [
+            {"id": existing["Grp 1"]["id"], "label": "Renamed 1"},
+            {"id": existing["Grp 2"]["id"], "label": "Grp 2"},
+        ]},
+    )
     assert response.status_code == 200
-    data = response.json()
-    assert len(data) == 1
-    assert data[0]["name"] == "Active Grouping"
-    assert data[0]["status"] == "active"
+    grouping_id = str(sample_grouping.id)
+    db_session.expire_all()
+
+    # The membership still points at the renamed group row.
+    memberships = (
+        (await db_session.execute(select(GroupingMembership).where(
+            GroupingMembership.grouping_id == grouping_id)))
+    ).scalars().all()
+    assert len(memberships) == 2
+    labels = {
+        str(g.id): g.label
+        for g in (await db_session.execute(select(GroupingGroup))).scalars().all()
+    }
+    assert {labels[m.group_id] for m in memberships} == {"Renamed 1", "Grp 2"}
 
 
 @pytest.mark.asyncio
-async def test_get_grouping(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
+async def test_patch_group_removal_cascades_memberships(
+    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
+    sample_grouping, sample_grouping_memberships,
 ):
-    """Test getting a specific grouping."""
-    grouping = Grouping(
-        name="Test Grouping",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
+    detail = client.get(f"{BASE}/{sample_grouping.id}", params=SA).json()
+    existing = _groups_by_label(detail)
+    response = client.patch(
+        f"{BASE}/{sample_grouping.id}",
+        params=SA,
+        json={"groups": [{"id": existing["Grp 2"]["id"], "label": "Grp 2"}]},
     )
-
-    db_session.add(grouping)
-    await db_session.commit()
-
-    response = client.get(
-        f"/api/v1/groupings/{grouping.id}",
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
-
     assert response.status_code == 200
-    data = response.json()
-    assert data["id"] == str(grouping.id)
-    assert data["name"] == "Test Grouping"
+
+    memberships = (
+        (await db_session.execute(select(GroupingMembership).where(
+            GroupingMembership.grouping_id == sample_grouping.id)))
+    ).scalars().all()
+    # Grp 1's member became ungrouped; only Grp 2's member remains.
+    assert len(memberships) == 1
+    assert memberships[0].group_id == existing["Grp 2"]["id"]
 
 
 @pytest.mark.asyncio
-async def test_get_grouping_not_found(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
+async def test_patch_group_removal_blocked_when_ungrouped_not_allowed(
+    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
+    sample_users, sample_personnel,
 ):
-    """Test getting a non-existent grouping."""
-    assert_404_response(
-        client,
-        "get",
-        "/api/v1/groupings/non-existent-id",
-        admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+    strict = Grouping(
+        label="Strict",
+        nominal_roll_id=str(sample_attendance_scope.id),
+        multiple_membership=False,
+        allow_ungrouped=False,
+        created_by=str(sample_users["admin"].id),
     )
-
-
-@pytest.mark.asyncio
-async def test_update_grouping(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
-):
-    """Test updating a grouping."""
-    grouping = Grouping(
-        name="Original Name",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
+    group = GroupingGroup(label="Only", position=0)
+    strict.groups.append(group)
+    db_session.add(strict)
+    await db_session.flush()
+    db_session.add(
+        GroupingMembership(
+            grouping_id=strict.id,
+            group_id=group.id,
+            personnel_id=str(sample_personnel[0].id),
+        )
     )
-
-    db_session.add(grouping)
     await db_session.commit()
-
-    update_data = {"name": "Updated Name", "notes": "Updated notes"}
 
     response = client.patch(
-        f"/api/v1/groupings/{grouping.id}",
-        json=update_data,
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
+        f"{BASE}/{strict.id}", params=SA, json={"groups": []}
     )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["name"] == "Updated Name"
-    assert data["notes"] == "Updated notes"
-
-
-@pytest.mark.asyncio
-async def test_update_grouping_status_transition(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
-):
-    """Test updating grouping status."""
-    grouping = Grouping(
-        name="Test Grouping",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
-    )
-
-    db_session.add(grouping)
-    await db_session.commit()
-
-    update_data = {"status": "active"}
-
-    response = client.patch(
-        f"/api/v1/groupings/{grouping.id}",
-        json=update_data,
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "active"
-    assert data["activated_at"] is not None
-
-
-@pytest.mark.asyncio
-async def test_update_grouping_invalid_status_transition(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
-):
-    """Test updating grouping status with invalid transition."""
-    grouping = Grouping(
-        name="Test Grouping",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        status="finalized",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
-    )
-
-    db_session.add(grouping)
-    await db_session.commit()
-
-    update_data = {"status": "active"}
-
-    response = client.patch(
-        f"/api/v1/groupings/{grouping.id}",
-        json=update_data,
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
-
     assert response.status_code == 400
-    assert "Invalid status transition" in response.json()["detail"]
+    assert "would be left" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_activate_grouping(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
+async def test_patch_unknown_group_id_rejected(
+    client: TestClient, sample_attendance_scope, sample_grouping
 ):
-    """Test activating a grouping."""
-    grouping = Grouping(
-        name="Test Grouping",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
+    response = client.patch(
+        f"{BASE}/{sample_grouping.id}",
+        params=SA,
+        json={"groups": [{"id": "not-a-known-id", "label": "X"}]},
     )
-
-    db_session.add(grouping)
-    await db_session.commit()
-
-    response = client.post(
-        f"/api/v1/groupings/{grouping.id}/activate",
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "active"
-    assert data["activated_at"] is not None
-
-
-@pytest.mark.asyncio
-async def test_activate_grouping_already_active(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
-):
-    """Test activating an already active grouping."""
-    grouping = Grouping(
-        name="Test Grouping",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        status="active",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
-        activated_at=utc_dt.db_utcnow(),
-    )
-
-    db_session.add(grouping)
-    await db_session.commit()
-
-    response = client.post(
-        f"/api/v1/groupings/{grouping.id}/activate",
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
-
     assert response.status_code == 400
-    assert "already active" in response.json()["detail"].lower()
+
+
+# ============================================================================
+# Delete
+# ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_deactivate_grouping(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
+async def test_delete_grouping_cascades(
+    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
+    sample_grouping, sample_grouping_memberships, sample_personnel,
 ):
-    """Test deactivating a grouping."""
-    grouping = Grouping(
-        name="Test Grouping",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        status="active",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
-        activated_at=utc_dt.db_utcnow(),
+    db_session.add(
+        GroupingMemberState(
+            grouping_id=sample_grouping.id,
+            personnel_id=str(sample_personnel[0].id),
+            checkbox=True,
+            remarks="note",
+            updated_by=str(sample_personnel[0].created_by),
+        )
     )
-
-    db_session.add(grouping)
     await db_session.commit()
 
-    response = client.post(
-        f"/api/v1/groupings/{grouping.id}/deactivate",
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "inactive"
-    assert data["deactivated_at"] is not None
-
-
-@pytest.mark.asyncio
-async def test_delete_grouping_as_super_admin(
-    client: TestClient, super_admin_token_headers: dict[str, str], db_session
-):
-    """Test grouping deletion by super admin."""
-    grouping = Grouping(
-        name="Test Grouping",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="super-admin-user-id",
-    )
-
-    db_session.add(grouping)
-    await db_session.commit()
-
-    response = client.delete(
-        f"/api/v1/groupings/{grouping.id}",
-        headers=super_admin_token_headers,
-        params={"user_id": "super-admin-user-id", "user_role": "super_admin"},
-    )
-
+    response = client.delete(f"{BASE}/{sample_grouping.id}", params=SA)
     assert response.status_code == 204
 
-    # Verify grouping was deleted
-    result = await db_session.execute(
-        select(Grouping).where(Grouping.id == grouping.id)
-    )
-    assert result.scalar_one_or_none() is None
+    for model in (Grouping, GroupingGroup, GroupingMembership, GroupingMemberState):
+        rows = (await db_session.execute(select(model))).scalars().all()
+        assert rows == [], f"{model.__tablename__} should be empty"
 
 
 @pytest.mark.asyncio
-async def test_delete_grouping_as_admin_forbidden(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
+async def test_delete_grouping_non_super_admin_forbidden(
+    client: TestClient, sample_attendance_scope, sample_grouping
 ):
-    """Test that regular admins cannot delete groupings."""
-    grouping = Grouping(
-        name="Test Grouping",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
-    )
+    for params in (ADMIN, USER):
+        response = client.delete(f"{BASE}/{sample_grouping.id}", params=params)
+        assert response.status_code == 403
 
-    db_session.add(grouping)
-    await db_session.commit()
 
-    assert_permission_denied(
-        client,
-        "delete",
-        f"/api/v1/groupings/{grouping.id}",
-        admin_token_headers,
-        expected_detail="Only super admins",
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
+# ============================================================================
+# Memberships
+# ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_delete_active_grouping_forbidden(
-    client: TestClient, super_admin_token_headers: dict[str, str], db_session
+async def test_set_personnel_groups_round_trip(
+    client: TestClient, sample_attendance_scope, sample_grouping,
+    sample_personnel,
 ):
-    """Test that active groupings cannot be deleted."""
-    grouping = Grouping(
-        name="Test Grouping",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        status="active",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="super-admin-user-id",
-        activated_at=utc_dt.db_utcnow(),
+    groups = _groups_by_label(client.get(f"{BASE}/{sample_grouping.id}", params=SA).json())
+    pid = str(sample_personnel[0].id)
+
+    response = client.put(
+        f"{BASE}/{sample_grouping.id}/personnel/{pid}/groups",
+        params=SA,
+        json={"group_ids": [groups["Grp 2"]["id"]]},
     )
+    assert response.status_code == 200
+    assert _groups_by_label(response.json())["Grp 2"]["member_count"] == 1
 
-    db_session.add(grouping)
-    await db_session.commit()
-
-    response = client.delete(
-        f"/api/v1/groupings/{grouping.id}",
-        headers=super_admin_token_headers,
-        params={"user_id": "super-admin-user-id", "user_role": "super_admin"},
+    # Moving to another group is a set replace.
+    response = client.put(
+        f"{BASE}/{sample_grouping.id}/personnel/{pid}/groups",
+        params=SA,
+        json={"group_ids": [groups["Grp 1"]["id"]]},
     )
+    assert response.status_code == 200
+    body = _groups_by_label(response.json())
+    assert body["Grp 1"]["member_count"] == 1
+    assert body["Grp 2"]["member_count"] == 0
 
+
+@pytest.mark.asyncio
+async def test_second_group_rejected_without_multiple_membership(
+    client: TestClient, sample_attendance_scope, sample_grouping,
+    sample_personnel,
+):
+    groups = _groups_by_label(client.get(f"{BASE}/{sample_grouping.id}", params=SA).json())
+    response = client.put(
+        f"{BASE}/{sample_grouping.id}/personnel/{sample_personnel[0].id}/groups",
+        params=SA,
+        json={"group_ids": [groups["Grp 1"]["id"], groups["Grp 2"]["id"]]},
+    )
     assert response.status_code == 400
-    assert "Cannot delete grouping" in response.json()["detail"]
+    assert "only one group" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_search_groupings(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
+async def test_multiple_groups_allowed_when_enabled(
+    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
+    sample_users, sample_personnel,
 ):
-    """Test searching groupings by name."""
-    grouping1 = Grouping(
-        name="Alpha Grouping",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
+    multi = Grouping(
+        label="Multi",
+        nominal_roll_id=str(sample_attendance_scope.id),
+        multiple_membership=True,
+        allow_ungrouped=True,
+        created_by=str(sample_users["admin"].id),
     )
-    grouping2 = Grouping(
-        name="Bravo Grouping",
-        nominal_roll_id="nominal_roll-2",
-        mode="standard",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
-    )
-
-    db_session.add(grouping1)
-    db_session.add(grouping2)
+    multi.groups.append(GroupingGroup(label="A", position=0))
+    multi.groups.append(GroupingGroup(label="B", position=1))
+    db_session.add(multi)
     await db_session.commit()
 
-    response = client.get(
-        "/api/v1/groupings/",
-        headers=admin_token_headers,
-        params={
-            "user_id": "admin-user-id",
-            "user_role": "admin",
-            "search": "Alpha",
-        },
+    ids = [str(g.id) for g in multi.groups]
+    response = client.put(
+        f"{BASE}/{multi.id}/personnel/{sample_personnel[0].id}/groups",
+        params=SA,
+        json={"group_ids": ids},
     )
-
     assert response.status_code == 200
-    data = response.json()
-    assert len(data) == 1
-    assert data[0]["name"] == "Alpha Grouping"
+    counts = {g["label"]: g["member_count"] for g in response.json()["groups"]}
+    assert counts == {"A": 1, "B": 1}
 
 
 @pytest.mark.asyncio
-async def test_list_groupings_pagination(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
+async def test_empty_set_rejected_when_ungrouped_not_allowed(
+    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
+    sample_users, sample_personnel,
 ):
-    """Test grouping list pagination."""
-    # Create multiple groupings
-    for i in range(5):
-        grouping = Grouping(
-            name=f"Grouping {i}",
-            nominal_roll_id=f"nominal_roll-{i}",
-            mode="standard",
-            valid_from=utc_dt.db_utcnow(),
-            valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-            created_by="admin-user-id",
+    strict = Grouping(
+        label="Strict Roster",
+        nominal_roll_id=str(sample_attendance_scope.id),
+        multiple_membership=False,
+        allow_ungrouped=False,
+        created_by=str(sample_users["admin"].id),
+    )
+    strict.groups.append(GroupingGroup(label="S1", position=0))
+    db_session.add(strict)
+    await db_session.commit()
+
+    response = client.put(
+        f"{BASE}/{strict.id}/personnel/{sample_personnel[0].id}/groups",
+        params=SA,
+        json={"group_ids": []},
+    )
+    assert response.status_code == 400
+    assert "requires every serviceman" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_set_groups_unknown_group_id(
+    client: TestClient, sample_attendance_scope, sample_grouping,
+    sample_personnel,
+):
+    response = client.put(
+        f"{BASE}/{sample_grouping.id}/personnel/{sample_personnel[0].id}/groups",
+        params=SA,
+        json={"group_ids": ["bogus"]},
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_set_groups_personnel_from_other_roll_404(
+    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
+    sample_grouping, sample_users,
+):
+    other_roll = NominalRoll(
+        caa=date(2024, 6, 1),
+        csv_hash="hash-two",
+        personnel_count=1,
+        uploaded_by=str(sample_users["admin"].id),
+    )
+    db_session.add(other_roll)
+    await db_session.flush()
+    outsider = Personnel(
+        nominal_roll_id=str(other_roll.id),
+        pers_no="99999999",
+        rank="PTE",
+        category="WOSE",
+        full_name="Outsider",
+        unit="Coy Z",
+        created_by=str(sample_users["admin"].id),
+    )
+    db_session.add(outsider)
+    await db_session.commit()
+
+    response = client.put(
+        f"{BASE}/{sample_grouping.id}/personnel/{str(outsider.id)}/groups",
+        params=SA,
+        json={"group_ids": []},
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_set_groups_non_super_admin_forbidden(
+    client: TestClient, sample_attendance_scope, sample_grouping,
+    sample_personnel,
+):
+    for params in (ADMIN, USER):
+        response = client.put(
+            f"{BASE}/{sample_grouping.id}/personnel/{sample_personnel[0].id}/groups",
+            params=params,
+            json={"group_ids": []},
         )
-        db_session.add(grouping)
+        assert response.status_code == 403
 
+
+# ============================================================================
+# Member state (checkbox / remarks)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_member_state_upsert_and_clear(
+    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
+    sample_grouping, sample_personnel,
+):
+    pid = str(sample_personnel[0].id)
+    grouping_id = str(sample_grouping.id)
+    url = f"{BASE}/{grouping_id}/personnel/{pid}/state"
+
+    response = client.patch(url, params=SA, json={"checkbox": True, "remarks": "driver"})
+    assert response.status_code == 200
+
+    async def _load_state() -> GroupingMemberState | None:
+        return (
+            await db_session.execute(
+                select(GroupingMemberState).where(
+                    GroupingMemberState.grouping_id == grouping_id,
+                    GroupingMemberState.personnel_id == pid,
+                )
+            )
+        ).scalar_one_or_none()
+
+    state = await _load_state()
+    assert state is not None
+    assert state.checkbox is True
+    assert state.remarks == "driver"
+
+    # Empty string clears remarks; checkbox untouched.
+    response = client.patch(url, params=SA, json={"remarks": ""})
+    assert response.status_code == 200
+    db_session.expire_all()
+    state = await _load_state()
+    assert state.checkbox is True
+    assert state.remarks is None
+
+
+@pytest.mark.asyncio
+async def test_member_state_non_super_admin_forbidden(
+    client: TestClient, sample_attendance_scope, sample_grouping,
+    sample_personnel,
+):
+    response = client.patch(
+        f"{BASE}/{sample_grouping.id}/personnel/{sample_personnel[0].id}/state",
+        params=ADMIN,
+        json={"checkbox": True},
+    )
+    assert response.status_code == 403
+
+
+# ============================================================================
+# Clone
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_clone_structure_only(
+    client: TestClient, sample_attendance_scope,
+    sample_grouping, sample_grouping_memberships,
+):
+    response = client.post(
+        f"{BASE}/{sample_grouping.id}/clone",
+        params=SA,
+        json={"label": "Test Grouping (copy)", "include_memberships": False},
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["label"] == "Test Grouping (copy)"
+    assert [g["label"] for g in body["groups"]] == ["Grp 1", "Grp 2"]
+    assert all(g["member_count"] == 0 for g in body["groups"])
+
+
+@pytest.mark.asyncio
+async def test_clone_with_memberships_and_state(
+    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
+    sample_grouping, sample_grouping_memberships, sample_personnel, sample_users,
+):
+    db_session.add(
+        GroupingMemberState(
+            grouping_id=sample_grouping.id,
+            personnel_id=str(sample_personnel[0].id),
+            checkbox=True,
+            remarks="keep me",
+            updated_by=str(sample_users["admin"].id),
+        )
+    )
     await db_session.commit()
 
-    assert_pagination_works(
-        client,
-        "/api/v1/groupings/",
-        admin_token_headers,
-        params={
-            "user_id": "admin-user-id",
-            "user_role": "admin",
+    response = client.post(
+        f"{BASE}/{sample_grouping.id}/clone",
+        params=SA,
+        json={"label": "With Members", "include_memberships": True},
+    )
+    assert response.status_code == 201
+    clone_id = response.json()["id"]
+
+    memberships = (
+        (await db_session.execute(select(GroupingMembership).where(
+            GroupingMembership.grouping_id == clone_id)))
+    ).scalars().all()
+    assert len(memberships) == 2
+    states = (
+        (await db_session.execute(select(GroupingMemberState).where(
+            GroupingMemberState.grouping_id == clone_id)))
+    ).scalars().all()
+    assert len(states) == 1
+    assert states[0].remarks == "keep me"
+
+
+@pytest.mark.asyncio
+async def test_clone_duplicate_label_409(
+    client: TestClient, sample_attendance_scope, sample_grouping
+):
+    response = client.post(
+        f"{BASE}/{sample_grouping.id}/clone",
+        params=SA,
+        json={"label": "Test Grouping"},
+    )
+    assert response.status_code == 409
+
+
+# ============================================================================
+# Copy from previous NR
+# ============================================================================
+
+
+async def _activate_roll(db_session: AsyncSession, roll: NominalRoll) -> None:
+    """Make ``roll`` the attendance-active NR, deactivating others."""
+    others = (
+        await db_session.execute(
+            select(NominalRoll).where(NominalRoll.attendance_active.is_(True))
+        )
+    ).scalars().all()
+    for other in others:
+        other.attendance_active = False
+    roll.attendance_active = True
+    roll.attendance_activated_at = utc_dt.ensure_naive(utc_dt.utcnow())
+    await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_copy_from_previous_relinks_by_pers_no(
+    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
+    sample_grouping, sample_grouping_memberships, sample_personnel,
+    sample_users,
+):
+    # New roll: person 0's pers_no matches, person 1 does not, plus a
+    # newcomer with no counterpart.
+    new_roll = NominalRoll(
+        caa=sample_attendance_scope.caa + timedelta(days=31),
+        csv_hash="new-hash",
+        personnel_count=3,
+        uploaded_by=str(sample_users["admin"].id),
+    )
+    db_session.add(new_roll)
+    await db_session.flush()
+    matched = Personnel(
+        nominal_roll_id=str(new_roll.id),
+        pers_no=sample_personnel[0].pers_no,
+        rank="PTE",
+        category="WOSE",
+        full_name="John Doe (new cycle)",
+        unit="Coy A",
+        created_by=str(sample_users["admin"].id),
+    )
+    unmatched = Personnel(
+        nominal_roll_id=str(new_roll.id),
+        pers_no="77777777",
+        rank="LCP",
+        category="WOSE",
+        full_name="Fresh Face",
+        unit="Coy A",
+        created_by=str(sample_users["admin"].id),
+    )
+    db_session.add_all([matched, unmatched])
+    await db_session.commit()
+    await _activate_roll(db_session, new_roll)
+
+    response = client.post(
+        f"{BASE}/copy-from-previous",
+        params=SA,
+        json={"source_grouping_id": str(sample_grouping.id)},
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["label"] == "Test Grouping"
+    assert body["nominal_roll_id"] == str(new_roll.id)
+    counts = {g["label"]: g["member_count"] for g in body["groups"]}
+    # Only the pers_no-matched person carried their Grp 1 membership over;
+    # Grp 2's member has no counterpart on the new roll.
+    assert counts == {"Grp 1": 1, "Grp 2": 0}
+
+
+@pytest.mark.asyncio
+async def test_copy_from_previous_label_collision(
+    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
+    sample_users,
+):
+    # Previous roll (activated earlier, now inactive) carrying the source.
+    previous_roll = NominalRoll(
+        caa=date(2023, 12, 1),
+        csv_hash="prev-hash",
+        personnel_count=0,
+        uploaded_by=str(sample_users["admin"].id),
+        attendance_activated_at=utc_dt.ensure_naive(
+            utc_dt.utcnow() - timedelta(days=1)
+        ),
+    )
+    db_session.add(previous_roll)
+    await db_session.flush()
+    source = Grouping(
+        label="Old Label",
+        nominal_roll_id=str(previous_roll.id),
+        created_by=str(sample_users["admin"].id),
+    )
+    source.groups.append(GroupingGroup(label="G1", position=0))
+    db_session.add(source)
+    # Occupy the same label on the ACTIVE roll.
+    db_session.add(
+        Grouping(
+            label="Old Label",
+            nominal_roll_id=str(sample_attendance_scope.id),
+            created_by=str(sample_users["admin"].id),
+        )
+    )
+    await db_session.commit()
+
+    response = client.post(
+        f"{BASE}/copy-from-previous",
+        params=SA,
+        json={"source_grouping_id": str(source.id)},
+    )
+    assert response.status_code == 409, response.text
+
+    explicit = client.post(
+        f"{BASE}/copy-from-previous",
+        params=SA,
+        json={
+            "source_grouping_id": str(source.id),
+            "label": "Old Label 2026-09",
         },
     )
+    assert explicit.status_code == 201
+    assert explicit.json()["label"] == "Old Label 2026-09"
+
+
+@pytest.mark.asyncio
+async def test_copy_from_previous_without_previous_roll(
+    client: TestClient, sample_attendance_scope, sample_grouping
+):
+    response = client.post(
+        f"{BASE}/copy-from-previous",
+        params=SA,
+        json={"source_grouping_id": str(sample_grouping.id)},
+    )
+    # The source grouping is on the active roll itself; no grouping on a
+    # previously activated roll matches, so the copy cannot proceed.
+    assert response.status_code in (400, 404)
 
 
 # ============================================================================
-# Grouping Status Tests
+# CSV export
 # ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_get_grouping_status_no_sessions(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
+async def test_export_csv_columns_and_content(
+    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
+    sample_grouping, sample_grouping_memberships, sample_personnel,
+    sample_users,
 ):
-    """Test getting grouping status when no sessions exist."""
-    grouping = Grouping(
-        name="Test Grouping",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        status="active",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
+    db_session.add(
+        GroupingMemberState(
+            grouping_id=sample_grouping.id,
+            personnel_id=str(sample_personnel[0].id),
+            checkbox=True,
+            remarks="exported remark",
+            updated_by=str(sample_users["admin"].id),
+        )
     )
-
-    db_session.add(grouping)
     await db_session.commit()
 
-    response = client.get(
-        f"/api/v1/groupings/{grouping.id}/status",
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
-
+    response = client.get(f"{BASE}/{sample_grouping.id}/export", params=USER)
     assert response.status_code == 200
-    data = response.json()
-    assert data["grouping_id"] == grouping.id
-    assert data["grouping_name"] == "Test Grouping"
-    assert data["grouping_status"] == "active"
-    assert data["am_session"] is None
-    assert data["pm_session"] is None
-    assert len(data["units"]) == 0
+    assert response.headers["content-type"].startswith("text/csv")
 
-
-@pytest.mark.asyncio
-async def test_get_grouping_status_with_sessions(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
-):
-    """Test getting grouping status with sessions and attendance."""
-    from datetime import date
-
-    # Create grouping
-    grouping = Grouping(
-        name="Test Grouping",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        status="active",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
-    )
-
-    db_session.add(grouping)
-    await db_session.commit()
-
-    # Create personnel
-    personnel1 = Personnel(
-        nominal_roll_id="nominal_roll-1",
-        rank="PTE",
-        category="WOSE",
-        full_name="John Doe",
-        unit="Coy A",
-        sub_unit_1="Platoon 1",
-        created_by="admin-user-id",
-    )
-
-    personnel2 = Personnel(
-        nominal_roll_id="nominal_roll-1",
-        rank="PTE",
-        category="WOSE",
-        full_name="Jane Smith",
-        unit="Coy B",
-        sub_unit_1="Platoon 2",
-        created_by="admin-user-id",
-    )
-
-    db_session.add_all([personnel1, personnel2])
-    await db_session.commit()
-
-    # Create attendance rows for today (AM/PM model).
-    today = utc_dt.utcnow().date()
-    attendance1 = Attendance(
-        personnel_id=str(personnel1.id),
-        nominal_roll_id="nominal_roll-1",
-        date=today,
-        status_am="present",
-        status_pm="present",
-        unit_snapshot="Coy A",
-        sub_unit_1_snapshot="Platoon 1",
-        created_by="admin-user-id",
-        updated_by="admin-user-id",
-    )
-
-    attendance2 = Attendance(
-        personnel_id=str(personnel2.id),
-        nominal_roll_id="nominal_roll-1",
-        date=today,
-        status_am="absent",
-        status_pm="absent",
-        unit_snapshot="Coy B",
-        sub_unit_1_snapshot="Platoon 2",
-        created_by="admin-user-id",
-        updated_by="admin-user-id",
-    )
-
-    db_session.add_all([attendance1, attendance2])
-    await db_session.commit()
-
-    response = client.get(
-        f"/api/v1/groupings/{grouping.id}/status",
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["grouping_id"] == grouping.id
-    assert data["grouping_name"] == "Test Grouping"
-    assert data["am_session"] is not None
-    assert data["am_session"]["present"] == 1
-    assert data["am_session"]["absent"] == 1
-    assert len(data["units"]) == 2
-
-
-# ============================================================================
-# CSV Export Tests
-# ============================================================================
-
-
-@pytest.mark.asyncio
-async def test_export_grouping_csv(
-    client: TestClient, admin_token_headers: dict[str, str], db_session
-):
-    """Test exporting grouping data to CSV."""
-    # Create grouping
-    grouping = Grouping(
-        name="Test Grouping",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        status="active",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
-    )
-
-    db_session.add(grouping)
-    await db_session.commit()
-
-    # Create personnel
-    personnel = Personnel(
-        nominal_roll_id="nominal_roll-1",
-        pers_no="10000001",
-        rank="PTE",
-        category="WOSE",
-        full_name="John Doe",
-        unit="Coy A",
-        sub_unit_1="Platoon 1",
-        created_by="admin-user-id",
-    )
-
-    db_session.add(personnel)
-    await db_session.commit()
-
-    # Create grouping override
-    override = GroupingPersonnelOverride(
-        grouping_id=str(grouping.id),
-        personnel_id=str(personnel.id),
-        unit="Override Unit",
-        sub_unit_1="Override Platoon",
-        created_by="admin-user-id",
-    )
-
-    db_session.add(override)
-    await db_session.commit()
-
-    # Create grouping notes
-    notes = GroupingNotes(
-        grouping_id=str(grouping.id),
-        personnel_id=str(personnel.id),
-        notes="Test notes",
-        created_by="admin-user-id",
-        updated_by="admin-user-id",
-    )
-
-    db_session.add(notes)
-    await db_session.commit()
-
-    response = client.get(
-        f"/api/v1/groupings/{grouping.id}/export",
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
-    )
-
-    assert response.status_code == 200
-    assert response.headers["content-type"] == "text/csv; charset=utf-8"
-    assert "attachment" in response.headers["content-disposition"]
-    assert "Test_Grouping" in response.headers["content-disposition"]
-
-    # Verify CSV content
-    csv_content = response.content.decode("utf-8")
-    assert personnel.pers_no in csv_content
-    assert "Rank" in csv_content
-    assert "John Doe" in csv_content
-    assert "Override Unit" in csv_content
-    assert "Test notes" in csv_content
-
-
-@pytest.mark.asyncio
-async def test_export_grouping_csv_unauthorized(
-    client: TestClient, user_token_headers: dict[str, str], db_session
-):
-    """Test that regular users cannot export grouping data without access."""
-    # Note: This test assumes the user doesn't have access to this grouping
-    # The access control logic will need to be implemented based on user scopes
-    grouping = Grouping(
-        name="Test Grouping",
-        nominal_roll_id="nominal_roll-1",
-        mode="standard",
-        status="active",
-        valid_from=utc_dt.db_utcnow(),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=30),
-        created_by="admin-user-id",
-    )
-
-    db_session.add(grouping)
-    await db_session.commit()
-
-    # For now, this test just checks the endpoint works
-    # Once proper access control is implemented, this should return 403
-    response = client.get(
-        f"/api/v1/groupings/{grouping.id}/export",
-        headers=user_token_headers,
-        params={"user_id": "user-id", "user_role": "user"},
-    )
-
-    # This might succeed with current access control implementation
-    # but should be restricted once proper scopes are enforced
-    assert response.status_code in [200, 403, 404]
-
-
-# ============================================================================
-# Grouping date editing validation tests
-# ============================================================================
-
-
-@pytest.mark.asyncio
-async def test_update_grouping_dates_widens_range(
-    client: TestClient,
-    admin_token_headers: dict[str, str],
-    admin_id: str,
-    sample_grouping: Grouping,
-):
-    """Widening the valid date range succeeds (sessions check removed)."""
-    new_valid_from = (date.today() - timedelta(days=10)).isoformat() + "T00:00:00"
-    new_valid_until = (date.today() + timedelta(days=60)).isoformat() + "T23:59:59"
-
-    response = client.patch(
-        f"/api/v1/groupings/{sample_grouping.id}",
-        json={"valid_from": new_valid_from, "valid_until": new_valid_until},
-        headers=admin_token_headers,
-        params={"user_id": admin_id, "user_role": "admin"},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["valid_until"].startswith(
-        (date.today() + timedelta(days=60)).isoformat()
-    )
-
-
-@pytest.mark.asyncio
-async def test_update_grouping_dates_no_sessions_succeeds(
-    client: TestClient,
-    admin_token_headers: dict[str, str],
-    admin_id: str,
-    sample_grouping: Grouping,
-):
-    """Updating dates on a grouping always succeeds now (no session check)."""
-    new_valid_from = (date.today() - timedelta(days=5)).isoformat() + "T00:00:00"
-
-    response = client.patch(
-        f"/api/v1/groupings/{sample_grouping.id}",
-        json={"valid_from": new_valid_from},
-        headers=admin_token_headers,
-        params={"user_id": admin_id, "user_role": "admin"},
-    )
-
-    assert response.status_code == 200
+    rows = list(csv.reader(io.StringIO(response.text)))
+    assert rows[0] == [
+        "Group", "Rank", "Name", "Unit", "Sub Unit", "Checkbox", "Remarks",
+    ]
+    by_name = {row[2]: row for row in rows[1:]}
+    assert by_name["John Doe"][0] == "Grp 1"
+    assert by_name["John Doe"][5] == "Yes"
+    assert by_name["John Doe"][6] == "exported remark"
+    assert by_name["Jane Smith"][0] == "Grp 2"
+    # Ungrouped serviceman exports with an empty group cell.
+    assert by_name["Bob Johnson"][0] == ""
+    # No attendance columns anywhere in the header.
+    header = " ".join(rows[0]).lower()
+    assert "attendance" not in header
+    assert "am" not in header.split()
+    assert "pm" not in header.split()

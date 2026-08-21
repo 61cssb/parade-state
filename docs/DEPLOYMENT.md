@@ -106,6 +106,7 @@ DEBUG=false
 # Optional: feature flags — see "Feature Flags" below. Default off.
 # FEATURE_DEFERMENTS=false
 # FEATURE_GROUPING=false
+# FEATURE_STRENGTH=false
 
 # Optional: environment-identifier banner — a thin amber strip fixed at
 # the top of every page (login screen included) showing this text. Set
@@ -116,19 +117,26 @@ DEBUG=false
 
 ### Feature Flags
 
-Env-var booleans hide not-yet-ready features **entirely**: no nav entry,
-and page + API routes return 404 for every role including super admins
-(the gate sits above role checks, so direct URLs are unreachable too).
+Env-var booleans hide features **entirely**: no nav entry, and page + API
+routes return 404 for every role including super admins (the gate sits
+above role checks, so direct URLs are unreachable too).
 Flag-off page routes answer with a styled HTML 404 page ("switched off
 on this deployment") so bookmarked links do not read as broken; API
 routes return the JSON 404 naming the env var.
-Defaults are off; development enables flags via Railway env vars, and a
-toggle is an env-var change plus service restart (no deploy).
+Preview flags (not-yet-shipped features) default off; development
+enables them via Railway env vars. The two core-feature **kill switches**
+default **on** — a missing env var can never hide a shipped feature; only
+an explicit `false` takes it offline (e.g. a data-corrupting bug appears
+mid-window and the feature must go down without a deploy). A toggle is an
+env-var change plus service restart (no deploy).
 
 | Flag | Gates | Default | Development | Production |
 |---|---|---|---|---|
 | `FEATURE_DEFERMENTS` | `/admin/deferments` page, `/api/v1/deferments/*`, nav entry | off | `true` | unset (off) |
-| `FEATURE_GROUPING` | `/grouping` pages, `/api/v1/groupings/*`, nav entry, NR-browser "Create Grouping", dashboard grouping card | off | `true` | unset (off) |
+| `FEATURE_GROUPING` | `/grouping` page, `/api/v1/groupings/*`, nav entry | off | `true` | unset (off) |
+| `FEATURE_STRENGTH` | Unit Strength report at `/admin`, nav entry | off | `true` | `true` (shipped; unset only to hide) |
+| `FEATURE_NOMINALROLL` | Nominal Roll stack: `/nominal-roll` + `/admin/csv-upload` + `/admin/taggings` pages, `/api/v1/nominal-rolls/*` + `/api/v1/csv/*` + `/api/v1/taggings/*`, nav entries | **on** | `true` | `true` (unset = on) |
+| `FEATURE_ATTENDANCE` | `/attendance` page, `/api/v1/attendance/*`, nav entry | **on** | `true` | `true` (unset = on) |
 
 Adding a new flag is a one-line `Settings` addition plus gating
 (`require_feature(...)` dependencies on routes, `{% if request.app.state.settings.FEATURE_* %}` in templates); see
