@@ -7,7 +7,11 @@ attendance** (one row per person/day, AM and PM slots), always with the NR's
 Updates are upserts keyed on (personnel_id, date).
 """
 
+import csv
+import io
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -383,6 +387,181 @@ async def copy_remarks(
         dest_slot=dest_slot,
         updated=updated,
         skipped=skipped,
+    )
+
+
+# ============================================================================
+# CSV Export
+# ============================================================================
+
+
+# Display labels for the exported statuses — exactly the option labels the
+# attendance page renders (raw enum values like "yet_to_inpro" would be
+# unreadable in a spreadsheet).
+_STATUS_LABELS = {
+    "present": "Present",
+    "absent": "Absent",
+    "time_off": "Time Off",
+    "mc": "MC",
+    "yet_to_inpro": "Yet to Inpro",
+    "outpro": "Outpro",
+    "reporting_sick": "Reporting Sick",
+    "late": "Late",
+    "att_out": "Att Out",
+}
+
+
+@router.get("/export")
+async def export_attendance_csv(
+    nominal_roll_id: str = Query(..., description="NR to export attendance for"),
+    date: utc_dt.date = Query(..., description="Attendance date"),
+    sub_unit_1: str | None = Query(
+        None,
+        description=(
+            "Restrict the export to personnel whose effective sub_unit_1 "
+            "matches (the attendance page's filter)"
+        ),
+    ),
+    user_id: str = Query(..., description="User ID making the request"),
+    user_role: str = Query(..., description="User role"),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Export the attendance marking table exactly as displayed.
+
+    Columns: Unit, Sub-unit 1-3, Category, Rank, Name, AM/PM Status and
+    Remarks. The roster is the active Called Up personnel with the NR's 1:1
+    tagging overlay applied, ordered like the marking page; personnel
+    without an attendance row for the date export as Absent (the page's
+    default). Read scoping mirrors the page: super_admin exports the whole
+    roster, everyone else only their assigned Subunit-1 scope (403 with no
+    assignments).
+    """
+    nr = (
+        await db.execute(
+            select(NominalRoll).where(NominalRoll.id == nominal_roll_id)
+        )
+    ).scalar_one_or_none()
+    if nr is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Nominal roll not found: {nominal_roll_id}",
+        )
+    tagging_id = await applied_tagging_id(db, nr)
+
+    roster = (
+        (
+            await db.execute(
+                select(Personnel)
+                .where(
+                    Personnel.nominal_roll_id == nominal_roll_id,
+                    Personnel.status == "active",
+                    Personnel.callup_status == "Called Up",
+                )
+                .order_by(
+                    Personnel.unit,
+                    Personnel.sub_unit_1,
+                    Personnel.sub_unit_2,
+                    Personnel.sub_unit_3,
+                    Personnel.rank,
+                    Personnel.full_name,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    entry_by_person: dict[str, TaggingEntry] = {}
+    if tagging_id:
+        entries = (
+            await db.execute(
+                select(TaggingEntry).where(
+                    TaggingEntry.tagging_id == tagging_id
+                )
+            )
+        ).scalars().all()
+        entry_by_person = {str(e.personnel_id): e for e in entries}
+
+    # Optional view filter: effective sub_unit_1 (tagging-aware).
+    if sub_unit_1:
+        to_sub1 = {
+            pid: (e.to_sub_unit_1 if e else None)
+            for pid, e in entry_by_person.items()
+        }
+        roster = [
+            p
+            for p in roster
+            if to_sub1.get(str(p.id), p.sub_unit_1) == sub_unit_1
+        ]
+
+    # Read scoping (Subunit-1 rule, same deny-by-default as writes).
+    accessible_pids = await _accessible_pids(
+        db,
+        nominal_roll_id,
+        user_id,
+        user_role,
+        tagging_id,
+        {str(p.id) for p in roster},
+    )
+
+    att_by_person = {
+        a.personnel_id: a
+        for a in (
+            await db.execute(
+                select(Attendance).where(
+                    and_(
+                        Attendance.nominal_roll_id == nominal_roll_id,
+                        Attendance.date == date,
+                    )
+                )
+            )
+        ).scalars().all()
+    }
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "Unit", "Sub-unit 1", "Sub-unit 2", "Sub-unit 3", "Category",
+            "Rank", "Name", "AM Status", "AM Remarks", "PM Status",
+            "PM Remarks",
+        ]
+    )
+    for person in roster:
+        if str(person.id) not in accessible_pids:
+            continue
+        record = att_by_person.get(str(person.id))
+        entry = entry_by_person.get(str(person.id))
+        writer.writerow(
+            [
+                entry.to_unit if entry else person.unit,
+                (entry.to_sub_unit_1 if entry else person.sub_unit_1) or "",
+                (entry.to_sub_unit_2 if entry else person.sub_unit_2) or "",
+                (entry.to_sub_unit_3 if entry else person.sub_unit_3) or "",
+                person.category,
+                person.rank,
+                person.full_name,
+                _STATUS_LABELS.get(
+                    record.status_am if record else "absent", "absent"
+                ),
+                record.remarks_am if record and record.remarks_am else "",
+                _STATUS_LABELS.get(
+                    record.status_pm if record else "absent", "absent"
+                ),
+                record.remarks_pm if record and record.remarks_pm else "",
+            ]
+        )
+
+    csv_data = output.getvalue()
+    output.close()
+    filename = (
+        f"attendance_{date.strftime('%Y%m%d')}_"
+        f"{utc_dt.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    )
+    return StreamingResponse(
+        io.BytesIO(csv_data.encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 

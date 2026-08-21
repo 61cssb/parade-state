@@ -1,12 +1,23 @@
 """Nominal Roll API endpoints."""
 
+import csv
+import io
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from fastapi.responses import StreamingResponse
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.db import get_db_session
-from parade_state.models import AuditLog, CsvUpload, Grouping, NominalRoll
+from parade_state.models import (
+    AuditLog,
+    CsvUpload,
+    Grouping,
+    NominalRoll,
+    Personnel,
+    TaggingEntry,
+)
 from parade_state.models.schemas import (
     NominalRollListItem,
     NominalRollResponse,
@@ -297,6 +308,129 @@ async def deactivate_attendance(
 
     row = await _load_nominal_roll_with_filename(db, nominal_roll_id)
     return _row_to_response(row)
+
+
+# ============================================================================
+# CSV Export
+# ============================================================================
+
+
+@router.get("/{nominal_roll_id}/export")
+async def export_nominal_roll_csv(
+    nominal_roll_id: str,
+    user_id: str = Query(..., description="User ID making the request"),
+    user_role: str = Query(..., description="User role for authorization"),
+    search: str | None = Query(None, description="Filter: name / pers no text search"),
+    unit: str | None = Query(None, description="Filter: unit"),
+    sub_unit_1: str | None = Query(None, description="Filter: sub-unit 1"),
+    sub_unit_2: str | None = Query(None, description="Filter: sub-unit 2"),
+    category: str | None = Query(None, description="Filter: category (Officer / WOSE)"),
+    rank: str | None = Query(None, description="Filter: rank"),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Export the nominal roll browser table exactly as displayed.
+
+    Columns: Unit, Sub Unit 1-3, Category, Rank, Full Name, Pers No, Callup,
+    Remarks — with the roll's 1:1 tagging overlay applied, ordered like the
+    browser view. The view's filters (search, unit, sub-units, category,
+    rank) are honoured so the CSV matches what the caller sees. Unlike the
+    view there is no 1000-row cap: an export is always complete.
+    """
+    _require_admin(user_role)
+    nr = await _load_nominal_roll_or_404(db, nominal_roll_id)
+
+    conds = [
+        Personnel.nominal_roll_id == str(nr.id),
+        Personnel.status == "active",
+    ]
+    if search:
+        pattern = f"%{search}%"
+        conds.append(
+            or_(
+                Personnel.full_name.ilike(pattern),
+                Personnel.pers_no.ilike(pattern),
+            )
+        )
+    if unit:
+        conds.append(Personnel.unit == unit)
+    if sub_unit_1:
+        conds.append(Personnel.sub_unit_1 == sub_unit_1)
+    if sub_unit_2:
+        conds.append(Personnel.sub_unit_2 == sub_unit_2)
+    if category:
+        conds.append(Personnel.category == category)
+    if rank:
+        conds.append(Personnel.rank == rank)
+
+    personnel_rows = (
+        (
+            await db.execute(
+                select(Personnel)
+                .where(*conds)
+                .order_by(
+                    Personnel.unit,
+                    Personnel.sub_unit_1,
+                    Personnel.sub_unit_2,
+                    Personnel.rank,
+                    Personnel.full_name,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    # Tagging overlay (same 1:1 semantics as the browser view): each
+    # entry's to_* values override the personnel's canonical unit/sub-units.
+    entry_by_personnel: dict[str, TaggingEntry] = {}
+    if personnel_rows:
+        entries = (
+            await db.execute(
+                select(TaggingEntry).where(
+                    TaggingEntry.personnel_id.in_(
+                        [str(p.id) for p in personnel_rows]
+                    )
+                )
+            )
+        ).scalars().all()
+        entry_by_personnel = {str(e.personnel_id): e for e in entries}
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "Unit", "Sub Unit 1", "Sub Unit 2", "Sub Unit 3",
+            "Category", "Rank", "Full Name", "Pers No", "Callup", "Remarks",
+        ]
+    )
+    for person in personnel_rows:
+        entry = entry_by_personnel.get(str(person.id))
+        writer.writerow(
+            [
+                entry.to_unit if entry else person.unit,
+                (entry.to_sub_unit_1 if entry else person.sub_unit_1) or "",
+                (entry.to_sub_unit_2 if entry else person.sub_unit_2) or "",
+                (entry.to_sub_unit_3 if entry else person.sub_unit_3) or "",
+                person.category,
+                person.rank,
+                person.full_name,
+                person.pers_no or "",
+                person.callup_status,
+                person.remarks or "",
+            ]
+        )
+
+    csv_data = output.getvalue()
+    output.close()
+    filename = (
+        f"nominal_roll_caa_{nr.caa.strftime('%Y%m%d')}_"
+        f"{utc_dt.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    )
+    return StreamingResponse(
+        io.BytesIO(csv_data.encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 async def _load_nominal_roll_or_404(

@@ -88,6 +88,10 @@ tags:
       require the target NR to be the active one (400 otherwise) and are
       gated by Subunit-1 assignment (403; super_admin bypasses;
       tagging-aware effective sub_unit_1).
+      GET /attendance/export streams the marking table for an NR + date as
+      CSV (statuses as display labels; no-record rows export as Absent),
+      honouring the page's sub_unit_1 filter and the same Subunit-1 read
+      scoping as the page.
       Kill-switched: every /api/v1/attendance/* route returns 404 for all
       roles (super-admins included) when FEATURE_ATTENDANCE=false
       (default on; unset = available).
@@ -96,6 +100,8 @@ tags:
       Nominal Roll management. Super-admin attendance activation:
       exactly one NR is active for attendance at a time (auto-switch on
       activate). The NR confirm/unconfirm workflow is removed.
+      GET /nominal-rolls/{id}/export streams the browser table as CSV
+      (tagging overlay applied, the view's filters honoured, no row cap).
       Kill-switched: every /api/v1/nominal-rolls/* route returns 404 for
       all roles (super-admins included) when FEATURE_NOMINALROLL=false
       (default on; unset = available).
@@ -294,6 +300,66 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/NominalRollResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /nominal-rolls/{nominalRollId}/export:
+    parameters:
+      - name: nominalRollId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [nominal-rolls]
+      summary: Export the nominal roll browser table as CSV
+      description: |
+        Admin-only export mirroring the Nominal Roll browser table — Unit,
+        Sub Unit 1-3, Category, Rank, Full Name, Pers No, Callup, Remarks —
+        with the roll's 1:1 tagging overlay applied, ordered like the view.
+        The view's filters (search, unit, sub_unit_1, sub_unit_2, category,
+        rank) are honoured so the CSV matches what the caller sees; unlike
+        the view there is no 1000-row cap.
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: user_role
+          in: query
+          required: true
+          schema: { type: string, enum: [super_admin, admin, user] }
+        - name: search
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filter — name / pers no text search
+        - name: unit
+          in: query
+          required: false
+          schema: { type: string }
+        - name: sub_unit_1
+          in: query
+          required: false
+          schema: { type: string }
+        - name: sub_unit_2
+          in: query
+          required: false
+          schema: { type: string }
+        - name: category
+          in: query
+          required: false
+          schema: { type: string, enum: [Officer, WOSE] }
+        - name: rank
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: CSV file attachment
+          content:
+            text/csv:
+              schema:
+                type: string
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 

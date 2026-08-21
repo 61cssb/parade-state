@@ -151,17 +151,25 @@
 {% if nominal_rolls %}
 <!-- Nominal roll selector -->
 <div class="card">
-    <form method="get" action="/nominal-roll" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-        <label for="nominal_roll_id" style="font-weight: bold;">Nominal Roll:</label>
-        <select name="nominal_roll_id" id="nominal_roll_id" onchange="this.form.submit()"
-                style="flex: 1; min-width: 240px; max-width: 400px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
-            {% for e in nominal_rolls %}
-            <option value="{{ e.id }}" {% if selected_nominal_roll and e.id == selected_nominal_roll.id %}selected{% endif %}>
-                CAA {{ e.caa }} — {{ e.personnel_count }} pers{% if e.attendance_active %} (active for attendance){% endif %}
-            </option>
-            {% endfor %}
-        </select>
-    </form>
+    <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+        <form method="get" action="/nominal-roll" style="display: flex; gap: 0.75rem; align-items: center; flex: 1; min-width: 240px; flex-wrap: wrap;">
+            <label for="nominal_roll_id" style="font-weight: bold;">Nominal Roll:</label>
+            <select name="nominal_roll_id" id="nominal_roll_id" onchange="this.form.submit()"
+                    style="flex: 1; min-width: 240px; max-width: 400px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                {% for e in nominal_rolls %}
+                <option value="{{ e.id }}" {% if selected_nominal_roll and e.id == selected_nominal_roll.id %}selected{% endif %}>
+                    CAA {{ e.caa }} — {{ e.personnel_count }} pers{% if e.attendance_active %} (active for attendance){% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </form>
+        {# Export carries the current filters so the CSV matches the table
+           exactly as displayed (same contract as the grouping export). #}
+        {% if selected_nominal_roll %}
+        <a href="/api/v1/nominal-rolls/{{ selected_nominal_roll.id }}/export?user_id={{ user.id | urlencode }}&user_role={{ user.role | urlencode }}{% if search %}&search={{ search | urlencode }}{% endif %}{% if unit %}&unit={{ unit | urlencode }}{% endif %}{% if sub_unit_1 %}&sub_unit_1={{ sub_unit_1 | urlencode }}{% endif %}{% if sub_unit_2 %}&sub_unit_2={{ sub_unit_2 | urlencode }}{% endif %}{% if category %}&category={{ category | urlencode }}{% endif %}{% if rank %}&rank={{ rank | urlencode }}{% endif %}"
+           class="btn" style="background: #e5e7eb; color: #374151; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.25rem; font-size: 0.875rem;">Export CSV</a>
+        {% endif %}
+    </div>
 
     {% if selected_nominal_roll %}
     {# Roll management (merged from the retired admin nominal rolls page).
