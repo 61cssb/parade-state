@@ -23,8 +23,8 @@ This document clarifies the different types of endpoints in the Parade State app
 
 **User-Facing View Routes (Phase 9D / 9F):**
 - `GET /grouping` - Grouping browser (issue 26 redesign): grouping dropdown over the groupings on the attendance-active NR, a Group filter (one option per group plus Ungrouped when the grouping allows it), and the servicemen table (Group | Rank | Name | Unit | Sub Unit | Checkbox | Remarks). Visible to all authenticated users; the New/Edit/Clone/Delete controls, inline group assignment, checkbox and remarks editing are super-admin only (403 enforced server-side). Empty state offers copy-from-previous-NR buttons when the previously activated NR has groupings; Export CSV link mirrors the table. The old `/grouping/{id}/personnel` page was removed with the redesign.
-- `GET /attendance` - Attendance marking table (per-row autosave on status change / remarks blur; Copy Remarks modal with explicit source/destination day + AM/PM) — NR + date + effective sub-unit-1 filters
-- `GET /nominal-roll` - Nominal Roll browser (row-numbered roster table with unit/sub-unit columns, search, unit filter) — nominal roll selector dropdown plus an expandable roll-management panel (label/remarks editing, attendance toggle, Delete — merged from the retired admin nominal rolls page; the old Create Grouping modal was removed — grouping creation lives on the Grouping page)
+- `GET /attendance` - Attendance marking table (per-row autosave on status change / remarks blur; Copy Remarks modal with explicit source/destination day + AM/PM) — NR + date + effective sub-unit-1 filters; Export CSV link streams the table (labels, Absent defaults) honouring the same filters and Subunit-1 read scoping
+- `GET /nominal-roll` - Nominal Roll browser (row-numbered roster table with unit/sub-unit columns, search, unit filter) — nominal roll selector dropdown plus an expandable roll-management panel (label/remarks editing, attendance toggle, Delete — merged from the retired admin nominal rolls page; the old Create Grouping modal was removed — grouping creation lives on the Grouping page); Export CSV link on the selector row streams the filtered table (tagging overlay applied, no row cap)
 
 **Admin Interface Routes:**
 - `GET /admin` - Unit Strength report (aggregated In/Out/Current/% by effective sub-unit; date + AM/PM slot params; subunit-scoped for regular admins) — replaced the admin dashboard; flag-gated by `FEATURE_STRENGTH`
@@ -62,11 +62,11 @@ This document clarifies the different types of endpoints in the Parade State app
 **Other APIs:**
 - `/api/v1/groupings/*` - Grouping management (issue 26 redesign: CRUD, group-enum set replacement, membership set per serviceman, checkbox/remarks member state, clone, copy-from-previous-NR, slim CSV export; super-admin-only mutations, all-role reads, active-NR reachability; never touches attendance)
 - `/api/v1/sessions/*` - Session management
-- `/api/v1/attendance/*` - Attendance records
+- `/api/v1/attendance/*` - Attendance records (incl. `GET /export` CSV of the marking table — labels, Absent defaults, Subunit-1 read scoping, the page's sub-unit filter)
 - `/api/v1/personnel/*` - Personnel management
 - `/api/v1/access-control/*` - Access control (NR-scoped subunit assignments only; the grouping-access and grouping-subunit-scope endpoints were removed)
 - `/api/v1/csv/*` - CSV upload and ingestion
-- `/api/v1/nominal-rolls/*` - Nominal Roll list/detail (admin-only), confirm/unconfirm (PATCH), delete (super_admin, DELETE)
+- `/api/v1/nominal-rolls/*` - Nominal Roll list/detail (admin-only), confirm/unconfirm (PATCH), delete (super_admin, DELETE), CSV export (`GET /{id}/export` — admin-only, view filters honoured, tagging overlay applied)
 - `/api/v1/audit/*` - Audit log
 
 ### 3. CSV Upload API

@@ -94,13 +94,13 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 
 **Current Test Suite:**
 - `tests/integration/test_api.py` - Authentication, user management, role management (18 tests)
-- `tests/integration/test_attendance_api.py` - Attendance management, snapshots, constraints (40 tests)
+- `tests/integration/test_attendance_api.py` - Attendance management, snapshots, constraints, CSV export scoping
 - `tests/integration/test_csv_upload_api.py` - CSV upload pipeline, hash dedup, mapping (9 tests)
 - `tests/integration/test_deferments_api.py` - Deferment CRUD, callup_status transitions, super_admin auth (15 tests)
 - `tests/integration/test_feature_flags.py` - Flag-off hides Deferments/Grouping entirely (nav, pages, API) for every role incl. super-admin; flag-on restore; env-var defaults (8 tests)
 - `tests/integration/test_environment_banner.py` - ENVIRONMENT_BANNER renders the top strip pre-auth (login) and post-auth, escapes its text, and emits no markup when unset (5 tests)
 - `tests/integration/test_groupings_api.py` - Groupings (issue 26 redesign): CRUD, group-enum set replacement, memberships, member state, clone, copy-from-previous-NR, CSV export, super-admin-only mutations, flag gating
-- `tests/integration/test_nominal_rolls_api.py` - Nominal Roll lifecycle (attendance activation auto-switch/deactivate, delete, label updates)
+- `tests/integration/test_nominal_rolls_api.py` - Nominal Roll lifecycle (attendance activation auto-switch/deactivate, delete, label updates, CSV export)
 - `tests/integration/test_personnel_api.py` - Personnel management, search, filtering (12 tests)
 - `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (NR/Tagging-scoped, AM/PM slots)
 - `tests/integration/test_sessions_410.py` - Sessions endpoints return 410 Gone (sessions removed in issue #4)
@@ -234,6 +234,11 @@ async def test_example(client, sample_users, sample_grouping):
   source/destination is rejected (400); an optional `sub_unit_1` param narrows
   the copy to the attendance page's view filter (effective-value aware).
   Blank source remarks are skipped; missing destination rows are created.
+- CSV export (`GET /api/v1/attendance/export`, issue 27): streams the marking
+  table for an NR + date — statuses as display labels, personnel without a
+  row export as Absent (the page's default). Honours the page's `sub_unit_1`
+  filter and the Subunit-1 read-scoping rule (super_admin all; deny-by-default
+  403 otherwise), so an export never leaks outside the caller's view.
 - Tagging delete guarded (409) when its NR has attendance rows.
 - Attendance status enum: present, absent, time_off, mc, yet_to_inpro, outpro,
   reporting_sick, late, att_out (default: absent).
@@ -273,6 +278,9 @@ async def test_example(client, sample_users, sample_grouping):
   change or remarks blur (a "Saving…/Saved" indicator near the table; a
   failed save red-edges the row and retries on the next edit). Tagged rows
   are no longer highlighted here; yellow stays an NR-view-only signal.
+- **Export CSV (issue 27):** link in the table header (beside the AM/PM
+  counts) streams the displayed table for the selected NR + date +
+  sub-unit filter — same contract as the Grouping page's export.
 - Nominal Roll management lives on `/nominal-roll` in the collapsed-by-default
   "Roll management" expander directly below the roll selector dropdown inside
   the selector card (the Grouping page's pattern; issue 22 — it acts on the
@@ -282,6 +290,10 @@ async def test_example(client, sample_users, sample_grouping):
   / Delete for super-admins, with the same confirm dialogs as before. The
   admin page's metadata columns (source file, uploaded at, CSV hash) were
   dropped — upload provenance stays on the Upload NR page's Recent Uploads.
+- **Export CSV (issue 27):** link on the roll-selector row (the Grouping
+  page's placement) streams the filtered roster table — tagging overlay
+  applied, the view's search/unit/sub-unit/category/rank filters honoured,
+  and no 1000-row cap (`GET /api/v1/nominal-rolls/{id}/export`).
 
 **Unit Strength Report (✅ Complete — feature-flagged, issue #25)**
 - `/admin` now serves the **Unit Strength** report and the old admin
