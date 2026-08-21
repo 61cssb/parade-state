@@ -861,7 +861,9 @@ The system is admin-only: only `super_admin` and `admin` accounts can sign in an
 - User.access_level_id.level_order ≥ ColumnMetadata.sensitivity_level_id.level_order (for each visible column)
 
 *(Admins bypass all checks. Groupings carry no access scoping — the
-grouping view is readable by every authenticated user and mutable only by
+grouping view (with its per-group filter, offering an Ungrouped option only
+when the grouping allows it) is readable by every authenticated user and
+mutable only by
 super admins.)*
 
 ### 5.4 Column Visibility Rules
