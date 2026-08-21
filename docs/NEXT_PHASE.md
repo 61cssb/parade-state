@@ -73,9 +73,13 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   Total × In/Out/Current/% strength format (In = Called Up, Current =
   present/late, Out = rest); date + AM/PM slot; regular admins scoped to
   their assigned sub-units; on via `FEATURE_STRENGTH` in dev and prod
-- Groupings: lifecycle, personnel exclusions/overrides, date editing —
-  managed from the `/grouping` view's expander (admin groupings page
-  retired); **feature-flagged** (`FEATURE_GROUPING`, dev-only until ready)
+- Groupings (issue 26 redesign, implemented on this branch): a labelled
+  set of groups on the attendance-active NR with memberships, per-person
+  checkbox/remarks, clone, copy-from-previous-NR, slim CSV export —
+  super-admin-only mutations, all-role reads, no attendance interaction;
+  the old lifecycle/overrides/exclusions/notes/access-scoping design and
+  the `/grouping/{id}/personnel` page are gone; **feature-flagged**
+  (`FEATURE_GROUPING`, default off)
 - Deferments (super-admin CRUD; `Personnel.callup_status`);
   **feature-flagged** (`FEATURE_DEFERMENTS`, dev-only until ready)
 - Sidebar: workflow pages flat (Unit Strength, Upload NR, Nominal Roll,
@@ -85,7 +89,8 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   (Deferments, Grouping, Unit Strength) render only when their flag is on
 - Admin UI: Unit Strength, users, audit log, taggings, deferments,
   Upload NR (CSV upload), DB restore, Settings purge (testing-only);
-  NR and grouping management live in expanders on their views
+  NR management lives in an expander on its view, grouping management on
+  the Grouping page
 - User-facing views — `/grouping`, `/attendance`, `/nominal-roll` —
   built, but admin-gated pending the viewer role (below)
 
@@ -187,6 +192,13 @@ Defer until CSV Step 3 (diff confirmation) forces it.
   `remarks`; CSV `Callup Decision`/`Reason`/`Remarks` mapped on ingest;
   attendance view shows only Called Up (non-destructive); inline admin
   editing in the NR browser
+- **2026-08-20:** Groupings redesigned (issue 26): the old
+  modes/lifecycle/overrides/exclusions/notes/access-scoping design was
+  replaced wholesale with a labelled set of groups per nominal roll —
+  memberships, per-person checkbox/remarks, clone,
+  copy-from-previous-NR, slim CSV export; super-admin-only mutations,
+  all-role reads; no attendance interaction; `FEATURE_GROUPING` still
+  default off
 - **2026-08-20:** Environment banner: `ENVIRONMENT_BANNER` renders a thin
   fixed top strip on every page (login included) naming the environment;
   set in dev, unset in prod — pure overlay, page below pixel-identical

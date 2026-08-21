@@ -130,7 +130,7 @@ async def update_personnel(
 # User roles
 class UserRole:
     SUPER_ADMIN = "super_admin"  # Full system access
-    ADMIN = "admin"              # Can manage groupings and users
+    ADMIN = "admin"              # Can manage users and most data
     USER = "user"                # Can record attendance
 
 # Permission checks
@@ -143,150 +143,78 @@ def can_delete_grouping(user_role: str) -> bool:
     return user_role == "super_admin"
 ```
 
-### Grouping-Based Access Control
+### Grouping Access Control (issue 26 redesign)
 
-**Ensure users can only access groupings they're assigned to:**
+The old per-grouping access model (GroupingUserAccess grants +
+UserSubunitScope scoping) was **removed**. The redesigned groupings carry
+no access scoping at all:
+
+- **Mutations are super-admin only** (403 otherwise), enforced
+  server-side on every grouping API route — not just hidden buttons
+- **Reads are open to every authenticated role** (page and API)
+- **Reachability follows the active nominal roll**: groupings on the roll
+  currently active for attendance are listable/readable; groupings on
+  non-active rolls are retained in the database but unreachable (404)
+  until their roll is re-activated
+- The whole feature sits behind the `FEATURE_GROUPING` flag (default
+  off): flag-off means 404 for every role, super-admins included
 
 ```python
-async def verify_grouping_access(
-    grouping_id: str,
-    user_id: str,
-    user_role: str,
-    db: AsyncSession,
-) -> Grouping:
-    """Verify user has access to grouping and return it."""
-
-    # Super admins have full access to all groupings
-    if user_role == "super_admin":
-        result = await db.execute(select(Grouping).where(grouping_id == grouping_id))
-        grouping = result.scalar_one_or_none()
-        if not grouping:
-            raise HTTPException(status_code=404, detail="Grouping not found")
-        return grouping
-
-    # Check for explicit grouping access
-    access_result = await db.execute(
-        select(GroupingUserAccess).where(
-            and_(
-                GroupingUserAccess.user_id == user_id,
-                GroupingUserAccess.grouping_id == grouping_id,
-                GroupingUserAccess.revoked_at.is_(None),
-            )
+def _require_super_admin(user_role: str) -> None:
+    """Authorize super_admin only (grouping mutations)."""
+    if user_role != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super admins can manage groupings",
         )
-    )
-    access = access_result.scalar_one_or_none()
-
-    # Both admins and regular users need explicit grouping access
-    if access:
-        result = await db.execute(select(Grouping).where(grouping_id == grouping_id))
-        return result.scalar_one_or_none()
-
-    # No access found
-    raise HTTPException(
-        status_code=403,
-        detail="Insufficient permissions to access this grouping"
-    )
 ```
 
-### Multi-Tenant Security Patterns
+### NR-Scoped Write Access
 
 **Data Isolation Strategy:**
 
-1. **Automatic Filtering:** All data queries automatically filter by grouping access
-2. **Explicit Grants:** Users must be explicitly granted access to groupings
-3. **Scope Enforcement:** Subunit-level filtering within groupings
-4. **Audit Trail:** All access grants and revocations are logged
+1. **Explicit Grants:** admins receive `UserSubunitAssignment` rows per
+   nominal roll (one effective `sub_unit_1` each)
+2. **Deny-by-default:** no assignments means no write access (403);
+   super_admin bypasses
+3. **Audit Trail:** grants and revocations are logged
 
-**Implementation Across APIs:**
+**Implementation:**
 
-✅ **Personnel API:**
 ```python
-# Filter personnel by grouping access
-async def list_personnel(grouping_id: str, user_id: str, user_role: str):
-    # Verify grouping access first
-    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
-    
-    # Return personnel only from accessible grouping
-    return await get_personnel_for_grouping(grouping.id)
-```
-
-✅ **Sessions API:**
-```python
-# Create sessions only for accessible groupings
-async def create_session(session_data: SessionCreate, user_id: str, user_role: str):
-    # Verify grouping access
-    grouping = await verify_grouping_access(
-        session_data.grouping_id, user_id, user_role, db
-    )
-    
-    # Create session with access verified
-    return await create_session_for_grouping(session_data, grouping)
-```
-
-✅ **Attendance API:**
-```python
-# Record attendance only for accessible groupings
-async def create_attendance(attendance_data: AttendanceCreate, user_id: str, user_role: str):
-    # Verify session and grouping access
-    session = await verify_session_and_grouping_access(
-        attendance_data.session_id, user_id, user_role, db
-    )
-    
-    # Record attendance with access verified
-    return await record_attendance(attendance_data, session)
+# Attendance/personnel writes gated per NR by sub_unit_1 assignment
+async def list_writable_personnel(user_id: str, nominal_roll_id: str):
+    subunits = await get_assigned_subunit_1s(user_id, nominal_roll_id)
+    return await query_personnel_in_subunits(nominal_roll_id, subunits)
 ```
 
 ### Subunit Scope Filtering
 
-**Hierarchical access control within groupings:**
+**Per-nominal-roll access control:**
 
 ```python
 async def check_subunit_access(
     user_id: str,
-    grouping_id: str,
-    unit: str | None = None,
-    sub_unit_1: str | None = None,
-    sub_unit_2: str | None = None,
-    sub_unit_3: str | None = None,
+    nominal_roll_id: str,
+    effective_sub_unit_1: str,
     db: AsyncSession,
 ) -> bool:
-    """Check if user has access to specific subunit within grouping."""
+    """Check the user may write rows with this effective sub_unit_1 on this roll."""
 
-    # Get user's subunit scopes for this grouping
-    scopes = await get_user_subunit_scopes(user_id, grouping_id, db)
-
-    # If no scopes defined, user has grouping-wide access
-    if not scopes:
-        return True
-
-    # Check if any scope matches the requested unit hierarchy
-    for scope in scopes:
-        # If scope has no restrictions, grant access
-        if not any([scope.unit, scope.sub_unit_1, scope.sub_unit_2, scope.sub_unit_3]):
-            return True
-
-        # Check hierarchical unit matching
-        if scope.unit and unit != scope.unit:
-            continue
-        if scope.sub_unit_1 and sub_unit_1 != scope.sub_unit_1:
-            continue
-        if scope.sub_unit_2 and sub_unit_2 != scope.sub_unit_2:
-            continue
-        if scope.sub_unit_3 and sub_unit_3 != scope.sub_unit_3:
-            continue
-
-        # All checks passed
-        return True
-
-    # No matching scope found
-    return False
+    # Deny-by-default: no assignments means no write access
+    assignments = await get_user_subunit_assignments(
+        user_id, nominal_roll_id, db
+    )
+    return any(
+        a.sub_unit_1 == effective_sub_unit_1 for a in assignments
+    )
 ```
 
 ### Access Control Best Practices
 
 **✅ DO:**
-- Verify grouping access at the beginning of each endpoint
-- Filter all data queries by grouping scope
+- Verify role/scope at the beginning of each endpoint
+- Filter data queries by scope at query level
 - Use dependency injection for authentication
 - Implement audit trails for access changes
 - Test access control with multiple user roles
@@ -301,9 +229,6 @@ async def check_subunit_access(
 - Ignore subunit scope restrictions
 - Return 404 for access denied (use 403)
 - Forget to log access control decisions
-
-    return await get_grouping(grouping_id, db)
-```
 
 ### Row-Level Security
 
