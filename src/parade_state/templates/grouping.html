@@ -5,6 +5,28 @@
 {% block page_title %}Grouping{% endblock %}
 
 {% block content %}
+<style>
+    /* Grouping setting chips: membership rule + ungrouped rule, shown next
+       to the grouping label. The settings are fixed at creation — the chips
+       make the active rule set visible at a glance. */
+    .setting-chip {
+        display: inline-block;
+        padding: 0.05rem 0.4rem;
+        border-radius: 0.25rem;
+        border: 1px solid #c4b5fd;
+        background: #ede9fe;
+        color: #6d28d9;
+        font-size: 0.7rem;
+        font-weight: 600;
+        vertical-align: middle;
+        white-space: nowrap;
+    }
+    .setting-chip.strict {
+        border-color: #fcd34d;
+        background: #fef3c7;
+        color: #b45309;
+    }
+</style>
 {% if not active_nr %}
 <div class="card">
     <p style="color: #6b7280;">No nominal roll is active for attendance. Activate a roll first — groupings are based on the active roll.</p>
@@ -83,13 +105,17 @@
 <div class="card">
     <h3 style="margin-bottom: 0.5rem;">
         {{ selected_grouping.label | e }}
+        <span class="setting-chip" title="Fixed when the grouping was created">
+            {%- if selected_grouping.multiple_membership %}Multiple groups{% else %}Single group{% endif -%}
+        </span>
+        <span class="setting-chip{% if not selected_grouping.allow_ungrouped %} strict{% endif %}" title="Fixed when the grouping was created">
+            {%- if selected_grouping.allow_ungrouped %}Ungrouped allowed{% else %}All must be grouped{% endif -%}
+        </span>
         <span style="font-size: 0.875rem; font-weight: normal; color: #6b7280;">
             — {{ personnel_rows | length }}{% if group_filter %} of {{ total_count }}{% endif %} servicemen on CAA {{ active_nr.caa }}
         </span>
     </h3>
     <p style="margin: 0.25rem 0 0; font-size: 0.8rem; color: #6b7280;">
-        {% if selected_grouping.multiple_membership %}Servicemen may hold several groups.{% else %}One group per serviceman.{% endif %}
-        {% if not selected_grouping.allow_ungrouped %} Every serviceman must hold a group.{% endif %}
         Checkbox and Remarks are free-form — their use follows your unit's standardisation.
     </p>
 
