@@ -239,8 +239,12 @@ async def test_grouping_view_group_filter(
     assert "Grp 1" in body
     assert "Grp 2" in body
     assert '<option value="ungrouped"' in body  # allow_ungrouped defaults True
+    assert '<option value="" selected' in body  # unfiltered default
     assert "John Doe" in body
     assert "Bob Johnson" in body
+    # Setting chips state the fixed rules at a glance.
+    assert "Single group" in body
+    assert "Ungrouped allowed" in body
 
     grp1_id = sample_grouping_memberships["Grp 1"].id
     filtered = client.get("/grouping", params={"group": str(grp1_id)})
@@ -249,12 +253,18 @@ async def test_grouping_view_group_filter(
     assert "Jane Smith" not in filtered.text  # Grp 2 member filtered out
     assert "Bob Johnson" not in filtered.text  # ungrouped filtered out
     assert "1 of 3 servicemen" in filtered.text
+    # The dropdown keeps the selection (regression: reverting to
+    # "All groups" on reload).
+    assert f'<option value="{grp1_id}" selected' in filtered.text
+    assert '<option value="" selected' not in filtered.text
 
     ungrouped = client.get("/grouping", params={"group": "ungrouped"})
     assert ungrouped.status_code == 200
     assert "Bob Johnson" in ungrouped.text
     assert "John Doe" not in ungrouped.text
     assert "Jane Smith" not in ungrouped.text
+    assert '<option value="ungrouped" selected' in ungrouped.text
+    assert '<option value="" selected' not in ungrouped.text
 
 
 @pytest.mark.asyncio
