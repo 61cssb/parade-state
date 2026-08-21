@@ -2,10 +2,8 @@
 
 from .access import (
     AccessLevel,
-    GroupingUserAccess,
     User,
     UserSubunitAssignment,
-    UserSubunitScope,
 )
 from .attendance import (
     ATTENDANCE_STATUSES,
@@ -23,19 +21,17 @@ from .csv_ingestion import (
 from .deferments import Deferment
 from .grouping import (
     Grouping,
-    GroupingNotes,
-    GroupingPersonnelExclusion,
-    GroupingPersonnelOverride,
+    GroupingGroup,
+    GroupingMemberState,
+    GroupingMembership,
 )
 from .personnel import CALLUP_STATUSES, SOURCE_MANUAL, Personnel
 from .tagging import Tagging, TaggingEntry
 
 __all__ = [
     "AccessLevel",
-    "GroupingUserAccess",
     "User",
     "UserSubunitAssignment",
-    "UserSubunitScope",
     "ATTENDANCE_STATUSES",
     "PRESENT_LIKE_STATUSES",
     "CALLUP_STATUSES",
@@ -48,9 +44,9 @@ __all__ = [
     "NominalRoll",
     "Deferment",
     "Grouping",
-    "GroupingNotes",
-    "GroupingPersonnelExclusion",
-    "GroupingPersonnelOverride",
+    "GroupingGroup",
+    "GroupingMemberState",
+    "GroupingMembership",
     "Personnel",
     "Tagging",
     "TaggingEntry",

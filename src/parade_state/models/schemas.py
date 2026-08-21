@@ -1,5 +1,6 @@
 """Pydantic schemas for API request/response validation."""
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -21,181 +22,147 @@ AttendanceStatus = Literal[
 ]
 
 # ============================================================================
-# Grouping Schemas
+# Grouping Schemas (issue 26 redesign)
 # ============================================================================
 
+# Grouping and group labels: printable text minus angle brackets (never
+# legitimate in a label; templates render with manual escaping) and
+# control characters. Trimmed; must be non-empty.
+_LABEL_FORBIDDEN = re.compile(r"[<>\x00-\x1f\x7f]")
 
-class GroupingBase(BaseModel):
-    """Base grouping schema.
 
-    ``valid_from`` / ``valid_until`` are optional to support adhoc groupings
-    (``mode="adhoc"``) that don't have a fixed validity window. Standard
-    groupings require them — enforced at the API layer.
+def _validate_label(value: str) -> str:
+    """Normalise and validate a grouping / group label."""
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError("label must not be empty or whitespace-only")
+    if _LABEL_FORBIDDEN.search(stripped):
+        raise ValueError(
+            "label must not contain angle brackets or control characters"
+        )
+    return stripped
+
+
+class GroupingGroupItem(BaseModel):
+    """One group enum in a create/update payload.
+
+    ``id`` is None for a new group. An existing id means rename-in-place —
+    memberships reference the group row, so every member follows. Ids
+    absent from an update payload are removals (their members cascade to
+    ungrouped, gated by ``allow_ungrouped``). List order is the new
+    display order.
     """
 
-    name: str = Field(..., min_length=1, max_length=255)
-    nominal_roll_id: str = Field(..., min_length=1)
-    valid_from: utc_dt.datetime | None = None
-    valid_until: utc_dt.datetime | None = None
-    notes: str | None = None
+    id: str | None = None
+    label: str = Field(..., min_length=1, max_length=100)
+
+    @field_validator("label")
+    @classmethod
+    def _label_valid(cls, v: str) -> str:
+        return _validate_label(v)
 
 
-class GroupingCreate(GroupingBase):
-    """Schema for creating a grouping."""
+class GroupingCreate(BaseModel):
+    """Schema for creating a grouping on the attendance-active NR."""
 
-    mode: Literal["standard", "adhoc", "vehicle"] = "standard"
-    status: Literal["draft", "active", "inactive"] = "draft"
-    scheduled_activation: utc_dt.datetime | None = None
+    label: str = Field(..., min_length=1, max_length=100)
+    groups: list[GroupingGroupItem] = Field(default_factory=list)
+    multiple_membership: bool = False
+    allow_ungrouped: bool = True
 
-
-class ExclusionCreate(BaseModel):
-    """Schema for excluding a personnel from a grouping."""
-
-    personnel_id: str = Field(..., min_length=1)
+    @field_validator("label")
+    @classmethod
+    def _label_valid(cls, v: str) -> str:
+        return _validate_label(v)
 
 
 class GroupingUpdate(BaseModel):
-    """Schema for updating a grouping."""
+    """Schema for updating a grouping.
 
-    name: str | None = Field(None, min_length=1, max_length=255)
-    status: (
-        Literal["draft", "active", "inactive", "archived", "closed", "finalized"] | None
-    ) = None
-    valid_from: utc_dt.datetime | None = None
-    valid_until: utc_dt.datetime | None = None
-    scheduled_activation: utc_dt.datetime | None = None
-    notes: str | None = None
+    ``multiple_membership`` / ``allow_ungrouped`` are immutable after
+    creation; they are accepted here only so change attempts get a clear
+    400 instead of being silently ignored.
+    """
+
+    label: str | None = Field(None, min_length=1, max_length=100)
+    groups: list[GroupingGroupItem] | None = None
+    multiple_membership: bool | None = None
+    allow_ungrouped: bool | None = None
+
+    @field_validator("label")
+    @classmethod
+    def _label_valid(cls, v: str | None) -> str | None:
+        return _validate_label(v) if v is not None else None
 
 
-class GroupingResponse(GroupingBase):
+class GroupingGroupResponse(BaseModel):
+    """Schema for one group enum, with its member count.
+
+    The count lets the edit dialog warn how many servicemen become
+    ungrouped before a removal is confirmed.
+    """
+
+    id: str
+    label: str
+    position: int
+    member_count: int = 0
+
+
+class GroupingResponse(BaseModel):
     """Schema for grouping response."""
 
     id: str
-    mode: str
-    status: str
-    scheduled_activation: utc_dt.datetime | None
-    personnel_count: int
+    label: str
+    nominal_roll_id: str
+    multiple_membership: bool
+    allow_ungrouped: bool
+    groups: list[GroupingGroupResponse] = Field(default_factory=list)
     created_at: utc_dt.datetime
     created_by: str
-    activated_at: utc_dt.datetime | None
-    deactivated_at: utc_dt.datetime | None
-
-    class Config:
-        from_attributes = True
 
 
-class GroupingListParams(BaseModel):
-    """Schema for grouping list query parameters."""
+class MembershipSetRequest(BaseModel):
+    """Schema for setting a serviceman's full group membership set."""
 
-    status: str | None = None
-    nominal_roll_id: str | None = None
-    search: str | None = None
-    limit: int = Field(100, ge=1, le=1000)
-    offset: int = Field(0, ge=0)
+    group_ids: list[str] = Field(default_factory=list)
 
 
-class GroupingStatusSessionInfo(BaseModel):
-    """Schema for session information in grouping status."""
+class MemberStateUpdate(BaseModel):
+    """Schema for updating a serviceman's grouping checkbox / remarks.
 
-    status: Literal["open", "closed", "finalized"]
-    present: int = 0
-    absent: int = 0
-    total: int = 0
+    Omitted fields are left unchanged; an empty string clears remarks.
+    """
 
-
-class GroupingStatusUnitBreakdown(BaseModel):
-    """Schema for unit-level breakdown in grouping status."""
-
-    name: str
-    total: int
-    present: int
-    absent: int
-
-
-class GroupingStatusResponse(BaseModel):
-    """Schema for grouping status response."""
-
-    grouping_id: str
-    grouping_name: str
-    date: utc_dt.date
-    grouping_status: Literal[
-        "draft", "active", "inactive", "archived", "closed", "finalized"
-    ]
-    am_session: GroupingStatusSessionInfo | None = None
-    pm_session: GroupingStatusSessionInfo | None = None
-    units: list[GroupingStatusUnitBreakdown]
-
-
-# ============================================================================
-# Grouping Personnel Override Schemas
-# ============================================================================
-
-
-class GroupingPersonnelOverrideCreate(BaseModel):
-    """Schema for creating a grouping personnel override."""
-
-    personnel_id: str
-    unit: str = Field(..., min_length=1)
-    sub_unit_1: str | None = None
-    sub_unit_2: str | None = None
-    sub_unit_3: str | None = None
-    checkbox: bool = False
+    checkbox: bool | None = None
     remarks: str | None = None
 
 
-class GroupingPersonnelOverrideResponse(BaseModel):
-    """Schema for grouping personnel override response."""
+class GroupingCloneRequest(BaseModel):
+    """Schema for cloning a grouping on the same NR."""
 
-    id: str
-    grouping_id: str
-    personnel_id: str
-    unit: str
-    sub_unit_1: str | None
-    sub_unit_2: str | None
-    sub_unit_3: str | None
-    checkbox: bool
-    remarks: str | None
-    created_at: utc_dt.datetime
-    created_by: str
-    updated_at: utc_dt.datetime
+    label: str = Field(..., min_length=1, max_length=100)
+    include_memberships: bool = False
 
-    class Config:
-        from_attributes = True
+    @field_validator("label")
+    @classmethod
+    def _label_valid(cls, v: str) -> str:
+        return _validate_label(v)
 
 
-# ============================================================================
-# Grouping Notes Schemas
-# ============================================================================
+class GroupingCopyRequest(BaseModel):
+    """Schema for copying a grouping from the previously activated NR.
 
+    ``label`` defaults to the source grouping's label; must be supplied
+    explicitly when that is already taken.
+    """
 
-class GroupingNotesCreate(BaseModel):
-    """Schema for creating grouping notes."""
+    source_grouping_id: str = Field(..., min_length=1)
+    label: str | None = Field(None, min_length=1, max_length=100)
 
-    personnel_id: str
-    notes: str = Field(..., min_length=1)
-
-
-class GroupingNotesUpdate(BaseModel):
-    """Schema for updating grouping notes."""
-
-    notes: str = Field(..., min_length=1)
-
-
-class GroupingNotesResponse(BaseModel):
-    """Schema for grouping notes response."""
-
-    id: str
-    grouping_id: str
-    personnel_id: str
-    notes: str
-    created_at: utc_dt.datetime
-    created_by: str
-    updated_at: utc_dt.datetime
-    updated_by: str
-    notes_version: int
-
-    class Config:
-        from_attributes = True
+    @field_validator("label")
+    @classmethod
+    def _label_valid(cls, v: str | None) -> str | None:
+        return _validate_label(v) if v is not None else None
 
 
 # ============================================================================
@@ -467,7 +434,6 @@ class PersonnelListParams(BaseModel):
     """Schema for personnel list query parameters."""
 
     nominal_roll_id: str | None = None
-    grouping_id: str | None = None
     unit: str | None = None
     sub_unit_1: str | None = None
     sub_unit_2: str | None = None
@@ -485,28 +451,6 @@ class PersonnelListParams(BaseModel):
     )
     limit: int = Field(100, ge=1, le=1000)
     offset: int = Field(0, ge=0)
-
-
-class PersonnelResponseWithGrouping(PersonnelBase):
-    """Schema for personnel response with grouping-specific assignments."""
-
-    id: str
-    nominal_roll_id: str
-    status: str
-    callup_status: str
-    remarks: str | None
-    source: str | None = None
-    created_at: utc_dt.datetime
-    updated_at: utc_dt.datetime | None
-    created_by: str
-    updated_by: str | None
-    # Grouping-specific fields (included when grouping_id is provided)
-    grouping_id: str | None = None
-    has_override: bool = False
-    grouping_notes: str | None = None
-
-    class Config:
-        from_attributes = True
 
 
 class PersonnelAttendanceHistoryItem(BaseModel):
@@ -554,67 +498,6 @@ class PersonnelAttendanceHistoryResponse(BaseModel):
 # ============================================================================
 # Access Control Schemas
 # ============================================================================
-
-
-class GroupingUserAccessCreate(BaseModel):
-    """Schema for creating grouping user access."""
-
-    # Empty for now - access is granted by user/grouping IDs
-    pass
-
-
-class GroupingUserAccessResponse(BaseModel):
-    """Schema for grouping user access response."""
-
-    id: str
-    user_id: str
-    grouping_id: str
-    granted_by: str
-    granted_at: utc_dt.datetime
-    revoked_at: utc_dt.datetime | None
-
-    class Config:
-        from_attributes = True
-
-
-class UserSubunitScopeCreate(BaseModel):
-    """Schema for creating user subunit scope."""
-
-    unit: str | None = None
-    sub_unit_1: str | None = None
-    sub_unit_2: str | None = None
-    sub_unit_3: str | None = None
-
-
-class UserSubunitScopeResponse(BaseModel):
-    """Schema for user subunit scope response."""
-
-    id: str
-    user_id: str
-    grouping_id: str
-    unit: str | None
-    sub_unit_1: str | None
-    sub_unit_2: str | None
-    sub_unit_3: str | None
-    created_at: utc_dt.datetime
-    created_by: str
-    updated_at: utc_dt.datetime
-
-    class Config:
-        from_attributes = True
-
-
-class UserAccessListParams(BaseModel):
-    """Schema for user access list query parameters."""
-
-    active_only: bool = True
-
-
-class UserSubunitScopeListParams(BaseModel):
-    """Schema for user subunit scope list query parameters."""
-
-    grouping_id: str | None = None
-    unit: str | None = None
 
 
 class UserSubunitAssignmentCreate(BaseModel):

@@ -421,7 +421,7 @@ async def _accessible_pids(
 
 
 # ============================================================================
-# Aggregate stats helper (reused by grouping summary view)
+# Aggregate stats helper (reused by the attendance web view)
 # ============================================================================
 
 

@@ -1,286 +1,598 @@
 {% extends "base.html" %}
 
-{% block title %}Grouping Summary - Parade State{% endblock %}
+{% block title %}Grouping - Parade State{% endblock %}
 
-{% block page_title %}Grouping Summary{% endblock %}
+{% block page_title %}Grouping{% endblock %}
 
 {% block content %}
-<style>
-    /* Management panel: the expanded <details> body is absolutely positioned
-       so expanding it never shifts the summary cards below. */
-    .mgmt-details { position: relative; }
-    .mgmt-details > div {
-        position: absolute;
-        top: 100%;
-        left: 0;
-        right: 0;
-        z-index: 40;
-        margin-top: 0.25rem;
-        padding: 0.75rem;
-        background: white;
-        border: 1px solid #e5e7eb;
-        border-radius: 0.375rem;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-    }
-</style>
-
-<!-- Grouping selector -->
+{% if not active_nr %}
 <div class="card">
-    <form method="get" action="/grouping" style="display: flex; gap: 0.5rem; align-items: center;">
-        <label for="grouping_id" style="font-weight: bold;">Grouping:</label>
-        <select name="grouping_id" id="grouping_id" onchange="this.form.submit()"
-                style="flex: 1; max-width: 400px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
-            {% for g in groupings %}
-            <option value="{{ g.id }}" {% if selected_grouping and g.id == selected_grouping.id %}selected{% endif %}>
-                {{ g.name }} ({{ g.status }})
-            </option>
-            {% endfor %}
-        </select>
-    </form>
-
-    {% if selected_grouping %}
-    {# Grouping management (merged from the retired admin groupings page).
-       Collapsed by default; the panel overlays so expanding never shifts
-       the page. Lifecycle buttons keep the per-status gating; Delete is
-       super-admin-only. #}
-    <details class="mgmt-details" style="margin: 0.75rem 0 0;">
-        <summary style="cursor: pointer; font-size: 0.85rem; color: #374151; font-weight: 600;">Grouping management</summary>
-        <div>
-            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-                <strong>{{ selected_grouping.name }}</strong>
-                <span style="padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; background: #f3f4f6; color: #374151;">{{ selected_grouping.mode }}</span>
-                <span style="padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem;
-                    {% if selected_grouping.status == 'active' %}background: #d1fae5; color: #065f46;
-                    {% elif selected_grouping.status == 'draft' %}background: #f3f4f6; color: #374151;
-                    {% elif selected_grouping.status == 'inactive' %}background: #fef3c7; color: #92400e;
-                    {% elif selected_grouping.status == 'closed' %}background: #dbeafe; color: #1e40af;
-                    {% elif selected_grouping.status == 'finalized' %}background: #ede9fe; color: #5b21b6;
-                    {% elif selected_grouping.status == 'archived' %}background: #e5e7eb; color: #4b5563;
-                    {% else %}background: #e5e7eb; color: #374151;{% endif %}">{{ selected_grouping.status }}</span>
-            </div>
-
-            <p style="margin-top: 0.5rem; font-size: 0.85rem; color: #6b7280;">
-                {% if selected_grouping.valid_from and selected_grouping.valid_until %}
-                <span id="date-display">{{ selected_grouping.valid_from.strftime('%Y-%m-%d') }} → {{ selected_grouping.valid_until.strftime('%Y-%m-%d') }}</span>
-                {% else %}
-                <span>No validity window</span>
-                {% endif %}
-            </p>
-
-            {% if selected_grouping.notes %}
-            <p style="margin-top: 0.25rem; font-size: 0.85rem; color: #6b7280;">{{ selected_grouping.notes }}</p>
-            {% endif %}
-
-            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.75rem;">
-                {% if selected_grouping.status in ['draft', 'active', 'inactive'] and selected_grouping.valid_from and selected_grouping.valid_until %}
-                <button class="btn" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; background: #f3f4f6; color: #374151;"
-                        onclick="toggleEditDates()">Edit Dates</button>
-                {% endif %}
-                {% if selected_grouping.status == 'draft' %}
-                <a class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; text-decoration: none;"
-                   href="/grouping/{{ selected_grouping.id }}/personnel">Manage Personnel</a>
-                <button class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                        onclick="transitionGrouping('active')">Activate</button>
-                {% elif selected_grouping.status == 'active' %}
-                <button class="btn" style="background: #3b82f6; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                        onclick="transitionGrouping('closed')">Close</button>
-                {% elif selected_grouping.status == 'inactive' %}
-                <button class="btn btn-success" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                        onclick="transitionGrouping('active')">Activate</button>
-                <button class="btn" style="background: #3b82f6; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                        onclick="transitionGrouping('closed')">Close</button>
-                <button class="btn" style="background: #6b7280; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                        onclick="transitionGrouping('archived')">Archive</button>
-                {% elif selected_grouping.status == 'closed' %}
-                <button class="btn" style="background: #8b5cf6; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                        onclick="transitionGrouping('finalized')">Finalize</button>
-                {% endif %}
-                {% if user.role == 'super_admin' and selected_grouping.status not in ['active', 'finalized'] %}
-                <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                        onclick="deleteGrouping('{{ selected_grouping.id }}', '{{ selected_grouping.name }}')">Delete</button>
-                {% endif %}
-            </div>
-
-            {% if selected_grouping.status in ['draft', 'active', 'inactive'] and selected_grouping.valid_from and selected_grouping.valid_until %}
-            <div id="edit-dates" style="display: none; margin-top: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 0.375rem; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-                <label style="font-size: 0.8rem; font-weight: 600;">Valid from:</label>
-                <input type="date" id="valid-from" value="{{ selected_grouping.valid_from.strftime('%Y-%m-%d') }}"
-                       style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
-                <label style="font-size: 0.8rem; font-weight: 600;">until:</label>
-                <input type="date" id="valid-until" value="{{ selected_grouping.valid_until.strftime('%Y-%m-%d') }}"
-                       style="padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem;">
-                <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                        onclick="saveDates()">Save</button>
-                <button class="btn" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; background: #e5e7eb; color: #374151;"
-                        onclick="toggleEditDates()">Cancel</button>
-            </div>
-            {% endif %}
-
-            <div id="statusMessage" style="margin-top: 0.6rem;"></div>
-        </div>
-    </details>
+    <p style="color: #6b7280;">No nominal roll is active for attendance. Activate a roll first — groupings are based on the active roll.</p>
+</div>
+{% elif not selected_grouping %}
+<div class="card">
+    <p style="color: #6b7280;">No groupings on the nominal roll with CAA {{ active_nr.caa }} yet.</p>
+    {% if user.role == 'super_admin' %}
+    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
+        <button class="btn btn-primary" onclick="openCreateModal()">New Grouping</button>
+    </div>
+    {% if previous_groupings %}
+    <p style="color: #374151; font-size: 0.875rem; margin-top: 1rem;">
+        Copy a grouping from the previously active roll (CAA {{ previous_nr.caa }}) — group enums and settings carry
+        over, and memberships re-link by Pers No where a match exists:
+    </p>
+    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
+        {% for pg in previous_groupings %}
+        <button class="btn" style="background: #e5e7eb; color: #374151;"
+                onclick="copyFromPrevious('{{ pg.id }}', {{ pg.label | tojson }})">Copy &ldquo;{{ pg.label | e }}&rdquo;</button>
+        {% endfor %}
+    </div>
+    {% endif %}
     {% endif %}
 </div>
-
-{% if selected_grouping %}
-<p style="color: #6b7280; margin-bottom: 1rem;">
-    Showing attendance for {{ today }}.
-</p>
-
-<!-- AM/PM summary cards -->
-{% if counts %}
-<div class="stats">
-    {% for slot, label in [('am', 'AM'), ('pm', 'PM')] %}
-    {% set s = counts[slot] %}
-    <div class="stat-card">
-        <div class="stat-label">{{ label }}</div>
-        <div style="display: flex; gap: 1.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
-            <div>
-                <span style="font-size: 0.75rem; color: #6b7280;">Present</span>
-                <div class="stat-value green">{{ s.present }}</div>
-            </div>
-            <div>
-                <span style="font-size: 0.75rem; color: #6b7280;">Absent</span>
-                <div class="stat-value" style="color: #ef4444;">{{ s.absent }}</div>
-            </div>
-            <div>
-                <span style="font-size: 0.75rem; color: #6b7280;">Total</span>
-                <div class="stat-value">{{ s.total }}</div>
-            </div>
-        </div>
-    </div>
-    {% endfor %}
-</div>
 {% else %}
+{# Selector + management buttons, mirroring the NR page's roll selector card. #}
 <div class="card">
-    <p style="color: #6b7280;">No attendance recorded for today.</p>
+    <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+        <form method="get" action="/grouping" style="display: flex; gap: 0.75rem; align-items: center; flex: 1; min-width: 240px;">
+            <label for="grouping_id" style="font-weight: bold;">Grouping:</label>
+            <select name="grouping_id" id="grouping_id" onchange="this.form.submit()"
+                    style="flex: 1; min-width: 200px; max-width: 360px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                {% for g in groupings %}
+                <option value="{{ g.id }}" {% if g.id == selected_grouping.id %}selected{% endif %}>{{ g.label | e }}</option>
+                {% endfor %}
+            </select>
+        </form>
+        {% if user.role == 'super_admin' %}
+        <button class="btn btn-primary" onclick="openCreateModal()">New</button>
+        <button class="btn" style="background: #e5e7eb; color: #374151;" onclick="openEditModal()">Edit</button>
+        <button class="btn" style="background: #e5e7eb; color: #374151;" onclick="openCloneModal()">Clone</button>
+        <button class="btn" style="background: #ef4444; color: white;" onclick="deleteGrouping()">Delete</button>
+        {% endif %}
+        <a href="/api/v1/groupings/{{ selected_grouping.id }}/export?user_id={{ user.id }}&user_role={{ user.role }}"
+           class="btn" style="background: #e5e7eb; color: #374151; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.25rem; font-size: 0.875rem;">Export CSV</a>
+    </div>
+    <div id="page-status" style="margin-top: 0.6rem;"></div>
 </div>
-{% endif %}
 
-<!-- Unit breakdown -->
-{% if unit_breakdown %}
 <div class="card">
-    <h3 style="margin-bottom: 1rem;">Unit Breakdown</h3>
+    <h3 style="margin-bottom: 0.5rem;">
+        {{ selected_grouping.label | e }}
+        <span style="font-size: 0.875rem; font-weight: normal; color: #6b7280;">
+            — {{ personnel_rows | length }} servicemen on CAA {{ active_nr.caa }}
+        </span>
+    </h3>
+    <p style="margin: 0.25rem 0 0; font-size: 0.8rem; color: #6b7280;">
+        {% if selected_grouping.multiple_membership %}Servicemen may hold several groups.{% else %}One group per serviceman.{% endif %}
+        {% if not selected_grouping.allow_ungrouped %} Every serviceman must hold a group.{% endif %}
+        Checkbox and Remarks are free-form — their use follows your unit's standardisation.
+    </p>
+
+    {% if personnel_rows %}
     <div class="table-wrap">
-        <table style="width: 100%; border-collapse: collapse;">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
             <thead>
                 <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.5rem;">Group</th>
+                    <th style="padding: 0.5rem;">Rank</th>
+                    <th style="padding: 0.5rem;">Name</th>
                     <th style="padding: 0.5rem;">Unit</th>
-                    <th style="padding: 0.5rem; text-align: center;">Present</th>
-                    <th style="padding: 0.5rem; text-align: center;">Absent</th>
-                    <th style="padding: 0.5rem; text-align: center;">Total</th>
+                    <th style="padding: 0.5rem;">Sub Unit</th>
+                    <th style="padding: 0.5rem;">Checkbox</th>
+                    <th style="padding: 0.5rem;">Remarks</th>
                 </tr>
             </thead>
             <tbody>
-                {% for u in unit_breakdown %}
+                {% for p in personnel_rows %}
                 <tr style="border-bottom: 1px solid #e5e7eb;">
-                    <td style="padding: 0.5rem; font-weight: bold;">{{ u.unit }}</td>
-                    <td style="padding: 0.5rem; text-align: center; color: #10b981; font-weight: bold;">{{ u.present }}</td>
-                    <td style="padding: 0.5rem; text-align: center; color: #ef4444;">{{ u.absent }}</td>
-                    <td style="padding: 0.5rem; text-align: center; font-weight: bold;">{{ u.total }}</td>
+                    <td style="padding: 0.5rem; white-space: nowrap;">
+                        {% if user.role == 'super_admin' %}
+                        {% if selected_grouping.multiple_membership %}
+                        <span style="display: inline-flex; gap: 0.6rem; flex-wrap: wrap;" data-multigroups="{{ p.id }}">
+                            {% for g in selected_grouping.groups %}
+                            <label style="white-space: nowrap; font-weight: normal; display: inline-flex; gap: 0.25rem; align-items: center;">
+                                <input type="checkbox" data-pid="{{ p.id }}" data-gid="{{ g.id }}"
+                                       {% if g.id in p.group_ids %}checked{% endif %}
+                                       onchange="onMultiGroupChange(this)">
+                                {{ g.label | e }}
+                            </label>
+                            {% endfor %}
+                        </span>
+                        {% else %}
+                        <select data-pid="{{ p.id }}" data-prev="{{ p.group_ids[0] if p.group_ids else '' }}"
+                                onchange="onSingleGroupChange(this)"
+                                style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem; background: #fff; color: #111827;">
+                            {% if selected_grouping.allow_ungrouped %}
+                            <option value="" {% if not p.group_ids %}selected{% endif %}>—</option>
+                            {% endif %}
+                            {% for g in selected_grouping.groups %}
+                            <option value="{{ g.id }}" {% if p.group_ids and p.group_ids[0] == g.id %}selected{% endif %}>{{ g.label | e }}</option>
+                            {% endfor %}
+                        </select>
+                        {% endif %}
+                        {% else %}
+                        {{ p.group_labels | join(', ') if p.group_labels else '—' }}
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.5rem; white-space: nowrap;">{{ p.rank | e }}</td>
+                    <td style="padding: 0.5rem;">{{ p.full_name | e }}</td>
+                    <td style="padding: 0.5rem;">{{ p.unit | e }}</td>
+                    <td style="padding: 0.5rem;">{{ p.sub_unit_1 | e if p.sub_unit_1 else '—' }}</td>
+                    <td style="padding: 0.5rem; text-align: center;">
+                        {% if user.role == 'super_admin' %}
+                        <input type="checkbox" data-pid="{{ p.id }}" {% if p.checkbox %}checked{% endif %}
+                               onchange="onCheckboxChange(this)" title="Generic checkbox — use per your unit's standardisation">
+                        {% else %}
+                        {% if p.checkbox %}&#10003;{% else %}—{% endif %}
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.5rem; max-width: 18rem;">
+                        {% if user.role == 'super_admin' %}
+                        <input value="{{ (p.remarks or '') | e }}" data-pid="{{ p.id }}" onchange="onRemarksChange(this)"
+                               title="{{ (p.remarks or '') | e }}" placeholder="—" maxlength="2000"
+                               style="width: 100%; max-width: 17rem; padding: 0.25rem 0.4rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem; background: #fff; color: #111827;">
+                        {% else %}
+                        <span title="{{ (p.remarks or '') | e }}">{{ p.remarks | e if p.remarks else '—' }}</span>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
+    {% else %}
+    <p style="color: #6b7280; margin-top: 1rem;">No active personnel on this nominal roll.</p>
+    {% endif %}
 </div>
 {% endif %}
-{% else %}
-<div class="card">
-    <p style="color: #6b7280;">No groupings available. Contact an administrator to get access.</p>
+
+{% if user.role == 'super_admin' and active_nr %}
+{# Create modal #}
+<div id="create-modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeCreateModal()"></div>
+<div id="create-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 480px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">New Grouping</h3>
+        <button type="button" onclick="closeCreateModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
+    </div>
+    <div style="background: #f9fafb; border-radius: 0.375rem; padding: 0.75rem; margin-bottom: 1rem; font-size: 0.875rem;">
+        <strong>Based on:</strong> CAA {{ active_nr.caa }} (the roll active for attendance)
+    </div>
+    <form id="create-grouping-form" onsubmit="event.preventDefault(); submitCreate();">
+        <div style="margin-bottom: 0.75rem;">
+            <label for="new-label" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Label <span style="color: #ef4444;">*</span></label>
+            <input type="text" id="new-label" required maxlength="100" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" placeholder="e.g. Duty Groups, FTX">
+        </div>
+        <div style="margin-bottom: 0.75rem;">
+            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Groups</label>
+            <div id="new-groups" style="display: flex; flex-direction: column; gap: 0.4rem;"></div>
+            <button type="button" class="btn" style="background: #e5e7eb; color: #374151; font-size: 0.8rem; padding: 0.25rem 0.75rem; margin-top: 0.4rem;" onclick="addNewGroupRow()">+ Add group</button>
+        </div>
+        <div style="display: flex; gap: 1.5rem; margin-bottom: 0.75rem; font-size: 0.875rem; color: #374151; flex-wrap: wrap;">
+            <label style="font-weight: normal; display: inline-flex; gap: 0.35rem; align-items: center;">
+                <input type="checkbox" id="new-multiple"> Allow several groups per serviceman
+            </label>
+            <label style="font-weight: normal; display: inline-flex; gap: 0.35rem; align-items: center;">
+                <input type="checkbox" id="new-allow-ungrouped" checked> Allow ungrouped servicemen
+            </label>
+        </div>
+        <p style="font-size: 0.75rem; color: #9ca3af; margin: 0 0 0.75rem;">These two settings are fixed once the grouping is created.</p>
+        <div id="create-modal-status" style="margin-bottom: 0.75rem;"></div>
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+            <button type="button" onclick="closeCreateModal()" style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: white; cursor: pointer;">Cancel</button>
+            <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1rem;">Create</button>
+        </div>
+    </form>
 </div>
+
+{% if selected_grouping %}
+{# Edit modal: label + group enums (rename / reorder / remove / add) #}
+<div id="edit-modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeEditModal()"></div>
+<div id="edit-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 520px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">Edit Grouping</h3>
+        <button type="button" onclick="closeEditModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
+    </div>
+    <form id="edit-grouping-form" onsubmit="event.preventDefault(); submitEdit();">
+        <div style="margin-bottom: 0.75rem;">
+            <label for="edit-label" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Label</label>
+            <input type="text" id="edit-label" required maxlength="100" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+        </div>
+        <div style="margin-bottom: 0.75rem;">
+            <label style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Groups <span style="color: #9ca3af; font-weight: normal;">(order = display order; removing a group un-assigns its members)</span></label>
+            <div id="edit-groups" style="display: flex; flex-direction: column; gap: 0.4rem;"></div>
+            <button type="button" class="btn" style="background: #e5e7eb; color: #374151; font-size: 0.8rem; padding: 0.25rem 0.75rem; margin-top: 0.4rem;" onclick="addEditGroupRow(null, 0)">+ Add group</button>
+        </div>
+        <div id="edit-modal-status" style="margin-bottom: 0.75rem;"></div>
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+            <button type="button" onclick="closeEditModal()" style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: white; cursor: pointer;">Cancel</button>
+            <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1rem;">Save</button>
+        </div>
+    </form>
+</div>
+
+{# Clone modal #}
+<div id="clone-modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeCloneModal()"></div>
+<div id="clone-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 440px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">Clone Grouping</h3>
+        <button type="button" onclick="closeCloneModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
+    </div>
+    <form id="clone-grouping-form" onsubmit="event.preventDefault(); submitClone();">
+        <div style="background: #f9fafb; border-radius: 0.375rem; padding: 0.75rem; margin-bottom: 1rem; font-size: 0.875rem;">
+            Cloning <strong>{{ selected_grouping.label | e }}</strong> — group enums and settings always carry over.
+        </div>
+        <div style="margin-bottom: 0.75rem;">
+            <label for="clone-label" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">New label <span style="color: #ef4444;">*</span></label>
+            <input type="text" id="clone-label" required maxlength="100" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" placeholder="Must differ from every existing label">
+        </div>
+        <div style="margin-bottom: 1rem; font-size: 0.875rem; color: #374151;">
+            <label style="font-weight: normal; display: inline-flex; gap: 0.35rem; align-items: center;">
+                <input type="checkbox" id="clone-include-memberships"> Also copy memberships and each serviceman's checkbox / remarks
+            </label>
+        </div>
+        <div id="clone-modal-status" style="margin-bottom: 0.75rem;"></div>
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+            <button type="button" onclick="closeCloneModal()" style="padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: white; cursor: pointer;">Cancel</button>
+            <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1rem;">Clone</button>
+        </div>
+    </form>
+</div>
+{% endif %}
 {% endif %}
 {% endblock %}
 
 {% block scripts %}
-{% if selected_grouping %}
+{% if active_nr %}
 <script>
-    {# Grouping management (merged from the retired admin groupings page).
-       Acts on the currently selected grouping only. #}
-    const ADMIN_USER_ID = "{{ user.id }}";
-    const ADMIN_USER_ROLE = "{{ user.role }}";
-    const GROUPING_ID = "{{ selected_grouping.id }}";
+    const USER_ID = "{{ user.id }}";
+    const USER_ROLE = "{{ user.role }}";
+    const GROUPING_ID = {{ (selected_grouping.id if selected_grouping else '') | tojson }};
+    const ALLOW_UNGROUPED = {{ (selected_grouping.allow_ungrouped if selected_grouping else true) | tojson }};
+    const GROUPS = {{ (selected_grouping.groups if selected_grouping else []) | tojson }};
 
-    function showStatus(message, type) {
-        const div = document.getElementById('statusMessage');
+    function showPageStatus(message, type) {
+        const div = document.getElementById('page-status');
+        if (!div) return;
         const color = type === 'success' ? '#10b981' : '#ef4444';
         div.innerHTML = '<p style="color: ' + color + '; font-weight: bold; margin: 0;">' + message + '</p>';
     }
 
-    function toggleEditDates() {
-        const div = document.getElementById('edit-dates');
+    function showModalStatus(id, message, type) {
+        const div = document.getElementById(id);
         if (!div) return;
-        if (div.style.display === 'none' || div.style.display === '') {
-            div.style.display = 'flex';
-        } else {
-            div.style.display = 'none';
+        const color = type === 'success' ? '#10b981' : '#ef4444';
+        div.innerHTML = '<p style="color: ' + color + '; font-size: 0.875rem; margin: 0;">' + message + '</p>';
+    }
+
+    function openModal(backdropId, modalId) {
+        document.getElementById(backdropId).style.display = 'block';
+        document.getElementById(modalId).style.display = 'block';
+    }
+
+    function closeModal(backdropId, modalId) {
+        document.getElementById(backdropId).style.display = 'none';
+        document.getElementById(modalId).style.display = 'none';
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key !== 'Escape') return;
+        ['create', 'edit', 'clone'].forEach(function(name) {
+            const modal = document.getElementById(name + '-modal');
+            if (modal && modal.style.display === 'block') {
+                closeModal(name + '-modal-backdrop', name + '-modal');
+            }
+        });
+    });
+
+    async function apiFetch(url, options) {
+        try {
+            const response = await fetch(url, options);
+            if (response.ok || response.status === 204) {
+                return { ok: true, status: response.status };
+            }
+            const data = await response.json().catch(function() { return {}; });
+            return { ok: false, status: response.status, detail: data.detail || ('HTTP ' + response.status) };
+        } catch (error) {
+            return { ok: false, status: 0, detail: 'Network error: ' + error.message };
         }
     }
 
-    async function saveDates() {
-        const fromInput = document.getElementById('valid-from');
-        const untilInput = document.getElementById('valid-until');
-        if (!fromInput.value || !untilInput.value) {
-            showStatus('Both dates are required.', 'error');
+    function withParams(path) {
+        return path + (path.indexOf('?') === -1 ? '?' : '&') +
+            'user_id=' + encodeURIComponent(USER_ID) + '&user_role=' + encodeURIComponent(USER_ROLE);
+    }
+
+    // --- Group / checkbox / remarks inline edits (super-admin markup only) ---
+    async function putGroups(pid, groupIds) {
+        const result = await apiFetch(withParams('/api/v1/groupings/' + GROUPING_ID + '/personnel/' + pid + '/groups'), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ group_ids: groupIds }),
+        });
+        if (result.ok) {
+            showPageStatus('Group updated.', 'success');
+        } else {
+            showPageStatus('Group update failed: ' + result.detail, 'error');
+            setTimeout(function() { location.reload(); }, 1200);
+        }
+    }
+
+    function onSingleGroupChange(sel) {
+        const pid = sel.getAttribute('data-pid');
+        const prev = sel.getAttribute('data-prev');
+        const value = sel.value;
+        if (!value && !ALLOW_UNGROUPED) {
+            sel.value = prev;
+            showPageStatus('This grouping requires every serviceman to hold a group.', 'error');
             return;
         }
-        try {
-            const response = await fetch('/api/v1/groupings/' + GROUPING_ID + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    valid_from: fromInput.value + 'T00:00:00',
-                    valid_until: untilInput.value + 'T23:59:59',
-                }),
-            });
-            if (response.ok) {
-                showStatus('Grouping dates updated.', 'success');
-                setTimeout(function() { location.reload(); }, 800);
-            } else {
-                const data = await response.json();
-                showStatus('Update failed: ' + (data.detail || 'Unknown error'), 'error');
-            }
-        } catch (error) {
-            showStatus('Network error: ' + error.message, 'error');
+        putGroups(pid, value ? [value] : []);
+    }
+
+    function onMultiGroupChange(box) {
+        const pid = box.getAttribute('data-pid');
+        const wrap = document.querySelector('[data-multigroups="' + pid + '"]');
+        const checked = Array.prototype.slice.call(wrap.querySelectorAll('input:checked'));
+        const ids = checked.map(function(b) { return b.getAttribute('data-gid'); });
+        if (!ids.length && !ALLOW_UNGROUPED) {
+            box.checked = true;
+            showPageStatus('This grouping requires every serviceman to hold a group.', 'error');
+            return;
+        }
+        putGroups(pid, ids);
+    }
+
+    async function patchState(pid, body) {
+        const result = await apiFetch(withParams('/api/v1/groupings/' + GROUPING_ID + '/personnel/' + pid + '/state'), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (result.ok) {
+            showPageStatus('Saved.', 'success');
+        } else {
+            showPageStatus('Save failed: ' + result.detail, 'error');
         }
     }
 
-    async function transitionGrouping(newStatus) {
-        try {
-            const response = await fetch('/api/v1/groupings/' + GROUPING_ID + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status: newStatus }),
-            });
-            if (response.ok) {
-                showStatus('Grouping transitioned to ' + newStatus + '.', 'success');
-                setTimeout(function() { location.reload(); }, 800);
-            } else {
-                const data = await response.json();
-                showStatus('Transition failed: ' + (data.detail || 'Unknown error'), 'error');
-            }
-        } catch (error) {
-            showStatus('Network error: ' + error.message, 'error');
+    function onCheckboxChange(box) {
+        patchState(box.getAttribute('data-pid'), { checkbox: box.checked });
+    }
+
+    function onRemarksChange(input) {
+        patchState(input.getAttribute('data-pid'), { remarks: input.value });
+    }
+
+    {% if user.role == 'super_admin' %}
+    // --- Create ---
+    function addNewGroupRow() {
+        const container = document.getElementById('new-groups');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'new-group-input';
+        input.maxLength = 100;
+        input.placeholder = 'Group name';
+        input.style.padding = '0.4rem 0.5rem';
+        input.style.border = '1px solid #d1d5db';
+        input.style.borderRadius = '0.25rem';
+        container.appendChild(input);
+        input.focus();
+    }
+
+    function openCreateModal() {
+        document.getElementById('new-label').value = '';
+        document.getElementById('new-multiple').checked = false;
+        document.getElementById('new-allow-ungrouped').checked = true;
+        const container = document.getElementById('new-groups');
+        container.innerHTML = '';
+        addNewGroupRow();
+        document.getElementById('create-modal-status').innerHTML = '';
+        openModal('create-modal-backdrop', 'create-modal');
+        document.getElementById('new-label').focus();
+    }
+
+    function closeCreateModal() {
+        closeModal('create-modal-backdrop', 'create-modal');
+    }
+
+    async function submitCreate() {
+        const label = document.getElementById('new-label').value.trim();
+        if (!label) {
+            showModalStatus('create-modal-status', 'Label is required.', 'error');
+            return;
+        }
+        const groups = Array.prototype.slice.call(document.querySelectorAll('#new-groups .new-group-input'))
+            .map(function(input) { return input.value.trim(); })
+            .filter(function(value) { return value; })
+            .map(function(value) { return { label: value }; });
+        const payload = {
+            label: label,
+            groups: groups,
+            multiple_membership: document.getElementById('new-multiple').checked,
+            allow_ungrouped: document.getElementById('new-allow-ungrouped').checked,
+        };
+        const result = await apiFetch(withParams('/api/v1/groupings/'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (result.ok) {
+            showModalStatus('create-modal-status', 'Grouping created. Reloading…', 'success');
+            setTimeout(function() { location.reload(); }, 700);
+        } else {
+            showModalStatus('create-modal-status', 'Create failed: ' + result.detail, 'error');
         }
     }
 
-    async function deleteGrouping(groupingId, name) {
-        if (!confirm('Delete grouping "' + name + '"? This cannot be undone.')) return;
-        try {
-            const response = await fetch('/api/v1/groupings/' + groupingId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE, {
-                method: 'DELETE',
-            });
-            if (response.ok) {
-                showStatus('Grouping deleted.', 'success');
-                setTimeout(function() { location.reload(); }, 800);
-            } else {
-                const data = await response.json();
-                showStatus('Delete failed: ' + (data.detail || 'Unknown error'), 'error');
-            }
-        } catch (error) {
-            showStatus('Network error: ' + error.message, 'error');
+    {% if selected_grouping %}
+    // --- Edit ---
+    function addEditGroupRow(group, count) {
+        const container = document.getElementById('edit-groups');
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.gap = '0.4rem';
+        row.style.alignItems = 'center';
+        row.dataset.id = group ? group.id : '';
+        row.dataset.count = count || 0;
+        row.innerHTML =
+            '<button type="button" class="btn" style="background:#e5e7eb;color:#374151;font-size:0.75rem;padding:0.2rem 0.45rem;" onclick="moveEditRow(this,-1)" title="Move up">&#9650;</button>' +
+            '<button type="button" class="btn" style="background:#e5e7eb;color:#374151;font-size:0.75rem;padding:0.2rem 0.45rem;" onclick="moveEditRow(this,1)" title="Move down">&#9660;</button>' +
+            '<input type="text" class="edit-group-label" maxlength="100" style="flex:1;padding:0.4rem 0.5rem;border:1px solid #d1d5db;border-radius:0.25rem;">' +
+            '<span class="edit-group-count" style="font-size:0.75rem;color:#9ca3af;white-space:nowrap;"></span>' +
+            '<button type="button" class="btn" style="background:#fee2e2;color:#b91c1c;font-size:0.75rem;padding:0.2rem 0.5rem;" onclick="removeEditRow(this)">Remove</button>';
+        row.querySelector('input').value = group ? group.label : '';
+        row.querySelector('.edit-group-count').textContent = count ? count + ' members' : '';
+        container.appendChild(row);
+    }
+
+    function moveEditRow(btn, delta) {
+        const row = btn.parentElement;
+        if (delta < 0 && row.previousElementSibling) {
+            row.parentElement.insertBefore(row, row.previousElementSibling);
+        } else if (delta > 0 && row.nextElementSibling) {
+            row.parentElement.insertBefore(row.nextElementSibling, row);
         }
     }
+
+    function removeEditRow(btn) {
+        const row = btn.parentElement;
+        const count = parseInt(row.dataset.count || '0', 10);
+        if (count > 0) {
+            // Hide rather than drop: the row still carries its member count
+            // for the un-grouping warning on Save.
+            row.querySelector('input').value = '';
+            row.style.display = 'none';
+        } else {
+            row.remove();
+        }
+    }
+
+    function openEditModal() {
+        document.getElementById('edit-label').value = {{ selected_grouping.label | tojson }};
+        const container = document.getElementById('edit-groups');
+        container.innerHTML = '';
+        GROUPS.forEach(function(group) {
+            addEditGroupRow(group, group.member_count);
+        });
+        document.getElementById('edit-modal-status').innerHTML = '';
+        openModal('edit-modal-backdrop', 'edit-modal');
+        document.getElementById('edit-label').focus();
+    }
+
+    function closeEditModal() {
+        closeModal('edit-modal-backdrop', 'edit-modal');
+    }
+
+    async function submitEdit() {
+        const label = document.getElementById('edit-label').value.trim();
+        if (!label) {
+            showModalStatus('edit-modal-status', 'Label is required.', 'error');
+            return;
+        }
+        const rows = Array.prototype.slice.call(document.querySelectorAll('#edit-groups > div')).filter(function(row) {
+            return row.style.display !== 'none' && row.querySelector('input').value.trim();
+        });
+        const removedMembers = Array.prototype.slice.call(document.querySelectorAll('#edit-groups > div'))
+            .filter(function(row) { return row.style.display === 'none'; })
+            .reduce(function(sum, row) { return sum + parseInt(row.dataset.count || '0', 10); }, 0);
+        if (removedMembers > 0) {
+            const proceed = confirm(
+                removedMembers + ' servicemen will become ungrouped by removing these groups. Continue?'
+            );
+            if (!proceed) return;
+        }
+        const groups = rows.map(function(row) {
+            const item = { label: row.querySelector('input').value.trim() };
+            if (row.dataset.id) item.id = row.dataset.id;
+            return item;
+        });
+        const result = await apiFetch(withParams('/api/v1/groupings/' + GROUPING_ID), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ label: label, groups: groups }),
+        });
+        if (result.ok) {
+            showModalStatus('edit-modal-status', 'Saved. Reloading…', 'success');
+            setTimeout(function() { location.reload(); }, 700);
+        } else {
+            showModalStatus('edit-modal-status', 'Save failed: ' + result.detail, 'error');
+        }
+    }
+
+    // --- Clone ---
+    function openCloneModal() {
+        document.getElementById('clone-label').value = '';
+        document.getElementById('clone-include-memberships').checked = false;
+        document.getElementById('clone-modal-status').innerHTML = '';
+        openModal('clone-modal-backdrop', 'clone-modal');
+        document.getElementById('clone-label').focus();
+    }
+
+    function closeCloneModal() {
+        closeModal('clone-modal-backdrop', 'clone-modal');
+    }
+
+    async function submitClone() {
+        const label = document.getElementById('clone-label').value.trim();
+        if (!label) {
+            showModalStatus('clone-modal-status', 'A new label is required.', 'error');
+            return;
+        }
+        const payload = {
+            label: label,
+            include_memberships: document.getElementById('clone-include-memberships').checked,
+        };
+        const result = await apiFetch(withParams('/api/v1/groupings/' + GROUPING_ID + '/clone'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (result.ok) {
+            showModalStatus('clone-modal-status', 'Cloned. Reloading…', 'success');
+            setTimeout(function() { location.reload(); }, 700);
+        } else {
+            showModalStatus('clone-modal-status', 'Clone failed: ' + result.detail, 'error');
+        }
+    }
+
+    // --- Delete ---
+    async function deleteGrouping() {
+        const label = {{ selected_grouping.label | tojson }};
+        if (!confirm('Delete grouping "' + label + '"?\n\nAll groups, memberships and per-serviceman checkbox / remarks are permanently removed. This cannot be undone.')) return;
+        const result = await apiFetch(withParams('/api/v1/groupings/' + GROUPING_ID), { method: 'DELETE' });
+        if (result.ok) {
+            window.location.href = '/grouping';
+        } else {
+            showPageStatus('Delete failed: ' + result.detail, 'error');
+        }
+    }
+    {% endif %}
+
+    // --- Copy from previous NR (empty state) ---
+    async function copyFromPrevious(sourceId, label) {
+        let payload = { source_grouping_id: sourceId };
+        let result = await apiFetch(withParams('/api/v1/groupings/copy-from-previous'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (result.status === 409) {
+            const newLabel = prompt('The label "' + label + '" is already in use. Enter a different label:', label);
+            if (!newLabel || !newLabel.trim()) return;
+            payload.label = newLabel.trim();
+            result = await apiFetch(withParams('/api/v1/groupings/copy-from-previous'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+        }
+        if (result.ok) {
+            location.reload();
+        } else {
+            alert('Copy failed: ' + result.detail);
+        }
+    }
+    {% endif %}
 </script>
 {% endif %}
 {% endblock %}
