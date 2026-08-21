@@ -1,5 +1,7 @@
-"""Tests for nominal_roll API endpoints (attendance activation, label, DELETE)."""
+"""Tests for nominal_roll API endpoints (attendance activation, label, DELETE, CSV export)."""
 
+import csv
+import io
 from datetime import date
 
 import pytest
@@ -433,3 +435,69 @@ async def test_list_nominal_rolls_includes_label(
     items = {item["id"]: item for item in response.json()}
     assert items[labeled.id]["label"] == "Visible"
     assert items[unlabeled.id]["label"] is None
+
+
+# ============================================================================
+# GET /api/v1/nominal-rolls/{id}/export
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_export_csv_columns_and_content(
+    client: TestClient, sample_nominal_roll, sample_personnel, admin_id: str
+):
+    """Export returns the browser table's columns and personnel values."""
+    response = client.get(
+        f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/export",
+        params={"user_id": admin_id, "user_role": "admin"},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers["content-disposition"]
+
+    rows = list(csv.reader(io.StringIO(response.text)))
+    assert rows[0] == [
+        "Unit", "Sub Unit 1", "Sub Unit 2", "Sub Unit 3",
+        "Category", "Rank", "Full Name", "Pers No", "Callup", "Remarks",
+    ]
+    assert len(rows) == 4  # header + all three sample personnel
+    by_name = {row[6]: row for row in rows[1:]}
+    assert by_name["John Doe"][0] == "Coy A"
+    assert by_name["John Doe"][1] == "Platoon 1"
+    assert by_name["John Doe"][2] == "Section 1"
+    assert by_name["John Doe"][7] == "10000001"
+    assert by_name["John Doe"][8] == "Called Up"
+
+
+@pytest.mark.asyncio
+async def test_export_csv_honours_view_filters(
+    client: TestClient, sample_nominal_roll, sample_personnel, admin_id: str
+):
+    """Filters applied on the page (category, search) scope the export too."""
+    by_category = client.get(
+        f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/export",
+        params={"user_id": admin_id, "user_role": "admin", "category": "Officer"},
+    )
+    assert by_category.status_code == 200
+    rows = list(csv.reader(io.StringIO(by_category.text)))
+    assert [row[6] for row in rows[1:]] == ["Bob Johnson"]
+
+    by_search = client.get(
+        f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/export",
+        params={"user_id": admin_id, "user_role": "admin", "search": "10000002"},
+    )
+    assert by_search.status_code == 200
+    rows = list(csv.reader(io.StringIO(by_search.text)))
+    assert [row[6] for row in rows[1:]] == ["Jane Smith"]
+
+
+@pytest.mark.asyncio
+async def test_export_csv_requires_admin(
+    client: TestClient, sample_nominal_roll, sample_users
+):
+    """Non-admin roles are refused (the browser page is admin-only too)."""
+    response = client.get(
+        f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/export",
+        params={"user_id": str(sample_users["user"].id), "user_role": "user"},
+    )
+    assert response.status_code == 403
