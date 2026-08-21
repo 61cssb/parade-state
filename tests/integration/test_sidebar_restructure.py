@@ -222,6 +222,76 @@ async def test_grouping_view_super_admin_gets_management_surface(
 
 
 @pytest.mark.asyncio
+async def test_grouping_view_group_filter(
+    client: TestClient, db_session: AsyncSession, sample_users,
+    sample_attendance_scope, sample_grouping, sample_grouping_memberships,
+    sample_personnel,
+):
+    """The Group filter follows the NR filter pattern: a select over the
+    grouping's enums plus an Ungrouped option (only when allowed), and the
+    roster narrows to the selected group's members."""
+    await _sign_in(client, db_session, sample_users["admin"])
+
+    base = client.get("/grouping")
+    assert base.status_code == 200
+    body = base.text
+    assert "All groups" in body
+    assert "Grp 1" in body
+    assert "Grp 2" in body
+    assert '<option value="ungrouped"' in body  # allow_ungrouped defaults True
+    assert "John Doe" in body
+    assert "Bob Johnson" in body
+
+    grp1_id = sample_grouping_memberships["Grp 1"].id
+    filtered = client.get("/grouping", params={"group": str(grp1_id)})
+    assert filtered.status_code == 200
+    assert "John Doe" in filtered.text  # Grp 1 member
+    assert "Jane Smith" not in filtered.text  # Grp 2 member filtered out
+    assert "Bob Johnson" not in filtered.text  # ungrouped filtered out
+    assert "1 of 3 servicemen" in filtered.text
+
+    ungrouped = client.get("/grouping", params={"group": "ungrouped"})
+    assert ungrouped.status_code == 200
+    assert "Bob Johnson" in ungrouped.text
+    assert "John Doe" not in ungrouped.text
+    assert "Jane Smith" not in ungrouped.text
+
+
+@pytest.mark.asyncio
+async def test_grouping_view_ungrouped_filter_hidden_when_disallowed(
+    client: TestClient, db_session: AsyncSession, sample_users,
+    sample_attendance_scope, sample_personnel,
+):
+    """A grouping that requires every serviceman to hold a group offers no
+    Ungrouped filter; the sentinel value is ignored server-side."""
+    from parade_state.models import Grouping, GroupingGroup
+
+    strict = Grouping(
+        label="Strict Filter",
+        nominal_roll_id=str(sample_attendance_scope.id),
+        multiple_membership=False,
+        allow_ungrouped=False,
+        created_by=str(sample_users["admin"].id),
+    )
+    strict.groups.append(GroupingGroup(label="S1", position=0))
+    db_session.add(strict)
+    await db_session.commit()
+
+    await _sign_in(client, db_session, sample_users["admin"])
+
+    response = client.get("/grouping", params={"grouping_id": str(strict.id)})
+    assert response.status_code == 200
+    assert '<option value="ungrouped"' not in response.text
+
+    # The sentinel falls back to the unfiltered view rather than 500.
+    sentinel = client.get(
+        "/grouping", params={"grouping_id": str(strict.id), "group": "ungrouped"}
+    )
+    assert sentinel.status_code == 200
+    assert "John Doe" in sentinel.text
+
+
+@pytest.mark.asyncio
 async def test_grouping_personnel_management_route_retired(
     client: TestClient, db_session: AsyncSession, sample_users, sample_grouping
 ):
