@@ -65,6 +65,12 @@
                 {% endfor %}
             </select>
         </form>
+        <span class="setting-chip" title="Fixed when the grouping was created">
+            {%- if selected_grouping.multiple_membership %}Multiple groups{% else %}Single group{% endif -%}
+        </span>
+        <span class="setting-chip{% if not selected_grouping.allow_ungrouped %} strict{% endif %}" title="Fixed when the grouping was created">
+            {%- if selected_grouping.allow_ungrouped %}Ungrouped allowed{% else %}All must be grouped{% endif -%}
+        </span>
         {% if user.role == 'super_admin' %}
         <button class="btn btn-primary" onclick="openCreateModal()">New</button>
         <button class="btn" style="background: #e5e7eb; color: #374151;" onclick="openEditModal()">Edit</button>
@@ -105,12 +111,6 @@
 <div class="card">
     <h3 style="margin-bottom: 0.5rem;">
         {{ selected_grouping.label | e }}
-        <span class="setting-chip" title="Fixed when the grouping was created">
-            {%- if selected_grouping.multiple_membership %}Multiple groups{% else %}Single group{% endif -%}
-        </span>
-        <span class="setting-chip{% if not selected_grouping.allow_ungrouped %} strict{% endif %}" title="Fixed when the grouping was created">
-            {%- if selected_grouping.allow_ungrouped %}Ungrouped allowed{% else %}All must be grouped{% endif -%}
-        </span>
         <span style="font-size: 0.875rem; font-weight: normal; color: #6b7280;">
             — {{ personnel_rows | length }}{% if group_filter %} of {{ total_count }}{% endif %} servicemen on CAA {{ active_nr.caa }}
         </span>
