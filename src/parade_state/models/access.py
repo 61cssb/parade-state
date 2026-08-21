@@ -11,7 +11,6 @@ from ..utils import utc_dt
 if TYPE_CHECKING:
     from .auth_session import UserSession
     from .csv_ingestion import ColumnMetadata, NominalRoll
-    from .grouping import Grouping
 
 
 class AccessLevel(Base):
@@ -83,16 +82,6 @@ class User(Base):
     sessions: Mapped[list["UserSession"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
-    subunit_scopes: Mapped[list["UserSubunitScope"]] = relationship(
-        back_populates="user",
-        cascade="all, delete-orphan",
-        foreign_keys="UserSubunitScope.user_id",
-    )
-    grouping_accesses: Mapped[list["GroupingUserAccess"]] = relationship(
-        back_populates="user",
-        cascade="all, delete-orphan",
-        foreign_keys="GroupingUserAccess.user_id",
-    )
     subunit_assignments: Mapped[list["UserSubunitAssignment"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
@@ -101,91 +90,6 @@ class User(Base):
 
     def __repr__(self) -> str:
         return f"<User(email={self.email!r}, status={self.status!r})>"
-
-
-class UserSubunitScope(Base):
-    """Links a user to specific subunit(s) within each grouping."""
-
-    __tablename__ = "user_subunit_scopes"
-
-    user_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True
-    )
-    grouping_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("groupings.id", ondelete="CASCADE"), index=True
-    )
-    unit: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    sub_unit_1: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    sub_unit_2: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    sub_unit_3: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[utc_dt.datetime] = mapped_column(
-        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
-    )
-    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
-    updated_at: Mapped[utc_dt.datetime] = mapped_column(
-        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
-    )
-
-    # Relationships
-    user: Mapped[User] = relationship(
-        back_populates="subunit_scopes", foreign_keys=[user_id]
-    )
-    grouping: Mapped["Grouping"] = relationship(back_populates="user_scopes")
-
-    __table_args__ = (
-        UniqueConstraint(
-            "user_id",
-            "grouping_id",
-            "unit",
-            "sub_unit_1",
-            "sub_unit_2",
-            "sub_unit_3",
-            name="unique_user_grouping_scope",
-        ),
-    )
-
-    def __repr__(self) -> str:
-        return (
-            f"<UserSubunitScope(user_id={self.user_id!r}, "
-            f"grouping_id={self.grouping_id!r}, "
-            f"unit={self.unit!r})>"
-        )
-
-
-class GroupingUserAccess(Base):
-    """Grants a user access to a specific grouping."""
-
-    __tablename__ = "grouping_user_accesses"
-
-    user_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True
-    )
-    grouping_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("groupings.id", ondelete="CASCADE"), index=True
-    )
-    granted_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
-    granted_at: Mapped[utc_dt.datetime] = mapped_column(
-        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
-    )
-    revoked_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True)
-
-    # Relationships
-    user: Mapped[User] = relationship(
-        back_populates="grouping_accesses", foreign_keys=[user_id]
-    )
-    grouping: Mapped["Grouping"] = relationship(back_populates="user_accesses")
-
-    __table_args__ = (
-        UniqueConstraint(
-            "user_id", "grouping_id", name="unique_user_grouping_access"
-        ),
-    )
-
-    def __repr__(self) -> str:
-        return (
-            f"<GroupingUserAccess(user_id={self.user_id!r}, "
-            f"grouping_id={self.grouping_id!r})>"
-        )
 
 
 class UserSubunitAssignment(Base):

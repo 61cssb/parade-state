@@ -65,7 +65,6 @@ uvicorn (single process)
       ├── /admin/*         NiceGUI admin UI (mounted via nicegui.app.mount)
       ├── /                Static file serving (mobile HTML/JS)
       ├── /events/*        SSE endpoints
-      └── APScheduler      Embedded async scheduler (grouping activation jobs)
 ```
 
 **Key design decisions:**
@@ -115,12 +114,10 @@ uvicorn (single process)
   - `/api/v1/events/*` - SSE endpoints
 
 #### Background Scheduler (APScheduler)
-- **Purpose:** Time-based grouping activation/deactivation
-- **Storage:** SQLAlchemy job store (PostgreSQL)
-- **Jobs:**
-  - Grouping activation at `valid_from` or `scheduled_activation`
-  - Grouping deactivation at `valid_until`
-  - Idempotent execution for safety
+- **Removed.** The scheduled grouping-activation jobs died with the old
+  groupings design (issue 26 redesign: no lifecycle, no validity windows,
+  no scheduled activation). Attendance is gated by the active-NR switch,
+  not by time-based jobs.
 
 ---
 
@@ -579,21 +576,19 @@ from parade_state.api.some_module import function  # Circular risk
 Nominal Roll (CSV source of truth)
  │
  ├── Personnel (roster entries)
- │    ├── GroupingPersonnelOverride (assignment changes)
- │    ├── GroupingNotes (per-grouping notes)
- │    └── AttendanceRecord (session attendance)
+ │    ├── AttendanceRecord (one row per personnel/day; active-NR gated)
+ │    ├── GroupingMembership (group memberships within a grouping)
+ │    └── GroupingMemberState (per-grouping checkbox + remarks)
  │
- ├── Grouping (operational windows)
- │    ├── GroupingPersonnelOverride
- │    ├── GroupingNotes
- │    ├── GroupingPersonnelExclusion (draft-only roster filtering)
- │    ├── Session (AM/PM windows)
- │    │    └── AttendanceRecord
- │    ├── GroupingUserAccess (user grants)
- │    └── UserSubunitScope (user scoping)
+ ├── Grouping (labelled set of groups on the roll; issue 26 redesign)
+ │    └── GroupingGroup (closed vocabulary; position = display order)
  │
  └── CsvUpload (raw file storage)
 ```
+
+Groupings never interact with attendance: no attendance columns,
+endpoints, or exports in the grouping feature, and no grouping coupling
+anywhere in the attendance path.
 
 ### 4.2 User Management Hierarchy
 
@@ -601,33 +596,35 @@ Nominal Roll (CSV source of truth)
 AccessLevel (vocabulary)
  │
  └── User (Google-authenticated accounts)
-      ├── UserSubunitScope (grouping-specific scoping)
-      └── GroupingUserAccess (grouping grants)
+      └── UserSubunitAssignment (NR-scoped sub_unit_1 write grants)
 ```
+
+(The old grouping-specific scoping tables — GroupingUserAccess and
+UserSubunitScope — were removed in the issue 26 redesign.)
 
 ### 4.3 Attendance Tracking Hierarchy
 
 ```
-Grouping
+Nominal Roll (the one active for attendance; 1:1 Tagging overlay applied)
  │
- └── Session (AM/PM windows)
-      └── AttendanceRecord (per-personnel records)
-           ├── status (present/absent)
-           ├── remarks (session-scoped)
-           ├── notes_snapshot (grouping notes frozen at session open)
-           └── unit_snapshot (personnel assignment frozen at write time)
+ └── AttendanceRecord (per-personnel per-day)
+      ├── status_am / remarks_am, status_pm / remarks_pm
+      └── unit_snapshot / sub_unit_*_snapshot (frozen at write time)
 ```
 
 ### 4.4 Key Cascades
 
 **Grouping cascades:**
-- Grouping deleted → all sessions, overrides, notes, access grants deleted
-- Grouping closed → all sessions marked closed
-- Grouping finalized → all sessions marked finalized
+- Grouping deleted → its groups, memberships, and member state cascade
+- GroupingGroup deleted → that group's memberships cascade (servicemen
+  become ungrouped; blocked under allow_ungrouped=false)
+- Group label renamed in place → memberships reference the row, so every
+  member follows
 
 **Nominal Roll cascades:**
-- Nominal Roll deleted → all personnel records deleted
-- Nominal Roll confirmed → creates initial draft grouping
+- Nominal Roll deleted → personnel, attendance, taggings cascade;
+  deletion refused (400) while groupings still reference the roll
+  (FK RESTRICT)
 
 **User cascades:**
 - User deleted → all scopes and access grants soft-deleted
@@ -671,11 +668,10 @@ async def get_attendance(session_id: str, db: AsyncSession = Depends(get_db_sess
     )
     return result.scalars().all()
 
-# Background async job
-async def activate_grouping(grouping_id: str):
+# Background async job pattern (no scheduler jobs remain; illustrative)
+async def rebuild_rollup(nominal_roll_id: str):
     async with get_db_session() as db:
-        await deactivate_current_grouping(db)
-        await activate_grouping_by_id(db, grouping_id)
+        await recompute_rollup(db, nominal_roll_id)
 ```
 
 **Benefits:**
@@ -812,13 +808,13 @@ class User(Base):
 
 **Row-level security:**
 ```python
-# User sees personnel rows matching their subunit scope
-async def get_visible_personnel(user_id: str, grouping_id: str):
-    # Get user's scopes for this grouping
-    scopes = await get_user_subunit_scopes(user_id, grouping_id)
-    
-    # Query personnel matching at least one scope
-    personnel = await query_personnel_in_scopes(grouping_id, scopes)
+# User writes personnel/attendance rows within their assigned subunits
+async def get_writable_personnel(user_id: str, nominal_roll_id: str):
+    # Get user's UserSubunitAssignment grants for this roll
+    subunits = await get_assigned_subunit_1s(user_id, nominal_roll_id)
+
+    # Query personnel whose effective sub_unit_1 matches a grant
+    personnel = await query_personnel_in_subunits(nominal_roll_id, subunits)
     return personnel
 ```
 
@@ -833,80 +829,22 @@ async def get_visible_columns(user_id: str):
     return columns
 ```
 
-### 7.3 Multi-Tenant Grouping Access Control (Phase 5)
+### 7.3 Grouping Access Control (per-grouping scoping removed)
 
-**Overview:** Enterprise-grade grouping isolation ensuring users can only access data from groupings they're explicitly authorized to access.
+The multi-tenant, per-grouping access model (GroupingUserAccess grants
+plus UserSubunitScope scoping) was **removed** in the issue 26 groupings
+redesign — the redesigned groupings carry no access scoping at all:
 
-**Architecture:**
-```
-┌─────────────────────────────────────────────────────────┐
-│           Multi-Tenant Access Control                    │
-│                                                           │
-│  User Request → verify_grouping_access()               │
-│       ↓                                                  │
-│  Check GroupingUserAccess table                        │
-│       ↓                                                  │
-│  Filter data by grouping_id                            │
-│       ↓                                                  │
-│  Return authorized data only                             │
-│                                                           │
-└─────────────────────────────────────────────────────────┘
-```
+- Grouping **mutations** are super-admin only (403 otherwise), enforced
+  server-side on every API route
+- Grouping **reads** (page and API) are open to every authenticated role
+- Reachability is a property of the nominal roll: groupings on the roll
+  active for attendance are listable/readable; groupings on non-active
+  rolls are retained in the database but unreachable (404) until their
+  roll is re-activated
 
-**Implementation Pattern:**
-```python
-async def verify_grouping_access(
-    grouping_id: str,
-    user_id: str,
-    user_role: str,
-    db: AsyncSession,
-) -> Grouping:
-    """Verify user has access to grouping and return it."""
-    
-    # Super admins have full access
-    if user_role == "super_admin":
-        return grouping
-    
-    # Check for explicit grouping access
-    access = await db.execute(
-        select(GroupingUserAccess).where(
-            and_(
-                GroupingUserAccess.user_id == user_id,
-                GroupingUserAccess.grouping_id == grouping_id,
-                GroupingUserAccess.revoked_at.is_(None),
-            )
-        )
-    )
-    
-    if not access:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    return grouping
-```
-
-**Access Control Enforcement Points:**
-- ✅ **Personnel API** - Grouping-based listing and filtering
-- ✅ **Sessions API** - Session creation and listing restricted by grouping
-- ✅ **Attendance API** - Attendance operations respect grouping boundaries
-- ✅ **Groupings API** - Grouping management with access checks
-
-**Data Isolation:**
-- Users only see personnel from their authorized groupings
-- Sessions filtered by grouping access
-- Attendance records scoped to accessible groupings
-- Automatic filtering in all list operations
-
-**Access Management:**
-- `POST /api/v1/access-control/groupings/{id}/users/{user_id}/access` - Grant access
-- `DELETE /api/v1/access-control/groupings/{id}/users/{user_id}/access` - Revoke access
-- `GET /api/v1/access-control/groupings/{id}/users` - List grouping users
-- `GET /api/v1/access-control/users/{user_id}/groupings` - List user groupings
-
-**Security Guarantees:**
-- No cross-grouping data leakage
-- Explicit access grants required
-- Audit trail for all access changes
-- Role-based + scope-based authorization
+Row-level write scoping elsewhere in the app is per nominal roll
+(`UserSubunitAssignment` on effective `sub_unit_1`), not per grouping.
 
 ### 7.4 Session Management Implementation
 

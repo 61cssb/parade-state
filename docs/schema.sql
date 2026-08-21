@@ -99,50 +99,18 @@ COMMENT ON COLUMN users.google_sub IS
 
 
 -- ---------------------------------------------------------------------------
--- 4. USER GROUPING GRANTS
---    Controls which groupings a user can see (separate from subunit scope).
---    A user must have a grant for a grouping to know it exists.
+-- 4. (REMOVED) USER GROUPING GRANTS / SUBUNIT SCOPE GRANTS
+--    The issue 26 groupings redesign removed per-grouping access scoping
+--    (the grouping_user_accesses / user_subunit_scopes tables). Grouping
+--    mutations are super-admin only; reads are open to every authenticated
+--    role. NR-scoped write access lives in user_subunit_assignments.
+--    The numbering below is unchanged for stability.
 -- ---------------------------------------------------------------------------
-
-CREATE TABLE user_grouping_grants (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    grouping_id     UUID NOT NULL,                     -- FK to groupings; defined below
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by      UUID REFERENCES users(id),
-    UNIQUE (user_id, grouping_id)
-);
-
-COMMENT ON TABLE user_grouping_grants IS
-    'Controls grouping visibility per user. A user without a grant for a grouping cannot see or know it exists.';
 
 
 -- ---------------------------------------------------------------------------
--- 5. USER SUBUNIT SCOPE GRANTS
---    Controls which personnel rows a user can see within a given grouping.
---    Each row scopes a user to a specific subunit within a grouping.
---    Nulls in subunit fields mean "any value at that level".
---    A unit-level user would have sub_unit_1/2/3 all null.
---    A coy-level user would have sub_unit_1 set, sub_unit_2/3 null.
---    A user's visible rows = UNION of all their subunit scope grants for that grouping.
+-- 5. (REMOVED — see note above)
 -- ---------------------------------------------------------------------------
-
-CREATE TABLE user_subunit_scope_grants (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    grouping_id     UUID NOT NULL,                     -- FK to groupings
-    unit            TEXT,                              -- null = any
-    sub_unit_1      TEXT,
-    sub_unit_2      TEXT,
-    sub_unit_3      TEXT,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by      UUID REFERENCES users(id)
-);
-
-COMMENT ON TABLE user_subunit_scope_grants IS
-    'Determines which personnel rows a user can see within a grouping. '
-    'Null subunit fields act as wildcards. Row is visible if any grant matches. '
-    'Admin role bypasses this table entirely.';
 
 
 -- ---------------------------------------------------------------------------
@@ -275,97 +243,96 @@ COMMENT ON TABLE personnel_snapshots IS
 
 
 -- ---------------------------------------------------------------------------
--- 10. GROUPINGS
---     Named, date-ranged assignment of personnel to subunits.
---     Based on a specific estab (csv_upload). Personnel assignment overrides
---     remap a subset of personnel; non-overridden inherit estab assignment.
---     Only one grouping may be active at any point in time.
---     Validity enforced by background job (activate at valid_from, deactivate at valid_until).
+-- 10. GROUPINGS (issue 26 redesign)
+--     A labelled set of groups (closed string vocabulary) based on a
+--     nominal roll. Servicemen on the roll hold memberships in the groups
+--     plus a per-grouping checkbox and free-text remarks. Groupings never
+--     read or write attendance. The multiple_membership / allow_ungrouped
+--     flags are immutable after creation. Groupings are reachable only via
+--     the nominal roll active for attendance.
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE groupings (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name            TEXT NOT NULL,
-    csv_upload_id   UUID NOT NULL REFERENCES csv_uploads(id),
-    status          TEXT NOT NULL DEFAULT 'draft'
-                        CHECK (status IN ('draft', 'active', 'inactive', 'archived')),
-    valid_from      TIMESTAMPTZ NOT NULL,
-    valid_until     TIMESTAMPTZ NOT NULL,
-    scheduled_activation TIMESTAMPTZ,                 -- if set, background job activates at this time
-    cloned_from_id  UUID REFERENCES groupings(id),    -- if this was created via clone or migrate
-    clone_type      TEXT CHECK (clone_type IN ('same_estab', 'cross_estab')),
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by      UUID NOT NULL REFERENCES users(id),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by      UUID REFERENCES users(id),
-    CONSTRAINT valid_range_check CHECK (valid_until > valid_from)
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    label               VARCHAR(100) NOT NULL,
+    nominal_roll_id     UUID NOT NULL REFERENCES nominal_rolls(id) ON DELETE RESTRICT,
+    multiple_membership BOOLEAN NOT NULL DEFAULT FALSE,  -- a serviceman may hold several groups
+    allow_ungrouped     BOOLEAN NOT NULL DEFAULT TRUE,   -- a serviceman may hold no group
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by          UUID NOT NULL REFERENCES users(id),
+    CONSTRAINT uq_groupings_nr_label UNIQUE (nominal_roll_id, label)
 );
 
-CREATE UNIQUE INDEX idx_groupings_one_active
-    ON groupings(status)
-    WHERE status = 'active';
+CREATE INDEX idx_groupings_label ON groupings(label);
+CREATE INDEX idx_groupings_nominal_roll ON groupings(nominal_roll_id);
 
 COMMENT ON TABLE groupings IS
-    'Named date-ranged operational contexts. Based on a specific CSV estab. '
-    'Only one active grouping at a time (enforced by partial unique index). '
-    'Background job handles activation/deactivation at valid_from/valid_until. '
-    'No overlapping valid_from/valid_until ranges permitted (enforced in application layer).';
-
-COMMENT ON COLUMN groupings.scheduled_activation IS
-    'If set, background job transitions status from draft to active at this datetime, '
-    'and deactivates the currently active grouping.';
-
+    'Labelled set of groups per nominal roll (issue 26 redesign). Labels are unique per roll, '
+    'not globally, so a copy from a previous roll may keep its label. '
+    'Flags are immutable after creation; recreate or clone to change them. '
+    'Groupings never interact with attendance.';
 
 -- ---------------------------------------------------------------------------
--- 11. GROUPING PERSONNEL OVERRIDES
---     Subunit remappings for cross-attached personnel within a grouping.
---     Personnel without an override inherit their estab (csv_upload) subunit assignment.
---     Overrides are editable on draft/active/inactive groupings (no write-lock).
+-- 11. GROUPING GROUPS
+--     One group enum within a grouping. position is the manual display
+--     order. Memberships reference the row: a rename propagates to every
+--     member; a delete cascades their memberships away.
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE grouping_personnel_overrides (
+CREATE TABLE grouping_groups (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     grouping_id     UUID NOT NULL REFERENCES groupings(id) ON DELETE CASCADE,
-    personnel_id    UUID NOT NULL REFERENCES personnel_snapshots(id),
-    unit            TEXT NOT NULL,
-    sub_unit_1      TEXT,
-    sub_unit_2      TEXT,
-    sub_unit_3      TEXT,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by      UUID REFERENCES users(id),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by      UUID REFERENCES users(id),
-    UNIQUE (grouping_id, personnel_id)
+    label           VARCHAR(100) NOT NULL,
+    position        INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT uq_grouping_group_label UNIQUE (grouping_id, label)
 );
 
-COMMENT ON TABLE grouping_personnel_overrides IS
-    'Per-grouping subunit remappings. Takes precedence over estab assignment for the given personnel row. '
-    'Absence of a row = inherit estab assignment. Editable at any time (no write-lock).';
+CREATE INDEX idx_grouping_groups_grouping ON grouping_groups(grouping_id);
 
+COMMENT ON TABLE grouping_groups IS
+    'Group enums within a grouping. Label unique per grouping; position is the '
+    'manual display order (edit-dialog up/down controls).';
 
 -- ---------------------------------------------------------------------------
--- 12. GROUPING NOTES
---     Canonical notes store, keyed by (grouping_id, personnel_id).
---     Notes are grouping-scoped and persist across sessions.
---     Edited from both grouping view and attendance session view.
+-- 12. GROUPING MEMBERSHIPS + MEMBER STATE
+--     Membership: one row per (grouping, personnel, group). The
+--     single-membership and no-ungrouped rules are application-enforced
+--     (at most one group per serviceman when multiple_membership=false;
+--     at least one when allow_ungrouped=false).
+--     Member state: one row per (grouping, personnel) — checkbox and
+--     free-text remarks whose semantics are left to each unit.
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE grouping_notes (
+CREATE TABLE grouping_memberships (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     grouping_id     UUID NOT NULL REFERENCES groupings(id) ON DELETE CASCADE,
-    personnel_id    UUID NOT NULL REFERENCES personnel_snapshots(id),
-    notes_text      TEXT NOT NULL DEFAULT '',
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by      UUID REFERENCES users(id),
-    UNIQUE (grouping_id, personnel_id)
+    group_id        UUID NOT NULL REFERENCES grouping_groups(id) ON DELETE CASCADE,
+    personnel_id    UUID NOT NULL REFERENCES personnel(id) ON DELETE CASCADE,
+    CONSTRAINT uq_grouping_membership UNIQUE (grouping_id, personnel_id, group_id)
 );
 
-CREATE INDEX idx_grouping_notes_lookup ON grouping_notes(grouping_id, personnel_id);
+CREATE INDEX idx_grouping_memberships_grouping ON grouping_memberships(grouping_id);
+CREATE INDEX idx_grouping_memberships_group ON grouping_memberships(group_id);
+CREATE INDEX idx_grouping_memberships_personnel ON grouping_memberships(personnel_id);
 
-COMMENT ON TABLE grouping_notes IS
-    'Canonical grouping-scoped notes per personnel. '
-    'Written from both grouping view and attendance session view (write-back from session). '
-    'Transferred to a new grouping by following the person across estabs via short_id on new estab confirmation.';
+CREATE TABLE grouping_member_state (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    grouping_id     UUID NOT NULL REFERENCES groupings(id) ON DELETE CASCADE,
+    personnel_id    UUID NOT NULL REFERENCES personnel(id) ON DELETE CASCADE,
+    checkbox        BOOLEAN NOT NULL DEFAULT FALSE,
+    remarks         TEXT,
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_by      UUID NOT NULL REFERENCES users(id),
+    CONSTRAINT uq_grouping_member_state UNIQUE (grouping_id, personnel_id)
+);
+
+CREATE INDEX idx_grouping_member_state_grouping ON grouping_member_state(grouping_id);
+CREATE INDEX idx_grouping_member_state_personnel ON grouping_member_state(personnel_id);
+
+COMMENT ON TABLE grouping_member_state IS
+    'Per-serviceman checkbox and remarks within a grouping — one row per '
+    '(grouping, personnel), independent of how many groups they hold. '
+    'Field semantics intentionally unspecified; standardisation is per unit.';
 
 
 -- ---------------------------------------------------------------------------
@@ -398,10 +365,9 @@ COMMENT ON TABLE sessions IS
 -- 14. ATTENDANCE RECORDS
 --     One record per personnel per session.
 --     Stores status, remarks (session-scoped), and a notes snapshot.
---     Also stores a unit+subunit snapshot (grouping assignment at time of write),
---     subject to the validity-range rule:
---       - Write within grouping valid_from/valid_until: snapshot unit+subunit from active grouping.
---       - Write outside validity range (retroactive admin edit): do NOT update unit+subunit snapshots.
+--     Also stores a unit+subunit snapshot (roster assignment at time of
+--     write). NOTE: this section predates the NR/AM-PM attendance model and
+--     the issue 26 groupings redesign — attendance has no grouping coupling.
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE attendance_records (
@@ -510,9 +476,3 @@ ALTER TABLE subunit_enum_values
 
 ALTER TABLE column_mappings
     ADD CONSTRAINT fk_column_mappings_first_seen FOREIGN KEY (first_seen_in) REFERENCES csv_uploads(id);
-
-ALTER TABLE user_grouping_grants
-    ADD CONSTRAINT fk_user_grp_grants_grouping FOREIGN KEY (grouping_id) REFERENCES groupings(id) ON DELETE CASCADE;
-
-ALTER TABLE user_subunit_scope_grants
-    ADD CONSTRAINT fk_user_scope_grants_grouping FOREIGN KEY (grouping_id) REFERENCES groupings(id) ON DELETE CASCADE;

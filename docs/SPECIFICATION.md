@@ -31,21 +31,22 @@ Nominal Roll (CAA-pinned, CSV-sourced, read-only; one NR is active for attendanc
  ├── Tagging (1:1 with NR; the overlay of person → subunit remaps; never mutates the NR)
  └── Attendance (one row per personnel/day on the active NR; AM and PM status + remarks)
 
-Grouping (remaps personnel unit+subunit; has date+time validity range) —
-  a separate feature, not linked to attendance.
+Grouping (a labelled set of groups on the NR active for attendance) —
+  a separate feature, never interacting with attendance.
 ```
 
 **Key Concepts:**
 - **Nominal Roll**: Base source of truth, uploaded from CSV, pinned by CAA date, read-only — unit/subunit edits are recorded on the NR's Tagging. Exactly one NR is **active for attendance** at a time (super-admin toggles "Use for Attendance" / "Deactivate Attendance" in the /nominal-roll view's Roll management panel; activating another NR auto-switches).
 - **Tagging**: 1:1 with an NR; the overlay of person → subunit remaps; never mutates the NR; always applied when attendance is taken against the active NR.
 - **Attendance**: One row per `(personnel, date)`, carrying `status_am`/`remarks_am` and `status_pm`/`remarks_pm` (statuses from the nine-value operational enum). AM and PM are hardcoded — there is no longer a user-managed Session model. Writes are only permitted against the active NR.
-- **Grouping**: Based on a nominal roll, remaps personnel assignments, valid for date+time range. A separate feature — the grouping view's checkbox/remarks never interact with attendance.
+- **Grouping**: A labelled, closed vocabulary of groups based on a nominal roll. Servicemen on the roll hold memberships in the groups plus a per-grouping checkbox and free-text remarks. A separate feature — groupings never read or write attendance.
 
 ### 1.3 Scope
 
 **In Scope (v1):**
 - CSV ingestion with CAA versioning, column mapping, diff detection
-- Grouping management: create, clone (same-roll), migrate (cross-roll), scheduled activation
+- Grouping management: create, clone (same-roll), copy from the previously
+  activated roll (cross-roll, re-linked by pers_no)
 - Attendance taking: AM/PM (hardcoded), nine-status operational reporting enum, NR-scoped with the 1:1 Tagging overlay applied, active-NR gating
 - Row access control (access level + subunit scope) and column sensitivity control
 - Parade state table view scoped to user access with inline editing
@@ -108,7 +109,8 @@ Nominal Roll
 
 ### 2.2 Grouping
 
-**Operational grouping based on an nominal roll, with overrides and validity window.**
+**A labelled set of groups (closed string vocabulary) based on a nominal
+roll (issue 26 redesign).**
 
 *Not yet shipped: hidden behind the `FEATURE_GROUPING` env-var flag (see
 [4.8 Feature Flags](#48-feature-flags-env-var-kill-switches)).*
@@ -116,29 +118,55 @@ Nominal Roll
 ```
 Grouping
 ├── id: UUID (PK)
-├── name: str
+├── label: str (max 100)
 ├── nominal_roll_id: UUID (FK Nominal Roll, on_delete=RESTRICT)
-├── status: str ENUM ['draft', 'active', 'inactive', 'archived', 'closed', 'finalized']
-│   └── draft: not yet active
-│   └── active: currently operational (only one per system, application-enforced)
-│   └── inactive: was active, now past validity window
-│   └── archived: retained for history but no longer operational
-│   └── closed: no further edits permitted
-│   └── finalized: permanent archive; cascades closure to all sessions
-├── valid_from: datetime (when grouping becomes active)
-├── valid_until: datetime (when grouping expires)
-├── scheduled_activation: datetime (nullable; explicit scheduled time)
-├── personnel_count: int (snapshot; non-archived personnel in this grouping)
+├── multiple_membership: bool (default false; a serviceman may hold several groups)
+├── allow_ungrouped: bool (default true; a serviceman may hold no group)
 ├── created_at: datetime
-├── created_by: UUID (FK User)
-├── activated_at: datetime (nullable; when actually transitioned to active)
-├── deactivated_at: datetime (nullable; when transitioned away from active)
-└── notes: str (nullable; admin notes)
+└── created_by: UUID (FK User)
+
+GroupingGroup
+├── id: UUID (PK)
+├── grouping_id: UUID (FK Grouping, on_delete=CASCADE)
+├── label: str (max 100; unique within the grouping)
+└── position: int (manual display order)
+
+GroupingMembership
+├── id: UUID (PK)
+├── grouping_id: UUID (FK Grouping, on_delete=CASCADE)
+├── group_id: UUID (FK GroupingGroup, on_delete=CASCADE)
+└── personnel_id: UUID (FK Personnel, on_delete=CASCADE)
+
+GroupingMemberState
+├── grouping_id: UUID (FK Grouping, on_delete=CASCADE)
+├── personnel_id: UUID (FK Personnel, on_delete=CASCADE)
+├── checkbox: bool (default false)
+├── remarks: text (nullable)
+└── updated_at / updated_by
 ```
 
-**Constraints:**
-- Only one grouping can have status = 'active' (enforced at application layer)
-- Validity range overlaps with existing draft/active grouping → hard reject
+**Constraints and rules:**
+- UNIQUE(nominal_roll_id, label) — grouping labels are unique per nominal
+  roll, not globally (a copy from a previous roll may keep its label)
+- UNIQUE(grouping_id, label) on GroupingGroup; UNIQUE(grouping_id,
+  personnel_id, group_id) on GroupingMembership; UNIQUE(grouping_id,
+  personnel_id) on GroupingMemberState (one checkbox/remarks row per
+  serviceman per grouping, regardless of how many groups they hold)
+- `multiple_membership` and `allow_ungrouped` are **immutable after
+  creation** (set only on create/clone/copy); patching them later is a 400.
+  Recreate the grouping under a new label to change semantics
+- Application-enforced (not expressible as plain constraints): at most one
+  group per serviceman when `multiple_membership=false`, and at least one
+  when `allow_ungrouped=false`
+- Groupings are created on (and only reachable through) the nominal roll
+  currently active for attendance; groupings on non-active rolls are
+  retained in the database but unreachable (404) until their roll is
+  re-activated. Deleting an NR that still has groupings is refused (400;
+  the FK is RESTRICT)
+- Groupings never read or write attendance — no attendance columns,
+  endpoints, or exports anywhere in the feature. The checkbox and remarks
+  semantics are intentionally unspecified; standardisation is left to each
+  unit
 
 ### 2.3 Attendance (AM/PM hardcoded, active-NR model)
 
@@ -241,27 +269,14 @@ User
 - Super-admin cannot be revoked via UI; bootstrapped via env var
 - Non-admin users must have access_level_id set
 
-#### 3.1.3 UserSubunitScope
+#### 3.1.3 Grouping access scoping (removed)
 
-**Links a user to specific subunit(s) within each grouping.**
-
-```
-UserSubunitScope
-├── id: UUID (PK)
-├── user_id: UUID (FK User, on_delete=CASCADE)
-├── grouping_id: UUID (FK Grouping, on_delete=CASCADE)
-├── unit: str (nullable; part of scoped path)
-├── sub_unit_1: str (nullable)
-├── sub_unit_2: str (nullable)
-├── sub_unit_3: str (nullable)
-├── created_at: datetime
-├── created_by: UUID (FK User)
-└── updated_at: datetime
-```
-
-**Constraints:**
-- UNIQUE(user_id, grouping_id, unit, sub_unit_1, sub_unit_2, sub_unit_3)
-- NULL values = "include all at that level and below"
+**Removed in the issue 26 groupings redesign** (together with the
+`GroupingUserAccess` and `UserSubunitScope` tables): the new groupings
+have no per-grouping access scoping. Grouping mutations are super-admin
+only and reads are open to every authenticated role; row-level write
+access elsewhere is scoped per nominal roll by `UserSubunitAssignment`
+(see §2.3 and §3.5.2).
 
 ### 3.2 Personnel & CSV Ingestion
 
@@ -311,8 +326,9 @@ Personnel
 - Cross-roll person recognition on ingest matches on `pers_no`.
 - A duplicate `pers_no` within one CSV violates UNIQUE(nominal_roll_id, pers_no) and fails
   the process request (IntegrityError).
-- Notes, overrides, and attendance link to `Personnel.id` (the row PK). Cross-roll continuity
-  (tagging transfer, history) follows the person via `pers_no`.
+- Notes and attendance link to `Personnel.id` (the row PK); grouping
+  memberships likewise. Cross-roll continuity (tagging transfer, grouping
+  copy, history) follows the person via `pers_no`.
 
 **Callup status & remarks (issue 06):**
 - On ingest, `callup_status` is parsed from the CSV `Callup Decision` column:
@@ -525,8 +541,8 @@ Attendance
 ├── date: date
 ├── status_am / remarks_am: attendance_status enum + text (default 'absent')
 ├── status_pm / remarks_pm: attendance_status enum + text (default 'absent')
-├── notes_snapshot: str (snapshot of grouping notes at row creation)
-├── unit_snapshot, sub_unit_{1,2,3}_snapshot: str (personnel's effective hierarchy)
+├── notes_snapshot: str (legacy column, now always NULL)
+├── unit_snapshot, sub_unit_{1,2,3}_snapshot: str (roster snapshot at row creation)
 ├── created_at/by, updated_at/by, last_edit_at/by, is_retroactive_edit: audit
 ```
 
@@ -571,44 +587,33 @@ a guidance message for admins with no assignments.
 
 ### 4.1 Attendance Snapshot Rule
 
-**Condition 1: Within grouping.valid_from to valid_until**
-- On write, resolve effective unit+subunit: override ?? nominal roll
-- Populate: unit_snapshot, sub_unit_1_snapshot, sub_unit_2_snapshot, sub_unit_3_snapshot
-- Populate: notes_snapshot from current GroupingNotes
+- On write, snapshot the row's roster values: unit_snapshot,
+  sub_unit_1_snapshot, sub_unit_2_snapshot, sub_unit_3_snapshot
 - Update: last_edit_at, last_edit_by (for display purposes)
+- Groupings play no part in attendance (issue 26): there are no grouping
+  validity windows, overrides, or notes to resolve
 
-**Condition 2: Outside validity range (retroactive edit)**
-- Update: status, remarks, notes_snapshot only
-- DO NOT update: any *_snapshot fields (preserve original snapshot)
-- Update: last_edit_at, last_edit_by (for display purposes)
+### 4.2 Grouping Rules (issue 26 redesign)
 
-### 4.2 Grouping Lifecycle
-
-```
-Grouping created (draft)
-  ├─ valid_from, valid_until, optional scheduled_activation set
-  ├─ Admin can edit overrides
-  ├─ PersonnelOverrides populated (initially mirrored from Nominal Roll)
-  └─ Session creation BLOCKED — see §4.3
-
-              At valid_from time (or scheduled_activation, or manual):
-              ↓
-        status → active
-        ├─ Only one grouping active at a time (application-enforced)
-        ├─ Sessions can be created/opened
-        └─ Admin can still edit overrides (live reorg)
-
-              At valid_until time:
-              ↓
-        status → inactive (auto)
-        ├─ No new attendance activation
-        └─ Admin can manually transition → archived or closed or finalized
-
-        [Manual admin actions at any status:]
-        ├─ archived: retain for history, hide from active lists
-        ├─ closed: no further edits allowed (grouping locked)
-        └─ finalized: permanent archive (immutable)
-```
+- **No attendance interaction**: no reads, no writes, no attendance
+  columns, endpoints, or exports anywhere in the feature
+- `multiple_membership=false`: at most one group per serviceman;
+  assigning a second group → 400
+- `allow_ungrouped=false`: every serviceman must hold at least one
+  group; removing a serviceman's last group → 400
+- **Removing a group that has members**: the UI warns how many servicemen
+  will become ungrouped; on confirm their memberships cascade away with
+  the group. Blocked with a clear error (reassign first) when
+  `allow_ungrouped=false`
+- **Renaming a group** updates the label in place; memberships reference
+  the group row, so every member follows automatically. Group display
+  order follows the manual `position` values
+- **Flags are immutable after creation**: `multiple_membership` and
+  `allow_ungrouped` are set only when the grouping is created (or
+  cloned/copied); patching them later → 400
+- **Access**: all mutations super-admin only (403 otherwise); reads open
+  to every authenticated role; the whole feature sits behind the
+  `FEATURE_GROUPING` flag (default off)
 
 ### 4.3 Attendance Activation & Editability
 
@@ -735,8 +740,8 @@ callup transitions.
 
 Super-admin action (Admin → Settings) that deletes **every Nominal Roll and
 all downstream data** in one transaction: personnel, attendance,
-deferments, taggings, groupings (with their overrides, exclusions, notes,
-and access grants), column metadata, CSV uploads, and NR-bound subunit
+deferments, taggings, groupings (with their groups, memberships, and
+member state), column metadata, CSV uploads, and NR-bound subunit
 assignments.
 
 **Preserved:** users, access levels, sessions, global column mappings, and
@@ -761,7 +766,7 @@ Env-var booleans (`FEATURE_<NAME>`, default off) hide not-yet-ready
 features from a deployment **entirely**:
 
 - **Nav/templates:** the feature's sidebar entry and every other entry
-  point (e.g. the NR-browser *Create Grouping* button) are not rendered.
+  point are not rendered.
 - **Routes:** page and API routes return 404 for **every role, including
   super admins** — the gate (`parade_state.features.require_feature`)
   sits above role checks, so direct URLs are unreachable. Pages answer
@@ -804,8 +809,10 @@ an env-var change plus restart with no other action.
 | AccessLevel | (name), (level_order) | - | Vocab uniqueness |
 | Nominal Roll | (caa) | (caa) | CAA uniqueness; application-level: only one `attendance_active` |
 | ColumnMapping | (canonical_name) among non-deprecated | (canonical_name) | Mapping uniqueness |
-| Grouping | Application-level: only one active | (status) | Active grouping enforcement |
-| UserSubunitScope | (user_id, grouping_id, unit, sub_unit_1-3) | (user_id, grouping_id) | Scope lookup |
+| Grouping | (nominal_roll_id, label) | (label), (nominal_roll_id) | Label uniqueness per NR |
+| GroupingGroup | (grouping_id, label) | (grouping_id) | Group enum uniqueness |
+| GroupingMembership | (grouping_id, personnel_id, group_id) | (grouping_id), (group_id), (personnel_id) | Membership dedup |
+| GroupingMemberState | (grouping_id, personnel_id) | (grouping_id), (personnel_id) | One state row per person per grouping |
 | Attendance | (personnel_id, date) | (personnel_id, date) | One row per person per day |
 | UserSubunitAssignment | (user_id, nominal_roll_id, sub_unit_1) | (user_id, nominal_roll_id, sub_unit_1) | One grant per user/NR/subunit |
 | Personnel | — | (callup_status) | Callup status filter |
@@ -824,15 +831,17 @@ an env-var change plus restart with no other action.
 
 **App Admin:**
 - Granted by super-admin
-- Full read/write access to all entities, all columns, all groupings
+- Full read/write access to all entities and columns
 - Access to audit log
 - All structural operations are admin-only
+- Grouping mutations remain super-admin only; admins can read the
+  grouping view
 
 **Scoped User:**
 - Deferred (planned viewer role — see future issues). Not currently usable: non-admin sign-ins get the no-access page and viewer-facing routes are gated on admin role.
 - Google-authenticated
 - Has access level: single admin-assigned label from ordered vocabulary
-- Has subunit scope: one or more (grouping, subunit) pairs
+- Has subunit scope: one or more (nominal roll, subunit) pairs
 - Write scope: attendance status, Notes, Remarks — for rows within scope only
 
 ### 5.2 Account Lifecycle
@@ -847,11 +856,15 @@ The system is admin-only: only `super_admin` and `admin` accounts can sign in an
 ### 5.3 Row Visibility Rules
 
 **User sees personnel row if:**
-- User has GroupingUserAccess for grouping, AND
-- Personnel's (unit, sub_unit_1, sub_unit_2, sub_unit_3) matches at least one UserSubunitScope for that grouping, AND
+- Personnel's effective sub_unit_1 matches at least one of the user's
+  UserSubunitAssignment grants on that nominal roll, AND
 - User.access_level_id.level_order ≥ ColumnMetadata.sensitivity_level_id.level_order (for each visible column)
 
-*(Admins bypass all checks)*
+*(Admins bypass all checks. Groupings carry no access scoping — the
+grouping view (with its per-group filter, offering an Ungrouped option only
+when the grouping allows it) is readable by every authenticated user and
+mutable only by
+super admins.)*
 
 ### 5.4 Column Visibility Rules
 
@@ -873,7 +886,7 @@ Admin-defined ordered string labels (e.g. unit, coy, platoon, section). Linear h
 
 **Column manifest pattern:** All data endpoints return columns (user-visible column manifest) + rows (objects containing only manifest keys). Clients render headers from manifest; never hardcode column names.
 
-**SSE stale detection:** GET /api/v1/events/attendance?groupingId=&sessionId= emits data_changed signal events (no payload data) when any record in the user's scope is modified. Client fetches on user confirmation. 30s keep-alive ping.
+**SSE stale detection:** GET /api/v1/events/attendance emits data_changed signal events (no payload data) when any record in the user's scope is modified. Client fetches on user confirmation. 30s keep-alive ping.
 
 **Auth:** session cookie (HttpOnly, Secure, SameSite=Strict). Google OAuth via Authlib.
 
@@ -896,16 +909,23 @@ identity (see §3.2.1). Blank cells store NULL.
 
 ### 6.3 Grouping Operations
 
-**Clone (Same-Nominal Roll):**
-- Admin-only
-- Copies overrides, prefixes name "Copy of …", resets validity range to blank
-- Admin chooses whether to transfer grouping notes
+**Clone (same nominal roll):**
+- Super-admin only
+- Copies group enums (with positions) and both flags; the label must
+  differ from every other label on the roll (409 otherwise — the
+  uniqueness requirement is the confirmation)
+- The dialog chooses what carries over: structure only, or structure plus
+  memberships and member state (checkbox / remarks)
 
-**Migrate (Cross-Nominal Roll):**
-- Admin-only
-- Two-step: compute diff between source nominal roll and target nominal roll
-- Present leavers (must be individually dismissed) and joiners (must each receive a unit+subunit assignment)
-- On confirm, create new draft grouping against target nominal roll
+**Copy from previous roll (cross-roll):**
+- Super-admin only; offered from the grouping view's empty state when the
+  active NR has no groupings and the previously activated NR
+  (latest `attendance_activated_at`) has some
+- Copies group enums (with positions) and both flags; the label defaults
+  to the source's (per-NR uniqueness means this usually works; 409 when
+  taken, then an explicit label is required)
+- Memberships re-link by `pers_no`; new-roll personnel without a match
+  start ungrouped. Member state (checkbox / remarks) is not copied
 
 ---
 
@@ -961,15 +981,20 @@ extra_fields: Mapped[dict] = mapped_column(JSON, default=dict)
 
 **Decision:** Enforce certain business rules at application level rather than database level
 
-**Active Grouping Constraint:**
-- Original Spec: Only one grouping can have status = 'active' (database constraint)
-- Implementation: Application-level validation only
+**Grouping membership rules:**
+- Single-membership (at most one group per serviceman when
+  `multiple_membership=false`) and no-ungrouped (at least one group when
+  `allow_ungrouped=false`) are enforced at the application layer only —
+  they cannot be expressed as plain unique constraints over the
+  membership table
 
 **Rationale:**
-- SQLite doesn't support partial unique indexes (e.g., WHERE status = 'active')
-- PostgreSQL supports this, but maintaining divergent constraints increases complexity
-- Application layer can provide better error messages and validation logic
-- Allows multiple "draft" or "inactive" groupings without constraint violations
+- A per-serviceman conditional uniqueness would need partial/filtered
+  constraints that SQLite does not support portably
+- Application layer can provide better error messages (e.g. the affected
+  serviceman count when a group removal is blocked)
+- The flags are immutable after creation, so the rule a grouping follows
+  never changes under live data
 
 ### 7.5 Test Architecture
 

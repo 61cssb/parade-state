@@ -12,7 +12,7 @@ info:
 
     ## Access control
     Two enforcement dimensions applied on every data endpoint:
-    - **Row visibility**: user sees only personnel rows covered by their subunit scope grants for the requested grouping.
+    - **Row visibility**: user sees only personnel rows covered by their nominal-roll subunit assignments.
     - **Column visibility**: response includes only columns whose sensitivity label is met by the user's access level.
       The `columns` manifest on list endpoints is always pre-scoped — clients render headers from the manifest, never from hardcoded column names.
 
@@ -26,7 +26,7 @@ info:
     ## Stale detection (SSE)
     `GET /events/attendance` is a Server-Sent Events stream. The server emits a
     `data_changed` event whenever any attendance record within the user's current
-    grouping+session scope is updated by another user. The client shows a Refresh
+    scope is updated by another user. The client shows a Refresh
     prompt on receipt; it does not apply updates automatically.
 
 servers:
@@ -65,14 +65,13 @@ tags:
     description: Per-CSV-version column registry and sensitivity labels (admin)
   - name: groupings
     description: >
-      Grouping lifecycle — create, clone, migrate, activate.
+      Groupings (issue 26 redesign) — a labelled, closed vocabulary of
+      groups based on the nominal roll active for attendance. Mutations
+      are super-admin only; reads are open to every role; groupings never
+      read or write attendance.
       Feature-flagged: every /api/v1/groupings/* route returns 404 for
       all roles (super-admins included) unless FEATURE_GROUPING=true
-      (on in development, off in production).
-  - name: grouping-overrides
-    description: Personnel subunit overrides within a grouping
-  - name: grouping-notes
-    description: Grouping-scoped persistent notes per personnel
+      (default off).
   - name: sessions
     description: >
       DEPRECATED (issue #4). Sessions were removed — AM/PM are now hardcoded
@@ -202,7 +201,7 @@ paths:
       description: |
         Super-admin only (403 otherwise). Deletes every Nominal Roll and all
         downstream data — personnel, attendance, deferments, taggings,
-        groupings (with overrides/exclusions/notes/access grants),
+        groupings (with groups/memberships/member state),
         column metadata, CSV uploads, and NR-bound subunit assignments —
         in one transaction, so CSV upload can be re-tested from a clean
         slate. Preserved: users, access levels, sessions, global column
@@ -469,12 +468,17 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /users/{userId}/grouping-grants:
+  /access-control/nominal-rolls/{nominalRollId}/subunit-assignments:
     parameters:
-      - $ref: '#/components/parameters/UserIdParam'
+      - name: nominalRollId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
     get:
       tags: [users]
-      summary: List grouping grants for user
+      summary: List every user's subunit assignments on a nominal roll
       x-access-control: admin
       responses:
         '200':
@@ -483,66 +487,48 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/UserGroupingGrant'
-    put:
-      tags: [users]
-      summary: Replace grouping grants for user
-      x-access-control: admin
-      description: Full replacement. Writes `user.access_updated` to audit log.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [groupingIds]
-              properties:
-                groupingIds:
-                  type: array
-                  items:
-                    type: string
-                    format: uuid
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/UserGroupingGrant'
+                  $ref: '#/components/schemas/UserSubunitAssignment'
 
-  /users/{userId}/subunit-grants:
+  /access-control/nominal-rolls/{nominalRollId}/users/{userId}/subunit-assignments:
     parameters:
+      - name: nominalRollId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
       - $ref: '#/components/parameters/UserIdParam'
-    get:
+    post:
       tags: [users]
-      summary: List subunit scope grants for user
-      x-access-control: admin
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/UserSubunitGrant'
-    put:
-      tags: [users]
-      summary: Replace subunit scope grants for user
-      x-access-control: admin
-      description: Full replacement. Writes `user.access_updated` to audit log.
+      summary: Grant a user a subunit assignment on a nominal roll
+      x-access-control: super-admin
+      description: |
+        NR-scoped write access grants (attendance marking, callup/remarks
+        editing). The issue 26 groupings redesign removed the old
+        grouping-scoped grants; assignments are per nominal roll only.
+        `subUnit1` must match a value present on the roll's roster.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [grants]
-              properties:
-                grants:
-                  type: array
-                  items:
-                    $ref: '#/components/schemas/SubunitGrantInput'
+              $ref: '#/components/schemas/SubunitAssignmentInput'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSubunitAssignment'
+        '409':
+          description: User already assigned to this sub_unit_1 on this roll
+
+  /access-control/users/{userId}/subunit-assignments:
+    parameters:
+      - $ref: '#/components/parameters/UserIdParam'
+    get:
+      tags: [users]
+      summary: List a user's subunit assignments across nominal rolls
+      x-access-control: admin
       responses:
         '200':
           content:
@@ -550,7 +536,30 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/UserSubunitGrant'
+                  $ref: '#/components/schemas/UserSubunitAssignment'
+
+  /access-control/nominal-rolls/{nominalRollId}/users/{userId}/subunit-assignments/{assignmentId}:
+    parameters:
+      - name: nominalRollId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/UserIdParam'
+      - name: assignmentId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [users]
+      summary: Remove a subunit assignment
+      x-access-control: admin
+      responses:
+        '204':
+          description: Assignment removed
 
   # ---------------------------------------------------------------------------
   # ACCESS LEVELS
@@ -830,14 +839,14 @@ paths:
         Step 3 of 3. Admin confirms the diff.
         - Populates personnel_snapshots from parsed CSV.
         - Archives leavers (persons present in the prior estab but not in the new one, matched by pers_no).
-        - Creates estab grouping linked to this CSV.
-        - Transfers notes from the prior active grouping by following each person across estabs via pers_no (persons are matched on pers_no, the external personnel number).
         - Marks prior confirmed CSV as `superseded`.
         - Sets this upload status to `confirmed`.
-        Writes `csv.diff_confirmed` and `grouping.created` to audit log.
+        (Legacy design doc: the current pipeline is upload → process; no
+        grouping is created from a CSV any more.)
+        Writes `csv.diff_confirmed` to audit log.
       responses:
         '200':
-          description: Upload committed; estab grouping created
+          description: Upload committed
           content:
             application/json:
               schema:
@@ -979,16 +988,10 @@ paths:
   /groupings:
     get:
       tags: [groupings]
-      summary: List groupings visible to current user
+      summary: List groupings on the attendance-active nominal roll
       description: |
-        Admins see all groupings.
-        Scoped users see only groupings for which they have a grant.
-      parameters:
-        - name: status
-          in: query
-          schema:
-            type: string
-            enum: [draft, active, inactive, archived]
+        Reads are open to every authenticated role. Returns an empty list
+        when no nominal roll is active for attendance.
       responses:
         '200':
           content:
@@ -996,16 +999,18 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/GroupingSummary'
+                  $ref: '#/components/schemas/Grouping'
 
     post:
       tags: [groupings]
-      summary: Create grouping
-      x-access-control: admin
+      summary: Create a grouping
+      x-access-control: super-admin
       description: |
-        Creates a `draft` grouping. Validates that valid_from/valid_until does not
-        overlap any existing draft or active grouping (returns 409 if conflict).
-        Writes `grouping.created` to audit log.
+        Creates a grouping on the nominal roll currently active for
+        attendance (server-resolved; 400 when none). Mutations are
+        super-admin only (403 otherwise). A duplicate label on the roll
+        is rejected with 409; duplicate group labels in the payload with
+        400. Writes `grouping` create to audit log.
       requestBody:
         required: true
         content:
@@ -1017,13 +1022,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Grouping.'
+                $ref: '#/components/schemas/Grouping'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '409':
-          description: Date range overlaps an existing draft or active grouping
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GroupingOverlapError'
+          description: Grouping label already in use on this nominal roll
 
   /groupings/{groupingId}:
     parameters:
@@ -1031,25 +1034,30 @@ paths:
     get:
       tags: [groupings]
       summary: Get grouping details
+      description: |
+        Each group carries member_count (feeds the group-removal warning
+        popup). Groupings on a non-active nominal roll are unreachable
+        (404) until their roll is re-activated.
       responses:
         '200':
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Grouping.'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+                $ref: '#/components/schemas/Grouping'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
       tags: [groupings]
-      summary: Update grouping
-      x-access-control: admin
+      summary: Rename a grouping and/or replace its group enums
+      x-access-control: super-admin
       description: |
-        Writable fields: `name`, `valid_from`, `valid_until`, `scheduled_activation`.
-        valid_from/valid_until changes are rejected if they would create an overlap or
-        if any existing sessions would fall outside the new date range.
-        Writes `grouping.updated` to audit log.
+        `label` renames the grouping (409 on clash). `groups` is the full
+        new set of {id?, label} items: an existing id means rename in
+        place (memberships follow), an absent id means removal (members
+        cascade to ungrouped; blocked with 400 when allow_ungrouped=false),
+        payload order becomes the new display order, and an item without
+        id is an addition. Attempts to change multiple_membership or
+        allow_ungrouped are rejected with 400 (immutable after creation).
       requestBody:
         required: true
         content:
@@ -1061,44 +1069,112 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Grouping.'
+                $ref: '#/components/schemas/Grouping'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '409':
-          description: Date range overlap or grouping not in editable state
+          description: Grouping label already in use on this nominal roll
+    delete:
+      tags: [groupings]
+      summary: Delete a grouping
+      x-access-control: super-admin
+      description: |
+        Cascades the grouping's groups, memberships, and member state.
+      responses:
+        '204':
+          description: Grouping deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
 
-  /groupings/{groupingId}/activate:
+  /groupings/{groupingId}/personnel/{personnelId}/groups:
     parameters:
       - $ref: '#/components/parameters/GroupingIdParam'
-    post:
+      - name: personnelId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
       tags: [groupings]
-      summary: Manually activate a grouping
-      x-access-control: admin
+      summary: Set a serviceman's full group membership set
+      x-access-control: super-admin
       description: |
-        Transitions grouping to `active`. Moves current active grouping to `inactive`.
-        Validates no date range overlap with currently active grouping.
-        Writes `grouping.activated` and `grouping.deactivated` to audit log.
+        Replaces the serviceman's memberships with the payload set.
+        Multiple groups are allowed only when the grouping has
+        multiple_membership (400 otherwise); an empty set only when it
+        has allow_ungrouped (400 otherwise). Unknown group ids are a 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [group_ids]
+              properties:
+                group_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
       responses:
         '200':
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Grouping.'
-        '409':
-          description: Overlap conflict or grouping already active/archived
+                $ref: '#/components/schemas/Grouping'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Grouping or serviceman not found on the active roll
+
+  /groupings/{groupingId}/personnel/{personnelId}/state:
+    parameters:
+      - $ref: '#/components/parameters/GroupingIdParam'
+      - name: personnelId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags: [groupings]
+      summary: Upsert a serviceman's checkbox / remarks
+      x-access-control: super-admin
+      description: |
+        Per-grouping checkbox and free-text remarks (one row per
+        serviceman per grouping). Their semantics are intentionally
+        unspecified — standardisation is left to each unit. An empty
+        remarks string clears the remarks.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                checkbox:
+                  type: boolean
+                remarks:
+                  type: string
+      responses:
+        '200':
+          description: Member state updated
+        '404':
+          description: Grouping or serviceman not found on the active roll
 
   /groupings/{groupingId}/clone:
     parameters:
       - $ref: '#/components/parameters/GroupingIdParam'
     post:
       tags: [groupings]
-      summary: Clone a grouping (same-estab)
-      x-access-control: admin
+      summary: Clone a grouping on the same nominal roll
+      x-access-control: super-admin
       description: |
-        Creates a new `draft` grouping from the same estab.
-        Copies personnel assignment overrides.
-        Name is prefixed "Copy of …" by default (overridable in request).
-        valid_from/valid_until are unset in the clone (must be provided before activation).
-        transferNotes: if true, copies grouping_notes to the new grouping.
-        Writes `grouping.cloned` to audit log.
+        Copies group enums (with positions) and both flags always;
+        memberships and member state only when include_memberships is
+        true. The label must differ from every label on the roll (409
+        otherwise — the uniqueness requirement is the confirmation).
       requestBody:
         required: true
         content:
@@ -1110,193 +1186,68 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Grouping.'
+                $ref: '#/components/schemas/Grouping'
+        '409':
+          description: Grouping label already in use on this nominal roll
 
-  /groupings/{groupingId}/migrate:
-    parameters:
-      - $ref: '#/components/parameters/GroupingIdParam'
+  /groupings/copy-from-previous:
     post:
       tags: [groupings]
-      summary: Begin cross-estab migration
-      x-access-control: admin
+      summary: Copy a grouping from the previously activated nominal roll
+      x-access-control: super-admin
       description: |
-        Step 1 of 2. Computes the diff between the source grouping's estab and
-        the target estab. Returns a resolution payload for admin review.
+        Copies a grouping from the previously activated nominal roll (the
+        latest attendance_activated_at before the active roll's) onto the
+        active roll. Group enums (with positions) and both flags carry
+        over. The label defaults to the source's (per-roll uniqueness
+        means this usually works; 409 when taken, then an explicit label
+        is required). Memberships re-link by pers_no; unmatched personnel
+        start ungrouped. Member state is not copied.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [targetCsvUploadId]
+              required: [source_grouping_id]
               properties:
-                targetCsvUploadId:
+                source_grouping_id:
                   type: string
                   format: uuid
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MigrateResolutionPayload'
-        '400':
-          description: Target CSV is not in confirmed status
-
-  /groupings/{groupingId}/migrate/confirm:
-    parameters:
-      - $ref: '#/components/parameters/GroupingIdParam'
-    post:
-      tags: [groupings]
-      summary: Confirm cross-estab migration
-      x-access-control: admin
-      description: |
-        Step 2 of 2. Admin submits resolved assignments for joiners and dismissed leavers.
-        Creates a new draft grouping against the target estab.
-        Writes `grouping.migrated` to audit log.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MigrateConfirmRequest'
+                label:
+                  type: string
+                  maxLength: 100
       responses:
         '201':
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Grouping.'
+                $ref: '#/components/schemas/Grouping'
         '400':
-          description: Unresolved joiners (missing unit assignments) or undismissed leavers
+          description: No active roll, or no previously activated roll to copy from
+        '404':
+          description: Source grouping not found on the previously activated roll
+        '409':
+          description: Label already in use on the active nominal roll
 
-  # ---------------------------------------------------------------------------
-  # GROUPING PERSONNEL OVERRIDES
-  # ---------------------------------------------------------------------------
-
-  /groupings/{groupingId}/overrides:
+  /groupings/{groupingId}/export:
     parameters:
       - $ref: '#/components/parameters/GroupingIdParam'
     get:
-      tags: [grouping-overrides]
-      summary: List personnel overrides for a grouping
-      x-access-control: admin
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/PersonnelOverride'
-
-    put:
-      tags: [grouping-overrides]
-      summary: Replace all personnel overrides for a grouping
-      x-access-control: admin
-      description: Full replacement. Writes `grouping.override_updated` to audit log.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [overrides]
-              properties:
-                overrides:
-                  type: array
-                  items:
-                    $ref: '#/components/schemas/PersonnelOverrideInput'
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/PersonnelOverride'
-
-  /groupings/{groupingId}/overrides/{persNo}:
-    parameters:
-      - $ref: '#/components/parameters/GroupingIdParam'
-      - name: persNo
-        in: path
-        required: true
-        schema:
-          type: string
-    patch:
-      tags: [grouping-overrides]
-      summary: Upsert override for a single person
-      x-access-control: admin
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PersonnelOverrideInput'
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PersonnelOverride'
-    delete:
-      tags: [grouping-overrides]
-      summary: Remove override (person reverts to estab assignment)
-      x-access-control: admin
-      responses:
-        '204':
-          description: Override removed
-
-  # ---------------------------------------------------------------------------
-  # GROUPING NOTES
-  # ---------------------------------------------------------------------------
-
-  /groupings/{groupingId}/notes/{persNo}:
-    parameters:
-      - $ref: '#/components/parameters/GroupingIdParam'
-      - name: persNo
-        in: path
-        required: true
-        schema:
-          type: string
-    get:
-      tags: [grouping-notes]
-      summary: Get notes for a person in a grouping
-      description: Accessible to any user with row access to this person in this grouping.
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GroupingNote'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-    patch:
-      tags: [grouping-notes]
-      summary: Update notes (grouping view context)
+      tags: [groupings]
+      summary: Export the grouping table as CSV
       description: |
-        Writes to canonical grouping_notes only.
-        Does not update any attendance record's notes_snapshot.
-        Accessible to scoped users with write access to this row.
-        Writes `notes.updated` to audit log.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [notesText]
-              properties:
-                notesText:
-                  type: string
-                  maxLength: 2000
+        Slim export mirroring the displayed table — Group, Rank, Name,
+        Unit, Sub Unit, Checkbox, Remarks for the roll's active
+        personnel. No attendance data; groupings never interact with
+        attendance.
       responses:
         '200':
+          description: CSV file attachment
           content:
-            application/json:
+            text/csv:
               schema:
-                $ref: '#/components/schemas/GroupingNote'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+                type: string
 
   # ---------------------------------------------------------------------------
   # SESSIONS
@@ -1615,23 +1566,23 @@ paths:
       summary: SSE stream for attendance stale detection
       description: |
         Server-Sent Events stream. The server emits a `data_changed` event when any
-        attendance record within the authenticated user's current grouping+session scope
+        attendance record within the authenticated user's current scope
         is modified by a different user.
 
         The client should:
-        1. Open this connection on entering the attendance view, passing groupingId and sessionId.
+        1. Open this connection on entering the attendance view.
         2. On receiving `data_changed`, show a "Refresh" prompt to the user.
-        3. On user confirming refresh, call GET /sessions/{sessionId}/attendance to reload.
+        3. On user confirming refresh, reload the attendance view.
         4. Close the connection on leaving the attendance view.
 
         The server does NOT push full record data over this stream — only change signals.
         Connection is authenticated via session cookie. The server closes the connection
-        if the session expires or the user loses grouping access.
+        if the session expires.
 
         Event format:
         ```
         event: data_changed
-        data: {"groupingId": "...", "sessionId": "...", "updatedAt": "..."}
+        data: {"updatedAt": "..."}
         ```
 
         Keep-alive ping every 30s:
@@ -1640,12 +1591,6 @@ paths:
         data: {}
         ```
       parameters:
-        - name: groupingId
-          in: query
-          required: true
-          schema:
-            type: string
-            format: uuid
         - name: sessionId
           in: query
           required: true
@@ -2315,7 +2260,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Forbidden:
-      description: Insufficient access level or grouping grant
+      description: Insufficient access level or role
       content:
         application/json:
           schema:
@@ -2434,12 +2379,6 @@ components:
           enum: [super_admin, admin, scoped]
         accessLevel:
           $ref: '#/components/schemas/AccessLevel'
-        groupingGrants:
-          type: array
-          items:
-            type: string
-            format: uuid
-          description: IDs of groupings this user can access
 
     # --- Users ---
 
@@ -2513,7 +2452,7 @@ components:
         pageSize:
           type: integer
 
-    UserGroupingGrant:
+    UserSubunitAssignment:
       type: object
       properties:
         id:
@@ -2522,57 +2461,25 @@ components:
         userId:
           type: string
           format: uuid
-        groupingId:
+        nominalRollId:
           type: string
           format: uuid
+        subUnit1:
+          type: string
         createdAt:
           type: string
           format: date-time
+        createdBy:
+          type: string
+          format: uuid
 
-    UserSubunitGrant:
+    SubunitAssignmentInput:
       type: object
+      required: [subUnit1]
       properties:
-        id:
-          type: string
-          format: uuid
-        userId:
-          type: string
-          format: uuid
-        groupingId:
-          type: string
-          format: uuid
-        unit:
-          type: string
-          nullable: true
         subUnit1:
           type: string
-          nullable: true
-        subUnit2:
-          type: string
-          nullable: true
-        subUnit3:
-          type: string
-          nullable: true
-
-    SubunitGrantInput:
-      type: object
-      required: [groupingId]
-      properties:
-        groupingId:
-          type: string
-          format: uuid
-        unit:
-          type: string
-          nullable: true
-        subUnit1:
-          type: string
-          nullable: true
-        subUnit2:
-          type: string
-          nullable: true
-        subUnit3:
-          type: string
-          nullable: true
+          description: The effective sub_unit_1 the user may write within on this roll
 
     # --- Access levels ---
 
@@ -2818,15 +2725,9 @@ components:
         csvUploadId:
           type: string
           format: uuid
-        groupingId:
-          type: string
-          format: uuid
-          description: ID of the auto-created estab grouping
         personnelCount:
           type: integer
         archivedCount:
-          type: integer
-        notesTransferred:
           type: integer
 
     # --- Column metadata ---
@@ -2861,265 +2762,111 @@ components:
 
     # --- Groupings ---
 
-    GroupingSummary:
+    Grouping:
       type: object
       properties:
         id:
           type: string
           format: uuid
-        name:
+        label:
           type: string
-        status:
-          type: string
-          enum: [draft, active, inactive, archived]
-        validFrom:
-          type: string
-          format: date-time
-        validUntil:
-          type: string
-          format: date-time
-        scheduledActivation:
-          type: string
-          format: date-time
-          nullable: true
-        csvUploadId:
+          maxLength: 100
+        nominalRollId:
           type: string
           format: uuid
-        caaDate:
+        multipleMembership:
+          type: boolean
+          description: Immutable after creation
+        allowUngrouped:
+          type: boolean
+          description: Immutable after creation
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupingGroup'
+        createdAt:
           type: string
-          format: date
+          format: date-time
+        createdBy:
+          type: string
+          format: uuid
 
-    Grouping:
-      allOf:
-        - $ref: '#/components/schemas/GroupingSummary'
-        - type: object
-          properties:
-            clonedFromId:
-              type: string
-              format: uuid
-              nullable: true
-            cloneType:
-              type: string
-              enum: [same_estab, cross_estab]
-              nullable: true
-            overrideCount:
-              type: integer
-            createdAt:
-              type: string
-              format: date-time
-            createdBy:
-              type: string
-              format: uuid
+    GroupingGroup:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        label:
+          type: string
+          maxLength: 100
+        position:
+          type: integer
+          description: Manual display order
+        memberCount:
+          type: integer
+          description: Membership count; feeds the group-removal warning popup
 
     CreateGroupingRequest:
       type: object
-      required: [name, csvUploadId, validFrom, validUntil]
+      required: [label, groups]
       properties:
-        name:
+        label:
           type: string
-        csvUploadId:
-          type: string
-          format: uuid
-        validFrom:
-          type: string
-          format: date-time
-        validUntil:
-          type: string
-          format: date-time
-        scheduledActivation:
-          type: string
-          format: date-time
-          nullable: true
+          maxLength: 100
+        groups:
+          type: array
+          items:
+            type: object
+            required: [label]
+            properties:
+              label:
+                type: string
+                maxLength: 100
+        multipleMembership:
+          type: boolean
+          default: false
+        allowUngrouped:
+          type: boolean
+          default: true
 
     UpdateGroupingRequest:
       type: object
       properties:
-        name:
+        label:
           type: string
-        validFrom:
-          type: string
-          format: date-time
-        validUntil:
-          type: string
-          format: date-time
-        scheduledActivation:
-          type: string
-          format: date-time
-          nullable: true
-
-    GroupingOverlapError:
-      allOf:
-        - $ref: '#/components/schemas/Error'
-        - type: object
-          properties:
-            conflictingGroupings:
-              type: array
-              items:
-                type: object
-                properties:
-                  id:
-                    type: string
-                    format: uuid
-                  name:
-                    type: string
-                  validFrom:
-                    type: string
-                    format: date-time
-                  validUntil:
-                    type: string
-                    format: date-time
+          maxLength: 100
+        groups:
+          type: array
+          description: >
+            The full new set of group enums. An existing id means rename in
+            place (memberships follow); an absent id means removal (members
+            cascade to ungrouped; blocked with 400 when allow_ungrouped
+            is false); payload order becomes the new display order; an item
+            without id is an addition.
+          items:
+            type: object
+            required: [label]
+            properties:
+              id:
+                type: string
+                format: uuid
+              label:
+                type: string
+                maxLength: 100
 
     CloneGroupingRequest:
       type: object
+      required: [label]
       properties:
-        name:
+        label:
           type: string
-          description: Defaults to "Copy of {source name}" if omitted
-        transferNotes:
+          maxLength: 100
+          description: Must differ from every label on the roll (409 otherwise)
+        includeMemberships:
           type: boolean
           default: false
-          description: Whether to copy grouping_notes to the new grouping
-
-    MigrateResolutionPayload:
-      type: object
-      description: Returned by POST /groupings/{id}/migrate; drives the resolution UI
-      properties:
-        sourceGroupingId:
-          type: string
-          format: uuid
-        targetCsvUploadId:
-          type: string
-          format: uuid
-        leavers:
-          type: array
-          description: In source estab, not in target. Each must be individually dismissed.
-          items:
-            $ref: '#/components/schemas/MigratePersonnelRow'
-        joiners:
-          type: array
-          description: In target estab, not in source. Each needs unit+subunit assignment.
-          items:
-            $ref: '#/components/schemas/MigratePersonnelRow'
-        continuing:
-          type: array
-          description: In both. Carries over automatically with existing overrides.
-          items:
-            $ref: '#/components/schemas/MigratePersonnelRow'
-
-    MigratePersonnelRow:
-      type: object
-      properties:
-        persNo:
-          type: string
-        rank:
-          type: string
-        fullName:
-          type: string
-        estabUnit:
-          type: string
-          nullable: true
-        estabSubUnit1:
-          type: string
-          nullable: true
-        estabSubUnit2:
-          type: string
-          nullable: true
-        estabSubUnit3:
-          type: string
-          nullable: true
-        currentOverride:
-          $ref: '#/components/schemas/PersonnelOverrideInput'
-          nullable: true
-
-    MigrateConfirmRequest:
-      type: object
-      required: [name, transferNotes, dismissedLeaverPersNos, joinerAssignments]
-      properties:
-        name:
-          type: string
-        validFrom:
-          type: string
-          format: date-time
-          nullable: true
-        validUntil:
-          type: string
-          format: date-time
-          nullable: true
-        transferNotes:
-          type: boolean
-        dismissedLeaverPersNos:
-          type: array
-          description: Must include ALL leavers from the resolution payload to confirm
-          items:
-            type: string
-        joinerAssignments:
-          type: array
-          description: Unit+subunit assignment for each joiner
-          items:
-            $ref: '#/components/schemas/PersonnelOverrideInput'
-
-    # --- Grouping overrides ---
-
-    PersonnelOverride:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        groupingId:
-          type: string
-          format: uuid
-        persNo:
-          type: string
-        unit:
-          type: string
-        subUnit1:
-          type: string
-          nullable: true
-        subUnit2:
-          type: string
-          nullable: true
-        subUnit3:
-          type: string
-          nullable: true
-
-    PersonnelOverrideInput:
-      type: object
-      required: [persNo, unit]
-      properties:
-        persNo:
-          type: string
-        unit:
-          type: string
-        subUnit1:
-          type: string
-          nullable: true
-        subUnit2:
-          type: string
-          nullable: true
-        subUnit3:
-          type: string
-          nullable: true
-
-    # --- Grouping notes ---
-
-    GroupingNote:
-      type: object
-      properties:
-        groupingId:
-          type: string
-          format: uuid
-        persNo:
-          type: string
-        notesText:
-          type: string
-        updatedAt:
-          type: string
-          format: date-time
-        updatedBy:
-          type: string
-          format: uuid
-          nullable: true
+          description: Also copy memberships and member state (checkbox / remarks)
 
     # --- Sessions ---
 

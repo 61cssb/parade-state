@@ -133,7 +133,7 @@ env-var change plus service restart (no deploy).
 | Flag | Gates | Default | Development | Production |
 |---|---|---|---|---|
 | `FEATURE_DEFERMENTS` | `/admin/deferments` page, `/api/v1/deferments/*`, nav entry | off | `true` | unset (off) |
-| `FEATURE_GROUPING` | `/grouping` pages, `/api/v1/groupings/*`, nav entry, NR-browser "Create Grouping" | off | `true` | unset (off) |
+| `FEATURE_GROUPING` | `/grouping` page, `/api/v1/groupings/*`, nav entry | off | `true` | unset (off) |
 | `FEATURE_STRENGTH` | Unit Strength report at `/admin`, nav entry | off | `true` | `true` (shipped; unset only to hide) |
 | `FEATURE_NOMINALROLL` | Nominal Roll stack: `/nominal-roll` + `/admin/csv-upload` + `/admin/taggings` pages, `/api/v1/nominal-rolls/*` + `/api/v1/csv/*` + `/api/v1/taggings/*`, nav entries | **on** | `true` | `true` (unset = on) |
 | `FEATURE_ATTENDANCE` | `/attendance` page, `/api/v1/attendance/*`, nav entry | **on** | `true` | `true` (unset = on) |

@@ -226,10 +226,15 @@ async def test_viewer_routes_redirect_non_admins_to_no_access(
 
     client.cookies.set(AUTH_COOKIE_NAME, session.token)
 
-    for path in ("/grouping", "/attendance", "/nominal-roll"):
+    for path in ("/attendance", "/nominal-roll"):
         response = client.get(path, follow_redirects=False)
         assert response.status_code == 302, path
         assert response.headers["location"].endswith("/auth/no-access"), path
+
+    # Groupings are visible to every authenticated user (issue 26) —
+    # the viewer lands on the page (empty state without an active NR).
+    response = client.get("/grouping")
+    assert response.status_code == 200
 
     # Admin pages treat the non-admin as unauthenticated — no content.
     response = client.get("/admin", follow_redirects=False)

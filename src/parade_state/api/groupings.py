@@ -1,40 +1,46 @@
-"""Grouping management API endpoints.
+"""Grouping management API endpoints (issue 26 redesign).
 
-"Grouping" is the umbrella term covering standard operational groupings,
-adhoc groupings, and vehicle manifests.
+A grouping is a labelled, closed vocabulary of groups based on the
+attendance-active nominal roll. Servicemen on that roll hold memberships
+in the groups plus a per-grouping checkbox and free-text remarks.
+Groupings never read or write attendance.
+
+All mutations are super-admin only (403 otherwise); reads are open to
+every role. Groupings whose nominal roll is not the attendance-active
+one are unreachable (404) until their roll is re-activated.
 """
 
 import csv
+import io
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from parade_state.db import get_db_session
-from parade_state.models.attendance import PRESENT_LIKE_STATUSES, Attendance
-from parade_state.models.csv_ingestion import NominalRoll
-from parade_state.models.grouping import (
+from parade_state.models import (
+    AuditLog,
     Grouping,
-    GroupingNotes,
-    GroupingPersonnelExclusion,
-    GroupingPersonnelOverride,
+    GroupingGroup,
+    GroupingMemberState,
+    GroupingMembership,
+    NominalRoll,
+    Personnel,
 )
-from parade_state.models.personnel import Personnel
 from parade_state.models.schemas import (
-    ExclusionCreate,
+    GroupingCloneRequest,
+    GroupingCopyRequest,
     GroupingCreate,
-    GroupingListParams,
-    GroupingNotesCreate,
-    GroupingNotesResponse,
-    GroupingNotesUpdate,
-    GroupingPersonnelOverrideCreate,
-    GroupingPersonnelOverrideResponse,
+    GroupingGroupItem,
+    GroupingGroupResponse,
     GroupingResponse,
-    GroupingStatusResponse,
-    GroupingStatusSessionInfo,
-    GroupingStatusUnitBreakdown,
     GroupingUpdate,
+    MemberStateUpdate,
+    MembershipSetRequest,
 )
 from parade_state.utils import utc_dt
 
@@ -42,187 +48,316 @@ router = APIRouter()
 
 
 # ============================================================================
-# Helper Functions
+# Helpers
 # ============================================================================
 
 
-async def verify_grouping_access(
-    grouping_id: str,
-    user_id: str,
-    user_role: str,
-    db: AsyncSession,
-) -> Grouping:
-    """Verify user has access to grouping and return it."""
-    # Super admins have full access
-    if user_role == "super_admin":
-        result = await db.execute(
-            select(Grouping).where(Grouping.id == grouping_id)
+def _require_super_admin(user_role: str) -> None:
+    """Authorize super_admin only."""
+    if user_role != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super admins can manage groupings",
         )
-        grouping = result.scalar_one_or_none()
-        if not grouping:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Grouping not found",
-            )
-        return grouping
 
-    # For regular users and admins, check grouping access
-    # TODO: Implement proper access control based on user scopes
-    # For now, admins can access all groupings
-    if user_role in ["admin", "user"]:
-        result = await db.execute(
-            select(Grouping).where(Grouping.id == grouping_id)
+
+async def _active_nr(db: AsyncSession) -> NominalRoll | None:
+    """The nominal roll currently active for attendance, if any."""
+    return (
+        await db.execute(
+            select(NominalRoll).where(NominalRoll.attendance_active.is_(True))
         )
-        grouping = result.scalar_one_or_none()
-        if not grouping:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Grouping not found",
-            )
-        return grouping
+    ).scalar_one_or_none()
 
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Insufficient permissions to access this grouping",
+
+async def _load_grouping(grouping_id: str, db: AsyncSession) -> Grouping:
+    """Load a grouping (with children) that lives on the active NR.
+
+    Groupings based on non-active NRs are retained in the DB but not
+    reachable: their roll must be (re-)activated first.
+    """
+    nr = await _active_nr(db)
+    if nr is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No nominal roll is active for attendance",
+        )
+    grouping = (
+        await db.execute(
+            select(Grouping)
+            .where(
+                Grouping.id == grouping_id,
+                Grouping.nominal_roll_id == nr.id,
+            )
+            .options(
+                selectinload(Grouping.groups).selectinload(GroupingGroup.memberships),
+                selectinload(Grouping.memberships),
+                selectinload(Grouping.member_state),
+            )
+        )
+    ).scalar_one_or_none()
+    if grouping is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Grouping not found on the nominal roll active for attendance",
+        )
+    return grouping
+
+
+async def _member_counts(db: AsyncSession, grouping_id: str) -> dict[str, int]:
+    """Membership count per group id — feeds the removal warning popup."""
+    rows = await db.execute(
+        select(GroupingMembership.group_id, func.count())
+        .where(GroupingMembership.grouping_id == grouping_id)
+        .group_by(GroupingMembership.group_id)
+    )
+    return {group_id: count for group_id, count in rows.all()}
+
+
+def _to_response(grouping: Grouping, counts: dict[str, int]) -> GroupingResponse:
+    # Sort by position: the in-memory collection's iteration order is the
+    # session's insertion order, not the display order.
+    return GroupingResponse(
+        id=grouping.id,
+        label=grouping.label,
+        nominal_roll_id=grouping.nominal_roll_id,
+        multiple_membership=grouping.multiple_membership,
+        allow_ungrouped=grouping.allow_ungrouped,
+        groups=[
+            GroupingGroupResponse(
+                id=g.id,
+                label=g.label,
+                position=g.position,
+                member_count=counts.get(g.id, 0),
+            )
+            for g in sorted(grouping.groups, key=lambda g: g.position)
+        ],
+        created_at=grouping.created_at,
+        created_by=grouping.created_by,
     )
 
 
-async def validate_grouping_status_transition(
-    current_status: str,
-    new_status: str,
-) -> bool:
-    """Validate grouping status transition is allowed."""
-    valid_transitions = {
-        "draft": ["active", "inactive", "archived"],
-        "active": ["inactive", "closed"],
-        "inactive": ["active", "archived", "closed"],
-        "closed": ["finalized"],
-        "finalized": [],  # Finalized is terminal
-        "archived": [],  # Archived is terminal
-    }
+async def _ensure_label_available(
+    db: AsyncSession, label: str, nominal_roll_id: str, *, exclude_id: str | None = None
+) -> None:
+    """Labels are unique per nominal roll — a copy from a previous roll
+    may keep its label while the source still exists on that old roll."""
+    query = select(Grouping.id).where(
+        Grouping.label == label,
+        Grouping.nominal_roll_id == nominal_roll_id,
+    )
+    if exclude_id is not None:
+        query = query.where(Grouping.id != exclude_id)
+    if (await db.execute(query)).scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Grouping label already in use on this nominal roll.",
+        )
 
-    return new_status in valid_transitions.get(current_status, [])
+
+def _check_group_labels_unique(labels: list[str]) -> None:
+    seen: set[str] = set()
+    for label in labels:
+        if label in seen:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Duplicate group label: {label!r}",
+            )
+        seen.add(label)
+
+
+async def _fetch_for_response(
+    db: AsyncSession, grouping_id: str
+) -> Grouping:
+    """Re-fetch a grouping with its children eagerly loaded.
+
+    After an insert, an untouched ``groups`` collection would lazy-load
+    (and crash under async); this keeps response building IO-explicit.
+    """
+    grouping = (
+        await db.execute(
+            select(Grouping)
+            .where(Grouping.id == grouping_id)
+            .options(selectinload(Grouping.groups))
+        )
+    ).scalar_one()
+    return grouping
+
+
+def _audit(
+    db: AsyncSession,
+    user_id: str,
+    grouping: Grouping,
+    action: str,
+    description: dict,
+) -> None:
+    db.add(
+        AuditLog(
+            user_id=user_id,
+            entity_type="grouping",
+            entity_id=str(grouping.id),
+            action=action,
+            changes=None,
+            description=json.dumps(description, default=str),
+        )
+    )
+
+
+def _apply_group_set(grouping: Grouping, items: list[GroupingGroupItem]) -> None:
+    """Apply a full group-enum payload: add, rename, reorder, remove.
+
+    Removals cascade memberships away via the ORM, except where
+    ``allow_ungrouped=false`` would leave a serviceman with no group —
+    those are rejected first with the affected count.
+    """
+    _check_group_labels_unique([item.label for item in items])
+
+    existing = {group.id: group for group in grouping.groups}
+
+    # Unknown ids in the payload are a client bug, not a removal.
+    for item in items:
+        if item.id is not None and item.id not in existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown group id: {item.id}",
+            )
+
+    kept_ids = {item.id for item in items if item.id is not None}
+
+    if not grouping.allow_ungrouped:
+        # A serviceman stays grouped if they hold at least one membership
+        # in a group that survives this update.
+        affected = 0
+        for group in grouping.groups:
+            if group.id in kept_ids:
+                continue
+            for membership in group.memberships:
+                survivor_ids = {
+                    m.group_id
+                    for m in grouping.memberships
+                    if m.personnel_id == membership.personnel_id
+                } & kept_ids
+                if not survivor_ids:
+                    affected += 1
+        if affected:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Cannot remove: {affected} servicemen would be left "
+                    "without a group (this grouping requires every "
+                    "serviceman to hold at least one). Reassign them first."
+                ),
+            )
+
+    # Removals first (ORM cascades their memberships away).
+    for group in list(grouping.groups):
+        if group.id not in kept_ids:
+            grouping.groups.remove(group)
+
+    # Adds + renames + positions.
+    by_position: dict[int, GroupingGroup] = {}
+    for position, item in enumerate(items):
+        if item.id is not None:
+            group = existing[item.id]
+            group.label = item.label
+        else:
+            group = GroupingGroup(label=item.label)
+            grouping.groups.append(group)
+        group.position = position
+        by_position[position] = group
 
 
 # ============================================================================
-# Grouping CRUD Endpoints
+# Grouping CRUD
 # ============================================================================
 
 
-@router.post(
-    "/", response_model=GroupingResponse, status_code=status.HTTP_201_CREATED
-)
+@router.post("/", response_model=GroupingResponse, status_code=status.HTTP_201_CREATED)
 async def create_grouping(
     grouping_data: GroupingCreate,
     user_id: str = Query(..., description="User ID creating the grouping"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Create a new grouping.
+    """Create a grouping on the nominal roll active for attendance."""
+    _require_super_admin(user_role)
 
-    Requires admin or super_admin role.
-    """
-    # Verify user has permission
-    if user_role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can create groupings",
-        )
-
-    # Verify nominal roll exists
-    result = await db.execute(
-        select(NominalRoll).where(NominalRoll.id == grouping_data.nominal_roll_id)
-    )
-    nominal_roll = result.scalar_one_or_none()
-    if not nominal_roll:
+    nr = await _active_nr(db)
+    if nr is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Nominal roll {grouping_data.nominal_roll_id} not found",
+            detail="No nominal roll is active for attendance.",
         )
 
-    # Normalise datetimes to naive UTC for the TIMESTAMP WITHOUT TIME ZONE
-    # columns: asyncpg (Postgres) rejects aware values, SQLite accepts either.
-    for field in ("valid_from", "valid_until", "scheduled_activation"):
-        value = getattr(grouping_data, field)
-        if value is not None:
-            setattr(grouping_data, field, utc_dt.ensure_naive(utc_dt.to_utc(value)))
+    await _ensure_label_available(db, grouping_data.label, str(nr.id))
+    _check_group_labels_unique([item.label for item in grouping_data.groups])
 
-    # Validate date range — required for standard mode, optional for adhoc/vehicle
-    if grouping_data.mode == "standard":
-        if not grouping_data.valid_from or not grouping_data.valid_until:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="valid_from and valid_until are required for standard groupings",
-            )
-        if grouping_data.valid_until <= grouping_data.valid_from:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="valid_until must be after valid_from",
-            )
-
-    # Create grouping
     grouping = Grouping(
-        name=grouping_data.name,
-        nominal_roll_id=grouping_data.nominal_roll_id,
-        mode=grouping_data.mode,
-        status=grouping_data.status,
-        valid_from=grouping_data.valid_from,
-        valid_until=grouping_data.valid_until,
-        scheduled_activation=grouping_data.scheduled_activation,
-        notes=grouping_data.notes,
+        label=grouping_data.label,
+        nominal_roll_id=nr.id,
+        multiple_membership=grouping_data.multiple_membership,
+        allow_ungrouped=grouping_data.allow_ungrouped,
         created_by=user_id,
     )
-
-    # Auto-activate if status is active
-    if grouping_data.status == "active":
-        grouping.activated_at = utc_dt.db_utcnow()
+    for position, item in enumerate(grouping_data.groups):
+        grouping.groups.append(
+            GroupingGroup(label=item.label, position=position)
+        )
 
     db.add(grouping)
-    await db.commit()
-    await db.refresh(grouping)
-
-    return grouping
+    _audit(
+        db,
+        user_id,
+        grouping,
+        "create",
+        {
+            "label": grouping.label,
+            "groups": [item.label for item in grouping_data.groups],
+            "multiple_membership": grouping.multiple_membership,
+            "allow_ungrouped": grouping.allow_ungrouped,
+        },
+    )
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Grouping label already in use.",
+        ) from None
+    return _to_response(
+        await _fetch_for_response(db, grouping.id),
+        await _member_counts(db, grouping.id),
+    )
 
 
 @router.get("/", response_model=list[GroupingResponse])
 async def list_groupings(
-    status: str | None = None,
-    nominal_roll_id: str | None = None,
-    search: str | None = None,
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
     user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for filtering"),
+    user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """List groupings with optional filtering.
-
-    All authenticated users can list groupings.
-    Filters may be applied based on user role.
-    """
-    query = select(Grouping)
-
-    # Apply filters
-    if status:
-        query = query.where(Grouping.status == status)
-
-    if nominal_roll_id:
-        query = query.where(Grouping.nominal_roll_id == nominal_roll_id)
-
-    if search:
-        search_pattern = f"%{search}%"
-        query = query.where(Grouping.name.ilike(search_pattern))
-
-    # Order by created_at descending
-    query = query.order_by(Grouping.created_at.desc())
-
-    # Apply pagination
-    query = query.offset(offset).limit(limit)
-
-    result = await db.execute(query)
-    groupings = result.scalars().all()
-
-    return groupings
+    """List the groupings on the attendance-active NR."""
+    nr = await _active_nr(db)
+    if nr is None:
+        return []
+    groupings = (
+        (
+            await db.execute(
+                select(Grouping)
+                .where(Grouping.nominal_roll_id == nr.id)
+                .options(selectinload(Grouping.groups))
+                .order_by(Grouping.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    result = []
+    for grouping in groupings:
+        counts = await _member_counts(db, grouping.id)
+        result.append(_to_response(grouping, counts))
+    return result
 
 
 @router.get("/{grouping_id}", response_model=GroupingResponse)
@@ -232,12 +367,9 @@ async def get_grouping(
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Get a specific grouping by ID.
-
-    Requires appropriate access permissions.
-    """
-    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
-    return grouping
+    """Get one grouping on the attendance-active NR."""
+    grouping = await _load_grouping(grouping_id, db)
+    return _to_response(grouping, await _member_counts(db, grouping.id))
 
 
 @router.patch("/{grouping_id}", response_model=GroupingResponse)
@@ -248,92 +380,57 @@ async def update_grouping(
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Update a grouping.
+    """Update a grouping's label and group enums.
 
-    Requires admin or super_admin role.
+    ``multiple_membership`` / ``allow_ungrouped`` are immutable after
+    creation — change attempts get a 400 pointing at clone-and-replace.
     """
-    # Verify user has permission
-    if user_role not in ["admin", "super_admin"]:
+    _require_super_admin(user_role)
+    grouping = await _load_grouping(grouping_id, db)
+
+    if update_data.multiple_membership is not None and (
+        update_data.multiple_membership != grouping.multiple_membership
+    ):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can update groupings",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="multiple_membership cannot be changed after creation.",
+        )
+    if update_data.allow_ungrouped is not None and (
+        update_data.allow_ungrouped != grouping.allow_ungrouped
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="allow_ungrouped cannot be changed after creation.",
         )
 
-    # Get grouping
-    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
-
-    # Validate date range if both provided
-    if update_data.valid_from and update_data.valid_until:
-        if update_data.valid_until <= update_data.valid_from:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="valid_until must be after valid_from",
-            )
-
-    # Update fields
-    if update_data.name is not None:
-        grouping.name = update_data.name
-
-    # Naive-UTC normalisation, as in the create endpoint
-    if update_data.valid_from is not None:
-        grouping.valid_from = utc_dt.ensure_naive(utc_dt.to_utc(update_data.valid_from))
-
-    if update_data.valid_until is not None:
-        grouping.valid_until = utc_dt.ensure_naive(
-            utc_dt.to_utc(update_data.valid_until)
+    if update_data.label is not None and update_data.label != grouping.label:
+        await _ensure_label_available(
+            db,
+            update_data.label,
+            grouping.nominal_roll_id,
+            exclude_id=grouping.id,
         )
+        grouping.label = update_data.label
 
-    if update_data.scheduled_activation is not None:
-        grouping.scheduled_activation = utc_dt.ensure_naive(
-            utc_dt.to_utc(update_data.scheduled_activation)
-        )
+    if update_data.groups is not None:
+        _apply_group_set(grouping, update_data.groups)
 
-    if update_data.notes is not None:
-        grouping.notes = update_data.notes
-
-    # Handle status transition
-    if update_data.status is not None:
-        current_status = grouping.status
-        new_status = update_data.status
-
-        # Validate transition
-        if not await validate_grouping_status_transition(current_status, new_status):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid status transition from {current_status} to {new_status}",
-            )
-
-        # Handle activation
-        if new_status == "active" and current_status != "active":
-            # Check if another grouping is already active
-            active_result = await db.execute(
-                select(Grouping).where(
-                    and_(
-                        Grouping.status == "active",
-                        Grouping.id != grouping_id,
-                    )
-                )
-            )
-            active_grouping = active_result.scalar_one_or_none()
-
-            if active_grouping:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Another grouping is already active. Only one grouping can be active at a time.",
-                )
-
-            grouping.activated_at = utc_dt.db_utcnow()
-
-        # Handle deactivation
-        if new_status in ["inactive", "closed"] and current_status == "active":
-            grouping.deactivated_at = utc_dt.db_utcnow()
-
-        grouping.status = new_status
-
-    await db.commit()
-    await db.refresh(grouping)
-
-    return grouping
+    _audit(
+        db,
+        user_id,
+        grouping,
+        "update",
+        {"label": grouping.label},
+    )
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Grouping label already in use.",
+        ) from None
+    return _to_response(grouping, await _member_counts(db, grouping.id))
 
 
 @router.delete("/{grouping_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -343,613 +440,371 @@ async def delete_grouping(
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Delete a grouping.
+    """Delete a grouping; groups, memberships and member state cascade."""
+    _require_super_admin(user_role)
+    grouping = await _load_grouping(grouping_id, db)
 
-    Requires super_admin role.
-    """
-    # Verify user has permission
-    if user_role != "super_admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only super admins can delete groupings",
-        )
-
-    # Get grouping
-    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
-
-    # Prevent deletion of active or finalized groupings
-    if grouping.status in ["active", "finalized"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot delete grouping with status {grouping.status}",
-        )
-
+    _audit(db, user_id, grouping, "delete", {"label": grouping.label})
     await db.delete(grouping)
     await db.commit()
-
     return None
 
 
 # ============================================================================
-# Grouping Activation Endpoints
+# Memberships and member state
 # ============================================================================
 
 
-@router.post("/{grouping_id}/activate", response_model=GroupingResponse)
-async def activate_grouping(
+@router.put(
+    "/{grouping_id}/personnel/{personnel_id}/groups",
+    response_model=GroupingResponse,
+)
+async def set_personnel_groups(
     grouping_id: str,
-    user_id: str = Query(..., description="User ID activating the grouping"),
+    personnel_id: str,
+    payload: MembershipSetRequest,
+    user_id: str = Query(..., description="User ID making the change"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Manually activate a grouping.
+    """Set a serviceman's full group membership set within a grouping."""
+    _require_super_admin(user_role)
+    grouping = await _load_grouping(grouping_id, db)
 
-    Requires admin or super_admin role.
-    """
-    # Verify user has permission
-    if user_role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can activate groupings",
-        )
-
-    # Get grouping
-    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
-
-    # Check if already active
-    if grouping.status == "active":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Grouping is already active",
-        )
-
-    # Check if another grouping is already active
-    active_result = await db.execute(
-        select(Grouping).where(
-            and_(
-                Grouping.status == "active",
-                Grouping.id != grouping_id,
+    personnel = (
+        await db.execute(
+            select(Personnel).where(
+                Personnel.id == personnel_id,
+                Personnel.nominal_roll_id == grouping.nominal_roll_id,
             )
         )
-    )
-    active_grouping = active_result.scalar_one_or_none()
-
-    if active_grouping:
+    ).scalar_one_or_none()
+    if personnel is None:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Another grouping is already active. Only one grouping can be active at a time.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Serviceman not found on this grouping's nominal roll.",
         )
 
-    # Validate transition
-    if not await validate_grouping_status_transition(grouping.status, "active"):
+    group_ids: list[str] = []
+    for group_id in payload.group_ids:
+        if group_id not in group_ids:
+            group_ids.append(group_id)
+
+    known = {group.id for group in grouping.groups}
+    for group_id in group_ids:
+        if group_id not in known:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown group id for this grouping.",
+            )
+
+    if not grouping.multiple_membership and len(group_ids) > 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot activate grouping with status {grouping.status}",
+            detail="This grouping allows only one group per serviceman.",
+        )
+    if not group_ids and not grouping.allow_ungrouped:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This grouping requires every serviceman to hold a group.",
         )
 
-    # Activate grouping
-    grouping.status = "active"
-    grouping.activated_at = utc_dt.db_utcnow()
+    wanted = set(group_ids)
+    for membership in list(grouping.memberships):
+        if membership.personnel_id == personnel_id and membership.group_id not in wanted:
+            grouping.memberships.remove(membership)
+    held = {
+        membership.group_id
+        for membership in grouping.memberships
+        if membership.personnel_id == personnel_id
+    }
+    for group_id in group_ids:
+        if group_id not in held:
+            grouping.memberships.append(
+                GroupingMembership(
+                    group_id=group_id,
+                    personnel_id=personnel_id,
+                )
+            )
 
     await db.commit()
-    await db.refresh(grouping)
-
-    return grouping
+    return _to_response(grouping, await _member_counts(db, grouping.id))
 
 
-@router.post("/{grouping_id}/deactivate", response_model=GroupingResponse)
-async def deactivate_grouping(
+@router.patch("/{grouping_id}/personnel/{personnel_id}/state")
+async def update_member_state(
     grouping_id: str,
-    user_id: str = Query(..., description="User ID deactivating the grouping"),
-    user_role: str = Query(..., description="User role for authorization"),
-    db: AsyncSession = Depends(get_db_session),
-):
-    """Manually deactivate a grouping.
-
-    Requires admin or super_admin role.
-    """
-    # Verify user has permission
-    if user_role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can deactivate groupings",
-        )
-
-    # Get grouping
-    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
-
-    # Check if currently active
-    if grouping.status != "active":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only active groupings can be deactivated",
-        )
-
-    # Deactivate grouping
-    grouping.status = "inactive"
-    grouping.deactivated_at = utc_dt.db_utcnow()
-
-    await db.commit()
-    await db.refresh(grouping)
-
-    return grouping
-
-
-# ============================================================================
-# Grouping Personnel Exclusions
-# ============================================================================
-
-
-@router.post(
-    "/{grouping_id}/exclusions",
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_exclusion(
-    grouping_id: str,
-    exclusion_data: ExclusionCreate,
-    user_id: str = Query(..., description="User ID creating the exclusion"),
+    personnel_id: str,
+    payload: MemberStateUpdate,
+    user_id: str = Query(..., description="User ID making the change"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Exclude a personnel from a grouping's roster.
+    """Update a serviceman's grouping checkbox / free-text remarks.
 
-    Requires admin or super_admin role. Only allowed when grouping is in
-    draft status. Idempotent — excluding an already-excluded personnel
-    returns 200 with no change.
+    Both fields are intentionally generic — their meaning is left to the
+    unit's standardisation.
     """
-    if user_role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can manage exclusions",
-        )
+    _require_super_admin(user_role)
+    grouping = await _load_grouping(grouping_id, db)
 
-    # Verify grouping exists and is draft
-    result = await db.execute(select(Grouping).where(Grouping.id == grouping_id))
-    grouping = result.scalar_one_or_none()
-    if not grouping:
+    personnel = (
+        await db.execute(
+            select(Personnel).where(
+                Personnel.id == personnel_id,
+                Personnel.nominal_roll_id == grouping.nominal_roll_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if personnel is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Grouping not found: {grouping_id}",
-        )
-    if grouping.status != "draft":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Exclusions can only be modified for draft groupings "
-                f"(current status: '{grouping.status}')."
-            ),
+            detail="Serviceman not found on this grouping's nominal roll.",
         )
 
-    # Verify personnel belongs to this grouping's nominal roll
-    personnel_result = await db.execute(
-        select(Personnel).where(
-            Personnel.id == exclusion_data.personnel_id,
-            Personnel.nominal_roll_id == grouping.nominal_roll_id,
+    state = (
+        await db.execute(
+            select(GroupingMemberState).where(
+                GroupingMemberState.grouping_id == grouping_id,
+                GroupingMemberState.personnel_id == personnel_id,
+            )
         )
-    )
-    if not personnel_result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Personnel not found in this grouping's nominal roll.",
+    ).scalar_one_or_none()
+    if state is None:
+        state = GroupingMemberState(
+            grouping_id=grouping_id,
+            personnel_id=personnel_id,
+            updated_by=user_id,
         )
+        db.add(state)
+    if payload.checkbox is not None:
+        state.checkbox = payload.checkbox
+    if payload.remarks is not None:
+        state.remarks = payload.remarks or None
+    state.updated_by = user_id
+    state.updated_at = utc_dt.db_utcnow()
 
-    # Check if already excluded (idempotent)
-    existing = await db.execute(
-        select(GroupingPersonnelExclusion).where(
-            GroupingPersonnelExclusion.grouping_id == grouping_id,
-            GroupingPersonnelExclusion.personnel_id == exclusion_data.personnel_id,
-        )
-    )
-    if existing.scalar_one_or_none():
-        return {"detail": "Personnel already excluded"}
-
-    exclusion = GroupingPersonnelExclusion(
-        grouping_id=grouping_id,
-        personnel_id=exclusion_data.personnel_id,
-        excluded_by=user_id,
-    )
-    db.add(exclusion)
     await db.commit()
-
-    return {"detail": "Personnel excluded"}
-
-
-@router.delete(
-    "/{grouping_id}/exclusions/{personnel_id}",
-    status_code=status.HTTP_200_OK,
-)
-async def delete_exclusion(
-    grouping_id: str,
-    personnel_id: str,
-    user_id: str = Query(..., description="User ID removing the exclusion"),
-    user_role: str = Query(..., description="User role for authorization"),
-    db: AsyncSession = Depends(get_db_session),
-) -> dict:
-    """Re-include a previously excluded personnel in a grouping's roster.
-
-    Requires admin or super_admin role. Only allowed when grouping is in
-    draft status.
-    """
-    if user_role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can manage exclusions",
-        )
-
-    # Verify grouping exists and is draft
-    result = await db.execute(select(Grouping).where(Grouping.id == grouping_id))
-    grouping = result.scalar_one_or_none()
-    if not grouping:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Grouping not found: {grouping_id}",
-        )
-    if grouping.status != "draft":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Exclusions can only be modified for draft groupings "
-                f"(current status: '{grouping.status}')."
-            ),
-        )
-
-    # Find and delete the exclusion
-    result = await db.execute(
-        select(GroupingPersonnelExclusion).where(
-            GroupingPersonnelExclusion.grouping_id == grouping_id,
-            GroupingPersonnelExclusion.personnel_id == personnel_id,
-        )
-    )
-    exclusion = result.scalar_one_or_none()
-    if not exclusion:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Personnel is not excluded from this grouping.",
-        )
-
-    await db.delete(exclusion)
-    await db.commit()
-
-    return {"detail": "Personnel re-included"}
+    return {"detail": "Member state updated"}
 
 
 # ============================================================================
-# Grouping Personnel Overrides
+# Clone and copy-from-previous-NR
 # ============================================================================
 
 
-@router.post(
-    "/{grouping_id}/personnel-overrides",
-    response_model=GroupingPersonnelOverrideResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_personnel_override(
+@router.post("/{grouping_id}/clone", response_model=GroupingResponse,
+             status_code=status.HTTP_201_CREATED)
+async def clone_grouping(
     grouping_id: str,
-    override_data: GroupingPersonnelOverrideCreate,
-    user_id: str = Query(..., description="User ID creating the override"),
+    payload: GroupingCloneRequest,
+    user_id: str = Query(..., description="User ID making the clone"),
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Create a grouping personnel override.
+    """Clone a grouping on the same NR under a fresh label.
 
-    Requires admin or super_admin role.
+    Structure (group enums with positions + both flags) always carries
+    over; memberships and member state only when the dialog opts in.
     """
-    # Verify user has permission
-    if user_role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can create personnel overrides",
-        )
+    _require_super_admin(user_role)
+    source = await _load_grouping(grouping_id, db)
+    await _ensure_label_available(db, payload.label, source.nominal_roll_id)
 
-    # Verify grouping exists
-    await verify_grouping_access(grouping_id, user_id, user_role, db)
-
-    # Check if override already exists
-    existing_result = await db.execute(
-        select(GroupingPersonnelOverride).where(
-            and_(
-                GroupingPersonnelOverride.grouping_id == grouping_id,
-                GroupingPersonnelOverride.personnel_id == override_data.personnel_id,
-            )
-        )
-    )
-    existing_override = existing_result.scalar_one_or_none()
-
-    if existing_override:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Personnel override already exists for this grouping and personnel",
-        )
-
-    # Create override
-    override = GroupingPersonnelOverride(
-        grouping_id=grouping_id,
-        personnel_id=override_data.personnel_id,
-        unit=override_data.unit,
-        sub_unit_1=override_data.sub_unit_1,
-        sub_unit_2=override_data.sub_unit_2,
-        sub_unit_3=override_data.sub_unit_3,
-        checkbox=override_data.checkbox,
-        remarks=override_data.remarks,
+    clone = Grouping(
+        label=payload.label,
+        nominal_roll_id=source.nominal_roll_id,
+        multiple_membership=source.multiple_membership,
+        allow_ungrouped=source.allow_ungrouped,
         created_by=user_id,
-        updated_at=utc_dt.db_utcnow(),
     )
+    group_map: dict[str, GroupingGroup] = {}
+    for group in source.groups:
+        copy = GroupingGroup(label=group.label, position=group.position)
+        clone.groups.append(copy)
+        group_map[group.id] = copy
 
-    db.add(override)
-    await db.commit()
-    await db.refresh(override)
-
-    return override
-
-
-@router.get(
-    "/{grouping_id}/personnel-overrides",
-    response_model=list[GroupingPersonnelOverrideResponse],
-)
-async def list_personnel_overrides(
-    grouping_id: str,
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
-    db: AsyncSession = Depends(get_db_session),
-):
-    """List all personnel overrides for a grouping.
-
-    Requires appropriate access permissions.
-    """
-    # Verify grouping exists and user has access
-    await verify_grouping_access(grouping_id, user_id, user_role, db)
-
-    # Get overrides
-    result = await db.execute(
-        select(GroupingPersonnelOverride).where(
-            GroupingPersonnelOverride.grouping_id == grouping_id
-        )
-    )
-    overrides = result.scalars().all()
-
-    return overrides
-
-
-# ============================================================================
-# Grouping Notes
-# ============================================================================
-
-
-@router.post(
-    "/{grouping_id}/notes",
-    response_model=GroupingNotesResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_grouping_notes(
-    grouping_id: str,
-    notes_data: GroupingNotesCreate,
-    user_id: str = Query(..., description="User ID creating the notes"),
-    user_role: str = Query(..., description="User role for authorization"),
-    db: AsyncSession = Depends(get_db_session),
-):
-    """Create grouping notes for a personnel.
-
-    Requires admin or super_admin role.
-    """
-    # Verify user has permission
-    if user_role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can create grouping notes",
-        )
-
-    # Verify grouping exists
-    await verify_grouping_access(grouping_id, user_id, user_role, db)
-
-    # Check if notes already exist
-    existing_result = await db.execute(
-        select(GroupingNotes).where(
-            and_(
-                GroupingNotes.grouping_id == grouping_id,
-                GroupingNotes.personnel_id == notes_data.personnel_id,
+    if payload.include_memberships:
+        for membership in source.memberships:
+            clone.memberships.append(
+                GroupingMembership(
+                    group=group_map[membership.group_id],
+                    personnel_id=membership.personnel_id,
+                )
             )
-        )
-    )
-    existing_notes = existing_result.scalar_one_or_none()
+        for state in source.member_state:
+            clone.member_state.append(
+                GroupingMemberState(
+                    personnel_id=state.personnel_id,
+                    checkbox=state.checkbox,
+                    remarks=state.remarks,
+                    updated_by=user_id,
+                )
+            )
 
-    if existing_notes:
+    db.add(clone)
+    _audit(
+        db,
+        user_id,
+        clone,
+        "create",
+        {"cloned_from": source.label, "include_memberships": payload.include_memberships},
+    )
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Grouping label already in use.",
+        ) from None
+    return _to_response(
+        await _fetch_for_response(db, clone.id),
+        await _member_counts(db, clone.id),
+    )
+
+
+@router.post("/copy-from-previous", response_model=GroupingResponse,
+             status_code=status.HTTP_201_CREATED)
+async def copy_grouping_from_previous_nr(
+    payload: GroupingCopyRequest,
+    user_id: str = Query(..., description="User ID making the copy"),
+    user_role: str = Query(..., description="User role for authorization"),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Copy a grouping from the previously activated NR onto the active one.
+
+    Group enums (with positions) and both flags carry over. Memberships
+    re-link by ``pers_no`` — the canonical cross-roll person identifier —
+    so new-NR personnel without a match start ungrouped. Member state is
+    not copied: checkbox / remarks are per-cycle operational state.
+    """
+    _require_super_admin(user_role)
+
+    active = await _active_nr(db)
+    if active is None or active.attendance_activated_at is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Grouping notes already exist for this personnel. Use update endpoint.",
+            detail="No nominal roll is active for attendance.",
         )
 
-    # Create notes
-    notes = GroupingNotes(
-        grouping_id=grouping_id,
-        personnel_id=notes_data.personnel_id,
-        notes=notes_data.notes,
-        created_by=user_id,
-        updated_by=user_id,
-        notes_version=1,
-    )
-
-    db.add(notes)
-    await db.commit()
-    await db.refresh(notes)
-
-    return notes
-
-
-@router.get("/{grouping_id}/notes", response_model=list[GroupingNotesResponse])
-async def list_grouping_notes(
-    grouping_id: str,
-    personnel_id: str | None = None,
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
-    db: AsyncSession = Depends(get_db_session),
-):
-    """List grouping notes.
-
-    Requires appropriate access permissions.
-    """
-    # Verify grouping exists and user has access
-    await verify_grouping_access(grouping_id, user_id, user_role, db)
-
-    # Build query
-    query = select(GroupingNotes).where(
-        GroupingNotes.grouping_id == grouping_id
-    )
-
-    if personnel_id:
-        query = query.where(GroupingNotes.personnel_id == personnel_id)
-
-    result = await db.execute(query)
-    notes_list = result.scalars().all()
-
-    return notes_list
-
-
-@router.patch(
-    "/{grouping_id}/notes/{personnel_id}", response_model=GroupingNotesResponse
-)
-async def update_grouping_notes(
-    grouping_id: str,
-    personnel_id: str,
-    notes_data: GroupingNotesUpdate,
-    user_id: str = Query(..., description="User ID updating the notes"),
-    user_role: str = Query(..., description="User role for authorization"),
-    db: AsyncSession = Depends(get_db_session),
-):
-    """Update grouping notes for a personnel.
-
-    Requires admin or super_admin role.
-    """
-    # Verify user has permission
-    if user_role not in ["admin", "super_admin"]:
+    previous = (
+        await db.execute(
+            select(NominalRoll)
+            .where(
+                NominalRoll.attendance_activated_at.is_not(None),
+                NominalRoll.attendance_activated_at < active.attendance_activated_at,
+            )
+            .order_by(NominalRoll.attendance_activated_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if previous is None:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can update grouping notes",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No previously activated nominal roll to copy from.",
         )
 
-    # Verify grouping exists
-    await verify_grouping_access(grouping_id, user_id, user_role, db)
-
-    # Get existing notes
-    result = await db.execute(
-        select(GroupingNotes).where(
-            and_(
-                GroupingNotes.grouping_id == grouping_id,
-                GroupingNotes.personnel_id == personnel_id,
+    source = (
+        await db.execute(
+            select(Grouping)
+            .where(
+                Grouping.id == payload.source_grouping_id,
+                Grouping.nominal_roll_id == previous.id,
+            )
+            .options(
+                selectinload(Grouping.groups),
+                selectinload(Grouping.memberships),
             )
         )
-    )
-    notes = result.scalar_one_or_none()
-
-    if not notes:
+    ).scalar_one_or_none()
+    if source is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Grouping notes not found for this personnel",
+            detail="Grouping not found on the previously activated nominal roll.",
         )
 
-    # Update notes
-    notes.notes = notes_data.notes
-    notes.updated_by = user_id
-    notes.updated_at = utc_dt.db_utcnow()
-    notes.notes_version += 1
+    label = payload.label or source.label
+    await _ensure_label_available(db, label, str(active.id))
 
-    await db.commit()
-    await db.refresh(notes)
+    copy = Grouping(
+        label=label,
+        nominal_roll_id=active.id,
+        multiple_membership=source.multiple_membership,
+        allow_ungrouped=source.allow_ungrouped,
+        created_by=user_id,
+    )
+    group_map: dict[str, GroupingGroup] = {}
+    for group in source.groups:
+        group_copy = GroupingGroup(label=group.label, position=group.position)
+        copy.groups.append(group_copy)
+        group_map[group.id] = group_copy
 
-    return notes
-
-
-# ============================================================================
-# Grouping Status
-# ============================================================================
-
-
-@router.get("/{grouping_id}/status", response_model=GroupingStatusResponse)
-async def get_grouping_status(
-    grouping_id: str,
-    status_date: utc_dt.date | None = Query(
-        None, description="Date to get status for (defaults to today)"
-    ),
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
-    db: AsyncSession = Depends(get_db_session),
-):
-    """Get grouping status for a specific date.
-
-    Returns current snapshot including:
-    - Grouping info
-    - Today's AM/PM attendance status
-    - Personnel counts by attendance status
-    - Unit-level breakdown
-
-    Defaults to today if no date provided.
-    """
-    # Verify grouping exists and user has access
-    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
-
-    # Default to today if no date provided
-    if status_date is None:
-        status_date = utc_dt.utcnow().date()
-
-    # Fetch attendance rows for the grouping's NR on the date.
-    attendance_result = await db.execute(
-        select(Attendance).where(
-            and_(
-                Attendance.nominal_roll_id == grouping.nominal_roll_id,
-                Attendance.date == status_date,
+    # Re-link memberships by pers_no — relationships wire the FKs, so no
+    # intermediate flush is needed.
+    new_roll_people = {
+        person.pers_no: person.id
+        for person in (
+            await db.execute(
+                select(Personnel).where(
+                    Personnel.nominal_roll_id == active.id,
+                    Personnel.status == "active",
+                    Personnel.pers_no.is_not(None),
+                )
             )
         )
+        .scalars()
+        .all()
+    }
+    source_people = {
+        person.id: person.pers_no
+        for person in (
+            await db.execute(
+                select(Personnel).where(
+                    Personnel.nominal_roll_id == previous.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    }
+    relinked = 0
+    for membership in source.memberships:
+        pers_no = source_people.get(membership.personnel_id)
+        target_id = new_roll_people.get(pers_no) if pers_no else None
+        if target_id is None:
+            continue  # no pers_no match — starts ungrouped
+        copy.memberships.append(
+            GroupingMembership(
+                group=group_map[membership.group_id],
+                personnel_id=target_id,
+            )
+        )
+        relinked += 1
+
+    db.add(copy)
+    _audit(
+        db,
+        user_id,
+        copy,
+        "create",
+        {
+            "copied_from": source.label,
+            "source_nominal_roll_id": str(previous.id),
+            "relinked_memberships": relinked,
+        },
     )
-    rows = list(attendance_result.scalars().all())
-
-    # Build AM/PM present/absent/total counts.
-    def _slot_stats(slot: str) -> GroupingStatusSessionInfo | None:
-        if not rows:
-            return None
-        present = 0
-        total = 0
-        for row in rows:
-            value = row.status_am if slot == "am" else row.status_pm
-            total += 1
-            if value in PRESENT_LIKE_STATUSES:
-                present += 1
-        return GroupingStatusSessionInfo(
-            status="open",  # AM/PM are hardcoded; "open" keeps the schema happy
-            present=present,
-            absent=total - present,
-            total=total,
-        )
-
-    am_session_info = _slot_stats("am")
-    pm_session_info = _slot_stats("pm")
-
-    # Unit-level breakdown — aggregate both slots per unit.
-    unit_stats: dict[str, dict[str, int]] = {}
-    for row in rows:
-        unit_name = row.unit_snapshot or "—"
-        stats = unit_stats.setdefault(unit_name, {"total": 0, "present": 0})
-        for value in (row.status_am, row.status_pm):
-            stats["total"] += 1
-            if value in PRESENT_LIKE_STATUSES:
-                stats["present"] += 1
-
-    units = [
-        GroupingStatusUnitBreakdown(
-            name=unit_name,
-            total=stats["total"],
-            present=stats["present"],
-            absent=stats["total"] - stats["present"],
-        )
-        for unit_name, stats in sorted(unit_stats.items())
-    ]
-
-    return GroupingStatusResponse(
-        grouping_id=grouping.id,
-        grouping_name=grouping.name,
-        date=status_date,
-        grouping_status=grouping.status,  # type: ignore[assignment]
-        am_session=am_session_info,
-        pm_session=pm_session_info,
-        units=units,
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Grouping label already in use.",
+        ) from None
+    return _to_response(
+        await _fetch_for_response(db, copy.id),
+        await _member_counts(db, copy.id),
     )
 
 
@@ -965,152 +820,83 @@ async def export_grouping_csv(
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Export grouping data to CSV format for debugging and analysis.
+    """Export the grouping table exactly as displayed.
 
-    Returns a CSV file containing:
-    - Personnel records with grouping-specific assignments
-    - Attendance rows (AM/PM status + remarks per date)
-    - Grouping notes
-
-    Access-controlled by grouping scope.
+    Columns: Group, Rank, Name, Unit, Sub Unit, Checkbox, Remarks. No
+    attendance data — groupings never interact with attendance.
     """
-    # Verify grouping exists and user has access
-    grouping = await verify_grouping_access(grouping_id, user_id, user_role, db)
+    grouping = await _load_grouping(grouping_id, db)
 
-    # Get all personnel records for this grouping from the nominal roll
-    personnel_result = await db.execute(
-        select(Personnel).where(
-            Personnel.nominal_roll_id == grouping.nominal_roll_id
+    personnel_rows = (
+        (
+            await db.execute(
+                select(Personnel)
+                .where(
+                    Personnel.nominal_roll_id == grouping.nominal_roll_id,
+                    Personnel.status == "active",
+                )
+                .order_by(
+                    Personnel.unit,
+                    Personnel.sub_unit_1,
+                    Personnel.rank,
+                    Personnel.full_name,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    memberships = (
+        await db.execute(
+            select(GroupingMembership).where(
+                GroupingMembership.grouping_id == grouping.id
+            )
         )
     )
-    all_personnel = personnel_result.scalars().all()
+    group_labels = {group.id: group.label for group in grouping.groups}
+    groups_by_person: dict[str, list[str]] = {}
+    for membership in memberships.scalars():
+        groups_by_person.setdefault(membership.personnel_id, []).append(
+            group_labels.get(membership.group_id, "?")
+        )
 
-    # Get grouping overrides
-    overrides_result = await db.execute(
-        select(GroupingPersonnelOverride).where(
-            GroupingPersonnelOverride.grouping_id == grouping_id
+    states = (
+        await db.execute(
+            select(GroupingMemberState).where(
+                GroupingMemberState.grouping_id == grouping.id
+            )
         )
     )
-    overrides = overrides_result.scalars().all()
-
-    # Create a mapping of personnel_id to override
-    override_map = {override.personnel_id: override for override in overrides}
-
-    # Get grouping notes
-    notes_result = await db.execute(
-        select(GroupingNotes).where(GroupingNotes.grouping_id == grouping_id)
-    )
-    notes = notes_result.scalars().all()
-
-    # Create a mapping of personnel_id to notes
-    notes_map = {note.personnel_id: note.notes for note in notes}
-
-    # Get attendance rows for this grouping's NR.
-    attendance_result = await db.execute(
-        select(Attendance).where(
-            Attendance.nominal_roll_id == grouping.nominal_roll_id
-        )
-    )
-    attendance_records = attendance_result.scalars().all()
-
-    # Distinct dates (sorted ascending) for column headers.
-    dates = sorted({record.date for record in attendance_records})
-
-    # Map (personnel_id, date) -> attendance row.
-    attendance_map = {
-        (record.personnel_id, record.date): record
-        for record in attendance_records
-    }
-
-    # Generate CSV data
-    import io
+    state_by_person = {state.personnel_id: state for state in states.scalars()}
 
     output = io.StringIO()
     writer = csv.writer(output)
-
-    # Write header
     writer.writerow(
-        [
-            "ID",
-            "Rank",
-            "Name",
-            "Nominal Roll Unit",
-            "Nominal Roll SubUnit 1",
-            "Nominal Roll SubUnit 2",
-            "Nominal Roll SubUnit 3",
-            "Override Unit",
-            "Override SubUnit 1",
-            "Override SubUnit 2",
-            "Override SubUnit 3",
-            "Checkbox",
-            "Remarks",
-            "Grouping Notes",
-        ]
-        + [
-            f"{d.strftime('%Y-%m-%d')} AM Status"
-            for d in dates
-        ]
-        + [
-            f"{d.strftime('%Y-%m-%d')} AM Remarks"
-            for d in dates
-        ]
-        + [
-            f"{d.strftime('%Y-%m-%d')} PM Status"
-            for d in dates
-        ]
-        + [
-            f"{d.strftime('%Y-%m-%d')} PM Remarks"
-            for d in dates
-        ]
+        ["Group", "Rank", "Name", "Unit", "Sub Unit", "Checkbox", "Remarks"]
     )
+    for person in personnel_rows:
+        state = state_by_person.get(person.id)
+        writer.writerow(
+            [
+                "; ".join(groups_by_person.get(person.id, [])),
+                person.rank,
+                person.full_name,
+                person.unit,
+                person.sub_unit_1 or "",
+                "Yes" if state and state.checkbox else "",
+                state.remarks if state and state.remarks else "",
+            ]
+        )
 
-    # Write personnel rows
-    for person in all_personnel:
-        # Get override if exists
-        override = override_map.get(person.id)
-        person_notes = notes_map.get(person.id, "")
-
-        # Build row
-        row = [
-            person.pers_no or "",
-            person.rank,
-            person.full_name,
-            person.unit,
-            person.sub_unit_1 or "",
-            person.sub_unit_2 or "",
-            person.sub_unit_3 or "",
-            override.unit if override else "",
-            override.sub_unit_1 if override else "",
-            override.sub_unit_2 if override else "",
-            override.sub_unit_3 if override else "",
-            "Yes" if override and override.checkbox else "",
-            override.remarks if override else "",
-            person_notes,
-        ]
-
-        # Add attendance data for each date (AM status/remarks, then PM).
-        for d in dates:
-            record = attendance_map.get((person.id, d))
-            row.append(record.status_am if record else "")
-            row.append(record.remarks_am or "" if record else "")
-        for d in dates:
-            record = attendance_map.get((person.id, d))
-            row.append(record.status_pm if record else "")
-            row.append(record.remarks_pm or "" if record else "")
-
-        writer.writerow(row)
-
-    # Prepare response
     csv_data = output.getvalue()
     output.close()
-
-    # Create filename with grouping name and timestamp
-    filename = f"grouping_{grouping.name.replace(' ', '_')}_{utc_dt.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
-
+    filename = (
+        f"grouping_{grouping.label.replace(' ', '_')}_"
+        f"{utc_dt.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    )
     return StreamingResponse(
         io.BytesIO(csv_data.encode("utf-8")),
         media_type="text/csv",
-        headers={
-            "Content-Disposition": f"attachment; filename={filename}",
-        },
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )

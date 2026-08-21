@@ -384,7 +384,7 @@ class Personnel(Base):
     __tablename__ = "personnel"
 
     # Relationships
-    grouping_overrides: Mapped[list["GroupingPersonnelOverride"]] = relationship(
+    memberships: Mapped[list["GroupingMembership"]] = relationship(
         back_populates="personnel",
         cascade="all, delete-orphan",
     )
