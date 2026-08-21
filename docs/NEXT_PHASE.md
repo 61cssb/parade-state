@@ -80,6 +80,11 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   the old lifecycle/overrides/exclusions/notes/access-scoping design and
   the `/grouping/{id}/personnel` page are gone; **feature-flagged**
   (`FEATURE_GROUPING`, default off)
+- Export CSV on all three working views — Grouping (issue 26), and the
+  Nominal Roll browser + Attendance marking table (issue 27): each streams
+  its displayed table (filters honoured, tagging overlay applied; the NR
+  export has no row cap; the attendance export follows the Subunit-1 read
+  scoping and labels statuses like the page)
 - Deferments (super-admin CRUD; `Personnel.callup_status`);
   **feature-flagged** (`FEATURE_DEFERMENTS`, dev-only until ready)
 - Sidebar: workflow pages flat (Unit Strength, Upload NR, Nominal Roll,

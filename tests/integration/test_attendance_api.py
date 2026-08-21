@@ -5,10 +5,13 @@ bulk + per-row upsert, list, copy-remarks (explicit source/destination,
 issue 20), and the scope-activation endpoint.
 """
 
+import csv
+import io
 from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.mark.asyncio
@@ -694,3 +697,100 @@ async def test_per_row_upsert_single_record(
         },
     )
     assert response.status_code == 403
+
+
+# ============================================================================
+# GET /api/v1/attendance/export
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_export_csv_columns_and_content(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_attendance_scope,
+    sample_attendance,
+):
+    """Super-admin export mirrors the marking table: statuses as labels,
+    missing rows default to Absent, remarks carried per slot."""
+    today = date.today().isoformat()
+    response = client.get(
+        "/api/v1/attendance/export",
+        params={
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "date": today,
+            "user_id": "super-admin-test-id",
+            "user_role": "super_admin",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers["content-disposition"]
+
+    rows = list(csv.reader(io.StringIO(response.text)))
+    assert rows[0] == [
+        "Unit", "Sub-unit 1", "Sub-unit 2", "Sub-unit 3", "Category",
+        "Rank", "Name", "AM Status", "AM Remarks", "PM Status", "PM Remarks",
+    ]
+    assert len(rows) == 4  # header + whole Called Up roster
+    by_name = {row[6]: row for row in rows[1:]}
+    # John Doe: AM present, PM absent with remark (sample_attendance today).
+    assert by_name["John Doe"][7] == "Present"
+    assert by_name["John Doe"][9] == "Absent"
+    assert by_name["John Doe"][10] == "Sick leave"
+    # Jane Smith: present both slots, no remarks.
+    assert by_name["Jane Smith"][7] == "Present"
+    assert by_name["Jane Smith"][9] == "Present"
+    # Bob Johnson has no attendance row → the page's Absent default.
+    assert by_name["Bob Johnson"][7] == "Absent"
+    assert by_name["Bob Johnson"][9] == "Absent"
+
+
+@pytest.mark.asyncio
+async def test_export_csv_scopes_to_assigned_subunits(
+    client: TestClient,
+    db_session: AsyncSession,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_attendance_scope,
+    sample_attendance,
+    admin_id: str,
+):
+    """Admin export follows the Subunit-1 rule: 403 without assignments,
+    assigned scope with them, and the page's sub-unit filter narrows it."""
+    from parade_state.models import UserSubunitAssignment
+
+    base = {
+        "nominal_roll_id": str(sample_nominal_roll.id),
+        "date": date.today().isoformat(),
+        "user_id": admin_id,
+        "user_role": "admin",
+    }
+
+    # Deny-by-default: no UserSubunitAssignment rows for this admin yet.
+    denied = client.get("/api/v1/attendance/export", params=base)
+    assert denied.status_code == 403
+
+    granted = UserSubunitAssignment(
+        user_id=admin_id,
+        nominal_roll_id=str(sample_nominal_roll.id),
+        sub_unit_1="Platoon 1",
+        created_by=admin_id,
+    )
+    db_session.add(granted)
+    await db_session.commit()
+
+    allowed = client.get("/api/v1/attendance/export", params=base)
+    assert allowed.status_code == 200
+    rows = list(csv.reader(io.StringIO(allowed.text)))
+    # Platoon 1 only — Bob Johnson (Platoon 2) stays out of the export.
+    assert [row[6] for row in rows[1:]] == ["John Doe", "Jane Smith"]
+
+    filtered = client.get(
+        "/api/v1/attendance/export",
+        params={**base, "sub_unit_1": "Platoon 2"},
+    )
+    assert filtered.status_code == 200
+    rows = list(csv.reader(io.StringIO(filtered.text)))
+    assert rows[1:] == []  # outside the admin's assigned scope
