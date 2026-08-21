@@ -55,11 +55,36 @@
     <div id="page-status" style="margin-top: 0.6rem;"></div>
 </div>
 
+{% if selected_grouping.groups %}
+{# Group filter — same pattern as the NR page's filter card: GET form,
+   auto-submitting select, Clear link while a filter is active. #}
+<div class="card">
+    <form method="get" action="/grouping" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+        <input type="hidden" name="grouping_id" value="{{ selected_grouping.id }}">
+        <label for="group" style="font-weight: bold;">Group:</label>
+        <select name="group" id="group" onchange="this.form.submit()"
+                style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            <option value="" {% if not group_filter %}selected{% endif %}>All groups</option>
+            {% for g in selected_grouping.groups %}
+            <option value="{{ g.id }}" {% if group_filter == g.id %}selected{% endif %}>{{ g.label | e }}</option>
+            {% endfor %}
+            {% if selected_grouping.allow_ungrouped %}
+            <option value="ungrouped" {% if group_filter == 'ungrouped' %}selected{% endif %}>Ungrouped</option>
+            {% endif %}
+        </select>
+        <button type="submit" class="btn btn-primary">Filter</button>
+        {% if group_filter %}
+        <a href="/grouping?grouping_id={{ selected_grouping.id }}" class="btn" style="background: #e5e7eb; color: #374151; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.25rem; font-size: 0.875rem;">Clear</a>
+        {% endif %}
+    </form>
+</div>
+{% endif %}
+
 <div class="card">
     <h3 style="margin-bottom: 0.5rem;">
         {{ selected_grouping.label | e }}
         <span style="font-size: 0.875rem; font-weight: normal; color: #6b7280;">
-            — {{ personnel_rows | length }} servicemen on CAA {{ active_nr.caa }}
+            — {{ personnel_rows | length }}{% if group_filter %} of {{ total_count }}{% endif %} servicemen on CAA {{ active_nr.caa }}
         </span>
     </h3>
     <p style="margin: 0.25rem 0 0; font-size: 0.8rem; color: #6b7280;">

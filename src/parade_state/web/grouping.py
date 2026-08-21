@@ -30,6 +30,7 @@ router = APIRouter()
 async def grouping_view(
     request: Request,
     grouping_id: str | None = None,
+    group: str | None = None,
 ):
     """Render the grouping browser page."""
     current_user = await get_current_user_optional(request)
@@ -180,6 +181,25 @@ async def grouping_view(
                     }
                 )
 
+    # Group filter (NR-filter pattern): a group id keeps only members of
+    # that group; the "ungrouped" sentinel keeps only servicemen with no
+    # group. The ungrouped option is only offered when the grouping allows
+    # it — unknown values fall back to the unfiltered view.
+    total_count = len(personnel_rows)
+    group_filter = ""
+    if selected is not None and group:
+        known = {g["id"] for g in selected_groups}
+        if group == "ungrouped" and selected.allow_ungrouped:
+            group_filter = group
+            personnel_rows = [
+                row for row in personnel_rows if not row["group_ids"]
+            ]
+        elif group in known:
+            group_filter = group
+            personnel_rows = [
+                row for row in personnel_rows if group in row["group_ids"]
+            ]
+
     env = _get_templates(request)
     template = env.get_template("grouping.html")
 
@@ -207,6 +227,8 @@ async def grouping_view(
             else None
         ),
         personnel_rows=personnel_rows,
+        total_count=total_count,
+        group_filter=group_filter,
         previous_nr=(
             {"id": str(previous_nr.id), "caa": previous_nr.caa}
             if previous_nr is not None
