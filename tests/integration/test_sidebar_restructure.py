@@ -134,8 +134,9 @@ async def test_sa_pages_render_for_super_admins(
 async def test_nominal_roll_view_has_management_element_for_admin(
     client: TestClient, db_session: AsyncSession, sample_users, sample_nominal_roll
 ):
-    """Admins get the management expander with label/remarks editing and
-    Create Grouping, but not the super-admin-only attendance/delete buttons."""
+    """Admins get the management expander with label/remarks editing, but
+    not the super-admin-only attendance/delete buttons (grouping creation
+    moved to the Grouping page — issue 26)."""
     await _sign_in(client, db_session, sample_users["admin"])
 
     response = client.get("/nominal-roll")
@@ -145,7 +146,6 @@ async def test_nominal_roll_view_has_management_element_for_admin(
     assert "Roll management" in body
     assert 'id="label-display"' in body
     assert 'id="remarks-display"' in body
-    assert "Create Grouping" in body
     # SA-only action buttons are not rendered (the shared JS helpers may be).
     assert "onclick=\"useForAttendance" not in body
     assert "onclick=\"deactivateAttendance" not in body
@@ -173,83 +173,64 @@ async def test_nominal_roll_view_shows_sa_actions_for_super_admin(
 
 
 @pytest.mark.asyncio
-async def test_grouping_view_has_management_element(
-    client: TestClient, db_session: AsyncSession, sample_users, sample_grouping
+async def test_grouping_view_readonly_for_plain_admins(
+    client: TestClient, db_session: AsyncSession, sample_users,
+    sample_attendance_scope, sample_grouping, sample_personnel,
 ):
-    """The active grouping shows metadata, Edit Dates, and Close; draft-only
-    Manage Personnel and super-admin Delete stay hidden for a plain admin."""
+    """Admins see the roster table but no management buttons and no
+    inline editors — mutations are super-admin only (server-enforced)."""
     await _sign_in(client, db_session, sample_users["admin"])
 
     response = client.get("/grouping")
 
     assert response.status_code == 200
     body = response.text
-    assert "Grouping management" in body
-    assert "standard" in body  # mode chip
-    assert "active" in body  # status chip
-    assert "Edit Dates" in body  # active + validity window present
-    assert "Close" in body
-    assert "Manage Personnel" not in body  # draft-only
-    assert "onclick=\"deleteGrouping" not in body  # super_admin-only
+    assert "Test Grouping" in body  # dropdown option
+    assert "John Doe" in body  # roster row
+    assert ">New</button>" not in body
+    assert ">Edit</button>" not in body
+    assert ">Clone</button>" not in body
+    assert ">Delete</button>" not in body
+    assert 'onchange="onSingleGroupChange' not in body  # no inline editors
+    assert 'onchange="onCheckboxChange' not in body
 
 
 @pytest.mark.asyncio
-async def test_grouping_view_draft_shows_manage_personnel_for_super_admin(
-    client: TestClient, db_session: AsyncSession, sample_users, sample_grouping
+async def test_grouping_view_super_admin_gets_management_surface(
+    client: TestClient, db_session: AsyncSession,
+    sample_attendance_scope, sample_grouping, sample_personnel,
 ):
-    """A draft grouping exposes Manage Personnel, Activate, and (for super
-    admins) Delete — matching the retired admin page's gating."""
-    from parade_state.models import Grouping
-    from parade_state.utils import utc_dt
-    from datetime import timedelta
-
-    draft = Grouping(
-        name="Draft Grouping",
-        nominal_roll_id=str(sample_grouping.nominal_roll_id),
-        mode="standard",
-        status="draft",
-        valid_from=utc_dt.db_utcnow() - timedelta(days=1),
-        valid_until=utc_dt.db_utcnow() + timedelta(days=1),
-        personnel_count=3,
-        created_by=str(sample_users["admin"].id),
-    )
-    db_session.add(draft)
-    await db_session.commit()
-
+    """Super admins get the New / Edit / Clone / Delete row and inline
+    group / checkbox / remarks editors on the selected grouping."""
     sa = await _make_super_admin(db_session)
     await _sign_in(client, db_session, sa)
 
-    response = client.get("/grouping", params={"grouping_id": str(draft.id)})
+    response = client.get("/grouping")
 
     assert response.status_code == 200
     body = response.text
-    assert "Grouping management" in body
-    assert f'href="/grouping/{draft.id}/personnel"' in body
-    assert "Activate" in body
-    assert "onclick=\"deleteGrouping" in body
-
-
-# --- Manage Personnel move ---
+    assert ">New</button>" in body
+    assert ">Edit</button>" in body
+    assert ">Clone</button>" in body
+    assert ">Delete</button>" in body
+    assert "Export CSV" in body
+    assert 'onchange="onSingleGroupChange' in body
+    assert 'onchange="onCheckboxChange' in body
+    assert 'onchange="onRemarksChange' in body
+    # The empty "(no group)" option is offered — allow_ungrouped defaults True.
+    assert "<option value=\"\"" in body
 
 
 @pytest.mark.asyncio
-async def test_manage_personnel_at_new_route_with_back_link(
+async def test_grouping_personnel_management_route_retired(
     client: TestClient, db_session: AsyncSession, sample_users, sample_grouping
 ):
-    """Manage Personnel lives at /grouping/{id}/personnel and links back to
-    /grouping; the old admin route is gone."""
+    """The old per-grouping personnel management page is gone."""
     await _sign_in(client, db_session, sample_users["admin"])
 
     response = client.get(f"/grouping/{sample_grouping.id}/personnel")
 
-    assert response.status_code == 200
-    assert 'href="/grouping"' in response.text
-    assert "Back to Grouping" in response.text
-
-    old = client.get(
-        f"/admin/groupings/{sample_grouping.id}/personnel", follow_redirects=False
-    )
-    assert old.status_code == 404
+    assert response.status_code == 404
 
 
 # --- Retired pages ---

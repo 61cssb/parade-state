@@ -248,13 +248,27 @@ async def test_delete_non_existent_nominal_roll(
 
 
 @pytest.mark.asyncio
+async def test_delete_nominal_roll_blocked_by_groupings(
+    client: TestClient, super_admin_token_headers: dict[str, str],
+    sample_nominal_roll, sample_grouping,
+):
+    """Groupings are RESTRICTed: a roll with groupings cannot be deleted."""
+    response = client.delete(
+        f"/api/v1/nominal-rolls/{str(sample_nominal_roll.id)}",
+        headers=super_admin_token_headers,
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
+    )
+    assert response.status_code == 400
+    assert "grouping" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
 async def test_delete_nominal_roll_cascades(
     client: TestClient, super_admin_token_headers: dict[str, str],
-    sample_nominal_roll, sample_grouping, sample_attendance,
+    sample_nominal_roll, sample_attendance,
 ):
-    """Deleting an nominal_roll cascade-deletes dependent data (verified via API)."""
+    """Deleting a roll without groupings cascade-deletes dependent data."""
     nominal_roll_id = str(sample_nominal_roll.id)
-    grouping_id = str(sample_grouping.id)
 
     response = client.delete(
         f"/api/v1/nominal-rolls/{nominal_roll_id}",
@@ -263,21 +277,12 @@ async def test_delete_nominal_roll_cascades(
     )
     assert response.status_code == 200
 
-    # NominalRoll is gone
     nominal_roll_response = client.get(
         f"/api/v1/nominal-rolls/{nominal_roll_id}",
         headers=super_admin_token_headers,
         params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
     assert nominal_roll_response.status_code == 404
-
-    # Grouping cascade-deleted — no longer accessible
-    dep_response = client.get(
-        f"/api/v1/groupings/{grouping_id}",
-        headers=super_admin_token_headers,
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
-    )
-    assert dep_response.status_code == 404
 
 
 # ============================================================================
