@@ -57,6 +57,9 @@
                     <th style="padding: 0.5rem;">Role</th>
                     <th style="padding: 0.5rem;">Status</th>
                     <th style="padding: 0.5rem;">Access Level</th>
+                    {% if user.role == 'super_admin' %}
+                    <th style="padding: 0.5rem;">Access Scopes</th>
+                    {% endif %}
                     <th style="padding: 0.5rem;">Last Sign In</th>
                     <th style="padding: 0.5rem;">Actions</th>
                 </tr>
@@ -84,6 +87,17 @@
                         </select>
                     </td>
                     <td style="padding: 0.5rem;">{{ u.access_level or '--' }}</td>
+                    {% if user.role == 'super_admin' %}
+                    <td id="scope-cell-{{ u.id }}" style="padding: 0.5rem; max-width: 22rem;">
+                        {% if u.grants %}
+                            {% for g in u.grants %}
+                            <span style="display: inline-block; background: #e5e7eb; border-radius: 0.25rem; padding: 0.15rem 0.4rem; margin: 0 0.25rem 0.25rem 0; font-size: 0.75rem; white-space: nowrap;">{{ g.nr_label }} — {{ 'All units' if g.unit == '*' else g.unit }} / {{ 'All sub-units' if g.sub_unit_1 == '*' else g.sub_unit_1 }}</span>
+                            {% endfor %}
+                        {% else %}
+                            <span style="color: #9ca3af; font-size: 0.8rem;">—</span>
+                        {% endif %}
+                    </td>
+                    {% endif %}
                     <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">
                         {% if u.last_sign_in_at %}{{ u.last_sign_in_at.strftime('%Y-%m-%d %H:%M') }}{% else %}Never{% endif %}
                     </td>
@@ -98,7 +112,7 @@
                 </tr>
                 {% if user.role == 'super_admin' %}
                 <tr class="scope-row" id="scope-{{ u.id }}" style="display: none; background: #f9fafb; border-bottom: 1px solid #e5e7eb;">
-                    <td colspan="7" style="padding: 0.75rem 0.5rem;">
+                    <td colspan="8" style="padding: 0.75rem 0.5rem;">
                         <div id="scope-list-{{ u.id }}" style="margin-bottom: 0.75rem;"></div>
                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
                             <span style="font-size: 0.8rem; color: #6b7280;">Grant:</span>
@@ -244,6 +258,25 @@
             ' / ' + scopeValue(a.sub_unit_1, 'All sub-units');
     }
 
+    // The always-visible "Access Scopes" column cell (server-rendered on
+    // load; refreshed here after grant/revoke so it never goes stale).
+    function renderScopeCell(userId) {
+        const cell = document.getElementById('scope-cell-' + userId);
+        if (!cell) {
+            return;
+        }
+        const assignments = scopeAssignmentsCache[userId] || [];
+        if (!assignments.length) {
+            cell.innerHTML = '<span style="color: #9ca3af; font-size: 0.8rem;">—</span>';
+            return;
+        }
+        cell.innerHTML = assignments.map(function(a) {
+            return '<span style="display: inline-block; background: #e5e7eb; ' +
+                'border-radius: 0.25rem; padding: 0.15rem 0.4rem; margin: 0 0.25rem 0.25rem 0; ' +
+                'font-size: 0.75rem; white-space: nowrap;">' + scopeChipLabel(a) + '</span>';
+        }).join('');
+    }
+
     function renderScopeList(userId) {
         const container = document.getElementById('scope-list-' + userId);
         const assignments = scopeAssignmentsCache[userId] || [];
@@ -290,6 +323,7 @@
         }
         scopeAssignmentsCache[userId] = await response.json();
         renderScopeList(userId);
+        renderScopeCell(userId);
     }
 
     async function onScopeNrChange(userId) {

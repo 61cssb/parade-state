@@ -29,6 +29,7 @@ from parade_state.models import (
     Tagging,
     TaggingEntry,
     User,
+    UserSubunitAssignment,
 )
 from parade_state.utils import markdown, utc_dt
 
@@ -373,14 +374,46 @@ async def admin_users(
                 select(NominalRoll).order_by(NominalRoll.caa.desc())
             )
         ).scalars().all()
-        nr_options = [
-            {
-                "id": str(nr.id),
-                "label": nr.label
-                or (nr.caa.isoformat() if nr.caa else str(nr.id)[:8]),
-            }
+        nr_label_by_id = {
+            str(nr.id): nr.label
+            or (nr.caa.isoformat() if nr.caa else str(nr.id)[:8])
             for nr in nr_rows
+        }
+        nr_options = [
+            {"id": nr_id, "label": label}
+            for nr_id, label in nr_label_by_id.items()
         ]
+
+        # Each listed user's scope grants, shown directly in the table
+        # (issue #28) instead of behind the Scope panel toggle.
+        grants_by_user: dict[str, list[dict]] = {}
+        listed_user_ids = [str(user.id) for user, _ in rows]
+        if listed_user_ids:
+            grant_rows = (
+                await db.execute(
+                    select(UserSubunitAssignment)
+                    .where(
+                        UserSubunitAssignment.user_id.in_(listed_user_ids)
+                    )
+                    .order_by(
+                        UserSubunitAssignment.nominal_roll_id,
+                        UserSubunitAssignment.unit,
+                        UserSubunitAssignment.sub_unit_1,
+                    )
+                )
+            ).scalars().all()
+            for grant in grant_rows:
+                grants_by_user.setdefault(str(grant.user_id), []).append(
+                    {
+                        "id": str(grant.id),
+                        "unit": grant.unit,
+                        "sub_unit_1": grant.sub_unit_1,
+                        "nr_label": nr_label_by_id.get(
+                            str(grant.nominal_roll_id),
+                            str(grant.nominal_roll_id)[:8],
+                        ),
+                    }
+                )
 
     users = [
         {
@@ -392,6 +425,7 @@ async def admin_users(
             "access_level": access_level.name if access_level else None,
             "created_at": user.created_at,
             "last_sign_in_at": user.last_sign_in_at,
+            "grants": grants_by_user.get(str(user.id), []),
         }
         for user, access_level in rows
     ]

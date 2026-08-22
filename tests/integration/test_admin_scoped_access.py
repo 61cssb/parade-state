@@ -700,3 +700,37 @@ async def test_grant_and_revoke_unit_scoped_grant(
                 "requesting_user_role": "super_admin"},
     )
     assert listed_again.json() == []
+
+
+@pytest.mark.asyncio
+async def test_admin_users_page_shows_scopes_without_toggle(
+    client: TestClient, db_session, sample_nominal_roll, sample_personnel,
+    sample_users,
+):
+    """The /admin/users table renders each user's grants directly (issue 28
+    follow-up) — no Scope-panel interaction needed to see access state."""
+    from parade_state.auth.session import create_user_session
+    from parade_state.utils.cookies import AUTH_COOKIE_NAME
+
+    await _grant(
+        db_session, sample_nominal_roll.id, str(sample_users["user"].id),
+        "Coy A", "Platoon 1",
+    )
+
+    session = await create_user_session(
+        db_session,
+        user_id="super-admin-test-id",
+        email="super-admin-test@example.com",
+        name="super-admin-test",
+        role="super_admin",
+    )
+    await db_session.commit()
+    client.cookies.set(AUTH_COOKIE_NAME, session.token)
+
+    response = client.get("/admin/users")
+    assert response.status_code == 200
+    body = response.text
+    assert "Access Scopes" in body
+    # The granted chip is server-rendered in the table itself.
+    assert "Platoon 1" in body
+    assert "Coy A" in body
