@@ -6,6 +6,14 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from parade_state.api.subunit_access import (
+    accessible_nr_ids,
+    assert_locations_in_scope,
+    assert_nr_accessible,
+    get_scope_grants,
+    grant_matches,
+    resolve_effective_locations,
+)
 from parade_state.db import get_db_session
 from parade_state.models import (
     PRESENT_LIKE_STATUSES,
@@ -159,6 +167,69 @@ async def _load_effective_remap_for_personnel(
     ).scalar_one_or_none()
 
 
+async def _assert_personnel_in_scope(
+    db: AsyncSession, user_id: str, user_role: str, personnel: Personnel
+) -> None:
+    """403 unless the personnel's effective location is in the caller's scope.
+
+    Issue #28: single-record gate for detail / update / history surfaces.
+    Deny-by-default (no grants on the personnel's NR → 403 naming the
+    missing assignment); ``super_admin`` bypasses.
+    """
+    tagging = (
+        await db.execute(
+            select(Tagging).where(
+                Tagging.nominal_roll_id == personnel.nominal_roll_id
+            )
+        )
+    ).scalar_one_or_none()
+    await assert_locations_in_scope(
+        db,
+        user_id,
+        user_role,
+        str(personnel.nominal_roll_id),
+        [str(personnel.id)],
+        str(tagging.id) if tagging else None,
+    )
+
+
+async def _filter_rows_in_scope(
+    db: AsyncSession, user_id: str, rows: list[Personnel]
+) -> list[Personnel]:
+    """Overlay-aware subset of ``rows`` inside the caller's scope.
+
+    Rows are grouped per NR; each group is checked against that NR's
+    grants with the NR's 1:1 tagging overlay applied (effective, not
+    canonical, location). Order of ``rows`` is preserved. Roster-sized
+    batches only — callers paginate after filtering.
+    """
+    by_nr: dict[str, list[Personnel]] = {}
+    for row in rows:
+        by_nr.setdefault(row.nominal_roll_id, []).append(row)
+
+    kept_ids: set[str] = set()
+    for nr_id, nr_rows in by_nr.items():
+        grants = await get_scope_grants(db, user_id, nr_id)
+        if not grants:
+            continue
+        tagging = (
+            await db.execute(
+                select(Tagging).where(Tagging.nominal_roll_id == nr_id)
+            )
+        ).scalar_one_or_none()
+        locations = await resolve_effective_locations(
+            db,
+            [str(r.id) for r in nr_rows],
+            str(tagging.id) if tagging else None,
+        )
+        for row in nr_rows:
+            unit, sub1 = locations.get(str(row.id), (None, None))
+            if grant_matches(grants, unit, sub1):
+                kept_ids.add(str(row.id))
+
+    return [row for row in rows if str(row.id) in kept_ids]
+
+
 def apply_personnel_filters(query, params: PersonnelListParams):
     """Apply filters to personnel query."""
     # Filter by nominal_roll_id
@@ -256,6 +327,14 @@ async def list_personnel(
     - Can sort by: name, rank, unit, status, created_at, updated_at
     - Sort order: asc (ascending) or desc (descending)
     - Default: No sorting (returns in natural order)
+
+    Read scoping (issue #28): ``super_admin`` lists everything. Regular
+    admins see only personnel inside their (unit, sub_unit_1) scope —
+    deny-by-default (403) on a named NR with no grants, and without a
+    named NR only NRs they hold grants on. Client-supplied unit/sub_unit_1
+    filters only narrow further; they can never widen the scope. Scope
+    applies to the effective location (tagging overlay), so rows are
+    filtered before pagination.
     """
     params = PersonnelListParams(
         nominal_roll_id=nominal_roll_id,
@@ -278,15 +357,39 @@ async def list_personnel(
             detail="Only admins can list personnel",
         )
 
-    query = select(Personnel)
-    query = apply_personnel_filters(query, params)
+    if user_role != "super_admin":
+        allowed_nrs: set[str] | None = None
+        if params.nominal_roll_id:
+            await assert_nr_accessible(
+                db, user_id, user_role, params.nominal_roll_id
+            )
+        else:
+            # Cross-NR request: restrict to NRs with at least one grant.
+            allowed_nrs = await accessible_nr_ids(db, user_id, user_role)
+            if not allowed_nrs:
+                return []
 
-    # Apply pagination
-    query = query.offset(params.offset).limit(params.limit)
+        query = select(Personnel)
+        query = apply_personnel_filters(query, params)
+        if allowed_nrs is not None:
+            query = query.where(Personnel.nominal_roll_id.in_(allowed_nrs))
 
-    # Execute query
-    result = await db.execute(query)
-    personnel_list = result.scalars().all()
+        # Scope applies to the effective location, so filter the full
+        # candidate set first and paginate the survivors.
+        result = await db.execute(query)
+        rows = list(result.scalars().all())
+        rows = await _filter_rows_in_scope(db, user_id, rows)
+        personnel_list = rows[params.offset : params.offset + params.limit]
+    else:
+        query = select(Personnel)
+        query = apply_personnel_filters(query, params)
+
+        # Apply pagination
+        query = query.offset(params.offset).limit(params.limit)
+
+        # Execute query
+        result = await db.execute(query)
+        personnel_list = result.scalars().all()
 
     personnel_responses = [
         PersonnelResponse(
@@ -463,7 +566,11 @@ async def get_personnel(
     user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Get personnel by ID (admin/super_admin only)."""
+    """Get personnel by ID (admin/super_admin only).
+
+    Issue #28: the personnel's effective (unit, sub_unit_1) must fall
+    inside the caller's scope (403 otherwise; super_admin bypasses).
+    """
     if user_role not in ["admin", "super_admin"]:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
@@ -478,6 +585,8 @@ async def get_personnel(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Personnel not found",
         )
+
+    await _assert_personnel_in_scope(db, user_id, user_role, personnel)
 
     return PersonnelResponse(
             id=personnel.id,
@@ -517,6 +626,10 @@ async def update_personnel(
     ``status`` is still applied directly to the personnel row. Response
     fields return the **effective** values (``to_*`` if tagged else
     canonical).
+
+    Issue #28 write scoping: the personnel's effective (unit, sub_unit_1)
+    must be inside the caller's scope before anything is applied (403
+    otherwise; super_admin bypasses).
     """
     # Check permissions
     if user_role not in ["admin", "super_admin"]:
@@ -568,6 +681,9 @@ async def update_personnel(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Personnel not found",
         )
+
+    # Scope gate before any mutation (or tagging-entry redirect).
+    await _assert_personnel_in_scope(db, user_id, user_role, personnel)
 
     # Apply status / callup_status / remarks directly to the personnel row
     # (still allowed). Changing callup_status away from "Called Up" only
@@ -679,7 +795,8 @@ async def get_personnel_attendance_history(
 
     Returns per-day AM/PM attendance with summary statistics. AM and PM slots
     are counted independently toward totals. Supports date range filtering and
-    pagination.
+    pagination. Issue #28: the personnel's effective (unit, sub_unit_1) must
+    be inside the caller's scope (403 otherwise; super_admin bypasses).
     """
     # Resolve personnel (and its NR).
     personnel_result = await db.execute(
@@ -691,6 +808,8 @@ async def get_personnel_attendance_history(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Personnel not found",
         )
+
+    await _assert_personnel_in_scope(db, user_id, user_role, personnel)
 
     resolved_nr = personnel.nominal_roll_id
     if nominal_roll_id and nominal_roll_id != resolved_nr:
