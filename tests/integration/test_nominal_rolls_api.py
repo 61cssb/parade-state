@@ -292,12 +292,36 @@ async def test_delete_nominal_roll_cascades(
 # ============================================================================
 
 
+async def _grant_nr_access(
+    db_session: AsyncSession, nominal_roll_id, user_id: str = "admin-user-id"
+) -> None:
+    """Insert a scope grant so a regular admin can access a test-made NR.
+
+    Issue #28: NR reads/writes are deny-by-default per NR. Test-created
+    rolls have no roster, so the grant is a direct DB insert with a
+    marker sub_unit_1 (the API's roster validation does not apply).
+    """
+    from parade_state.models import UserSubunitAssignment
+
+    db_session.add(
+        UserSubunitAssignment(
+            user_id=user_id,
+            nominal_roll_id=str(nominal_roll_id),
+            unit="*",
+            sub_unit_1="granted",
+            created_by="super-admin-test-id",
+        )
+    )
+    await db_session.commit()
+
+
 @pytest.mark.asyncio
 async def test_update_nominal_roll_label(
     client: TestClient, admin_token_headers: dict[str, str],
     db_session: AsyncSession, sample_users,
+    admin_subunit_assignment,
 ):
-    """Admin can set a label on an nominal_roll; response and GET reflect it."""
+    """Admin can set a label on a nominal roll they hold a grant on."""
     draft_nominal_roll = NominalRoll(
         caa=date(2024, 9, 1),
         csv_hash="label-hash-set",
@@ -305,6 +329,7 @@ async def test_update_nominal_roll_label(
     )
     db_session.add(draft_nominal_roll)
     await db_session.commit()
+    await _grant_nr_access(db_session, draft_nominal_roll.id)
 
     response = client.patch(
         f"/api/v1/nominal-rolls/{draft_nominal_roll.id}",
@@ -330,6 +355,7 @@ async def test_update_nominal_roll_label(
 async def test_update_nominal_roll_label_strips_whitespace(
     client: TestClient, admin_token_headers: dict[str, str],
     db_session: AsyncSession, sample_users,
+    admin_subunit_assignment,
 ):
     """Label is stripped before storage."""
     draft_nominal_roll = NominalRoll(
@@ -339,6 +365,7 @@ async def test_update_nominal_roll_label_strips_whitespace(
     )
     db_session.add(draft_nominal_roll)
     await db_session.commit()
+    await _grant_nr_access(db_session, draft_nominal_roll.id)
 
     response = client.patch(
         f"/api/v1/nominal-rolls/{draft_nominal_roll.id}",
@@ -355,6 +382,7 @@ async def test_update_nominal_roll_label_strips_whitespace(
 async def test_update_nominal_roll_label_duplicate_rejected(
     client: TestClient, admin_token_headers: dict[str, str],
     db_session: AsyncSession, sample_users,
+    admin_subunit_assignment,
 ):
     """Setting a label that's already in use returns 409."""
     nominal_roll_a = NominalRoll(
@@ -370,6 +398,7 @@ async def test_update_nominal_roll_label_duplicate_rejected(
     )
     db_session.add_all([nominal_roll_a, nominal_roll_b])
     await db_session.commit()
+    await _grant_nr_access(db_session, nominal_roll_b.id)
 
     response = client.patch(
         f"/api/v1/nominal-rolls/{nominal_roll_b.id}",
@@ -386,6 +415,7 @@ async def test_update_nominal_roll_label_duplicate_rejected(
 async def test_update_nominal_roll_label_empty_rejected(
     client: TestClient, admin_token_headers: dict[str, str],
     db_session: AsyncSession, sample_users,
+    admin_subunit_assignment,
 ):
     """Empty/whitespace label fails schema validation (422)."""
     draft_nominal_roll = NominalRoll(
@@ -395,6 +425,7 @@ async def test_update_nominal_roll_label_empty_rejected(
     )
     db_session.add(draft_nominal_roll)
     await db_session.commit()
+    await _grant_nr_access(db_session, draft_nominal_roll.id)
 
     response = client.patch(
         f"/api/v1/nominal-rolls/{draft_nominal_roll.id}",
@@ -410,6 +441,7 @@ async def test_update_nominal_roll_label_empty_rejected(
 async def test_list_nominal_rolls_includes_label(
     client: TestClient, admin_token_headers: dict[str, str],
     db_session: AsyncSession, sample_users,
+    admin_subunit_assignment,
 ):
     """List endpoint returns the label field (null when unset)."""
     labeled = NominalRoll(
@@ -425,6 +457,8 @@ async def test_list_nominal_rolls_includes_label(
     )
     db_session.add_all([labeled, unlabeled])
     await db_session.commit()
+    await _grant_nr_access(db_session, labeled.id)
+    await _grant_nr_access(db_session, unlabeled.id)
 
     response = client.get(
         "/api/v1/nominal-rolls",
@@ -444,7 +478,8 @@ async def test_list_nominal_rolls_includes_label(
 
 @pytest.mark.asyncio
 async def test_export_csv_columns_and_content(
-    client: TestClient, sample_nominal_roll, sample_personnel, admin_id: str
+    client: TestClient, sample_nominal_roll, sample_personnel, admin_id: str,
+    admin_subunit_assignment,
 ):
     """Export returns the browser table's columns and personnel values."""
     response = client.get(
@@ -471,7 +506,8 @@ async def test_export_csv_columns_and_content(
 
 @pytest.mark.asyncio
 async def test_export_csv_honours_view_filters(
-    client: TestClient, sample_nominal_roll, sample_personnel, admin_id: str
+    client: TestClient, sample_nominal_roll, sample_personnel, admin_id: str,
+    admin_subunit_assignment,
 ):
     """Filters applied on the page (category, search) scope the export too."""
     by_category = client.get(

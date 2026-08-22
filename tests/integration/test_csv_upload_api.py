@@ -22,7 +22,7 @@ async def test_upload_csv_success(
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("test.csv", csv_content, "text/csv")},
-        params={"user_id": admin_id, "user_role": "admin"},
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=admin_token_headers,
     )
 
@@ -35,7 +35,7 @@ async def test_upload_csv_success(
     assert data["detected_columns"] == ["rank", "name", "unit"]
     assert data["status"] == "received"
     assert data["is_duplicate"] is False
-    assert data["uploaded_by"] == admin_id
+    assert data["uploaded_by"] == "super-admin-test-id"
 
     # Verify CsvUpload record in DB
     result = await db_session.execute(
@@ -55,7 +55,7 @@ async def test_upload_csv_success(
     )
     audit_log = audit_result.scalar_one()
     assert audit_log.action == "create"
-    assert audit_log.user_id == admin_id
+    assert audit_log.user_id == "super-admin-test-id"
 
 
 @pytest.mark.asyncio
@@ -71,7 +71,7 @@ async def test_upload_csv_duplicate_detection(
     response1 = client.post(
         "/api/v1/csv/upload",
         files={"file": ("test.csv", csv_content, "text/csv")},
-        params={"user_id": admin_id, "user_role": "admin"},
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=admin_token_headers,
     )
     assert response1.status_code == 200
@@ -81,7 +81,7 @@ async def test_upload_csv_duplicate_detection(
     response2 = client.post(
         "/api/v1/csv/upload",
         files={"file": ("test_copy.csv", csv_content, "text/csv")},
-        params={"user_id": admin_id, "user_role": "admin"},
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=admin_token_headers,
     )
     assert response2.status_code == 200
@@ -96,7 +96,7 @@ async def test_upload_csv_permission_denied(
     user_token_headers: dict[str, str],
     sample_users,
 ):
-    """Test that regular users cannot upload CSV files."""
+    """Test that non-super-admins cannot upload CSV files."""
     csv_content = b"rank,name\nPTE,John\n"
     user_id = str(sample_users["user"].id)
 
@@ -108,7 +108,7 @@ async def test_upload_csv_permission_denied(
     )
 
     assert response.status_code == 403
-    assert "Only admins" in response.json()["detail"]
+    assert "Only super admins" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -121,7 +121,7 @@ async def test_upload_csv_empty_file(
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("empty.csv", b"", "text/csv")},
-        params={"user_id": admin_id, "user_role": "admin"},
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=admin_token_headers,
     )
 
@@ -139,7 +139,7 @@ async def test_upload_csv_wrong_extension(
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("test.txt", b"some content", "text/plain")},
-        params={"user_id": admin_id, "user_role": "admin"},
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=admin_token_headers,
     )
 
@@ -160,7 +160,7 @@ async def test_upload_csv_user_not_found(
         files={"file": ("test.csv", csv_content, "text/csv")},
         params={
             "user_id": "nonexistent-user-id-12345",
-            "user_role": "admin",
+            "user_role": "super_admin",
         },
         headers=admin_token_headers,
     )
@@ -195,7 +195,7 @@ async def test_list_csv_uploads(
 
     response = client.get(
         "/api/v1/csv/uploads",
-        params={"user_id": admin_id, "user_role": "admin"},
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=admin_token_headers,
     )
 

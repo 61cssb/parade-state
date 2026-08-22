@@ -74,7 +74,7 @@ async def uploaded_csv(
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("fixture_caa260220.csv", raw, "text/csv")},
-        params={"user_id": admin_id, "user_role": "admin"},
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=super_admin_token_headers,
     )
     assert response.status_code == 200, response.text
@@ -159,7 +159,7 @@ async def test_upload_with_auto_process_creates_nr_and_tagging(
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("auto_caa260301.csv", raw, "text/csv")},
-        params={"user_id": admin_id, "user_role": "admin", "auto_process": "true"},
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin", "auto_process": "true"},
         headers=super_admin_token_headers,
     )
     assert response.status_code == 200, response.text
@@ -204,7 +204,7 @@ async def test_upload_auto_process_failure_keeps_upload_for_manual_step(
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("badcols_caa260302.csv", csv_content, "text/csv")},
-        params={"user_id": admin_id, "user_role": "admin", "auto_process": "true"},
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin", "auto_process": "true"},
         headers=super_admin_token_headers,
     )
     assert response.status_code == 200, response.text
@@ -251,7 +251,7 @@ async def test_upload_auto_process_reports_duplicate_caa(
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("second_caa260220.csv", raw, "text/csv")},
-        params={"user_id": admin_id, "user_role": "admin", "auto_process": "true"},
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin", "auto_process": "true"},
         headers=super_admin_token_headers,
     )
     assert response.status_code == 200, response.text
@@ -282,7 +282,7 @@ async def test_upload_without_auto_process_stays_manual(
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("manual_caa260303.csv", raw, "text/csv")},
-        params={"user_id": admin_id, "user_role": "admin"},
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=super_admin_token_headers,
     )
     assert response.status_code == 200, response.text
@@ -459,7 +459,7 @@ async def test_process_csv_imports_taggings_matching_pers_no(
     upload = client.post(
         "/api/v1/csv/upload",
         files={"file": ("fixture_caa260220.csv", raw, "text/csv")},
-        params={"user_id": admin_id, "user_role": "admin"},
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=super_admin_token_headers,
     )
     upload_id = upload.json()["id"]
@@ -498,7 +498,7 @@ async def test_process_csv_blank_pers_no_stored_as_null(
     upload = client.post(
         "/api/v1/csv/upload",
         files={"file": ("fixture_caa260220.csv", raw, "text/csv")},
-        params={"user_id": admin_id, "user_role": "admin"},
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=super_admin_token_headers,
     )
     upload_id = upload.json()["id"]
@@ -548,7 +548,7 @@ async def test_process_csv_unparseable_filename_400(
     upload = client.post(
         "/api/v1/csv/upload",
         files={"file": ("no_caa_token.csv", raw, "text/csv")},
-        params={"user_id": admin_id, "user_role": "admin"},
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=super_admin_token_headers,
     )
     upload_id = upload.json()["id"]
@@ -600,7 +600,7 @@ async def test_process_csv_maps_callup_status_and_remarks(
     upload = client.post(
         "/api/v1/csv/upload",
         files={"file": ("fixture_caa260330.csv", raw, "text/csv")},
-        params={"user_id": admin_id, "user_role": "admin"},
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=super_admin_token_headers,
     )
     upload_id = upload.json()["id"]

@@ -134,7 +134,8 @@ async def test_sa_pages_render_for_super_admins(
 
 @pytest.mark.asyncio
 async def test_nominal_roll_view_has_management_element_for_admin(
-    client: TestClient, db_session: AsyncSession, sample_users, sample_nominal_roll
+    client: TestClient, db_session: AsyncSession, sample_users, sample_nominal_roll,
+    sample_personnel, admin_subunit_assignment,
 ):
     """Admins get the management expander with label/remarks editing, but
     not the super-admin-only attendance/delete buttons (grouping creation

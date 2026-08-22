@@ -30,14 +30,18 @@ async def test_list_returns_rows_for_date(
     sample_personnel,
     sample_attendance_scope,
     sample_attendance,
+    admin_id,
+    admin_subunit_assignment,
 ):
-    """List returns rows for the requested NR + date."""
+    """List returns rows for the requested NR + date (scope-filtered)."""
     today = date.today().isoformat()
     response = client.get(
         "/api/v1/attendance/",
         params={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "date": today,
+            "user_id": admin_id,
+            "user_role": "admin",
         },
     )
     assert response.status_code == 200

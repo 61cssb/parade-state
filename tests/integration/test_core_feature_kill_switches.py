@@ -27,9 +27,15 @@ from parade_state.utils.cookies import AUTH_COOKIE_NAME
 
 SUPER_ADMIN_PARAMS = {"user_id": "super-admin-test-id", "user_role": "super_admin"}
 
-# list_attendance requires the NR and date query params; the NR need not
-# exist (the endpoint then just returns an empty list).
-ATTENDANCE_LIST_PARAMS = {"nominal_roll_id": str(uuid.uuid4()), "date": "2026-08-20"}
+def _attendance_list_params(nominal_roll_id: str) -> dict:
+    """list_attendance requires NR + date + caller identity params. The NR
+    must exist — issue #28 made unknown NRs 404 like the other endpoints."""
+    return {
+        "nominal_roll_id": nominal_roll_id,
+        "date": "2026-08-20",
+        "user_id": "super-admin-test-id",
+        "user_role": "super_admin",
+    }
 
 NR_NAV_HREFS = ('href="/admin/csv-upload"', 'href="/nominal-roll"', 'href="/admin/taggings"')
 ATTENDANCE_NAV_HREFS = ('href="/attendance"',)
@@ -57,6 +63,21 @@ async def _make_super_admin(db_session: AsyncSession) -> User:
     db_session.add(user)
     await db_session.commit()
     return user
+
+
+async def _make_nr(db_session: AsyncSession, sa: User):
+    from datetime import date
+
+    from parade_state.models import NominalRoll
+
+    nr = NominalRoll(
+        caa=date(2026, 8, 20),
+        csv_hash="kill-switch-nr",
+        uploaded_by=str(sa.id),
+    )
+    db_session.add(nr)
+    await db_session.commit()
+    return nr
 
 
 def _set_switches(monkeypatch, nominal_roll: bool, attendance: bool) -> None:
@@ -121,6 +142,7 @@ async def test_switch_off_hides_nav(
     _set_switches(monkeypatch, nominal_roll=False, attendance=False)
     sa = await _make_super_admin(db_session)
     await _sign_in(client, db_session, sa)
+    nr = await _make_nr(db_session, sa)
 
     dashboard = client.get("/admin")
     assert dashboard.status_code == 200
@@ -231,6 +253,7 @@ async def test_switches_gate_independently(
     leaves Attendance reachable, and vice versa."""
     sa = await _make_super_admin(db_session)
     await _sign_in(client, db_session, sa)
+    nr = await _make_nr(db_session, sa)
 
     # NR off, Attendance on.
     _set_switches(monkeypatch, nominal_roll=False, attendance=True)
@@ -245,7 +268,7 @@ async def test_switches_gate_independently(
         "/api/v1/nominal-rolls", params=SUPER_ADMIN_PARAMS
     ).status_code == 404
     assert client.get(
-        "/api/v1/attendance/", params=ATTENDANCE_LIST_PARAMS
+        "/api/v1/attendance/", params=_attendance_list_params(str(nr.id))
     ).status_code == 200
 
     # NR on, Attendance off.
@@ -261,7 +284,7 @@ async def test_switches_gate_independently(
         "/api/v1/nominal-rolls", params=SUPER_ADMIN_PARAMS
     ).status_code == 200
     assert client.get(
-        "/api/v1/attendance/", params=ATTENDANCE_LIST_PARAMS
+        "/api/v1/attendance/", params=_attendance_list_params(str(nr.id))
     ).status_code == 404
 
 
@@ -285,6 +308,7 @@ async def test_default_posture_unchanged(
 
     sa = await _make_super_admin(db_session)
     await _sign_in(client, db_session, sa)
+    nr = await _make_nr(db_session, sa)
 
     dashboard = client.get("/admin")
     assert dashboard.status_code == 200
@@ -303,7 +327,7 @@ async def test_default_posture_unchanged(
         "/api/v1/nominal-rolls", params=SUPER_ADMIN_PARAMS
     ).status_code == 200
     assert client.get(
-        "/api/v1/attendance/", params=ATTENDANCE_LIST_PARAMS
+        "/api/v1/attendance/", params=_attendance_list_params(str(nr.id))
     ).status_code == 200
     assert client.get(
         "/api/v1/taggings", params=SUPER_ADMIN_PARAMS
