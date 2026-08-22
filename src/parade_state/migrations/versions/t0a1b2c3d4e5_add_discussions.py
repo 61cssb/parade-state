@@ -170,7 +170,14 @@ def downgrade() -> None:
     op.drop_table("discussion_posts")
 
     bind = op.get_bind()
-    if bind.dialect.name != "postgresql":
+    if bind.dialect.name == "postgresql":
+        # Native enum types outlive their tables on PostgreSQL — drop the
+        # two this migration created so a re-upgrade does not collide
+        # (DuplicateObjectError). The widened audit_entity_type stays
+        # (q7 downgrade posture).
+        op.execute("DROP TYPE IF EXISTS discussion_category")
+        op.execute("DROP TYPE IF EXISTS discussion_post_status")
+    else:
         bind.execute(
             sa.text("DELETE FROM audit_logs WHERE entity_type = 'discussion_post'")
         )
