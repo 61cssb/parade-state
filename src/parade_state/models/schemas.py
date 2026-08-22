@@ -893,7 +893,7 @@ class TaggingCloneResponse(BaseModel):
 # ============================================================================
 
 DiscussionCategory = Literal["requests", "bugs"]
-DiscussionStatus = Literal["Open", "Duplicate", "Accepted", "Implemented"]
+DiscussionStatus = Literal["Open", "Duplicate", "Accepted", "Implemented", "Closed"]
 
 
 class DiscussionPostCreate(BaseModel):

@@ -619,7 +619,7 @@ async def admin_deferments(
 
 # Discussion board filter dropdown options (mirror the model enums)
 DISCUSSION_CATEGORIES = ["requests", "bugs"]
-DISCUSSION_STATUSES = ["Open", "Duplicate", "Accepted", "Implemented"]
+DISCUSSION_STATUSES = ["Open", "Duplicate", "Accepted", "Implemented", "Closed"]
 
 
 def _fmt_ts(value) -> str:  # noqa: ANN001 — naive datetime or None from the DB

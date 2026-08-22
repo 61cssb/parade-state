@@ -68,6 +68,7 @@ def upgrade() -> None:
                 "Duplicate",
                 "Accepted",
                 "Implemented",
+                "Closed",
                 name="discussion_post_status",
             ),
             server_default="Open",

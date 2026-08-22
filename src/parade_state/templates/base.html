@@ -583,7 +583,7 @@
             {# Workflow pages. Per-item gating is enforced in-page:
                super-admin-only surfaces (Taggings) render a no-access
                message for plain admins, while flag-gated features
-               (Deferments, Discussions, Grouping) are hidden entirely
+               (Deferments, Grouping, Discussions) are hidden entirely
                when their FEATURE_* env flag is off. The core-feature
                flags (Nominal Roll, Attendance) are default-on kill
                switches: they hide their entries only on an explicit
@@ -614,12 +614,6 @@
                 <span class="icon">🕓</span><span>Deferments</span>
             </a>
             {% endif %}
-            {% if request.app.state.settings.FEATURE_DISCUSSIONS %}
-            <a href="/admin/discussions" title="Discussions"
-               class="{% if active_page == 'discussions' %}active{% endif %}">
-                <span class="icon">💬</span><span>Discussions</span>
-            </a>
-            {% endif %}
             {% if request.app.state.settings.FEATURE_ATTENDANCE %}
             <a href="/attendance" title="Attendance"
                class="{% if active_page == 'attendance' %}active{% endif %}">
@@ -630,6 +624,12 @@
             <a href="/grouping" title="Grouping"
                class="{% if active_page == 'grouping' %}active{% endif %}">
                 <span class="icon">📊</span><span>Grouping</span>
+            </a>
+            {% endif %}
+            {% if request.app.state.settings.FEATURE_DISCUSSIONS %}
+            <a href="/admin/discussions" title="Discussions"
+               class="{% if active_page == 'discussions' %}active{% endif %}">
+                <span class="icon">💬</span><span>Discussions</span>
             </a>
             {% endif %}
             <div class="nav-section-label">Admin</div>

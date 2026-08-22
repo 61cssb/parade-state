@@ -1895,7 +1895,7 @@ paths:
           schema: { type: string, enum: [requests, bugs] }
         - name: status
           in: query
-          schema: { type: string, enum: [Open, Duplicate, Accepted, Implemented] }
+          schema: { type: string, enum: [Open, Duplicate, Accepted, Implemented, Closed] }
       responses:
         '200':
           description: List of posts (with author_name and comment_count)
@@ -1992,7 +1992,7 @@ paths:
                 status:
                   type: string
                   nullable: true
-                  enum: [Open, Duplicate, Accepted, Implemented]
+                  enum: [Open, Duplicate, Accepted, Implemented, Closed]
       responses:
         '200': { description: Updated }
         '401': { $ref: '#/components/responses/Unauthorized' }

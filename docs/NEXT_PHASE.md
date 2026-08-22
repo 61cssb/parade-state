@@ -93,10 +93,10 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   author-only edits enforced server-side from the session identity;
   **feature-flagged** (`FEATURE_DISCUSSIONS`, default off)
 - Sidebar: workflow pages flat (Unit Strength, Upload NR, Nominal Roll,
-  Taggings, Deferments, Discussions, Attendance, Grouping) + **Admin** section
+  Taggings, Deferments, Attendance, Grouping, Discussions) + **Admin** section
   (Users, Settings, Audit Log, Restore Backup); SA-only pages show an
   in-page no-access message for plain admins; flag-gated entries
-  (Deferments, Discussions, Grouping, Unit Strength) render only when
+  (Deferments, Grouping, Discussions, Unit Strength) render only when
   their flag is on
 - Admin UI: Unit Strength, users, audit log, taggings, deferments,
   Upload NR (CSV upload), DB restore, Settings purge (testing-only);

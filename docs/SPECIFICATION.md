@@ -598,7 +598,7 @@ DiscussionPost
 ├── body: text (markdown source)
 ├── author_id: UUID (FK User)
 ├── category: str ENUM ['requests', 'bugs']  (required at creation)
-├── status: str ENUM ['Open', 'Duplicate', 'Accepted', 'Implemented']
+├── status: str ENUM ['Open', 'Duplicate', 'Accepted', 'Implemented', 'Closed']
 │    (default: 'Open')
 ├── created_at: datetime
 └── edited_at: datetime (nullable; flips on first edit, then tracks the

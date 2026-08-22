@@ -231,12 +231,15 @@ async def test_non_author_cannot_edit_post(
 async def test_admin_cannot_triage_or_delete(
     client: TestClient, db_session: AsyncSession, actors, author_post
 ):
-    """Plain admins get 403 on category/status changes and deletions."""
+    """Plain admins get 403 on category/status changes and deletions.
+
+    Triaging to 'Closed' (a valid value — a 422 would mean the enum
+    rejected it) still meets the role gate."""
     await _sign_in(client, db_session, actors["other"])
     post_id = author_post["id"]
 
     triage = client.patch(
-        f"/api/v1/discussions/posts/{post_id}/triage", json={"status": "Accepted"}
+        f"/api/v1/discussions/posts/{post_id}/triage", json={"status": "Closed"}
     )
     assert triage.status_code == 403
 
@@ -280,6 +283,19 @@ async def test_super_admin_triage_writes_audit_row(
     assert rows[0].action == "update"
     assert "category: requests -> bugs" in rows[0].description
     assert "status: Open -> Accepted" in rows[0].description
+
+
+async def test_triage_closed_status(
+    client: TestClient, db_session: AsyncSession, actors, author_post
+):
+    """'Closed' is a valid terminal triage status."""
+    await _sign_in(client, db_session, actors["super"])
+    response = client.patch(
+        f"/api/v1/discussions/posts/{author_post['id']}/triage",
+        json={"status": "Closed"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "Closed"
 
 
 async def test_triage_no_change_writes_no_audit_row(

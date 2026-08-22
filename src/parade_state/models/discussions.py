@@ -40,7 +40,7 @@ class DiscussionPost(Base):
         index=True,
     )
     status: Mapped[str] = mapped_column(
-        Enum("Open", "Duplicate", "Accepted", "Implemented",
+        Enum("Open", "Duplicate", "Accepted", "Implemented", "Closed",
              name="discussion_post_status"),
         default="Open",
         index=True,
