@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}Discussions - Parade State Admin{% endblock %}
+
+{% block page_title %}Discussions{% endblock %}
+
+{% block content %}
+<p style="color: #6b7280; margin-bottom: 1.5rem;">
+    Board for requests and bug reports. Create a post, discuss in comments — super admins triage each item (status, category).
+</p>
+
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">Board</h3>
+        <button class="btn btn-primary" onclick="openCreateModal()">+ New Post</button>
+    </div>
+
+    <form method="get" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
+        <label style="font-size: 0.875rem; color: #374151;">Category:</label>
+        <select name="category" onchange="this.form.submit()" style="padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            <option value="" {% if not category_filter %}selected{% endif %}>All</option>
+            {% for c in categories %}
+            <option value="{{ c }}" {% if category_filter == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+        </select>
+        <label style="font-size: 0.875rem; color: #374151; margin-left: 0.5rem;">Status:</label>
+        <select name="status_filter" onchange="this.form.submit()" style="padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            <option value="" {% if not status_filter %}selected{% endif %}>All</option>
+            {% for s in statuses %}
+            <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+    </form>
+
+    {% if posts %}
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 0.5rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.5rem;">Title</th>
+                    <th style="padding: 0.5rem;">Category</th>
+                    <th style="padding: 0.5rem;">Status</th>
+                    <th style="padding: 0.5rem;">Author</th>
+                    <th style="padding: 0.5rem;">Comments</th>
+                    <th style="padding: 0.5rem;">Posted</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in posts %}
+                <tr style="border-bottom: 1px solid #e5e7eb;">
+                    <td style="padding: 0.5rem;">
+                        <a href="/admin/discussions/posts/{{ p.id | e }}" style="color: #2563eb; text-decoration: none;">{{ p.title | e }}</a>
+                        {% if p.edited_at %}<span style="font-size: 0.75rem; color: #9ca3af;"> (edited {{ p.edited_at | e }})</span>{% endif %}
+                    </td>
+                    <td style="padding: 0.5rem;">
+                        <span style="font-size: 0.75rem; padding: 0.25rem 0.5rem; color: white; border-radius: 0.25rem; background: {% if p.category == 'bugs' %}#ef4444{% else %}#2563eb{% endif %};">{{ p.category | e }}</span>
+                    </td>
+                    <td style="padding: 0.5rem;">
+                        {% set status_color = {
+                            'Open': '#6b7280',
+                            'Duplicate': '#f59e0b',
+                            'Accepted': '#2563eb',
+                            'Implemented': '#10b981'
+                        } %}
+                        <span style="font-size: 0.75rem; padding: 0.25rem 0.5rem; color: white; border-radius: 0.25rem; background: {{ status_color.get(p.status, '#6b7280') }};">{{ p.status | e }}</span>
+                    </td>
+                    <td style="padding: 0.5rem; font-size: 0.85rem;">{{ p.author_name | e }}</td>
+                    <td style="padding: 0.5rem; font-size: 0.85rem;">{{ p.comment_count }}</td>
+                    <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280; white-space: nowrap;">{{ p.created_at | e }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: #6b7280; margin-top: 1rem;">No posts found. Click "New Post" to create one.</p>
+    {% endif %}
+</div>
+
+{# Create post modal #}
+<div id="create-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeCreateModal()"></div>
+<div id="create-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 560px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">New Post</h3>
+        <button type="button" onclick="closeCreateModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
+    </div>
+
+    <form id="create-post-form" onsubmit="event.preventDefault(); submitCreate();">
+        <div style="margin-bottom: 0.75rem;">
+            <label for="create-title" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Title <span style="color: #ef4444;">*</span></label>
+            <input type="text" id="create-title" required maxlength="200" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;" placeholder="Short summary">
+        </div>
+
+        <div style="margin-bottom: 0.75rem;">
+            <label for="create-category" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Category <span style="color: #ef4444;">*</span></label>
+            <select id="create-category" required style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                <option value="requests">requests</option>
+                <option value="bugs">bugs</option>
+            </select>
+        </div>
+
+        <div style="margin-bottom: 0.75rem;">
+            <label for="create-body" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Body (markdown) <span style="color: #ef4444;">*</span></label>
+            <textarea id="create-body" required rows="8" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-family: inherit;" placeholder="Describe the request or bug. Markdown supported; raw HTML is shown as text."></textarea>
+        </div>
+
+        <p id="create-status" style="font-size: 0.8rem; min-height: 1.1rem; margin: 0.5rem 0;"></p>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+            <button type="button" class="btn" onclick="closeCreateModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create Post</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function showMsg(id, msg, kind) {
+        var el = document.getElementById(id);
+        el.textContent = msg;
+        el.style.color = kind === 'success' ? '#10b981' : '#ef4444';
+    }
+
+    function openCreateModal() {
+        document.getElementById('create-status').textContent = '';
+        document.getElementById('create-backdrop').style.display = 'block';
+        document.getElementById('create-modal').style.display = 'block';
+    }
+
+    function closeCreateModal() {
+        document.getElementById('create-backdrop').style.display = 'none';
+        document.getElementById('create-modal').style.display = 'none';
+    }
+
+    async function submitCreate() {
+        const payload = {
+            title: document.getElementById('create-title').value.trim(),
+            category: document.getElementById('create-category').value,
+            body: document.getElementById('create-body').value,
+        };
+        if (!payload.title || !payload.body) {
+            showMsg('create-status', 'Title and body are required.', 'error');
+            return;
+        }
+        try {
+            const res = await fetch('/api/v1/discussions/posts', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload),
+            });
+            if (res.ok) {
+                showMsg('create-status', 'Post created.', 'success');
+                setTimeout(function() { location.reload(); }, 700);
+            } else {
+                const data = await res.json();
+                showMsg('create-status', 'Create failed: ' + (data.detail || 'Unknown error'), 'error');
+            }
+        } catch (err) {
+            showMsg('create-status', 'Network error: ' + err.message, 'error');
+        }
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key !== 'Escape') return;
+        if (document.getElementById('create-modal').style.display === 'block') closeCreateModal();
+    });
+</script>
+{% endblock %}

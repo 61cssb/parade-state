@@ -20,6 +20,8 @@ from parade_state.models import (
     AuditLog,
     CsvUpload,
     Deferment,
+    DiscussionComment,
+    DiscussionPost,
     Grouping,
     NominalRoll,
     PRESENT_LIKE_STATUSES,
@@ -28,7 +30,7 @@ from parade_state.models import (
     TaggingEntry,
     User,
 )
-from parade_state.utils import utc_dt
+from parade_state.utils import markdown, utc_dt
 
 router = APIRouter()
 depends_admin = Depends(require_admin_user_flexible)
@@ -44,6 +46,7 @@ AUDIT_ENTITY_TYPES = [
     "personnel",
     "access_level",
     "column_mapping",
+    "discussion_post",
 ]
 AUDIT_ACTIONS = ["create", "update", "delete", "archive", "close", "finalize"]
 
@@ -609,6 +612,193 @@ async def admin_deferments(
         active_nominal_roll_caa=active_nominal_roll_caa,
         deferment_statuses=DEFERMENT_STATUSES,
         deferment_reasons=DEFERMENT_REASONS,
+    )
+
+    return HTMLResponse(content=html_content)
+
+
+# Discussion board filter dropdown options (mirror the model enums)
+DISCUSSION_CATEGORIES = ["requests", "bugs"]
+DISCUSSION_STATUSES = ["Open", "Duplicate", "Accepted", "Implemented"]
+
+
+def _fmt_ts(value) -> str:  # noqa: ANN001 — naive datetime or None from the DB
+    """Render a model timestamp for the board pages (ISO date + time)."""
+    return value.strftime("%Y-%m-%d %H:%M") if value else ""
+
+
+@router.get(
+    "/admin/discussions",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_feature("FEATURE_DISCUSSIONS"))],
+)
+async def admin_discussions(
+    request: Request,
+    category: str | None = None,
+    status_filter: str | None = None,
+):
+    """Render the discussions board list page (issue 24).
+
+    Flat newest-first list with category / status filters, capped at the
+    200 most recent posts — no pagination at the expected admin-only
+    volume. Open to every admin; triage controls live on the post page.
+    """
+    current_admin = await get_current_admin_user_optional(request)
+    if not current_admin:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    session_maker = get_session_maker()
+    async with session_maker() as db:
+        query = (
+            select(
+                DiscussionPost,
+                User.name,
+                func.count(DiscussionComment.id),
+            )
+            .outerjoin(User, DiscussionPost.author_id == User.id)
+            .outerjoin(DiscussionComment, DiscussionComment.post_id == DiscussionPost.id)
+            .group_by(DiscussionPost.id, User.name)
+            .order_by(DiscussionPost.created_at.desc())
+            .limit(200)
+        )
+        if category:
+            query = query.where(DiscussionPost.category == category)
+        if status_filter:
+            query = query.where(DiscussionPost.status == status_filter)
+        rows = (await db.execute(query)).all()
+
+    posts = [
+        {
+            "id": str(post.id),
+            "title": post.title,
+            "author_name": author_name or "(unknown)",
+            "category": post.category,
+            "status": post.status,
+            "comment_count": comment_count,
+            "created_at": _fmt_ts(post.created_at),
+            "edited_at": _fmt_ts(post.edited_at),
+        }
+        for post, author_name, comment_count in rows
+    ]
+
+    env = get_templates(request)
+    template = env.get_template("admin/discussions_list.html")
+
+    html_content = template.render(
+        request=request,
+        user={
+            "id": current_admin.id,
+            "name": current_admin.name,
+            "email": current_admin.email,
+            "role": current_admin.role,
+        },
+        active_page="discussions",
+        posts=posts,
+        categories=DISCUSSION_CATEGORIES,
+        statuses=DISCUSSION_STATUSES,
+        category_filter=category or "",
+        status_filter=status_filter or "",
+        is_super_admin=current_admin.role == "super_admin",
+    )
+
+    return HTMLResponse(content=html_content)
+
+
+@router.get(
+    "/admin/discussions/posts/{post_id}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_feature("FEATURE_DISCUSSIONS"))],
+)
+async def admin_discussion_post(request: Request, post_id: str):
+    """Render a single board post with its comments (issue 24).
+
+    Bodies render through the sanitized markdown subset. Edit controls
+    appear only for the author; triage (category / status) and delete
+    controls only for super-admins — the API enforces both regardless.
+    """
+    current_admin = await get_current_admin_user_optional(request)
+    if not current_admin:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    session_maker = get_session_maker()
+    async with session_maker() as db:
+        row = (
+            await db.execute(
+                select(DiscussionPost, User.name)
+                .outerjoin(User, DiscussionPost.author_id == User.id)
+                .where(DiscussionPost.id == post_id)
+            )
+        ).one_or_none()
+        if row is None:
+            return HTMLResponse(
+                content=(
+                    get_templates(request).get_template("admin/no_permission.html").render(
+                        request=request,
+                        user={
+                            "id": current_admin.id,
+                            "name": current_admin.name,
+                            "email": current_admin.email,
+                            "role": current_admin.role,
+                        },
+                        active_page="discussions",
+                        page_name="Discussion post",
+                    )
+                ),
+                status_code=404,
+            )
+        post, author_name = row
+
+        comment_rows = (
+            await db.execute(
+                select(DiscussionComment, User.name)
+                .outerjoin(User, DiscussionComment.author_id == User.id)
+                .where(DiscussionComment.post_id == post_id)
+                .order_by(DiscussionComment.created_at)
+            )
+        ).all()
+
+    comments = [
+        {
+            "id": str(comment.id),
+            "author_id": str(comment.author_id),
+            "author_name": name or "(unknown)",
+            "body_html": markdown.render_markdown(comment.body),
+            "raw_body": comment.body,
+            "created_at": _fmt_ts(comment.created_at),
+            "edited_at": _fmt_ts(comment.edited_at),
+        }
+        for comment, name in comment_rows
+    ]
+
+    env = get_templates(request)
+    template = env.get_template("admin/discussion_post.html")
+
+    html_content = template.render(
+        request=request,
+        user={
+            "id": current_admin.id,
+            "name": current_admin.name,
+            "email": current_admin.email,
+            "role": current_admin.role,
+        },
+        active_page="discussions",
+        post={
+            "id": str(post.id),
+            "title": post.title,
+            "body_html": markdown.render_markdown(post.body),
+            "raw_body": post.body,
+            "author_id": str(post.author_id),
+            "author_name": author_name or "(unknown)",
+            "category": post.category,
+            "status": post.status,
+            "created_at": _fmt_ts(post.created_at),
+            "edited_at": _fmt_ts(post.edited_at),
+        },
+        comments=comments,
+        categories=DISCUSSION_CATEGORIES,
+        statuses=DISCUSSION_STATUSES,
+        is_super_admin=current_admin.role == "super_admin",
+        is_author=str(current_admin.id) == str(post.author_id),
     )
 
     return HTMLResponse(content=html_content)
