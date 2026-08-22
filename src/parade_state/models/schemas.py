@@ -501,8 +501,14 @@ class PersonnelAttendanceHistoryResponse(BaseModel):
 
 
 class UserSubunitAssignmentCreate(BaseModel):
-    """Schema for granting a user attendance rights on one NR sub_unit_1."""
+    """Schema for granting a user scope on one NR.
 
+    ``unit``/``sub_unit_1`` use the explicit ``*`` sentinel for wildcard
+    matching (issue #28); at least one must be concrete and both must be
+    values present on the NR's roster when concrete.
+    """
+
+    unit: str = Field("*", min_length=1)
     sub_unit_1: str = Field(..., min_length=1)
 
 
@@ -512,10 +518,12 @@ class UserSubunitAssignmentResponse(BaseModel):
     id: str
     user_id: str
     nominal_roll_id: str
+    unit: str
     sub_unit_1: str
     created_at: utc_dt.datetime
     created_by: str
     updated_at: utc_dt.datetime
+    nominal_roll_label: str | None = None
 
     class Config:
         from_attributes = True
