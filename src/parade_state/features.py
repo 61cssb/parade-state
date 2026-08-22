@@ -35,6 +35,7 @@ FEATURE_LABELS = {
     "FEATURE_DEFERMENTS": "Deferments",
     "FEATURE_GROUPING": "Grouping",
     "FEATURE_STRENGTH": "Unit Strength",
+    "FEATURE_DISCUSSIONS": "Discussions",
     "FEATURE_NOMINALROLL": "Nominal Roll",
     "FEATURE_ATTENDANCE": "Attendance",
 }

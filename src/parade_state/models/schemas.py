@@ -886,3 +886,92 @@ class TaggingCloneResponse(BaseModel):
     source_count: int
     matched_count: int
     unmatched: list[TaggingCloneUnmatchedItem]
+
+
+# ============================================================================
+# Discussion Schemas (issue 24)
+# ============================================================================
+
+DiscussionCategory = Literal["requests", "bugs"]
+DiscussionStatus = Literal["Open", "Duplicate", "Accepted", "Implemented"]
+
+
+class DiscussionPostCreate(BaseModel):
+    """Schema for creating a board post.
+
+    ``category`` is required and limited to ``requests`` / ``bugs``;
+    every post starts its lifecycle in the ``Open`` triage status.
+    """
+
+    title: str = Field(..., min_length=1, max_length=200)
+    body: str = Field(..., min_length=1)
+    category: DiscussionCategory
+
+
+class DiscussionPostUpdate(BaseModel):
+    """Schema for an author's edit of a board post.
+
+    Title and body only — category and status changes are super-admin
+    triage (see :class:`DiscussionPostTriage`) and cannot ride along.
+    """
+
+    title: str | None = Field(None, min_length=1, max_length=200)
+    body: str | None = Field(None, min_length=1)
+
+
+class DiscussionPostTriage(BaseModel):
+    """Schema for a super-admin's triage of a board post."""
+
+    category: DiscussionCategory | None = None
+    status: DiscussionStatus | None = None
+
+
+class DiscussionPostResponse(BaseModel):
+    """Schema for board post API responses."""
+
+    id: str
+    title: str
+    body: str
+    author_id: str
+    author_name: str | None = None
+    category: str
+    status: str
+    comment_count: int = 0
+    created_at: utc_dt.datetime
+    edited_at: utc_dt.datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class DiscussionCommentCreate(BaseModel):
+    """Schema for commenting on a board post."""
+
+    body: str = Field(..., min_length=1)
+
+
+class DiscussionCommentUpdate(BaseModel):
+    """Schema for an author's edit of a comment (body only)."""
+
+    body: str = Field(..., min_length=1)
+
+
+class DiscussionCommentResponse(BaseModel):
+    """Schema for board comment API responses."""
+
+    id: str
+    post_id: str
+    author_id: str
+    author_name: str | None = None
+    body: str
+    created_at: utc_dt.datetime
+    edited_at: utc_dt.datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class DiscussionPostDetailResponse(DiscussionPostResponse):
+    """A board post with its comments (detail view)."""
+
+    comments: list[DiscussionCommentResponse] = []
