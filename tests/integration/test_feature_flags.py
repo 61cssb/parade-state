@@ -69,22 +69,26 @@ def test_flags_default_off(monkeypatch):
     """With no env vars set (the prod posture) both flags are off."""
     monkeypatch.delenv("FEATURE_DEFERMENTS", raising=False)
     monkeypatch.delenv("FEATURE_GROUPING", raising=False)
+    monkeypatch.delenv("FEATURE_DISCUSSIONS", raising=False)
 
     settings = Settings()
 
     assert settings.FEATURE_DEFERMENTS is False
     assert settings.FEATURE_GROUPING is False
+    assert settings.FEATURE_DISCUSSIONS is False
 
 
 def test_flags_enabled_via_env_vars(monkeypatch):
     """The dev posture: env vars turn the flags on (no deploy needed)."""
     monkeypatch.setenv("FEATURE_DEFERMENTS", "true")
     monkeypatch.setenv("FEATURE_GROUPING", "true")
+    monkeypatch.setenv("FEATURE_DISCUSSIONS", "true")
 
     settings = Settings()
 
     assert settings.FEATURE_DEFERMENTS is True
     assert settings.FEATURE_GROUPING is True
+    assert settings.FEATURE_DISCUSSIONS is True
 
 
 # --- Flags off: unreachable for every role, including super admins ---
@@ -202,6 +206,86 @@ async def test_flag_off_blocks_api_even_for_super_admin(
         assert response.status_code == 404, f"{method} {url}"
         assert response.headers["content-type"].startswith("application/json")
         assert "not available on this deployment" in response.json()["detail"]
+
+
+# --- Flags off: unreachable for every role, including super admins ---
+
+
+def _set_discussions_flag(monkeypatch, enabled: bool) -> None:
+    """Point the discussions flag at a fixed posture (both Settings copies)."""
+    for settings_obj in {get_settings(), main_app.state.settings}:
+        monkeypatch.setattr(settings_obj, "FEATURE_DISCUSSIONS", enabled)
+
+
+@pytest.mark.asyncio
+async def test_discussions_flag_off_hides_nav_and_entry_points(
+    client: TestClient,
+    db_session: AsyncSession,
+    monkeypatch,
+):
+    """A signed-in super admin sees no trace of the board: sidebar entry,
+    list page and post-detail URLs all 404."""
+    _set_discussions_flag(monkeypatch, False)
+    sa = await _make_super_admin(db_session)
+    await _sign_in(client, db_session, sa)
+
+    dashboard = client.get("/admin")
+    assert dashboard.status_code == 200
+    assert 'href="/admin/discussions"' not in dashboard.text
+
+    assert client.get("/admin/discussions").status_code == 404
+    assert client.get("/admin/discussions/posts/some-id").status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_discussions_flag_off_blocks_api_even_for_super_admin(
+    client: TestClient,
+    db_session: AsyncSession,
+    monkeypatch,
+):
+    """Board API routes 404 across verbs for a signed-in super admin, and
+    for anonymous callers too — the gate runs before auth."""
+    _set_discussions_flag(monkeypatch, False)
+    sa = await _make_super_admin(db_session)
+    await _sign_in(client, db_session, sa)
+
+    any_id = str(uuid.uuid4())
+    requests = [
+        ("GET", "/api/v1/discussions/posts"),
+        ("POST", "/api/v1/discussions/posts"),
+        ("GET", f"/api/v1/discussions/posts/{any_id}"),
+        ("PATCH", f"/api/v1/discussions/posts/{any_id}"),
+        ("DELETE", f"/api/v1/discussions/posts/{any_id}"),
+        ("POST", f"/api/v1/discussions/posts/{any_id}/comments"),
+        ("PATCH", f"/api/v1/discussions/comments/{any_id}"),
+    ]
+    for method, url in requests:
+        response = client.request(method, url, json={"title": "x", "body": "y", "category": "requests"})
+        assert response.status_code == 404, f"{method} {url}"
+        assert response.headers["content-type"].startswith("application/json")
+        assert "not available on this deployment" in response.json()["detail"]
+
+    client.cookies.delete(AUTH_COOKIE_NAME)
+    assert client.get("/api/v1/discussions/posts").status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_discussions_flag_on_restores_routes_and_nav(
+    client: TestClient,
+    db_session: AsyncSession,
+):
+    """With the flag on (the conftest default posture), the board page and
+    nav entry are reachable for an admin."""
+    admin = User(
+        email="board-admin@example.com", name="Board Admin", status="active", role="admin"
+    )
+    db_session.add(admin)
+    await db_session.commit()
+    await _sign_in(client, db_session, admin)
+
+    dashboard = client.get("/admin")
+    assert 'href="/admin/discussions"' in dashboard.text
+    assert client.get("/admin/discussions").status_code == 200
 
 
 # --- Flags on: the dev posture ---
