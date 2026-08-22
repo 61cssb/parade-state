@@ -21,7 +21,7 @@
     </div>
 
     <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
-        <span style="font-size: 0.75rem; padding: 0.25rem 0.5rem; color: white; border-radius: 0.25rem; background: {% if post.category == 'bugs' %}#ef4444{% else %}#2563eb{% endif %};">{{ post.category | e }}</span>
+        <span id="post-category-badge" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; color: white; border-radius: 0.25rem; background: {% if post.category == 'bugs' %}#ef4444{% else %}#2563eb{% endif %};">{{ post.category | e }}</span>
         {% set status_color = {
             'Open': '#6b7280',
             'Duplicate': '#f59e0b',
@@ -39,22 +39,25 @@
 
     {% if is_super_admin %}
     <div style="border-top: 1px solid #e5e7eb; margin-top: 1.25rem; padding-top: 1rem; display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+        {# Auto-save on change (issue 19 pattern): each select change PATCHes
+           immediately; the server records only the field that actually moved,
+           so one audit row per real change. Badges update in place — no
+           reload, the rest of the page is not triage-dependent. #}
         <span style="font-size: 0.8rem; color: #6b7280;">Triage:</span>
-        <select id="triage-category" style="padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+        <select id="triage-category" onchange="submitTriage()" style="padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
             {% for c in categories %}
             <option value="{{ c }}" {% if post.category == c %}selected{% endif %}>{{ c }}</option>
             {% endfor %}
         </select>
-        <select id="triage-status" style="padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+        <select id="triage-status" onchange="submitTriage()" style="padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
             {% for s in statuses %}
             <option value="{{ s }}" {% if post.status == s %}selected{% endif %}>{{ s }}</option>
             {% endfor %}
         </select>
-        <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.6rem;" onclick="submitTriage()">Apply</button>
+        <span id="triage-status-msg" style="font-size: 0.8rem; color: #6b7280; min-height: 1.1rem;"></span>
         <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.6rem; margin-left: auto;" onclick="deletePost()">Delete Post</button>
     </div>
     {% endif %}
-    <p id="triage-status-msg" style="font-size: 0.8rem; min-height: 1.1rem; margin: 0.5rem 0 0;"></p>
 </div>
 
 {# Comments #}
@@ -160,14 +163,28 @@
     }
 
     // ----- Triage + delete (super admin) -----
+    var STATUS_COLORS = {
+        'Open': '#6b7280', 'Duplicate': '#f59e0b', 'Accepted': '#2563eb',
+        'Implemented': '#10b981', 'Closed': '#111827'
+    };
+    var CATEGORY_COLORS = { 'requests': '#2563eb', 'bugs': '#ef4444' };
+
     async function submitTriage() {
+        var category = document.getElementById('triage-category').value;
+        var status = document.getElementById('triage-status').value;
         try {
             await api('/api/v1/discussions/posts/' + POST_ID + '/triage', 'PATCH', {
-                category: document.getElementById('triage-category').value,
-                status: document.getElementById('triage-status').value,
+                category: category,
+                status: status,
             });
-            showMsg('triage-status-msg', 'Saved. Reloading…', 'success');
-            setTimeout(function() { location.reload(); }, 700);
+            // Badges follow in place — no reload for a one-field flip.
+            var catBadge = document.getElementById('post-category-badge');
+            catBadge.textContent = category;
+            catBadge.style.background = CATEGORY_COLORS[category] || '#2563eb';
+            var statusBadge = document.getElementById('post-status-badge');
+            statusBadge.textContent = status;
+            statusBadge.style.background = STATUS_COLORS[status] || '#6b7280';
+            showMsg('triage-status-msg', 'Saved', 'success');
         } catch (err) {
             showMsg('triage-status-msg', 'Save failed: ' + err.message, 'error');
         }
