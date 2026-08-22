@@ -243,21 +243,46 @@ async def test_example(client, sample_users, sample_grouping):
 - Attendance status enum: present, absent, time_off, mc, yet_to_inpro, outpro,
   reporting_sick, late, att_out (default: absent).
 
-**Subunit-1 Attendance Access (✅ Reworked in issue #4 PR 2)**
-- New `UserSubunitAssignment(user_id, nominal_roll_id, sub_unit_1)` model —
-  grants a user attendance-update rights for one sub_unit_1 on one NR.
-- Server-enforced 403 on `PUT /api/v1/attendance/upsert` and
-  `POST /api/v1/attendance/copy-remarks` when the caller lacks an assignment
-  for a target personnel's effective sub_unit_1. Effective sub_unit_1 follows
-  the NR's tagging overlay's `to_sub_unit_1` (tagging-aware), falling back
-  to the personnel's canonical `sub_unit_1`.
-- `super_admin` bypasses entirely; **deny-by-default** (no assignments = 403).
-- Super-admin CRUD API:
-  `POST /api/v1/access-control/nominal-rolls/{nr_id}/users/{user_id}/subunit-assignments`,
-  `DELETE .../subunit-assignments/{assignment_id}`,
-  `GET .../nominal-rolls/{nr_id}/subunit-assignments`,
-  `GET .../users/{user_id}/subunit-assignments`.
-- Migration `k1f2a3b4c5d6`. 332 tests passing.
+**Scope Access (✅ issue #4 PR 2; ✅ extended by issue #28)**
+- `UserSubunitAssignment(user_id, nominal_roll_id, unit, sub_unit_1)` — a
+  grant is a (unit, sub_unit_1) pair on one NR with the explicit `*`
+  wildcard sentinel per column; `(*, *)` is forbidden by CHECK constraint;
+  unique per (user, NR, unit, sub_unit_1). Migration `k1f2a3b4c5d6` (issue
+  #4) + `u2b3c4d5e6f7` (issue #28 unit dimension; validated on the
+  repro-pg roundtrip).
+- Shared enforcement module `api/subunit_access.py` (the seam for issue
+  #31's session identity): `get_scope_grants`, `grant_matches`,
+  `resolve_effective_locations` (tagging overlay applied verbatim, else
+  canonical), `assert_nr_accessible` / `assert_locations_in_scope` (write
+  403s naming the missing "unit/sub-unit"), `in_scope_pids` (non-raising
+  read filter), `accessible_nr_ids`.
+- Enforced surfaces (regular admins; super_admin bypasses; all
+  deny-by-default; client filters only narrow):
+  `GET /personnel` (single-NR 403 without grants; cross-NR restricted to
+  granted NRs; pagination applied after overlay-aware filtering),
+  `GET/PATCH /personnel/{id}`, `GET /personnel/{id}/attendance-history`,
+  `GET /attendance/`, `PUT /attendance/upsert`,
+  `POST /attendance/copy-remarks`, `GET /attendance/export`,
+  `GET /nominal-rolls` (granted NRs only), `GET/PATCH /nominal-rolls/{id}`,
+  `GET /nominal-rolls/{id}/export`, the strength report, and the NR
+  browser + attendance pages (scoped roster, dropdown options derived
+  from visible rows, no-assignments banner).
+- CSV upload/process tightened to super-admin only (NR lifecycle op).
+- Super-admin grant API under `/api/v1/access-control`: grant/revoke/list
+  (list responses carry the NR display label) +
+  `GET /nominal-rolls/{nr_id}/scope-options` (roster units and
+  unit→sub-unit values for the form). Grant values validated against the
+  roster (case-sensitive); `''` never means wildcard.
+- UI: the Scope panel on `/admin/users` (issue 28) — per-user grants
+  grouped by NR, cascading NR → unit → sub-unit grant form with
+  "All units"/"All sub-units" wildcard options, revoke buttons; auto-save
+  via fetch like the discussions triage pattern.
+- Discussions board stays org-wide for all admins (posts carry no
+  NR/personnel linkage; recorded decision for the issue 24 flag rollout).
+- Tests: `tests/integration/test_admin_scoped_access.py` (vocabulary,
+  deny-by-default across surfaces, overlay in/out boundaries, cosmetic
+  filter non-bypass, pagination under overlay, grant CRUD validation,
+  check constraint).
 
 **Attendance UI (✅ Active-NR model)**
 - The separate super-admin `/admin/attendance` page is **removed** — it

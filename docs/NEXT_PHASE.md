@@ -66,8 +66,20 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   status + remarks; writes gated to the active NR; roster shows only
   `callup_status = 'Called Up'` personnel (hiding is non-destructive —
   existing attendance records are preserved)
-- Attendance access control by effective sub-unit 1
-  (`UserSubunitAssignment`; deny-by-default; super_admin bypasses)
+- **Admin scoped access (issue #28)**: scope grants are
+  (unit, sub_unit_1) pairs per NR on `UserSubunitAssignment` with the
+  explicit `*` wildcard sentinel; matching follows the tagging-overlay
+  effective location; deny-by-default on every read/write personnel
+  surface (personnel list/detail/history/PATCH, attendance list/upsert/
+  copy/export, NR list/detail/PATCH/export, strength report, NR browser
+  page — client filters only narrow); out-of-scope answers 403 naming
+  the missing assignment; grants managed from the /admin/users Scope
+  panel (roster-validated) via the access-control API; CSV upload/process
+  tightened to super-admin. The board stays org-wide for admins (posts
+  carry no NR linkage — recorded decision). Caller identity is still the
+  spoofable query-param interface; issue 31
+  (issues/31-high-server-side-identity.md) swaps it to sessions through
+  the `api/subunit_access.py` seam
 - **Unit Strength** report at `/admin` (replaced the dashboard): the
   parade state rolled up by effective sub-unit 1/2 into the Officer/WOSE/
   Total × In/Out/Current/% strength format (In = Called Up, Current =

@@ -203,7 +203,8 @@ Attendance (one row per personnel/day)
   marks the row (red edge) and retries on the next edit. Tagged rows are
   highlighted yellow only in the NR view, never here. With no active NR the
   page shows an inactive message instead of the marking table. Write access
-  is gated per-NR by `UserSubunitAssignment` on the effective `sub_unit_1`.
+  is gated per-NR by `UserSubunitAssignment` scope grants on the effective
+  (unit, sub_unit_1) — see §5.3.
 
 **"Copy Remarks" semantics (issue 20):**
 - Explicit source (date + AM/PM) and destination (date + AM/PM), chosen in
@@ -576,10 +577,11 @@ subunits fall into a `(none)` bucket. Columns: **Officer / WOSE / Total**
 
 The date and AM/PM slot are URL params (server default: today, AM); a
 first-visit script re-defaults them from the browser's local datetime.
-Super-admins see the whole unit; regular admins see only their assigned
-sub_unit_1 sections (deny-by-default, the same `UserSubunitAssignment`
-machinery as attendance marking), with TOTAL summing the visible rows and
-a guidance message for admins with no assignments.
+Super-admins see the whole unit; regular admins see only the sections
+inside their (unit, sub_unit_1) scope grants (deny-by-default, the same
+`UserSubunitAssignment` machinery as attendance marking — §5.3), with
+TOTAL summing the visible rows and a guidance message for admins with no
+grants.
 
 ### 3.6 Discussions Board (issue 24)
 
@@ -704,16 +706,14 @@ then shows an inactive message instead of the marking table.
 be created and updated (upsert semantics on `(personnel_id, date)`).
 Retroactive edits (target date in the past) set `is_retroactive_edit = true`.
 
-**Subunit-1 access (issue #4 PR 2)** — Attendance writes are gated per NR by
-the caller's `UserSubunitAssignment` rows. A user may only upsert attendance
-for personnel whose **effective** `sub_unit_1` matches one of their
-assignments on that NR. The effective `sub_unit_1` is the NR's 1:1 Tagging
-overlay's `to_sub_unit_1` when an entry exists for that person (taggings are
-"remappings already applied"), falling back to the personnel's canonical
-`sub_unit_1`. `super_admin` bypasses entirely. **Deny-by-default**: a user
-with no assignments on an NR has no attendance-write access there (HTTP 403,
-listing the offending sub_unit_1s). `copy-remarks` only affects personnel in
-assigned subunits and 403s if the caller has no assignments on the NR.
+**Scope access (issues #4 and #28)** — Attendance writes are gated per NR
+by the caller's `UserSubunitAssignment` scope grants. A user may only upsert
+attendance for personnel whose **effective** (unit, sub_unit_1) is covered
+by one of their grants on that NR (see §5.3 for the vocabulary and match
+rule). `super_admin` bypasses entirely. **Deny-by-default**: a user with no
+grants on an NR has no write access there (HTTP 403, naming the offending
+unit/sub-unit pairs). `copy-remarks` only affects personnel in scope and
+403s if the caller has no grants on the NR.
 Assignments are managed by super-admin via
 `/api/v1/access-control/{nominal-rolls/{nr_id}/..., users/{user_id}/...}/subunit-assignments`.
 
@@ -882,7 +882,7 @@ an env-var change plus restart with no other action.
 | GroupingMembership | (grouping_id, personnel_id, group_id) | (grouping_id), (group_id), (personnel_id) | Membership dedup |
 | GroupingMemberState | (grouping_id, personnel_id) | (grouping_id), (personnel_id) | One state row per person per grouping |
 | Attendance | (personnel_id, date) | (personnel_id, date) | One row per person per day |
-| UserSubunitAssignment | (user_id, nominal_roll_id, sub_unit_1) | (user_id, nominal_roll_id, sub_unit_1) | One grant per user/NR/subunit |
+| UserSubunitAssignment | (user_id, nominal_roll_id, unit, sub_unit_1) + CHECK not both `*` | (user_id), (nominal_roll_id) | One grant per user/NR/(unit, sub_unit_1); wildcard pair forbidden |
 | Personnel | — | (callup_status) | Callup status filter |
 | Deferment | — | (personnel_id), (status), (updated_at) | Deferment lookup |
 
@@ -899,18 +899,33 @@ an env-var change plus restart with no other action.
 
 **App Admin:**
 - Granted by super-admin
-- Full read/write access to all entities and columns
+- **Scoped access (issue #28)**: reads and writes are limited to personnel
+  inside the admin's scope grants — see §5.3. Every personnel list, detail,
+  attendance view/export, the strength report, and the NR browser page are
+  server-side constrained; out-of-scope records are absent or answered with
+  403, regardless of client-supplied filters.
 - Access to audit log
-- All structural operations are admin-only
-- Grouping mutations remain super-admin only; admins can read the
-  grouping view
+- Structural operations are super-admin only: NR lifecycle (CSV upload and
+  processing, manual personnel create, NR delete, attendance
+  activate/deactivate), tagging, deferments, grouping mutations, grant
+  management, database restore/purge
+- The discussions board is org-wide for every admin while its flag is on —
+  posts carry no NR/personnel linkage, so individual posts are never
+  access-gated (decision recorded ahead of issue 24's flag rollout)
 
 **Scoped User:**
 - Deferred (planned viewer role — see future issues). Not currently usable: non-admin sign-ins get the no-access page and viewer-facing routes are gated on admin role.
 - Google-authenticated
 - Has access level: single admin-assigned label from ordered vocabulary
-- Has subunit scope: one or more (nominal roll, subunit) pairs
+- Has subunit scope: one or more (nominal roll, unit, sub-unit 1) grants
 - Write scope: attendance status, Notes, Remarks — for rows within scope only
+
+**Caller identity caveat (issue 31):** the JSON API still learns the
+caller's `user_id`/`user_role` from client-supplied query parameters —
+spoofable design debt that predates scoping. Every scope decision flows
+through the shared module (`api/subunit_access.py`) precisely so that
+issue 31 (session-derived identity) is an edge swap; until it lands, API
+authorization is advisory rather than a hard boundary.
 
 ### 5.2 Account Lifecycle
 
@@ -923,15 +938,42 @@ The system is admin-only: only `super_admin` and `admin` accounts can sign in an
 
 ### 5.3 Row Visibility Rules
 
+**Scope grants (issue #28).** A grant is one `UserSubunitAssignment` row:
+a `(unit, sub_unit_1)` pair on one nominal roll, each column using the
+explicit `*` sentinel for wildcard matching (never an empty string —
+accidental blanks fail validation instead of widening access):
+
+| Grant | Covers |
+|---|---|
+| `(U, *)` | every sub-unit of unit U (including NULL sub-unit rows) |
+| `(U, S)` | exactly that pair |
+| `(*, S)` | S under any unit (the pre-#28 grant shape) |
+| `(*, *)` | forbidden — CHECK constraint; whole-roll access is granted per unit |
+
+A personnel row is in scope when its **effective** location matches any
+grant. Effective = the NR's 1:1 tagging overlay values (`to_unit`,
+`to_sub_unit_1`, applied verbatim when an entry exists for the person),
+else the canonical personnel values. A NULL effective sub-unit matches
+only `*` sub-unit grants (closes the pre-#28 hole where NULL-sub-unit
+personnel slipped through deny-by-default).
+
 **User sees personnel row if:**
-- Personnel's effective sub_unit_1 matches at least one of the user's
-  UserSubunitAssignment grants on that nominal roll, AND
+- The row's effective (unit, sub_unit_1) matches at least one of the
+  user's grants on that nominal roll, AND
 - User.access_level_id.level_order ≥ ColumnMetadata.sensitivity_level_id.level_order (for each visible column)
 
-*(Admins bypass all checks. Groupings carry no access scoping — the
-grouping view (with its per-group filter, offering an Ungrouped option only
-when the grouping allows it) is readable by every authenticated user and
-mutable only by
+`super_admin` bypasses every check. Regular admins are deny-by-default:
+no grants on an NR means no access to it — the NR list omits it, and
+scoped endpoints answer 403 with a message naming the missing assignment
+("No assignment for: Coy A/Platoon 2. Ask a super-admin to grant
+access."), the app-wide convention for out-of-scope records. Grants are
+managed from `/admin/users` (super-admin only) with values validated
+against the roster; the access-control API also exposes each NR's
+`scope-options` (units and unit→sub-unit values) to feed the form.
+
+*(Groupings carry no access scoping — the grouping view (with its
+per-group filter, offering an Ungrouped option only when the grouping
+allows it) is readable by every authenticated user and mutable only by
 super admins.)*
 
 ### 5.4 Column Visibility Rules
