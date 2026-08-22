@@ -19,6 +19,7 @@ from .csv_ingestion import (
     NominalRoll,
 )
 from .deferments import Deferment
+from .discussions import DiscussionComment, DiscussionPost
 from .grouping import (
     Grouping,
     GroupingGroup,
@@ -43,6 +44,8 @@ __all__ = [
     "CsvUpload",
     "NominalRoll",
     "Deferment",
+    "DiscussionComment",
+    "DiscussionPost",
     "Grouping",
     "GroupingGroup",
     "GroupingMemberState",

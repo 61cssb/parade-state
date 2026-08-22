@@ -87,11 +87,17 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   scoping and labels statuses like the page)
 - Deferments (super-admin CRUD; `Personnel.callup_status`);
   **feature-flagged** (`FEATURE_DEFERMENTS`, dev-only until ready)
+- Discussions board (issue 24): admins/super-admins post `requests` /
+  `bugs` items and comment in sanitized markdown; super-admins triage
+  (status, category — the only audit-logged board action) and delete;
+  author-only edits enforced server-side from the session identity;
+  **feature-flagged** (`FEATURE_DISCUSSIONS`, default off)
 - Sidebar: workflow pages flat (Unit Strength, Upload NR, Nominal Roll,
-  Taggings, Deferments, Attendance, Grouping) + **Admin** section
+  Taggings, Deferments, Attendance, Grouping, Discussions) + **Admin** section
   (Users, Settings, Audit Log, Restore Backup); SA-only pages show an
   in-page no-access message for plain admins; flag-gated entries
-  (Deferments, Grouping, Unit Strength) render only when their flag is on
+  (Deferments, Grouping, Discussions, Unit Strength) render only when
+  their flag is on
 - Admin UI: Unit Strength, users, audit log, taggings, deferments,
   Upload NR (CSV upload), DB restore, Settings purge (testing-only);
   NR management lives in an expander on its view, grouping management on
@@ -175,6 +181,12 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-21:** Discussions board (issue 24): admins post `requests`/
+  `bugs` items, comment in sanitized markdown (raw HTML escaped, unsafe
+  link schemes scrubbed); super-admin triage (category/status, the only
+  audit-logged action) + deletions; author-only edits enforced
+  server-side from the session identity; `FEATURE_DISCUSSIONS`-gated,
+  default off
 - **2026-08-20:** Add Serviceman (Issue 26): super-admin manual personnel
   creation from the NR view — `Personnel.source` provenance ('manual'
   badge), `POST /api/v1/personnel`, pers_no nullable + super-admin

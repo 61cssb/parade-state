@@ -581,6 +581,74 @@ sub_unit_1 sections (deny-by-default, the same `UserSubunitAssignment`
 machinery as attendance marking), with TOTAL summing the visible rows and
 a guidance message for admins with no assignments.
 
+### 3.6 Discussions Board (issue 24)
+
+*Not yet shipped: hidden behind the `FEATURE_DISCUSSIONS` env-var flag (see
+[4.8 Feature Flags](#48-feature-flags-env-var-kill-switches)).*
+
+An in-app board where admins and super-admins post `requests` / `bugs`
+items and discuss them in markdown comments. Regular users never see it.
+
+#### 3.6.1 DiscussionPost
+
+```
+DiscussionPost
+├── id: UUID (PK)
+├── title: str (max 200)
+├── body: text (markdown source)
+├── author_id: UUID (FK User)
+├── category: str ENUM ['requests', 'bugs']  (required at creation)
+├── status: str ENUM ['Open', 'Duplicate', 'Accepted', 'Implemented', 'Closed']
+│    (default: 'Open')
+├── created_at: datetime
+└── edited_at: datetime (nullable; flips on first edit, then tracks the
+     last edit — full edit history is deliberately not kept)
+```
+
+#### 3.6.2 DiscussionComment
+
+```
+DiscussionComment
+├── id: UUID (PK)
+├── post_id: UUID (FK DiscussionPost, on_delete=CASCADE)
+├── author_id: UUID (FK User)
+├── body: text (markdown source)
+├── created_at: datetime
+└── edited_at: datetime (nullable; same last-edit-only semantics)
+```
+
+#### 3.6.3 Permissions
+
+| Action | admin | super_admin |
+|---|---|---|
+| Create post / comment | yes | yes |
+| Edit own post (title/body) / own comment | yes | yes |
+| Edit another author's post or comment | no (403) | no (403) |
+| Change category or status (triage) | no (403) | yes |
+| Delete post (cascades comments) or comment | no (403) | yes |
+
+Author-only edits are enforced server-side: the API derives identity from
+the session token (`require_admin_user_flexible`), never from
+client-supplied user ids.
+
+#### 3.6.4 Board semantics
+
+- List: flat newest-first at `/admin/discussions` with category and
+  status `<select>` filters, capped at the 200 most recent posts — no
+  pagination at the expected admin-only volume.
+- Every post and comment displays its author and original timestamp; an
+  edit adds an "Edited" indicator with the last-edit timestamp.
+- Markdown renders through a sanitized subset (`utils.markdown.render_markdown`,
+  markdown2 with `safe_mode="escape"` plus link-scheme scrubbing): raw
+  HTML is escaped to inert text and `javascript:` / `vbscript:` / `data:`
+  links are rewritten to `#`.
+- Audit trail: **triage only** — a super-admin category/status change
+  writes an `AuditLog` row (`entity_type='discussion_post'`,
+  `action='update'`). Posting, commenting, editing, and deleting are not
+  audit-logged; the board content is its own record.
+- "Duplicate" does not link to a canonical post (v1: mention it in a
+  comment); no attachments, no notifications.
+
 ---
 
 ## 4. Business Rules & Constraints

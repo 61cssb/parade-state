@@ -418,6 +418,56 @@
             margin-bottom: 1.5rem;
         }
 
+        /* ---------- Rendered markdown (discussions board) ----------
+           The global reset above flattens block spacing; restore just
+           enough for the sanitized markdown subset (headings, lists,
+           quotes, code) to stay readable inside post/comment cards. */
+        .markdown-body > *:first-child { margin-top: 0; }
+        .markdown-body > *:last-child { margin-bottom: 0; }
+        .markdown-body p { margin: 0.6em 0; }
+        .markdown-body h1, .markdown-body h2, .markdown-body h3,
+        .markdown-body h4, .markdown-body h5, .markdown-body h6 {
+            margin: 1em 0 0.4em;
+            color: #111827;
+        }
+        .markdown-body ul, .markdown-body ol {
+            margin: 0.6em 0;
+            padding-left: 1.5em;
+        }
+        .markdown-body li { margin: 0.25em 0; }
+        .markdown-body blockquote {
+            margin: 0.6em 0;
+            padding: 0.2em 0.9em;
+            border-left: 3px solid #d1d5db;
+            color: #6b7280;
+        }
+        .markdown-body code {
+            background-color: #f3f4f6;
+            border-radius: 0.2rem;
+            padding: 0.1em 0.35em;
+            font-size: 0.875em;
+        }
+        .markdown-body pre {
+            background-color: #f3f4f6;
+            border-radius: 0.375rem;
+            padding: 0.75rem 1rem;
+            margin: 0.6em 0;
+            overflow-x: auto;
+        }
+        .markdown-body pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        .markdown-body a { color: #2563eb; }
+        .markdown-body table {
+            border-collapse: collapse;
+            margin: 0.6em 0;
+        }
+        .markdown-body th, .markdown-body td {
+            border: 1px solid #e5e7eb;
+            padding: 0.3rem 0.6rem;
+        }
+
         /* ---------- Desktop collapsed state ---------- */
         body.sidebar-collapsed .sidebar {
             width: 64px;
@@ -533,10 +583,11 @@
             {# Workflow pages. Per-item gating is enforced in-page:
                super-admin-only surfaces (Taggings) render a no-access
                message for plain admins, while flag-gated features
-               (Deferments, Grouping) are hidden entirely when their
-               FEATURE_* env flag is off. The core-feature flags
-               (Nominal Roll, Attendance) are default-on kill switches:
-               they hide their entries only on an explicit "false". #}
+               (Deferments, Grouping, Discussions) are hidden entirely
+               when their FEATURE_* env flag is off. The core-feature
+               flags (Nominal Roll, Attendance) are default-on kill
+               switches: they hide their entries only on an explicit
+               "false". #}
             {% if request.app.state.settings.FEATURE_STRENGTH %}
             <a href="/admin" title="Unit Strength"
                class="{% if active_page == 'strength' %}active{% endif %}">
@@ -573,6 +624,12 @@
             <a href="/grouping" title="Grouping"
                class="{% if active_page == 'grouping' %}active{% endif %}">
                 <span class="icon">📊</span><span>Grouping</span>
+            </a>
+            {% endif %}
+            {% if request.app.state.settings.FEATURE_DISCUSSIONS %}
+            <a href="/admin/discussions" title="Discussions"
+               class="{% if active_page == 'discussions' %}active{% endif %}">
+                <span class="icon">💬</span><span>Discussions</span>
             </a>
             {% endif %}
             <div class="nav-section-label">Admin</div>

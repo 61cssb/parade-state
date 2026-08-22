@@ -26,6 +26,7 @@ from parade_state.api import (
     csv_upload,
     db_restore,
     deferments,
+    discussions,
     groupings,
     nominal_rolls,
     personnel,
@@ -192,6 +193,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         prefix="/api/v1/deferments",
         tags=["deferments"],
         dependencies=[Depends(require_feature("FEATURE_DEFERMENTS"))],
+    )
+    app.include_router(
+        discussions.router,
+        prefix="/api/v1/discussions",
+        tags=["discussions"],
+        dependencies=[Depends(require_feature("FEATURE_DISCUSSIONS"))],
     )
     app.include_router(
         tagging.router,

@@ -57,7 +57,8 @@ async def test_sidebar_lists_workflow_pages_then_admin_section(
     assert response.status_code == 200
     body = response.text
 
-    # Workflow pages in order, no section label above them.
+    # Workflow pages in order, no section label above them. Discussions
+    # sits after Grouping (flag on in the suite-wide test posture).
     order = [
         'href="/admin"',
         'href="/admin/csv-upload"',
@@ -66,6 +67,7 @@ async def test_sidebar_lists_workflow_pages_then_admin_section(
         'href="/admin/deferments"',
         'href="/attendance"',
         'href="/grouping"',
+        'href="/admin/discussions"',
         'nav-section-label">Admin',
         'href="/admin/users"',
         'href="/admin/settings"',

@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+
+{% block title %}{{ post.title | e }} - Discussions - Parade State Admin{% endblock %}
+
+{% block page_title %}Discussions{% endblock %}
+
+{% block content %}
+<p style="margin-bottom: 1rem;">
+    <a href="/admin/discussions" style="color: #2563eb; text-decoration: none;">&larr; Back to board</a>
+</p>
+
+{# Post card. body_html is pre-sanitized server-side (escaped raw HTML,
+   inert link schemes) — insert unescaped on purpose; never route other
+   user fields through this path. #}
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 0.75rem;">
+        <h2 style="margin: 0; font-size: 1.3rem; color: #111827; overflow-wrap: anywhere;">{{ post.title | e }}</h2>
+        {% if is_author %}
+        <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.6rem; flex-shrink: 0;" onclick="openEditPostModal()">Edit</button>
+        {% endif %}
+    </div>
+
+    <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
+        <span id="post-category-badge" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; color: white; border-radius: 0.25rem; background: {% if post.category == 'bugs' %}#ef4444{% else %}#2563eb{% endif %};">{{ post.category | e }}</span>
+        {% set status_color = {
+            'Open': '#6b7280',
+            'Duplicate': '#f59e0b',
+            'Accepted': '#2563eb',
+            'Implemented': '#10b981',
+            'Closed': '#111827'
+        } %}
+        <span id="post-status-badge" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; color: white; border-radius: 0.25rem; background: {{ status_color.get(post.status, '#6b7280') }};">{{ post.status | e }}</span>
+        <span style="font-size: 0.8rem; color: #6b7280;">
+            by {{ post.author_name | e }} &middot; {{ post.created_at | e }}{% if post.edited_at %} &middot; <em>edited {{ post.edited_at | e }}</em>{% endif %}
+        </span>
+    </div>
+
+    <div id="post-body" class="markdown-body" style="color: #1f2937; line-height: 1.6; overflow-wrap: anywhere;">{{ post.body_html }}</div>
+
+    {% if is_super_admin %}
+    <div style="border-top: 1px solid #e5e7eb; margin-top: 1.25rem; padding-top: 1rem; display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+        {# Auto-save on change (issue 19 pattern): each select change PATCHes
+           immediately; the server records only the field that actually moved,
+           so one audit row per real change. Badges update in place — no
+           reload, the rest of the page is not triage-dependent. #}
+        <span style="font-size: 0.8rem; color: #6b7280;">Triage:</span>
+        <select id="triage-category" onchange="submitTriage()" style="padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            {% for c in categories %}
+            <option value="{{ c }}" {% if post.category == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+        </select>
+        <select id="triage-status" onchange="submitTriage()" style="padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            {% for s in statuses %}
+            <option value="{{ s }}" {% if post.status == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+        <span id="triage-status-msg" style="font-size: 0.8rem; color: #6b7280; min-height: 1.1rem;"></span>
+        <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.6rem; margin-left: auto;" onclick="deletePost()">Delete Post</button>
+    </div>
+    {% endif %}
+</div>
+
+{# Comments #}
+<h3 style="margin: 1.5rem 0 0.75rem; font-size: 1.05rem; color: #111827;">Comments ({{ comments | length }})</h3>
+
+{% for c in comments %}
+<div class="card" style="padding: 1rem 1.25rem; margin-bottom: 0.75rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
+        <span style="font-size: 0.8rem; color: #6b7280;">
+            <strong style="color: #374151;">{{ c.author_name | e }}</strong>
+            &middot; {{ c.created_at | e }}{% if c.edited_at %} &middot; <em>edited {{ c.edited_at | e }}</em>{% endif %}
+        </span>
+        {% if user and c.author_id == user.id %}
+        <button class="btn" style="font-size: 0.75rem; padding: 0.2rem 0.5rem; flex-shrink: 0;" onclick="openEditCommentModal('{{ c.id | e }}')">Edit</button>
+        {% endif %}
+    </div>
+    {# Same pre-sanitized markdown path as the post body. #}
+    <div class="markdown-body" style="color: #1f2937; line-height: 1.6; overflow-wrap: anywhere;">{{ c.body_html }}</div>
+</div>
+{% else %}
+<p style="color: #6b7280; margin-bottom: 0.75rem;">No comments yet.</p>
+{% endfor %}
+
+{# Comment form #}
+<div class="card">
+    <form onsubmit="event.preventDefault(); submitComment();">
+        <label for="comment-body" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Add a comment (markdown)</label>
+        <textarea id="comment-body" rows="4" required style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-family: inherit;" placeholder="Markdown supported; raw HTML is shown as text."></textarea>
+        <p id="comment-status-msg" style="font-size: 0.8rem; min-height: 1.1rem; margin: 0.5rem 0;"></p>
+        <div style="display: flex; justify-content: flex-end;">
+            <button type="submit" class="btn btn-primary">Post Comment</button>
+        </div>
+    </form>
+</div>
+
+{# Edit post modal #}
+<div id="edit-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeEditPostModal()"></div>
+<div id="edit-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 560px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">Edit Post</h3>
+        <button type="button" onclick="closeEditPostModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
+    </div>
+    <form onsubmit="event.preventDefault(); submitEditPost();">
+        <div style="margin-bottom: 0.75rem;">
+            <label for="edit-title" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Title</label>
+            <input type="text" id="edit-title" required maxlength="200" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+        </div>
+        <div style="margin-bottom: 0.75rem;">
+            <label for="edit-body" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Body (markdown)</label>
+            <textarea id="edit-body" required rows="8" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-family: inherit;"></textarea>
+        </div>
+        <p id="edit-status-msg" style="font-size: 0.8rem; min-height: 1.1rem; margin: 0.5rem 0;"></p>
+        <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+            <button type="button" class="btn" onclick="closeEditPostModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+    </form>
+</div>
+
+{# Edit comment modal #}
+<div id="edit-comment-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;" onclick="if(event.target===this) closeEditCommentModal()"></div>
+<div id="edit-comment-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 0.5rem; padding: 1.5rem; width: 90%; max-width: 560px; z-index: 101; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">Edit Comment</h3>
+        <button type="button" onclick="closeEditCommentModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0; line-height: 1;">&times;</button>
+    </div>
+    <form onsubmit="event.preventDefault(); submitEditComment();">
+        <div style="margin-bottom: 0.75rem;">
+            <label for="edit-comment-body" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Comment (markdown)</label>
+            <textarea id="edit-comment-body" required rows="6" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-family: inherit;"></textarea>
+        </div>
+        <p id="edit-comment-status-msg" style="font-size: 0.8rem; min-height: 1.1rem; margin: 0.5rem 0;"></p>
+        <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+            <button type="button" class="btn" onclick="closeEditCommentModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    var POST_ID = '{{ post.id | e }}';
+    var EDIT_COMMENT_ID = null;
+
+    function showMsg(id, msg, kind) {
+        var el = document.getElementById(id);
+        el.textContent = msg;
+        el.style.color = kind === 'success' ? '#10b981' : '#ef4444';
+    }
+
+    async function api(path, method, body) {
+        const res = await fetch(path, {
+            method: method,
+            headers: {'Content-Type': 'application/json'},
+            body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        if (!res.ok) {
+            const data = await res.json().catch(function() { return {}; });
+            throw new Error(data.detail || ('HTTP ' + res.status));
+        }
+        return res;
+    }
+
+    // ----- Triage + delete (super admin) -----
+    var STATUS_COLORS = {
+        'Open': '#6b7280', 'Duplicate': '#f59e0b', 'Accepted': '#2563eb',
+        'Implemented': '#10b981', 'Closed': '#111827'
+    };
+    var CATEGORY_COLORS = { 'requests': '#2563eb', 'bugs': '#ef4444' };
+
+    async function submitTriage() {
+        var category = document.getElementById('triage-category').value;
+        var status = document.getElementById('triage-status').value;
+        try {
+            await api('/api/v1/discussions/posts/' + POST_ID + '/triage', 'PATCH', {
+                category: category,
+                status: status,
+            });
+            // Badges follow in place — no reload for a one-field flip.
+            var catBadge = document.getElementById('post-category-badge');
+            catBadge.textContent = category;
+            catBadge.style.background = CATEGORY_COLORS[category] || '#2563eb';
+            var statusBadge = document.getElementById('post-status-badge');
+            statusBadge.textContent = status;
+            statusBadge.style.background = STATUS_COLORS[status] || '#6b7280';
+            showMsg('triage-status-msg', 'Saved', 'success');
+        } catch (err) {
+            showMsg('triage-status-msg', 'Save failed: ' + err.message, 'error');
+        }
+    }
+
+    async function deletePost() {
+        if (!confirm('Delete this post and all its comments? This cannot be undone.')) return;
+        try {
+            await api('/api/v1/discussions/posts/' + POST_ID, 'DELETE');
+            location.href = '/admin/discussions';
+        } catch (err) {
+            showMsg('triage-status-msg', 'Delete failed: ' + err.message, 'error');
+        }
+    }
+
+    // ----- Comment form -----
+    async function submitComment() {
+        const body = document.getElementById('comment-body').value;
+        if (!body.trim()) return;
+        try {
+            await api('/api/v1/discussions/posts/' + POST_ID + '/comments', 'POST', { body: body });
+            showMsg('comment-status-msg', 'Comment posted. Reloading…', 'success');
+            setTimeout(function() { location.reload(); }, 700);
+        } catch (err) {
+            showMsg('comment-status-msg', 'Failed: ' + err.message, 'error');
+        }
+    }
+
+    // ----- Edit post (author) -----
+    // Raw markdown arrives via |tojson (HTML/JS-safe escaping) so the edit
+    // modals restore exactly what the author typed.
+    var POST_TITLE = {{ post.title | tojson }};
+    var RAW_POST_BODY = {{ post.raw_body | tojson }};
+    function openEditPostModal() {
+        document.getElementById('edit-title').value = POST_TITLE;
+        document.getElementById('edit-body').value = RAW_POST_BODY;
+        document.getElementById('edit-status-msg').textContent = '';
+        document.getElementById('edit-backdrop').style.display = 'block';
+        document.getElementById('edit-modal').style.display = 'block';
+    }
+
+    function closeEditPostModal() {
+        document.getElementById('edit-backdrop').style.display = 'none';
+        document.getElementById('edit-modal').style.display = 'none';
+    }
+
+    async function submitEditPost() {
+        const payload = {
+            title: document.getElementById('edit-title').value.trim(),
+            body: document.getElementById('edit-body').value,
+        };
+        if (!payload.title || !payload.body) {
+            showMsg('edit-status-msg', 'Title and body are required.', 'error');
+            return;
+        }
+        try {
+            await api('/api/v1/discussions/posts/' + POST_ID, 'PATCH', payload);
+            showMsg('edit-status-msg', 'Saved. Reloading…', 'success');
+            setTimeout(function() { location.reload(); }, 700);
+        } catch (err) {
+            showMsg('edit-status-msg', 'Save failed: ' + err.message, 'error');
+        }
+    }
+
+    // ----- Edit comment (author) -----
+    var RAW_COMMENT_BODIES = {};
+    {% for c in comments %}RAW_COMMENT_BODIES[{{ c.id | tojson }}] = {{ c.raw_body | tojson }};{% endfor %}
+    function openEditCommentModal(id) {
+        EDIT_COMMENT_ID = id;
+        document.getElementById('edit-comment-body').value = RAW_COMMENT_BODIES[id] || '';
+        document.getElementById('edit-comment-status-msg').textContent = '';
+        document.getElementById('edit-comment-backdrop').style.display = 'block';
+        document.getElementById('edit-comment-modal').style.display = 'block';
+    }
+
+    function closeEditCommentModal() {
+        document.getElementById('edit-comment-backdrop').style.display = 'none';
+        document.getElementById('edit-comment-modal').style.display = 'none';
+        EDIT_COMMENT_ID = null;
+    }
+
+    async function submitEditComment() {
+        if (!EDIT_COMMENT_ID) return;
+        const body = document.getElementById('edit-comment-body').value;
+        if (!body.trim()) return;
+        try {
+            await api('/api/v1/discussions/comments/' + EDIT_COMMENT_ID, 'PATCH', { body: body });
+            showMsg('edit-comment-status-msg', 'Saved. Reloading…', 'success');
+            setTimeout(function() { location.reload(); }, 700);
+        } catch (err) {
+            showMsg('edit-comment-status-msg', 'Save failed: ' + err.message, 'error');
+        }
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key !== 'Escape') return;
+        if (document.getElementById('edit-modal').style.display === 'block') closeEditPostModal();
+        else if (document.getElementById('edit-comment-modal').style.display === 'block') closeEditCommentModal();
+    });
+</script>
+{% endblock %}

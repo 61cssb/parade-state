@@ -19,6 +19,7 @@ import parade_state.models.audit  # noqa: F401
 import parade_state.models.auth_session  # noqa: F401
 import parade_state.models.csv_ingestion  # noqa: F401
 import parade_state.models.deferments  # noqa: F401
+import parade_state.models.discussions  # noqa: F401
 import parade_state.models.grouping  # noqa: F401
 import parade_state.models.personnel  # noqa: F401
 import parade_state.models.tagging  # noqa: F401
@@ -65,7 +66,12 @@ def feature_flags_enabled(monkeypatch):
     lives in tests/integration/test_core_feature_kill_switches.py).
     """
     for settings_obj in {get_settings(), app.state.settings}:
-        for flag in ("FEATURE_DEFERMENTS", "FEATURE_GROUPING", "FEATURE_STRENGTH"):
+        for flag in (
+            "FEATURE_DEFERMENTS",
+            "FEATURE_GROUPING",
+            "FEATURE_STRENGTH",
+            "FEATURE_DISCUSSIONS",
+        ):
             monkeypatch.setattr(settings_obj, flag, True)
 
 

@@ -107,6 +107,7 @@ DEBUG=false
 # FEATURE_DEFERMENTS=false
 # FEATURE_GROUPING=false
 # FEATURE_STRENGTH=false
+# FEATURE_DISCUSSIONS=false
 
 # Optional: environment-identifier banner — a thin amber strip fixed at
 # the top of every page (login screen included) showing this text. Set
@@ -135,6 +136,7 @@ env-var change plus service restart (no deploy).
 | `FEATURE_DEFERMENTS` | `/admin/deferments` page, `/api/v1/deferments/*`, nav entry | off | `true` | unset (off) |
 | `FEATURE_GROUPING` | `/grouping` page, `/api/v1/groupings/*`, nav entry | off | `true` | unset (off) |
 | `FEATURE_STRENGTH` | Unit Strength report at `/admin`, nav entry | off | `true` | `true` (shipped; unset only to hide) |
+| `FEATURE_DISCUSSIONS` | Discussions board: `/admin/discussions` pages, `/api/v1/discussions/*`, nav entry (admins only) | off | `true` | unset (off) |
 | `FEATURE_NOMINALROLL` | Nominal Roll stack: `/nominal-roll` + `/admin/csv-upload` + `/admin/taggings` pages, `/api/v1/nominal-rolls/*` + `/api/v1/csv/*` + `/api/v1/taggings/*`, nav entries | **on** | `true` | `true` (unset = on) |
 | `FEATURE_ATTENDANCE` | `/attendance` page, `/api/v1/attendance/*`, nav entry | **on** | `true` | `true` (unset = on) |
 

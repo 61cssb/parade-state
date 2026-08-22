@@ -122,6 +122,15 @@ tags:
       Feature-flagged: every /api/v1/deferments/* route returns 404 for
       all roles (super-admins included) unless FEATURE_DEFERMENTS=true
       (on in development, off in production).
+  - name: discussions
+    description: >
+      Discussions board (issue 24) — admins and super-admins only.
+      Unlike older routers, identity comes from the session token
+      (Bearer/cookie), never client-supplied user_id/user_role params,
+      so author-only edit rules are enforced server-side.
+      Feature-flagged: every /api/v1/discussions/* route returns 404 for
+      all roles (super-admins included) unless FEATURE_DISCUSSIONS=true
+      (on in development, off in production).
   - name: taggings
     description: >
       Tagging overlays — super-admin only; person→subunit remappings on a
@@ -1867,6 +1876,185 @@ paths:
                 type: object
                 properties:
                   detail: { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ===========================================================================
+  # Discussions board (issue 24) — admins only; session-token identity
+  # ===========================================================================
+  /discussions/posts:
+    get:
+      tags: [discussions]
+      summary: List board posts
+      description: |
+        Any admin/super-admin. Flat newest-first list capped at the 200
+        most recent posts; optional category and status filters.
+      parameters:
+        - name: category
+          in: query
+          schema: { type: string, enum: [requests, bugs] }
+        - name: status
+          in: query
+          schema: { type: string, enum: [Open, Duplicate, Accepted, Implemented, Closed] }
+      responses:
+        '200':
+          description: List of posts (with author_name and comment_count)
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [discussions]
+      summary: Create a board post
+      description: |
+        Any admin/super-admin. Category is required (requests/bugs); the
+        post starts with status Open — status moves only through triage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, body, category]
+              properties:
+                title: { type: string, maxLength: 200 }
+                body: { type: string }
+                category: { type: string, enum: [requests, bugs] }
+      responses:
+        '201': { description: Created }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/BadRequest' }
+
+  /discussions/posts/{postId}:
+    parameters:
+      - name: postId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [discussions]
+      summary: Fetch a post with its comments
+      responses:
+        '200': { description: Post detail (comments oldest-first) }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [discussions]
+      summary: Edit a post (title/body)
+      description: |
+        Author only (403 otherwise, super-admins included). Sets
+        edited_at. Category/status are not editable here — see triage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, maxLength: 200, nullable: true }
+                body: { type: string, nullable: true }
+      responses:
+        '200': { description: Updated }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [discussions]
+      summary: Delete a post and its comments
+      description: Super-admin only (403 otherwise).
+      responses:
+        '200': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /discussions/posts/{postId}/triage:
+    parameters:
+      - name: postId
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      tags: [discussions]
+      summary: Triage a post (category/status)
+      description: |
+        Super-admin only (403 otherwise). The one board action that
+        writes an audit row (entity_type discussion_post); a call that
+        changes nothing writes none.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                category: { type: string, enum: [requests, bugs], nullable: true }
+                status:
+                  type: string
+                  nullable: true
+                  enum: [Open, Duplicate, Accepted, Implemented, Closed]
+      responses:
+        '200': { description: Updated }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /discussions/posts/{postId}/comments:
+    parameters:
+      - name: postId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [discussions]
+      summary: Comment on a post
+      description: Any admin/super-admin.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string }
+      responses:
+        '201': { description: Created }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /discussions/comments/{commentId}:
+    parameters:
+      - name: commentId
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      tags: [discussions]
+      summary: Edit a comment (body)
+      description: Author only (403 otherwise). Sets edited_at.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string }
+      responses:
+        '200': { description: Updated }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [discussions]
+      summary: Delete a comment
+      description: Super-admin only (403 otherwise).
+      responses:
+        '200': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
