@@ -6,7 +6,7 @@ from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import func, or_, select
 from urllib.parse import urlsplit
 
-from parade_state.api.subunit_access import get_assigned_subunit_1s
+from parade_state.api.subunit_access import get_scope_grants, grant_matches
 from parade_state.api.tagging import _load_nr_tagging
 from parade_state.auth.admin_dependencies import (
     get_current_admin_user_optional,
@@ -29,6 +29,7 @@ from parade_state.models import (
     Tagging,
     TaggingEntry,
     User,
+    UserSubunitAssignment,
 )
 from parade_state.utils import markdown, utc_dt
 
@@ -172,8 +173,8 @@ async def admin_unit_strength(
     Called Up personnel; Current those marked present/late in the selected
     slot; Out everyone else (unmarked = absent). Unit and sub_unit_3 are
     ignored — attached personnel from other units report here too.
-    Super-admins see the whole unit; regular admins see only the
-    sub_unit_1 sections assigned to them on the NR.
+    Super-admins see the whole unit; regular admins see only the sections
+    inside their (unit, sub_unit_1) scope grants on the NR.
     """
     current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
@@ -238,9 +239,10 @@ async def admin_unit_strength(
             ).scalars().all()
             att_by_person = {a.personnel_id: a for a in attendance_rows}
 
-            # (effective sub_unit_1, effective sub_unit_2, category, slot
-            # status) per person; no attendance row = absent (model default).
-            per_person: list[tuple[str | None, str | None, str, str]] = []
+            # (effective unit, effective sub_unit_1, effective sub_unit_2,
+            # category, slot status) per person; no attendance row = absent
+            # (model default).
+            per_person: list[tuple[str | None, str | None, str | None, str, str]] = []
             for person in roster:
                 entry = entry_by_person.get(str(person.id))
                 record = att_by_person.get(str(person.id))
@@ -249,6 +251,7 @@ async def admin_unit_strength(
                 ) if record is not None else "absent"
                 per_person.append(
                     (
+                        entry.to_unit if entry is not None else person.unit,
                         entry.to_sub_unit_1 if entry is not None else person.sub_unit_1,
                         entry.to_sub_unit_2 if entry is not None else person.sub_unit_2,
                         person.category,
@@ -256,20 +259,20 @@ async def admin_unit_strength(
                     )
                 )
 
-            # Subunit-1 access scope (deny-by-default, tagging-aware) —
-            # super-admins bypass and see the whole unit.
+            # Access scope (deny-by-default, tagging-aware) — super-admins
+            # bypass and see the whole unit.
             if current_admin.role != "super_admin":
-                allowed = await get_assigned_subunit_1s(
-                    db, str(current_admin.id), nr_id
-                )
-                no_assignments = not allowed
-                per_person = [t for t in per_person if t[0] in allowed]
+                grants = await get_scope_grants(db, str(current_admin.id), nr_id)
+                no_assignments = not grants
+                per_person = [
+                    t for t in per_person if grant_matches(grants, t[0], t[1])
+                ]
 
             # Aggregate into (sub_unit_1, sub_unit_2) cells, then section
             # per sub_unit_1 (displayed once) with a SUBTOTAL, plus a
             # unit-wide TOTAL rollup.
             cells: dict[tuple[str | None, str | None], dict] = {}
-            for sub1, sub2, category, status in per_person:
+            for _unit, sub1, sub2, category, status in per_person:
                 buckets = cells.setdefault((sub1, sub2), _strength_buckets())
                 bucket = buckets[category]
                 bucket["in"] += 1
@@ -365,6 +368,53 @@ async def admin_users(
         result = await db.execute(query)
         rows = result.all()
 
+        # NR options for the super-admin scope-grant form (issue #28).
+        nr_rows = (
+            await db.execute(
+                select(NominalRoll).order_by(NominalRoll.caa.desc())
+            )
+        ).scalars().all()
+        nr_label_by_id = {
+            str(nr.id): nr.label
+            or (nr.caa.isoformat() if nr.caa else str(nr.id)[:8])
+            for nr in nr_rows
+        }
+        nr_options = [
+            {"id": nr_id, "label": label}
+            for nr_id, label in nr_label_by_id.items()
+        ]
+
+        # Each listed user's scope grants, shown directly in the table
+        # (issue #28) instead of behind the Scope panel toggle.
+        grants_by_user: dict[str, list[dict]] = {}
+        listed_user_ids = [str(user.id) for user, _ in rows]
+        if listed_user_ids:
+            grant_rows = (
+                await db.execute(
+                    select(UserSubunitAssignment)
+                    .where(
+                        UserSubunitAssignment.user_id.in_(listed_user_ids)
+                    )
+                    .order_by(
+                        UserSubunitAssignment.nominal_roll_id,
+                        UserSubunitAssignment.unit,
+                        UserSubunitAssignment.sub_unit_1,
+                    )
+                )
+            ).scalars().all()
+            for grant in grant_rows:
+                grants_by_user.setdefault(str(grant.user_id), []).append(
+                    {
+                        "id": str(grant.id),
+                        "unit": grant.unit,
+                        "sub_unit_1": grant.sub_unit_1,
+                        "nr_label": nr_label_by_id.get(
+                            str(grant.nominal_roll_id),
+                            str(grant.nominal_roll_id)[:8],
+                        ),
+                    }
+                )
+
     users = [
         {
             "id": str(user.id),
@@ -375,6 +425,7 @@ async def admin_users(
             "access_level": access_level.name if access_level else None,
             "created_at": user.created_at,
             "last_sign_in_at": user.last_sign_in_at,
+            "grants": grants_by_user.get(str(user.id), []),
         }
         for user, access_level in rows
     ]
@@ -385,13 +436,14 @@ async def admin_users(
     html_content = template.render(
         request=request,
         user={
-            "id": current_admin.id,
+            "id": str(current_admin.id),
             "name": current_admin.name,
             "email": current_admin.email,
             "role": current_admin.role,
         },
         active_page="users",
         users=users,
+        nominal_rolls=nr_options,
         search=search or "",
         status_filter=status_filter or "",
         role_filter=role_filter or "",

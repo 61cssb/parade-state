@@ -107,9 +107,12 @@ tags:
       (default on; unset = available).
   - name: subunit-assignments
     description: >
-      NR-scoped Subunit-1 attendance access (issue #4 PR 2). Super-admin-only
-      CRUD granting users attendance-update rights per sub_unit_1 on an NR.
-      Managed under /api/v1/access-control/...
+      Scope grants (issues #4 and #28): super-admin-only CRUD for
+      (unit, sub_unit_1) grants per NR, '*' marking wildcards, values
+      validated against the roll's roster. Grants scope every read/write
+      personnel surface for regular admins (deny-by-default; super_admin
+      bypasses). Managed under /api/v1/access-control/...; the UI is the
+      Scope panel on /admin/users.
   - name: app-settings
     description: Runtime application settings (admin)
   - name: audit-log
@@ -575,13 +578,13 @@ paths:
       - $ref: '#/components/parameters/UserIdParam'
     post:
       tags: [users]
-      summary: Grant a user a subunit assignment on a nominal roll
+      summary: Grant a user a scope grant on a nominal roll
       x-access-control: super-admin
       description: |
-        NR-scoped write access grants (attendance marking, callup/remarks
-        editing). The issue 26 groupings redesign removed the old
-        grouping-scoped grants; assignments are per nominal roll only.
-        `subUnit1` must match a value present on the roll's roster.
+        (unit, sub_unit_1) scope grant with '*' wildcards (issue #28).
+        Concrete values must match values present on the roll's roster
+        (case-sensitive; a sub-unit must exist under the chosen unit).
+        Empty strings never act as wildcards — use '*'.
       requestBody:
         required: true
         content:
@@ -594,16 +597,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserSubunitAssignment'
+        '400':
+          description: >
+            Value not present on the roster, or unit='*' together with
+            subUnit1='*'
         '409':
-          description: User already assigned to this sub_unit_1 on this roll
+          description: User already holds this exact grant on this roll
 
   /access-control/users/{userId}/subunit-assignments:
     parameters:
       - $ref: '#/components/parameters/UserIdParam'
     get:
       tags: [users]
-      summary: List a user's subunit assignments across nominal rolls
+      summary: List a user's scope grants across nominal rolls
       x-access-control: admin
+      description: >
+        Each entry carries the NR's display label (nominalRollLabel) for
+        the /admin/users scope panel.
       responses:
         '200':
           content:
@@ -612,6 +622,40 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/UserSubunitAssignment'
+
+  /access-control/nominal-rolls/{nominalRollId}/scope-options:
+    parameters:
+      - name: nominalRollId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [users]
+      summary: Units and unit→sub-unit values present on a roll's roster
+      x-access-control: super-admin
+      description: >
+        Feeds the grant form's cascading dropdowns on /admin/users
+        (issue #28). Personnel with a NULL sub-unit contribute the unit
+        but no sub-unit value — they are covered by subUnit1='*' grants.
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  units:
+                    type: array
+                    items:
+                      type: string
+                  subunitsByUnit:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: string
 
   /access-control/nominal-rolls/{nominalRollId}/users/{userId}/subunit-assignments/{assignmentId}:
     parameters:
@@ -2718,8 +2762,15 @@ components:
         nominalRollId:
           type: string
           format: uuid
+        unit:
+          type: string
+          description: "'*' = any unit (wildcard)"
         subUnit1:
           type: string
+          description: "'*' = every sub-unit of the unit (wildcard)"
+        nominalRollLabel:
+          type: string
+          description: Display label of the NR (list responses only)
         createdAt:
           type: string
           format: date-time
@@ -2731,9 +2782,19 @@ components:
       type: object
       required: [subUnit1]
       properties:
+        unit:
+          type: string
+          default: '*'
+          description: >
+            Unit the grant covers; '*' wildcards (any unit). A concrete
+            value must exist on the roll's roster.
         subUnit1:
           type: string
-          description: The effective sub_unit_1 the user may write within on this roll
+          description: >
+            Sub-unit 1 the grant covers; '*' wildcards (every sub-unit of
+            the unit, including NULL sub-unit personnel). Concrete values
+            must exist on the roster under the chosen unit. unit='*' with
+            subUnit1='*' is rejected (400).
 
     # --- Access levels ---
 

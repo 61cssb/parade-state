@@ -12,10 +12,7 @@ from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import and_, select
 
 from parade_state.api.attendance import attendance_counts_for_date
-from parade_state.api.subunit_access import (
-    get_assigned_subunit_1s,
-    resolve_effective_subunit_1_map,
-)
+from parade_state.api.subunit_access import get_scope_grants, in_scope_pids
 from parade_state.api.tagging import _load_nr_tagging
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
@@ -43,7 +40,7 @@ async def attendance_view(
     roster with the NR's 1:1 tagging overlay applied, joined to the selected
     day's attendance rows (AM/PM columns). Editing is enabled only when the
     selected NR is the active one. Non-super-admins only see personnel whose
-    effective sub_unit_1 matches one of their UserSubunitAssignment rows on
+    effective (unit, sub_unit_1) falls inside one of their scope grants on
     the NR.
     """
     current_user = await get_current_user_optional(request)
@@ -128,23 +125,22 @@ async def attendance_view(
                 ).scalars().all()
                 entry_by_person = {str(e.personnel_id): e for e in entries}
 
-            # Filter roster to the user's assigned subunits (tagging-aware).
+            # Filter roster to the user's scope (tagging-aware).
             # super_admin sees the whole roster.
             accessible_pids: set[str] | None = None
             if current_user.role != "super_admin":
-                all_pids = [str(p.id) for p in roster]
-                eff_map = await resolve_effective_subunit_1_map(
+                accessible_pids = await in_scope_pids(
                     db,
-                    all_pids,
+                    str(current_user.id),
+                    str(current_user.role),
+                    selected_nr_id,
                     applied_tagging_id,
+                    [str(p.id) for p in roster],
                 )
-                allowed = await get_assigned_subunit_1s(
+                grants = await get_scope_grants(
                     db, str(current_user.id), selected_nr_id
                 )
-                accessible_pids = {
-                    pid for pid, sub in eff_map.items() if sub in allowed
-                }
-                no_assignments = not allowed
+                no_assignments = not grants
 
             att_result = await db.execute(
                 select(Attendance).where(

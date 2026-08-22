@@ -22,8 +22,13 @@ async def test_list_personnel_without_grouping_context_as_admin(
     admin_token_headers: dict[str, str],
     sample_personnel,
     sample_users,
+    admin_subunit_assignment,
 ):
-    """Test listing personnel without grouping context as admin."""
+    """Test listing personnel without grouping context as admin.
+
+    Issue #28: cross-NR listing is scope-filtered, so the admin needs a
+    grant covering the sample roster to see any rows.
+    """
     response = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
@@ -68,6 +73,7 @@ async def test_list_personnel_with_unit_filter(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -99,6 +105,7 @@ async def test_list_personnel_with_sub_unit_filter(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -135,6 +142,7 @@ async def test_list_personnel_with_search(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -171,6 +179,7 @@ async def test_list_personnel_with_search_by_pers_no(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -207,6 +216,7 @@ async def test_get_personnel_by_id_without_grouping_context_as_admin(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     sample_personnel,
 ):
     """Test getting personnel by ID without grouping context as admin."""
@@ -250,6 +260,7 @@ async def test_update_personnel_as_admin(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -283,22 +294,26 @@ async def test_update_personnel_as_admin(
 @pytest.mark.asyncio
 async def test_update_personnel_remap_upserts_tagging_entry(
     client: TestClient,
-    admin_token_headers: dict[str, str],
-    sample_users,
+    super_admin_token_headers: dict[str, str],
     db_session,
     sample_personnel,
 ):
     """Two sequential remaps on the same person produce ONE tagging entry
-    whose ``to_*`` values reflect both edits (no duplicate rows)."""
+    whose ``to_*`` values reflect both edits (no duplicate rows).
+
+    Runs as super-admin on purpose: the first remap moves the person to
+    "New S1", outside any regular admin's grants — the scope gate would
+    (correctly) 403 the second edit (see test_admin_scoped_access).
+    """
     p = sample_personnel[0]
     base_params = {
-        "user_id": str(sample_users["admin"].id),
-        "user_role": "admin",
+        "user_id": "super-admin-test-id",
+        "user_role": "super_admin",
     }
 
     r1 = client.patch(
         f"/api/v1/personnel/{p.id}",
-        headers=admin_token_headers,
+        headers=super_admin_token_headers,
         params=base_params,
         json={"sub_unit_1": "New S1"},
     )
@@ -307,7 +322,7 @@ async def test_update_personnel_remap_upserts_tagging_entry(
 
     r2 = client.patch(
         f"/api/v1/personnel/{p.id}",
-        headers=admin_token_headers,
+        headers=super_admin_token_headers,
         params=base_params,
         json={"sub_unit_2": "New S2"},
     )
@@ -323,6 +338,7 @@ async def test_update_personnel_identity_fields_rejected(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     sample_personnel,
 ):
     """Rank/name edits are rejected with 409 — the NR is read-only."""
@@ -369,6 +385,7 @@ async def test_update_personnel_status(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -398,6 +415,7 @@ async def test_list_personnel_with_status_filter(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -431,6 +449,7 @@ async def test_list_personnel_with_category_filter(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     sample_personnel,
 ):
     """Test listing personnel filtered by category (Officer / WOSE).
@@ -488,6 +507,7 @@ async def test_update_personnel_status_only_does_not_touch_tagging(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -523,6 +543,7 @@ async def test_update_personnel_recomputes_category(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -544,6 +565,7 @@ async def test_list_personnel_with_pagination(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
 ):
     """Test listing personnel with pagination."""
     assert_pagination_works(
@@ -561,6 +583,7 @@ async def test_get_personnel_invalid_id(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
 ):
     """Test getting personnel with invalid ID."""
     assert_404_response(
@@ -579,6 +602,7 @@ async def test_update_personnel_invalid_id(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
 ):
     """Updating an unknown personnel id returns 404 (uses a remap field so
     the identity-field 409 path doesn't short-circuit first)."""
@@ -605,6 +629,7 @@ async def test_update_personnel_sets_audit_trail(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -653,6 +678,7 @@ async def test_list_personnel_sort_by_name_asc(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -681,6 +707,7 @@ async def test_list_personnel_sort_by_name_desc(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -709,6 +736,7 @@ async def test_list_personnel_sort_by_rank(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -737,6 +765,7 @@ async def test_list_personnel_sort_by_status(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -765,6 +794,7 @@ async def test_list_personnel_invalid_sort_field_ignored(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -790,6 +820,7 @@ async def test_update_personnel_invalid_status(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -817,6 +848,7 @@ async def test_update_personnel_empty_rank(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -844,6 +876,7 @@ async def test_update_personnel_too_long_name(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -871,6 +904,7 @@ async def test_personnel_response_includes_audit_fields(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -899,6 +933,7 @@ async def test_list_personnel_with_filters_and_sorting(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -944,6 +979,7 @@ async def test_update_personnel_callup_status_all_values(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
     callup_status: str,
@@ -976,6 +1012,7 @@ async def test_update_personnel_callup_status_invalid_rejected(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     sample_personnel,
     bad_value: str,
 ):
@@ -1001,6 +1038,7 @@ async def test_update_personnel_remarks_set_and_clear(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     db_session,
     sample_personnel,
 ):
@@ -1394,6 +1432,7 @@ async def test_update_personnel_pers_no_as_admin_forbidden(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     sample_personnel,
 ):
     """Admins cannot change pers_no (403) but keep the other PATCH fields."""
@@ -1439,6 +1478,7 @@ async def test_personnel_response_includes_source(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     sample_personnel,
 ):
     """The source provenance field is part of every personnel response."""

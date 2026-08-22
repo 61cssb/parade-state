@@ -2,7 +2,14 @@
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db import Base
@@ -93,15 +100,26 @@ class User(Base):
 
 
 class UserSubunitAssignment(Base):
-    """Grants a user attendance-update rights for one sub_unit_1 on an NR.
+    """A scope grant: one (unit, sub_unit_1) pair on one Nominal Roll.
 
-    NR-scoped (issue #4): attendance access is no longer grouping-scoped.
-    A user may only upsert attendance for personnel whose effective
-    ``sub_unit_1`` (canonical, or remapped under the active Tagging scope)
-    matches one of their assignments on that NR. ``super_admin`` bypasses
-    entirely. Deny-by-default: a user with no assignments on an NR has no
-    attendance-write access there.
+    Issue #28 extended the issue-#4 subunit grant with the unit dimension.
+    A grant authorizes reads and writes for personnel whose *effective*
+    location — the NR's 1:1 Tagging overlay remap when present, else the
+    canonical personnel values — matches the grant. Each column uses the
+    explicit sentinel ``*`` for wildcard matching (never an empty string:
+    accidental blanks must fail validation, not widen access):
+
+    - ``(unit='U', sub_unit_1='*')`` — every sub-unit of unit U
+    - ``(unit='U', sub_unit_1='S')`` — exactly U/S
+    - ``(unit='*', sub_unit_1='S')`` — S under any unit (pre-#28 grants)
+    - ``(unit='*', sub_unit_1='*')`` — forbidden (CHECK constraint); the
+      whole-roll case is expressed per unit, not as a blanket grant
+
+    ``super_admin`` bypasses entirely. Deny-by-default: a user with no
+    grants on an NR has no access there.
     """
+
+    WILDCARD = "*"
 
     __tablename__ = "user_subunit_assignments"
 
@@ -110,6 +128,9 @@ class UserSubunitAssignment(Base):
     )
     nominal_roll_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("nominal_rolls.id", ondelete="CASCADE"), index=True
+    )
+    unit: Mapped[str] = mapped_column(
+        String(255), nullable=False, server_default=WILDCARD
     )
     sub_unit_1: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[utc_dt.datetime] = mapped_column(
@@ -132,8 +153,13 @@ class UserSubunitAssignment(Base):
         UniqueConstraint(
             "user_id",
             "nominal_roll_id",
+            "unit",
             "sub_unit_1",
             name="uq_user_subunit_assignment",
+        ),
+        CheckConstraint(
+            "unit <> '*' OR sub_unit_1 <> '*'",
+            name="ck_user_subunit_assignment_not_both_wildcard",
         ),
     )
 
@@ -141,5 +167,5 @@ class UserSubunitAssignment(Base):
         return (
             f"<UserSubunitAssignment(user_id={self.user_id!r}, "
             f"nominal_roll_id={self.nominal_roll_id!r}, "
-            f"sub_unit_1={self.sub_unit_1!r})>"
+            f"unit={self.unit!r}, sub_unit_1={self.sub_unit_1!r})>"
         )

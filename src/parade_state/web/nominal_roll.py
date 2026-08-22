@@ -2,7 +2,10 @@
 
 Shows the personnel roster for the selected nominal roll as a simple table.
 Accessible to all authenticated users — the nominal roll is the unit's base
-roster (org-wide reference data).
+roster (org-wide reference data). Issue #28: regular admins only see NRs
+they hold scope grants on, and within those NRs only personnel inside
+their (unit, sub_unit_1) scope — effective location, tagging overlay
+included.
 """
 
 from fastapi import APIRouter, Request
@@ -10,9 +13,20 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import ColumnElement, func, or_, select
 
+from parade_state.api.subunit_access import (
+    accessible_nr_ids,
+    get_scope_grants,
+    in_scope_pids,
+)
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
-from parade_state.models import CALLUP_STATUSES, NominalRoll, Personnel, TaggingEntry
+from parade_state.models import (
+    CALLUP_STATUSES,
+    NominalRoll,
+    Personnel,
+    Tagging,
+    TaggingEntry,
+)
 from parade_state.utils import ranks
 
 router = APIRouter()
@@ -136,11 +150,17 @@ async def nominal_roll_view(
 
     session_maker = get_session_maker()
     async with session_maker() as db:
-        # All nominal rolls (org-wide reference data)
+        # All nominal rolls (org-wide reference data), narrowed to the
+        # caller's scope grants for regular admins (issue #28).
         rolls_result = await db.execute(
             select(NominalRoll).order_by(NominalRoll.caa.desc())
         )
         all_rolls = rolls_result.scalars().all()
+        allowed_nrs = await accessible_nr_ids(
+            db, str(current_user.id), str(current_user.role)
+        )
+        if allowed_nrs is not None:
+            all_rolls = [r for r in all_rolls if str(r.id) in allowed_nrs]
 
         if not all_rolls:
             return _render(
@@ -177,6 +197,16 @@ async def nominal_roll_view(
             sub_unit_2=sub_unit_2, category=category, rank=rank,
         )
 
+        # Issue #28 scope state for regular admins: grants on the selected
+        # NR + the in-scope subset of the fetched roster (overlay-aware).
+        no_assignments = False
+        scoped = current_user.role != "super_admin"
+        if scoped:
+            grants = await get_scope_grants(
+                db, str(current_user.id), str(selected.id)
+            )
+            no_assignments = not grants
+
         # Total matching rows (before limit) for display
         count_query = (
             select(func.count())
@@ -198,31 +228,100 @@ async def nominal_roll_view(
         personnel_result = await db.execute(query)
         personnel = personnel_result.scalars().all()
 
+        if scoped:
+            tagging = (
+                await db.execute(
+                    select(Tagging).where(
+                        Tagging.nominal_roll_id == str(selected.id)
+                    )
+                )
+            ).scalar_one_or_none()
+            in_scope = await in_scope_pids(
+                db,
+                str(current_user.id),
+                str(current_user.role),
+                str(selected.id),
+                str(tagging.id) if tagging else None,
+                [str(p.id) for p in personnel],
+            )
+            personnel = [
+                p for p in personnel if str(p.id) in (in_scope or set())
+            ]
+            total_count = len(personnel)
+
         # Cascading dropdowns: each lists values present under the selections
         # above it. Units are unscoped; sub-unit 1 scopes to unit; sub-unit 2
         # scopes to unit + sub-unit 1; rank scopes to all of those + category.
-        units = await _distinct_values(db, Personnel.unit, base)
-        sub_unit_1_options = await _distinct_values(
-            db, Personnel.sub_unit_1, _scoped_conditions(base, unit=unit)
-        )
-        sub_unit_2_options = await _distinct_values(
-            db, Personnel.sub_unit_2,
-            _scoped_conditions(base, unit=unit, sub_unit_1=sub_unit_1),
-        )
-        rank_options = await _distinct_values(
-            db, Personnel.rank,
-            _scoped_conditions(
-                base, unit=unit, sub_unit_1=sub_unit_1,
-                sub_unit_2=sub_unit_2, category=category,
-            ),
-        )
+        # For regular admins every list derives from the in-scope rows only
+        # (issue #28) — option lists must not reveal out-of-scope values.
+        if scoped:
+            def _row_options(
+                attr: str, **selections: str | None
+            ) -> list[str]:
+                def matches(p: Personnel) -> bool:
+                    checks = {
+                        "unit": p.unit,
+                        "sub_unit_1": p.sub_unit_1,
+                        "sub_unit_2": p.sub_unit_2,
+                        "category": p.category,
+                        "rank": p.rank,
+                    }
+                    return all(
+                        checks[key] == value
+                        for key, value in selections.items()
+                        if value
+                    )
 
-        # Unscoped suggestion lists for the super-admin cell editor
-        # (datalist inputs also accept values not present on the NR).
-        edit_unit_options = units
-        edit_sub1_options = await _distinct_values(db, Personnel.sub_unit_1, base)
-        edit_sub2_options = await _distinct_values(db, Personnel.sub_unit_2, base)
-        edit_sub3_options = await _distinct_values(db, Personnel.sub_unit_3, base)
+                values = {
+                    getattr(p, attr)
+                    for p in personnel
+                    if matches(p) and getattr(p, attr)
+                }
+                return sorted(values)
+
+            units = _row_options("unit")
+            sub_unit_1_options = _row_options("sub_unit_1", unit=unit)
+            sub_unit_2_options = _row_options(
+                "sub_unit_2", unit=unit, sub_unit_1=sub_unit_1
+            )
+            rank_options = _row_options(
+                "rank",
+                unit=unit, sub_unit_1=sub_unit_1,
+                sub_unit_2=sub_unit_2, category=category,
+            )
+            edit_unit_options = units
+            edit_sub1_options = _row_options("sub_unit_1")
+            edit_sub2_options = _row_options("sub_unit_2")
+            edit_sub3_options = _row_options("sub_unit_3")
+        else:
+            units = await _distinct_values(db, Personnel.unit, base)
+            sub_unit_1_options = await _distinct_values(
+                db, Personnel.sub_unit_1, _scoped_conditions(base, unit=unit)
+            )
+            sub_unit_2_options = await _distinct_values(
+                db, Personnel.sub_unit_2,
+                _scoped_conditions(base, unit=unit, sub_unit_1=sub_unit_1),
+            )
+            rank_options = await _distinct_values(
+                db, Personnel.rank,
+                _scoped_conditions(
+                    base, unit=unit, sub_unit_1=sub_unit_1,
+                    sub_unit_2=sub_unit_2, category=category,
+                ),
+            )
+
+            # Unscoped suggestion lists for the super-admin cell editor
+            # (datalist inputs also accept values not present on the NR).
+            edit_unit_options = units
+            edit_sub1_options = await _distinct_values(
+                db, Personnel.sub_unit_1, base
+            )
+            edit_sub2_options = await _distinct_values(
+                db, Personnel.sub_unit_2, base
+            )
+            edit_sub3_options = await _distinct_values(
+                db, Personnel.sub_unit_3, base
+            )
 
         # Load the NR's 1:1 tagging entries (overlay). The entry map is
         # keyed by personnel_id; each entry's ``to_*`` values override the
@@ -299,6 +398,7 @@ async def nominal_roll_view(
         category=category or "",
         rank=rank or "",
         total_count=total_count,
+        no_assignments=no_assignments,
     )
 
 
@@ -326,6 +426,7 @@ def _render(
     category: str,
     rank: str,
     total_count: int,
+    no_assignments: bool = False,
 ) -> HTMLResponse:
     templates_dir = request.app.state.templates_dir
     env = Environment(
@@ -363,5 +464,6 @@ def _render(
         category=category,
         rank=rank,
         total_count=total_count,
+        no_assignments=no_assignments,
     )
     return HTMLResponse(content=html)

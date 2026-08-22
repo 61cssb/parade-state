@@ -15,6 +15,7 @@ async def test_history_basic_stats(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     sample_personnel,
     sample_attendance,
 ):
@@ -65,6 +66,7 @@ async def test_history_date_filter(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     sample_personnel,
     sample_attendance,
 ):
@@ -93,6 +95,7 @@ async def test_history_ordering_desc(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     sample_personnel,
     sample_attendance,
 ):
@@ -117,6 +120,7 @@ async def test_history_invalid_personnel_404(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
 ):
     """Unknown personnel returns 404."""
     response = client.get(
@@ -135,6 +139,7 @@ async def test_history_wrong_nominal_roll_400(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     sample_personnel,
 ):
     """Passing a mismatched nominal_roll_id returns 400."""
@@ -156,6 +161,7 @@ async def test_history_no_records(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
+    admin_subunit_assignment,
     sample_personnel,
 ):
     """Personnel with no attendance rows get zeroed stats."""

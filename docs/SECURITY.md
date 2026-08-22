@@ -174,18 +174,22 @@ def _require_super_admin(user_role: str) -> None:
 **Data Isolation Strategy:**
 
 1. **Explicit Grants:** admins receive `UserSubunitAssignment` rows per
-   nominal roll (one effective `sub_unit_1` each)
-2. **Deny-by-default:** no assignments means no write access (403);
-   super_admin bypasses
+   nominal roll — (unit, sub_unit_1) pairs with the `*` wildcard sentinel
+   (issue #28)
+2. **Deny-by-default:** no grants means no access (403 naming the missing
+   assignment); super_admin bypasses
 3. **Audit Trail:** grants and revocations are logged
 
 **Implementation:**
 
 ```python
-# Attendance/personnel writes gated per NR by sub_unit_1 assignment
-async def list_writable_personnel(user_id: str, nominal_roll_id: str):
-    subunits = await get_assigned_subunit_1s(user_id, nominal_roll_id)
-    return await query_personnel_in_subunits(nominal_roll_id, subunits)
+# Personnel/attendance reads and writes gated per NR by scope grants
+# (api/subunit_access.py — the single enforcement seam; issue #31 will
+# only change how user_id/user_role are sourced)
+async def list_writable_personnel(user_id: str, user_role: str, nominal_roll_id: str):
+    grants = await get_scope_grants(db, user_id, nominal_roll_id)
+    locations = await resolve_effective_locations(db, pids, tagging_id)
+    return [p for p in personnel if grant_matches(grants, *locations[p.id])]
 ```
 
 ### Subunit Scope Filtering

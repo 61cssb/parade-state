@@ -128,12 +128,14 @@ async def upload_csv(
     validation passes; any processing failure is reported via
     ``process_error`` without failing the upload itself.
 
-    Requires admin or super_admin role.
+    Super-admin only (issue #28 tightening): ingesting a CSV creates a
+    whole new NR — an NR-lifecycle operation like create/delete/activate,
+    not a scoped write, so regular admins no longer perform it.
     """
-    if user_role not in ["admin", "super_admin"]:
+    if user_role != "super_admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can upload CSV files",
+            detail="Only super admins can upload CSV files",
         )
 
     user_result = await db.execute(select(User).where(User.id == user_id))
@@ -376,12 +378,13 @@ async def process_csv_upload(
     Personnel in the source tagging with no pers_no match in the new NR
     are surfaced in the response.
 
-    Requires admin or super_admin role.
+    Super-admin only (issue #28 tightening): processing mints a whole new
+    NR — an NR-lifecycle operation, not a scoped write.
     """
-    if user_role not in ["admin", "super_admin"]:
+    if user_role != "super_admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can process CSV uploads",
+            detail="Only super admins can process CSV uploads",
         )
 
     # Load the upload.

@@ -1,8 +1,8 @@
-"""Behavioral tests for Subunit-1 attendance access (issue #4 PR 2).
+"""Behavioral tests for scope-grant access (issues #4 and #28).
 
 Covers: deny-by-default enforcement on attendance upsert and copy-remarks,
-tagging-aware effective sub_unit_1, super_admin bypass, and the super-admin
-assignment CRUD endpoints.
+tagging-aware effective (unit, sub_unit_1), super_admin bypass, and the
+super-admin grant CRUD endpoints (roster-validated, '*' wildcards).
 """
 
 from datetime import date
@@ -40,7 +40,7 @@ async def test_grant_requires_super_admin(
 
 @pytest.mark.asyncio
 async def test_grant_then_list_assignment(
-    client: TestClient, sample_nominal_roll, sample_users
+    client: TestClient, sample_nominal_roll, sample_users, sample_personnel
 ):
     """Super-admin can grant an assignment and list it back."""
     user_id = str(sample_users["user"].id)
@@ -54,6 +54,7 @@ async def test_grant_then_list_assignment(
     assert response.status_code == 201
     created = response.json()
     assert created["sub_unit_1"] == "Platoon 1"
+    assert created["unit"] == "*"
 
     # List for NR (super-admin sees all).
     response = client.get(
@@ -66,7 +67,7 @@ async def test_grant_then_list_assignment(
 
 @pytest.mark.asyncio
 async def test_grant_duplicate_409(
-    client: TestClient, sample_nominal_roll, sample_users
+    client: TestClient, sample_nominal_roll, sample_users, sample_personnel
 ):
     """Granting the same (user, NR, sub_unit_1) twice returns 409."""
     user_id = str(sample_users["user"].id)
@@ -88,7 +89,7 @@ async def test_grant_duplicate_409(
 
 @pytest.mark.asyncio
 async def test_revoke_assignment(
-    client: TestClient, sample_nominal_roll, sample_users
+    client: TestClient, sample_nominal_roll, sample_users, sample_personnel
 ):
     """Super-admin can revoke an assignment."""
     user_id = str(sample_users["user"].id)
@@ -116,7 +117,7 @@ async def test_revoke_assignment(
 
 @pytest.mark.asyncio
 async def test_list_for_user_self_only(
-    client: TestClient, sample_nominal_roll, sample_users
+    client: TestClient, sample_nominal_roll, sample_users, sample_personnel
 ):
     """A regular user can list their own assignments but not another user's."""
     user_id = str(sample_users["user"].id)

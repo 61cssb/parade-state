@@ -296,6 +296,13 @@
     </p>
     {% endif %}
 
+    {% if no_assignments %}
+    <p style="color: #6b7280; margin-top: 1rem;">
+        You have no access assignments on this nominal roll — ask a
+        super-admin to grant scope access.
+    </p>
+    {% endif %}
+
     {% if personnel %}
     <div class="table-wrap">
         <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">

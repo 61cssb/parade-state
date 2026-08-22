@@ -128,6 +128,7 @@ async def test_nominal_roll_read_only_for_non_super_admins(
     sample_personnel,
     sample_attendance_scope,
     sample_users,
+    admin_subunit_assignment,
     monkeypatch,
 ):
     """Non-super-admins get a plain read-only table — no editor markup."""
@@ -300,6 +301,7 @@ async def test_nominal_roll_add_serviceman_hidden_for_admins(
     sample_nominal_roll,
     sample_personnel,
     sample_users,
+    admin_subunit_assignment,
     monkeypatch,
 ):
     """Admins get no Add Serviceman button/modal and a static pers_no cell."""
@@ -331,6 +333,7 @@ async def test_roll_management_panel_placement(
     sample_nominal_roll,
     sample_personnel,
     sample_users,
+    admin_subunit_assignment,
     monkeypatch,
 ):
     """Roll management acts on the selected roll, so it sits directly below

@@ -40,7 +40,7 @@ async def test_list_audit_logs_after_csv_upload(
     upload_response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("test.csv", csv_content, "text/csv")},
-        params={"user_id": admin_id, "user_role": "admin"},
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=admin_token_headers,
     )
     assert upload_response.status_code == 200
@@ -59,8 +59,8 @@ async def test_list_audit_logs_after_csv_upload(
         item for item in data["items"] if item["entity_type"] == "csv_upload"
     )
     assert csv_entry["action"] == "create"
-    assert csv_entry["user_name"] == "Admin User"
-    assert csv_entry["user_email"] == "admin@example.com"
+    assert csv_entry["user_name"] == "super-admin-test"
+    assert csv_entry["user_email"] == "super-admin-test@example.com"
 
 
 @pytest.mark.asyncio

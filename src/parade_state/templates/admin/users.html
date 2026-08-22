@@ -57,6 +57,9 @@
                     <th style="padding: 0.5rem;">Role</th>
                     <th style="padding: 0.5rem;">Status</th>
                     <th style="padding: 0.5rem;">Access Level</th>
+                    {% if user.role == 'super_admin' %}
+                    <th style="padding: 0.5rem;">Access Scopes</th>
+                    {% endif %}
                     <th style="padding: 0.5rem;">Last Sign In</th>
                     <th style="padding: 0.5rem;">Actions</th>
                 </tr>
@@ -84,14 +87,60 @@
                         </select>
                     </td>
                     <td style="padding: 0.5rem;">{{ u.access_level or '--' }}</td>
+                    {% if user.role == 'super_admin' %}
+                    <td id="scope-cell-{{ u.id }}" style="padding: 0.5rem; max-width: 22rem;">
+                        {% if u.grants %}
+                            {% for g in u.grants %}
+                            <span style="display: inline-block; background: #e5e7eb; border-radius: 0.25rem; padding: 0.15rem 0.4rem; margin: 0 0.25rem 0.25rem 0; font-size: 0.75rem; white-space: nowrap;">{{ g.nr_label }} — {{ 'All units' if g.unit == '*' else g.unit }} / {{ 'All sub-units' if g.sub_unit_1 == '*' else g.sub_unit_1 }}</span>
+                            {% endfor %}
+                        {% else %}
+                            <span style="color: #9ca3af; font-size: 0.8rem;">—</span>
+                        {% endif %}
+                    </td>
+                    {% endif %}
                     <td style="padding: 0.5rem; font-size: 0.85rem; color: #6b7280;">
                         {% if u.last_sign_in_at %}{{ u.last_sign_in_at.strftime('%Y-%m-%d %H:%M') }}{% else %}Never{% endif %}
                     </td>
-                    <td style="padding: 0.5rem;">
+                    <td style="padding: 0.5rem; white-space: nowrap;">
+                        {% if user.role == 'super_admin' %}
+                        <button class="btn" style="background: #e5e7eb; color: #374151; font-size: 0.75rem; padding: 0.25rem 0.5rem; margin-right: 0.25rem;"
+                                onclick="toggleScope('{{ u.id }}')">Scope…</button>
+                        {% endif %}
                         <button class="btn" style="background: #ef4444; color: white; font-size: 0.75rem; padding: 0.25rem 0.5rem;"
                                 onclick="deleteUser('{{ u.id }}', '{{ u.email }}')">Delete</button>
                     </td>
                 </tr>
+                {% if user.role == 'super_admin' %}
+                <tr class="scope-row" id="scope-{{ u.id }}" style="display: none; background: #f9fafb; border-bottom: 1px solid #e5e7eb;">
+                    <td colspan="8" style="padding: 0.75rem 0.5rem;">
+                        <div id="scope-list-{{ u.id }}" style="margin-bottom: 0.75rem;"></div>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+                            <span style="font-size: 0.8rem; color: #6b7280;">Grant:</span>
+                            <select id="scope-nr-{{ u.id }}" onchange="onScopeNrChange('{{ u.id }}')"
+                                    style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                                <option value="">Nominal roll…</option>
+                                {% for nr in nominal_rolls %}
+                                <option value="{{ nr.id }}">{{ nr.label }}</option>
+                                {% endfor %}
+                            </select>
+                            <select id="scope-unit-{{ u.id }}" onchange="onScopeUnitChange('{{ u.id }}')"
+                                    style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                                <option value="">Unit…</option>
+                            </select>
+                            <select id="scope-sub1-{{ u.id }}"
+                                    style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                                <option value="">Sub-unit 1…</option>
+                            </select>
+                            <button class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.75rem;"
+                                    onclick="grantScope('{{ u.id }}')">Grant</button>
+                        </div>
+                        <p style="margin: 0.5rem 0 0 0; font-size: 0.8rem; color: #6b7280;">
+                            "All units" / "All sub-units" are wildcards — a grant needs at least
+                            one concrete side. Values must exist on the roll's roster.
+                        </p>
+                    </td>
+                </tr>
+                {% endif %}
                 {% endfor %}
             </tbody>
         </table>
@@ -190,6 +239,209 @@
         const div = document.getElementById('statusMessage');
         const color = type === 'success' ? '#10b981' : '#ef4444';
         div.innerHTML = '<p style="color: ' + color + '; font-weight: bold;">' + message + '</p>';
+    }
+
+    // --- Scope grants (issue #28) — super-admin only; the API enforces it. ---
+
+    const CURRENT_USER_ID = '{{ user.id | e }}';
+    const CURRENT_USER_ROLE = '{{ user.role | e }}';
+    const scopeOptionsCache = {};
+    const scopeAssignmentsCache = {};
+
+    function scopeValue(v, allLabel) {
+        return v === '*' ? allLabel : v;
+    }
+
+    function scopeChipLabel(a) {
+        return (a.nominal_roll_label || a.nominal_roll_id.slice(0, 8)) +
+            ' — ' + scopeValue(a.unit, 'All units') +
+            ' / ' + scopeValue(a.sub_unit_1, 'All sub-units');
+    }
+
+    // The always-visible "Access Scopes" column cell (server-rendered on
+    // load; refreshed here after grant/revoke so it never goes stale).
+    function renderScopeCell(userId) {
+        const cell = document.getElementById('scope-cell-' + userId);
+        if (!cell) {
+            return;
+        }
+        const assignments = scopeAssignmentsCache[userId] || [];
+        if (!assignments.length) {
+            cell.innerHTML = '<span style="color: #9ca3af; font-size: 0.8rem;">—</span>';
+            return;
+        }
+        cell.innerHTML = assignments.map(function(a) {
+            return '<span style="display: inline-block; background: #e5e7eb; ' +
+                'border-radius: 0.25rem; padding: 0.15rem 0.4rem; margin: 0 0.25rem 0.25rem 0; ' +
+                'font-size: 0.75rem; white-space: nowrap;">' + scopeChipLabel(a) + '</span>';
+        }).join('');
+    }
+
+    function renderScopeList(userId) {
+        const container = document.getElementById('scope-list-' + userId);
+        const assignments = scopeAssignmentsCache[userId] || [];
+        if (!assignments.length) {
+            container.innerHTML =
+                '<p style="margin: 0; font-size: 0.85rem; color: #6b7280;">' +
+                'No grants — this user has no access to any nominal roll ' +
+                '(super-admins bypass scope).</p>';
+            return;
+        }
+        container.innerHTML = assignments.map(function(a) {
+            return '<span style="display: inline-flex; align-items: center; gap: 0.35rem; ' +
+                'background: #e5e7eb; border-radius: 0.25rem; padding: 0.2rem 0.5rem; ' +
+                'margin: 0 0.35rem 0.35rem 0; font-size: 0.8rem;">' +
+                scopeChipLabel(a) +
+                '<button title="Revoke" style="background: none; border: none; cursor: pointer; ' +
+                'color: #ef4444; font-weight: bold; padding: 0 0.15rem;" ' +
+                'onclick="revokeScope(\'' + userId + '\', \'' + a.id + '\')">×</button>' +
+                '</span>';
+        }).join('');
+    }
+
+    async function toggleScope(userId) {
+        const row = document.getElementById('scope-' + userId);
+        const willShow = row.style.display === 'none';
+        row.style.display = willShow ? '' : 'none';
+        if (willShow && !scopeAssignmentsCache[userId]) {
+            await loadScopeAssignments(userId);
+        }
+    }
+
+    async function loadScopeAssignments(userId) {
+        const params = new URLSearchParams({
+            requesting_user_id: CURRENT_USER_ID,
+            requesting_user_role: CURRENT_USER_ROLE,
+        });
+        const response = await fetch(
+            '/api/v1/access-control/users/' + userId + '/subunit-assignments?' + params
+        );
+        if (!response.ok) {
+            showStatus('Could not load scope grants: ' +
+                ((await response.json()).detail || response.status), 'error');
+            return;
+        }
+        scopeAssignmentsCache[userId] = await response.json();
+        renderScopeList(userId);
+        renderScopeCell(userId);
+    }
+
+    async function onScopeNrChange(userId) {
+        const nrId = document.getElementById('scope-nr-' + userId).value;
+        const unitSel = document.getElementById('scope-unit-' + userId);
+        const sub1Sel = document.getElementById('scope-sub1-' + userId);
+        unitSel.innerHTML = '<option value="">Unit…</option>';
+        sub1Sel.innerHTML = '<option value="">Sub-unit 1…</option>';
+        if (!nrId) {
+            return;
+        }
+        if (!scopeOptionsCache[nrId]) {
+            const params = new URLSearchParams({
+                user_id: CURRENT_USER_ID,
+                user_role: CURRENT_USER_ROLE,
+            });
+            const response = await fetch(
+                '/api/v1/access-control/nominal-rolls/' + nrId + '/scope-options?' + params
+            );
+            if (!response.ok) {
+                showStatus('Could not load roster values: ' +
+                    ((await response.json()).detail || response.status), 'error');
+                return;
+            }
+            scopeOptionsCache[nrId] = await response.json();
+        }
+        const options = scopeOptionsCache[nrId];
+        unitSel.innerHTML = '<option value="*">All units</option>' +
+            options.units.map(function(u) {
+                return '<option value="' + u.replace(/"/g, '&quot;') + '">' + u + '</option>';
+            }).join('');
+        onScopeUnitChange(userId);
+    }
+
+    function onScopeUnitChange(userId) {
+        const nrId = document.getElementById('scope-nr-' + userId).value;
+        const unit = document.getElementById('scope-unit-' + userId).value;
+        const sub1Sel = document.getElementById('scope-sub1-' + userId);
+        if (!nrId || !unit) {
+            sub1Sel.innerHTML = '<option value="">Sub-unit 1…</option>';
+            return;
+        }
+        const options = scopeOptionsCache[nrId];
+        const sub1s = unit === '*' ? sortedUniqueSubunits(options) : (options.subunits_by_unit[unit] || []);
+        sub1Sel.innerHTML = '<option value="*">All sub-units</option>' +
+            sub1s.map(function(s) {
+                return '<option value="' + s.replace(/"/g, '&quot;') + '">' + s + '</option>';
+            }).join('');
+    }
+
+    function sortedUniqueSubunits(options) {
+        const all = new Set();
+        Object.values(options.subunits_by_unit).forEach(function(list) {
+            list.forEach(function(s) { all.add(s); });
+        });
+        return Array.from(all).sort();
+    }
+
+    async function grantScope(userId) {
+        const nrId = document.getElementById('scope-nr-' + userId).value;
+        const unit = document.getElementById('scope-unit-' + userId).value;
+        const sub1 = document.getElementById('scope-sub1-' + userId).value;
+        if (!nrId || !unit || !sub1) {
+            showStatus('Pick a nominal roll, unit, and sub-unit first.', 'error');
+            return;
+        }
+        if (unit === '*' && sub1 === '*') {
+            showStatus('A grant needs at least one concrete side.', 'error');
+            return;
+        }
+        const params = new URLSearchParams({
+            granted_by: CURRENT_USER_ID,
+            user_role: CURRENT_USER_ROLE,
+        });
+        const response = await fetch(
+            '/api/v1/access-control/nominal-rolls/' + nrId +
+            '/users/' + userId + '/subunit-assignments?' + params,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ unit: unit, sub_unit_1: sub1 }),
+            }
+        );
+        if (response.ok) {
+            showStatus('Scope granted.', 'success');
+            await loadScopeAssignments(userId);
+        } else {
+            showStatus('Grant failed: ' + ((await response.json()).detail || 'Unknown error'), 'error');
+        }
+    }
+
+    async function revokeScope(userId, assignmentId) {
+        if (!confirm('Revoke this scope grant? The user immediately loses access it provided.')) {
+            return;
+        }
+        const nrId = assignmentNrByUser(userId, assignmentId);
+        const params = new URLSearchParams({
+            revoked_by: CURRENT_USER_ID,
+            user_role: CURRENT_USER_ROLE,
+        });
+        const response = await fetch(
+            '/api/v1/access-control/nominal-rolls/' + nrId +
+            '/users/' + userId + '/subunit-assignments/' + assignmentId + '?' + params,
+            { method: 'DELETE' }
+        );
+        if (response.ok) {
+            showStatus('Scope grant revoked.', 'success');
+            await loadScopeAssignments(userId);
+        } else {
+            showStatus('Revoke failed: ' + ((await response.json()).detail || 'Unknown error'), 'error');
+        }
+    }
+
+    function assignmentNrByUser(userId, assignmentId) {
+        const match = (scopeAssignmentsCache[userId] || []).find(function(a) {
+            return a.id === assignmentId;
+        });
+        return match ? match.nominal_roll_id : '';
     }
 </script>
 {% endblock %}

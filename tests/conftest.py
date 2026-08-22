@@ -450,25 +450,29 @@ async def sample_attendance_scope(
 async def admin_subunit_assignment(
     db_session: AsyncSession, sample_nominal_roll, sample_personnel, sample_users
 ):
-    """Grant the admin user Subunit-1 assignments covering the sample roster.
+    """Grant the admin users scope covering the sample roster.
 
-    Sample personnel span Platoon 1 (personnel 0, 1) and Platoon 2 (personnel 2).
-    This lets attendance-mechanics tests exercise the happy path under the
-    PR 2 deny-by-default gate without each test re-granting access.
+    Sample personnel span Platoon 1 (personnel 0, 1) and Platoon 2
+    (personnel 2). Grants go to both admin identities tests act as: the
+    ``sample_users`` admin and the well-known ``admin-user-id`` (seeded
+    by the integration conftest for every integration test). Issue #28
+    read/write scoping is deny-by-default, so mechanics tests that act
+    as a plain admin need this coverage without each re-granting.
     """
     from parade_state.models import UserSubunitAssignment
 
     admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
-    for sub1 in {"Platoon 1", "Platoon 2"}:
-        db_session.add(
-            UserSubunitAssignment(
-                user_id=admin_id,
-                nominal_roll_id=nr_id,
-                sub_unit_1=sub1,
-                created_by=admin_id,
+    for user_id in {admin_id, "admin-user-id"}:
+        for sub1 in {"Platoon 1", "Platoon 2"}:
+            db_session.add(
+                UserSubunitAssignment(
+                    user_id=user_id,
+                    nominal_roll_id=nr_id,
+                    sub_unit_1=sub1,
+                    created_by=admin_id,
+                )
             )
-        )
     await db_session.commit()
     return admin_id
 

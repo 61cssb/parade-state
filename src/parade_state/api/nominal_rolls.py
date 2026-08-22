@@ -9,6 +9,11 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from parade_state.api.subunit_access import (
+    accessible_nr_ids,
+    assert_nr_accessible,
+    in_scope_pids,
+)
 from parade_state.db import get_db_session
 from parade_state.models import (
     AuditLog,
@@ -16,6 +21,7 @@ from parade_state.models import (
     Grouping,
     NominalRoll,
     Personnel,
+    Tagging,
     TaggingEntry,
 )
 from parade_state.models.schemas import (
@@ -38,9 +44,15 @@ async def list_nominal_rolls(
 ) -> list[NominalRollListItem]:
     """List nominal rolls with their latest linked CsvUpload's filename.
 
-    Requires admin or super_admin role.
+    Requires admin or super_admin role. Issue #28 read scoping:
+    ``super_admin`` sees every NR; regular admins only see NRs they hold
+    at least one scope grant on (deny-by-default — no grants, no NRs).
     """
     _require_admin(user_role)
+
+    allowed_nrs = await accessible_nr_ids(db, user_id, user_role)
+    if allowed_nrs is not None and not allowed_nrs:
+        return []
 
     # Subquery: most recent CsvUpload per nominal roll (by uploaded_at).
     latest_upload = (
@@ -70,9 +82,10 @@ async def list_nominal_rolls(
             latest_upload, latest_upload.c.nominal_roll_id == NominalRoll.id
         )
         .order_by(NominalRoll.uploaded_at.desc())
-        .offset(offset)
-        .limit(limit)
     )
+    if allowed_nrs is not None:
+        query = query.where(NominalRoll.id.in_(allowed_nrs))
+    query = query.offset(offset).limit(limit)
 
     rows = (await db.execute(query)).all()
 
@@ -102,7 +115,8 @@ async def get_nominal_roll(
 ) -> NominalRollResponse:
     """Fetch a single nominal roll by id with its latest CsvUpload's filename.
 
-    Requires admin or super_admin role.
+    Requires admin or super_admin role. Issue #28: regular admins need at
+    least one scope grant on the NR (403 otherwise; super_admin bypasses).
     """
     _require_admin(user_role)
 
@@ -112,6 +126,8 @@ async def get_nominal_roll(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Nominal roll not found: {nominal_roll_id}",
         )
+
+    await assert_nr_accessible(db, user_id, user_role, nominal_roll_id)
 
     return _row_to_response(row)
 
@@ -126,7 +142,10 @@ async def update_nominal_roll(
 ) -> NominalRollResponse:
     """Update a nominal roll (notes, label, remarks).
 
-    Requires admin or super_admin role.
+    Requires admin or super_admin role. Issue #28 write scoping: regular
+    admins need at least one scope grant on the NR (403 otherwise;
+    ``super_admin`` bypasses — the notes/label/remarks fields describe
+    the whole roll and remain super-admin editable regardless of grants).
     """
     _require_admin(user_role)
 
@@ -139,6 +158,8 @@ async def update_nominal_roll(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Nominal roll not found: {nominal_roll_id}",
         )
+
+    await assert_nr_accessible(db, user_id, user_role, nominal_roll_id)
 
     if update_data.notes is not None:
         nominal_roll.notes = update_data.notes
@@ -335,9 +356,21 @@ async def export_nominal_roll_csv(
     browser view. The view's filters (search, unit, sub-units, category,
     rank) are honoured so the CSV matches what the caller sees. Unlike the
     view there is no 1000-row cap: an export is always complete.
+
+    Issue #28 read scoping: ``super_admin`` exports the whole roll;
+    everyone else only rows inside their (unit, sub_unit_1) scope — the
+    effective location under the tagging overlay, deny-by-default (403
+    with no grants on the NR).
     """
     _require_admin(user_role)
     nr = await _load_nominal_roll_or_404(db, nominal_roll_id)
+
+    await assert_nr_accessible(db, user_id, user_role, nominal_roll_id)
+    tagging = (
+        await db.execute(
+            select(Tagging).where(Tagging.nominal_roll_id == str(nr.id))
+        )
+    ).scalar_one_or_none()
 
     conds = [
         Personnel.nominal_roll_id == str(nr.id),
@@ -395,6 +428,16 @@ async def export_nominal_roll_csv(
         ).scalars().all()
         entry_by_personnel = {str(e.personnel_id): e for e in entries}
 
+    # Read scoping: effective (unit, sub_unit_1) under the overlay.
+    accessible = await in_scope_pids(
+        db,
+        user_id,
+        user_role,
+        str(nr.id),
+        str(tagging.id) if tagging else None,
+        [str(p.id) for p in personnel_rows],
+    )
+
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(
@@ -404,6 +447,8 @@ async def export_nominal_roll_csv(
         ]
     )
     for person in personnel_rows:
+        if accessible is not None and str(person.id) not in accessible:
+            continue
         entry = entry_by_personnel.get(str(person.id))
         writer.writerow(
             [

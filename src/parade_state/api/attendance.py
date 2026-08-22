@@ -17,9 +17,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.api.subunit_access import (
-    assert_can_update_attendance,
-    get_assigned_subunit_1s,
-    resolve_effective_subunit_1_map,
+    assert_locations_in_scope,
+    assert_nr_accessible,
+    in_scope_pids,
 )
 from parade_state.api.tagging import _load_nr_tagging
 from parade_state.db import get_db_session
@@ -106,14 +106,32 @@ async def get_roster_for_scope(
 async def list_attendance(
     nominal_roll_id: str = Query(..., description="NR to list attendance for"),
     date: utc_dt.date = Query(..., description="Attendance date"),
+    user_id: str = Query(..., description="User ID for authorization"),
+    user_role: str = Query(..., description="User role for authorization"),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List attendance rows for an NR on a given date.
 
-    Returns the active roster joined to any existing attendance rows; personnel
-    without an attendance row for that date are not included (callers should
-    synthesize default rows from the roster when needed).
+    Personnel without an attendance row for that date are not included
+    (callers should synthesize default rows from the roster when needed).
+    Read scoping (issue #28): ``super_admin`` sees every row; everyone
+    else only rows whose personnel fall inside their (unit, sub_unit_1)
+    scope — deny-by-default, 403 with no grants on the NR.
     """
+    nr = (
+        await db.execute(
+            select(NominalRoll).where(NominalRoll.id == nominal_roll_id)
+        )
+    ).scalar_one_or_none()
+    if nr is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Nominal roll not found: {nominal_roll_id}",
+        )
+    tagging_id = await applied_tagging_id(db, nr)
+
+    await assert_nr_accessible(db, user_id, user_role, nominal_roll_id)
+
     result = await db.execute(
         select(Attendance).where(
             and_(
@@ -122,7 +140,19 @@ async def list_attendance(
             )
         )
     )
-    return list(result.scalars().all())
+    rows = list(result.scalars().all())
+
+    accessible = await in_scope_pids(
+        db,
+        user_id,
+        user_role,
+        nominal_roll_id,
+        tagging_id,
+        {row.personnel_id for row in rows},
+    )
+    if accessible is not None:
+        rows = [row for row in rows if row.personnel_id in accessible]
+    return rows
 
 
 @router.put("/upsert", response_model=list[AttendanceResponse])
@@ -135,21 +165,22 @@ async def bulk_upsert_attendance(
     """Bulk upsert attendance rows for an NR's roster.
 
     Enforces that the NR is the one currently active for attendance AND that
-    the caller has Subunit-1 assignment for each target personnel's effective
-    sub_unit_1 (403 otherwise; super_admin bypasses). Each entry is keyed on
-    (personnel_id, date); existing rows are updated, new rows are created with
-    snapshot data from Personnel.
+    the caller's scope covers each target personnel's effective
+    (unit, sub_unit_1) (403 otherwise; super_admin bypasses). Each entry is
+    keyed on (personnel_id, date); existing rows are updated, new rows are
+    created with snapshot data from Personnel.
     """
     nr = await require_attendance_active(payload.nominal_roll_id, db)
     tagging_id = await applied_tagging_id(db, nr)
 
-    # Subunit-1 access enforcement (issue #4 PR 2).
+    # Scope enforcement (issues #4 and #28): effective (unit, sub_unit_1)
+    # must be covered by a grant; super_admin bypasses.
     personnel_ids = [r.personnel_id for r in payload.records]
-    await assert_can_update_attendance(
+    await assert_locations_in_scope(
         db,
-        payload.nominal_roll_id,
         user_id,
         user_role,
+        payload.nominal_roll_id,
         personnel_ids,
         tagging_id,
     )
@@ -271,8 +302,9 @@ async def copy_remarks(
 
     Scope: the active Called Up roster, optionally narrowed to an effective
     sub_unit_1 (the page's view filter), intersected with the caller's
-    Subunit-1 write access (super_admin bypasses; deny-by-default: no
-    assignments → 403). Rows with an empty source remark are skipped (the
+    (unit, sub_unit_1) write scope (super_admin bypasses;
+    deny-by-default: no grants → 403). Rows with an empty source remark are
+    skipped (the
     destination keeps its remark); missing destination rows are created
     (statuses default to absent). Source and destination must differ.
     """
@@ -306,10 +338,11 @@ async def copy_remarks(
             if (to_sub1.get(str(p.id), p.sub_unit_1) == sub_unit_1)
         ]
 
-    # Write access (Subunit-1 rule): super_admin → all; deny-by-default.
+    # Write access (scope rule): super_admin → all; deny-by-default.
     all_pids = {str(p.id) for p in roster}
-    accessible_pids = await _accessible_pids(
-        db, nominal_roll_id, user_id, user_role, tagging_id, all_pids
+    await assert_nr_accessible(db, user_id, user_role, nominal_roll_id)
+    accessible_pids = await in_scope_pids(
+        db, user_id, user_role, nominal_roll_id, tagging_id, all_pids
     )
 
     rows = (
@@ -330,8 +363,8 @@ async def copy_remarks(
     updated = 0
     skipped = 0
     for pid in all_pids:
-        if pid not in accessible_pids:
-            continue  # not assigned to this person's effective sub_unit_1
+        if accessible_pids is not None and pid not in accessible_pids:
+            continue  # outside the caller's effective (unit, sub_unit_1) scope
         source = by_key.get((pid, source_date))
         source_remark = (
             source.remarks_pm if source_slot == "pm" else source.remarks_am
@@ -433,8 +466,8 @@ async def export_attendance_csv(
     tagging overlay applied, ordered like the marking page; personnel
     without an attendance row for the date export as Absent (the page's
     default). Read scoping mirrors the page: super_admin exports the whole
-    roster, everyone else only their assigned Subunit-1 scope (403 with no
-    assignments).
+    roster, everyone else only rows inside their (unit, sub_unit_1) scope
+    (403 with no grants on the NR).
     """
     nr = (
         await db.execute(
@@ -494,12 +527,13 @@ async def export_attendance_csv(
             if to_sub1.get(str(p.id), p.sub_unit_1) == sub_unit_1
         ]
 
-    # Read scoping (Subunit-1 rule, same deny-by-default as writes).
-    accessible_pids = await _accessible_pids(
+    # Read scoping (scope rule, same deny-by-default as writes).
+    await assert_nr_accessible(db, user_id, user_role, nominal_roll_id)
+    accessible_pids = await in_scope_pids(
         db,
-        nominal_roll_id,
         user_id,
         user_role,
+        nominal_roll_id,
         tagging_id,
         {str(p.id) for p in roster},
     )
@@ -528,7 +562,7 @@ async def export_attendance_csv(
         ]
     )
     for person in roster:
-        if str(person.id) not in accessible_pids:
+        if accessible_pids is not None and str(person.id) not in accessible_pids:
             continue
         record = att_by_person.get(str(person.id))
         entry = entry_by_person.get(str(person.id))
@@ -563,40 +597,6 @@ async def export_attendance_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
-
-
-async def _accessible_pids(
-    db: AsyncSession,
-    nominal_roll_id: str,
-    user_id: str,
-    user_role: str,
-    active_tagging_id: str | None,
-    all_pids: set[str],
-) -> set[str]:
-    """Resolve which of ``all_pids`` the user may write to (Subunit-1 rule).
-
-    super_admin → all of them. Otherwise, require at least one assignment on
-    the NR (deny-by-default: 403 if none) and return the subset whose
-    effective sub_unit_1 is assigned.
-    """
-    if user_role == "super_admin":
-        return set(all_pids)
-
-    allowed = await get_assigned_subunit_1s(db, user_id, nominal_roll_id)
-    if not allowed:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "No Subunit-1 assignments on this nominal roll. "
-                "Ask a super-admin to grant access."
-            ),
-        )
-    if not all_pids:
-        return set()
-    eff_map = await resolve_effective_subunit_1_map(
-        db, list(all_pids), active_tagging_id
-    )
-    return {pid for pid in all_pids if eff_map.get(pid) in allowed}
 
 
 # ============================================================================
