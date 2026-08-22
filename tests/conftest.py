@@ -23,6 +23,7 @@ import parade_state.models.discussions  # noqa: F401
 import parade_state.models.grouping  # noqa: F401
 import parade_state.models.personnel  # noqa: F401
 import parade_state.models.tagging  # noqa: F401
+from parade_state.auth.session import create_user_session
 from parade_state.config import get_settings
 from parade_state.db import Base, get_session_maker, init_database, normalize_database_url
 from parade_state.main import app
@@ -400,10 +401,23 @@ def client(session_maker):
 
 
 @pytest.fixture
-def admin_token_headers(sample_users) -> dict[str, str]:
-    """Provide headers with admin authentication token."""
-    admin_id = str(sample_users["admin"].id)
-    return {"Authorization": f"Bearer {admin_id}"}
+async def admin_token_headers(db_session, sample_users) -> dict[str, str]:
+    """Bearer headers with a real session token for the sample admin.
+
+    The token is a minted ``UserSession`` for ``sample_users["admin"]`` —
+    the same identity tests pass as ``user_id``/``admin_id`` — so
+    session-derived authorization (issue 31) and provenance assertions
+    agree on who is calling.
+    """
+    admin = sample_users["admin"]
+    session = await create_user_session(
+        db_session,
+        user_id=str(admin.id),
+        email=admin.email,
+        name=admin.name,
+        role=admin.role,
+    )
+    return {"Authorization": f"Bearer {session.token}"}
 
 
 @pytest.fixture
@@ -413,17 +427,36 @@ def admin_id(sample_users) -> str:
 
 
 @pytest.fixture
-def user_token_headers(sample_users) -> dict[str, str]:
-    """Provide headers with regular user authentication token."""
-    user_id = str(sample_users["user"].id)
-    return {"Authorization": f"Bearer {user_id}"}
+async def user_token_headers(db_session, sample_users) -> dict[str, str]:
+    """Bearer headers with a real session token for the sample regular user."""
+    regular_user = sample_users["user"]
+    session = await create_user_session(
+        db_session,
+        user_id=str(regular_user.id),
+        email=regular_user.email,
+        name=regular_user.name,
+        role=regular_user.role,
+    )
+    return {"Authorization": f"Bearer {session.token}"}
 
 
 @pytest.fixture
-def super_admin_token_headers() -> dict[str, str]:
-    """Provide headers with super admin authentication token."""
-    super_admin_id = "super-admin-test-id"
-    return {"Authorization": f"Bearer {super_admin_id}"}
+async def super_admin_token_headers(db_session, well_known_users) -> dict[str, str]:
+    """Bearer headers with a real session token for the well-known super-admin.
+
+    Depends on ``well_known_users`` (autouse under tests/integration/) so
+    the ``super-admin-test-id`` row exists before the session is minted;
+    the session token replaces the pre-#31 fake Bearer (the raw user id).
+    """
+    super_admin = well_known_users["super-admin-test-id"]
+    session = await create_user_session(
+        db_session,
+        user_id=str(super_admin.id),
+        email=super_admin.email,
+        name=super_admin.name,
+        role=super_admin.role,
+    )
+    return {"Authorization": f"Bearer {session.token}"}
 
 
 @pytest.fixture
