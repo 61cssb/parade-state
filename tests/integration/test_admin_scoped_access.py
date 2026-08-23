@@ -16,8 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.models import Personnel, Tagging, TaggingEntry, UserSubunitAssignment
 
-SUPER_ADMIN = {"user_id": "super-admin-test-id", "user_role": "super_admin"}
-GRANT_SA = {"granted_by": "super-admin-test-id", "user_role": "super_admin"}
+SA_SESSION = "super_admin"  # client_as shorthand
 
 
 async def _grant(
@@ -548,43 +547,47 @@ async def test_nr_list_shows_only_granted_rolls(
 
 @pytest.mark.asyncio
 async def test_grant_rejects_values_absent_from_roster(
-    client: TestClient, sample_nominal_roll, sample_personnel, sample_users,
+    client: TestClient, client_as, sample_nominal_roll, sample_personnel,
+    sample_users,
 ):
     """Concrete grant values must exist on the roster (case-sensitive)."""
+    client = await client_as("super_admin")
     user_id = str(sample_users["user"].id)
     nr_id = str(sample_nominal_roll.id)
     url = f"/api/v1/access-control/nominal-rolls/{nr_id}/users/{user_id}/subunit-assignments"
 
-    unknown_unit = client.post(url, params=GRANT_SA, json={"unit": "Coy Z", "sub_unit_1": "*"})
+    unknown_unit = client.post(url, json={"unit": "Coy Z", "sub_unit_1": "*"})
     assert unknown_unit.status_code == 400
     assert "Coy Z" in unknown_unit.json()["detail"]
 
-    unknown_sub = client.post(url, params=GRANT_SA, json={"unit": "Coy A", "sub_unit_1": "Platoon 9"})
+    unknown_sub = client.post(url, json={"unit": "Coy A", "sub_unit_1": "Platoon 9"})
     assert unknown_sub.status_code == 400
     assert "Platoon 9" in unknown_sub.json()["detail"]
 
-    valid_pairing = client.post(url, params=GRANT_SA, json={"unit": "Coy A", "sub_unit_1": "Platoon 2"})
+    valid_pairing = client.post(url, json={"unit": "Coy A", "sub_unit_1": "Platoon 2"})
     assert valid_pairing.status_code == 201  # Platoon 2 exists under Coy A
 
     # But a sub-unit that exists on the roster only under another unit is
     # rejected for this unit's grant.
-    only_coy_a = client.post(url, params=GRANT_SA, json={"unit": "Coy B", "sub_unit_1": "Platoon 2"})
+    only_coy_a = client.post(url, json={"unit": "Coy B", "sub_unit_1": "Platoon 2"})
     assert only_coy_a.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_grant_rejects_empty_and_double_wildcard(
-    client: TestClient, sample_nominal_roll, sample_personnel, sample_users,
+    client: TestClient, client_as, sample_nominal_roll, sample_personnel,
+    sample_users,
 ):
     """'' never means wildcard, and (*, *) is refused outright."""
+    client = await client_as("super_admin")
     user_id = str(sample_users["user"].id)
     nr_id = str(sample_nominal_roll.id)
     url = f"/api/v1/access-control/nominal-rolls/{nr_id}/users/{user_id}/subunit-assignments"
 
-    empty_unit = client.post(url, params=GRANT_SA, json={"unit": "", "sub_unit_1": "Platoon 1"})
+    empty_unit = client.post(url, json={"unit": "", "sub_unit_1": "Platoon 1"})
     assert empty_unit.status_code == 422  # min_length=1 at the schema edge
 
-    both_wildcard = client.post(url, params=GRANT_SA, json={"unit": "*", "sub_unit_1": "*"})
+    both_wildcard = client.post(url, json={"unit": "*", "sub_unit_1": "*"})
     assert both_wildcard.status_code == 400
     assert "specific units" in both_wildcard.json()["detail"]
 
@@ -612,29 +615,32 @@ async def test_double_wildcard_blocked_by_check_constraint(
 
 @pytest.mark.asyncio
 async def test_grant_non_super_admin_forbidden(
-    client: TestClient, sample_nominal_roll, sample_personnel, sample_users,
+    client: TestClient, client_as, sample_nominal_roll, sample_personnel,
+    sample_users,
 ):
     """Regular admins cannot manage grants."""
+    client = await client_as("admin")
     user_id = str(sample_users["user"].id)
     response = client.post(
         f"/api/v1/access-control/nominal-rolls/{sample_nominal_roll.id}"
         f"/users/{user_id}/subunit-assignments",
-        params={"granted_by": str(sample_users["admin"].id), "user_role": "admin"},
         json={"unit": "Coy A", "sub_unit_1": "Platoon 1"},
     )
     assert response.status_code == 403
+    assert response.json()["detail"] == "Super admin access required"
 
 
 @pytest.mark.asyncio
 async def test_scope_options_list_roster_values(
-    client: TestClient, db_session, sample_nominal_roll, sample_personnel,
+    client: TestClient, client_as, db_session, sample_nominal_roll,
+    sample_personnel,
 ):
     """scope-options feeds the grant form: units present on the roster and
     each unit's sub-unit values; NULL sub-units contribute nothing."""
+    client = await client_as("super_admin")
     await _extra_personnel(db_session, sample_nominal_roll.id)
     response = client.get(
         f"/api/v1/access-control/nominal-rolls/{sample_nominal_roll.id}/scope-options",
-        params=SUPER_ADMIN,
     )
     assert response.status_code == 200
     data = response.json()
@@ -645,43 +651,38 @@ async def test_scope_options_list_roster_values(
 
 @pytest.mark.asyncio
 async def test_grant_and_revoke_unit_scoped_grant(
-    client: TestClient, sample_nominal_roll, sample_personnel, sample_users,
+    client: TestClient, client_as, sample_nominal_roll, sample_personnel,
+    sample_users,
 ):
     """Grant (Coy A, *) via the API, see it listed with the NR label,
     revoke it, see it gone."""
+    client = await client_as("super_admin")
     user_id = str(sample_users["user"].id)
     nr_id = str(sample_nominal_roll.id)
     url = f"/api/v1/access-control/nominal-rolls/{nr_id}/users/{user_id}/subunit-assignments"
 
-    created = client.post(url, params=GRANT_SA, json={"unit": "Coy A", "sub_unit_1": "*"})
+    created = client.post(url, json={"unit": "Coy A", "sub_unit_1": "*"})
     assert created.status_code == 201
     body = created.json()
     assert body["unit"] == "Coy A"
     assert body["sub_unit_1"] == "*"
 
-    duplicate = client.post(url, params=GRANT_SA, json={"unit": "Coy A", "sub_unit_1": "*"})
+    duplicate = client.post(url, json={"unit": "Coy A", "sub_unit_1": "*"})
     assert duplicate.status_code == 409
 
     listed = client.get(
         f"/api/v1/access-control/users/{user_id}/subunit-assignments",
-        params={"requesting_user_id": "super-admin-test-id",
-                "requesting_user_role": "super_admin"},
     )
     assert listed.status_code == 200
     entries = listed.json()
     assert len(entries) == 1
     assert entries[0]["nominal_roll_label"]  # display label present
 
-    revoked = client.delete(
-        f"{url}/{entries[0]['id']}",
-        params={"revoked_by": "super-admin-test-id", "user_role": "super_admin"},
-    )
+    revoked = client.delete(f"{url}/{entries[0]['id']}")
     assert revoked.status_code == 200
 
     listed_again = client.get(
         f"/api/v1/access-control/users/{user_id}/subunit-assignments",
-        params={"requesting_user_id": "super-admin-test-id",
-                "requesting_user_role": "super_admin"},
     )
     assert listed_again.json() == []
 

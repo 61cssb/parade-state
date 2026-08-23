@@ -12,8 +12,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from parade_state.auth.dependencies import require_super_admin_user
 from parade_state.db import get_db_session
-from parade_state.models import NominalRoll, Personnel, Tagging, TaggingEntry
+from parade_state.models import NominalRoll, Personnel, Tagging, TaggingEntry, User
 from parade_state.models.schemas import (
     TaggingCloneCreate,
     TaggingCloneResponse,
@@ -33,15 +34,6 @@ router = APIRouter()
 # ============================================================================
 # Constants & helpers
 # ============================================================================
-
-
-def _require_super_admin(user_role: str) -> None:
-    """Authorize super_admin only."""
-    if user_role != "super_admin":
-        raise HTTPException(
-            status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="Only super admins can manage taggings",
-        )
 
 
 def _snapshot_from_personnel(personnel: Personnel) -> dict:
@@ -347,8 +339,7 @@ async def copy_entries_by_pers_no(
 
 @router.get("", response_model=list[TaggingListItem])
 async def list_taggings(
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     nominal_roll_id: str | None = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
@@ -358,8 +349,8 @@ async def list_taggings(
 
     Returns summary rows (no entries); entry counts are computed via a
     correlated subquery so the list view doesn't need to load entries.
+    Caller identity is session-derived (issue 31).
     """
-    _require_super_admin(user_role)
 
     entry_count = (
         select(func.count())
@@ -402,17 +393,17 @@ async def list_taggings(
 )
 async def create_tagging(
     payload: TaggingCreate,
-    user_id: str = Query(..., description="User ID creating the tagging"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> TaggingResponse:
     """Create a tagging with optional initial entries.
 
     Under the 1:1 model taggings are auto-created on NR ingestion — this
     endpoint exists to backfill NRs that predate the auto-creation flow.
-    A 409 is returned if the NR already has a tagging.
+    A 409 is returned if the NR already has a tagging. Caller identity is
+    session-derived (issue 31).
     """
-    _require_super_admin(user_role)
+    user_id = str(user.id)
 
     # Validate NR exists.
     nr = (
@@ -468,12 +459,10 @@ async def create_tagging(
 @router.get("/{tagging_id}", response_model=TaggingResponse)
 async def get_tagging(
     tagging_id: str,
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> TaggingResponse:
     """Fetch a single tagging by id (with entries)."""
-    _require_super_admin(user_role)
     tagging = await _load_tagging_or_404(db, tagging_id, with_entries=True)
     entries_resp = await _build_entries_response(db, tagging.entries)
     return _tagging_to_response(tagging, entries_resp)
@@ -483,16 +472,16 @@ async def get_tagging(
 async def update_tagging(
     tagging_id: str,
     payload: TaggingUpdate,
-    user_id: str = Query(..., description="User ID making the update"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> TaggingResponse:
     """Update a tagging.
 
     Updates label/remarks. If ``entries`` is provided, the tagging's
     entries are full-replaced (existing entries deleted, new ones inserted).
+    Caller identity is session-derived (issue 31).
     """
-    _require_super_admin(user_role)
+    user_id = str(user.id)
     tagging = await _load_tagging_or_404(db, tagging_id, with_entries=True)
 
     if payload.label is not None:
@@ -530,8 +519,7 @@ async def update_tagging(
 @router.delete("/{tagging_id}")
 async def delete_tagging(
     tagging_id: str,
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Delete a tagging. Cascades to entries. Does not mutate the NR.
@@ -540,7 +528,6 @@ async def delete_tagging(
     would orphan the recorded history (per issue #4 Q5; under the 1:1 model
     the NR's attendance rows are the linkage).
     """
-    _require_super_admin(user_role)
     tagging = await _load_tagging_or_404(db, tagging_id, with_entries=False)
 
     from parade_state.models import Attendance
@@ -570,8 +557,7 @@ async def delete_tagging(
 async def clone_tagging(
     tagging_id: str,
     payload: TaggingCloneCreate,
-    user_id: str = Query(..., description="User ID cloning the tagging"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> TaggingCloneResponse:
     """Merge source tagging's entries into a target NR's existing tagging.
@@ -580,9 +566,10 @@ async def clone_tagging(
     creates a new tagging — it merges the source's entries into the target
     NR's tagging by ``pers_no`` matching. Personnel already on the target
     tagging are skipped (no clobber); source personnel with no pers_no
-    match in the target NR are surfaced in the response.
+    match in the target NR are surfaced in the response. Caller identity
+    is session-derived (issue 31).
     """
-    _require_super_admin(user_role)
+    user_id = str(user.id)
 
     source = await _load_tagging_or_404(db, tagging_id, with_entries=True)
 

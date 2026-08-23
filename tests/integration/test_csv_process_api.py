@@ -21,11 +21,6 @@ from parade_state.models import (
 )
 
 
-SUPER_ADMIN_PARAMS = {"user_role": "super_admin"}
-ADMIN_PARAMS = {"user_role": "admin"}
-USER_PARAMS = {"user_role": "user"}
-
-
 def _make_csv_bytes(rows: list[list[str]]) -> bytes:
     """Build an 18-column CSV matching ``CANONICAL_MAP`` in csv_constants."""
     header = [
@@ -74,7 +69,6 @@ async def uploaded_csv(
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("fixture_caa260220.csv", raw, "text/csv")},
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=super_admin_token_headers,
     )
     assert response.status_code == 200, response.text
@@ -96,8 +90,7 @@ async def test_process_csv_creates_nr_personnel_and_tagging(
     response = client.post(
         f"/api/v1/csv/{upload_id}/process",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
-        json={"created_by": admin_id},
+        json={},
     )
     assert response.status_code == 201, response.text
     data = response.json()
@@ -159,7 +152,7 @@ async def test_upload_with_auto_process_creates_nr_and_tagging(
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("auto_caa260301.csv", raw, "text/csv")},
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin", "auto_process": "true"},
+        params={"auto_process": "true"},
         headers=super_admin_token_headers,
     )
     assert response.status_code == 200, response.text
@@ -204,7 +197,7 @@ async def test_upload_auto_process_failure_keeps_upload_for_manual_step(
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("badcols_caa260302.csv", csv_content, "text/csv")},
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin", "auto_process": "true"},
+        params={"auto_process": "true"},
         headers=super_admin_token_headers,
     )
     assert response.status_code == 200, response.text
@@ -236,8 +229,7 @@ async def test_upload_auto_process_reports_duplicate_caa(
     first = client.post(
         f"/api/v1/csv/{upload_id}/process",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
-        json={"created_by": admin_id},
+        json={},
     )
     assert first.status_code == 201
 
@@ -251,7 +243,7 @@ async def test_upload_auto_process_reports_duplicate_caa(
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("second_caa260220.csv", raw, "text/csv")},
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin", "auto_process": "true"},
+        params={"auto_process": "true"},
         headers=super_admin_token_headers,
     )
     assert response.status_code == 200, response.text
@@ -282,7 +274,6 @@ async def test_upload_without_auto_process_stays_manual(
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("manual_caa260303.csv", raw, "text/csv")},
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=super_admin_token_headers,
     )
     assert response.status_code == 200, response.text
@@ -304,16 +295,14 @@ async def test_process_csv_refuses_already_processed(
     first = client.post(
         f"/api/v1/csv/{upload_id}/process",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
-        json={"created_by": admin_id},
+        json={},
     )
     assert first.status_code == 201
 
     second = client.post(
         f"/api/v1/csv/{upload_id}/process",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
-        json={"created_by": admin_id},
+        json={},
     )
     assert second.status_code == 409
 
@@ -340,8 +329,7 @@ async def test_process_csv_refuses_duplicate_caa(
     response = client.post(
         f"/api/v1/csv/{upload_id}/process",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
-        json={"created_by": admin_id},
+        json={},
     )
     assert response.status_code == 409
     assert "CAA 2026-02-20" in response.json()["detail"]
@@ -358,8 +346,7 @@ async def test_process_csv_as_user_forbidden(
     response = client.post(
         f"/api/v1/csv/{upload_id}/process",
         headers=user_token_headers,
-        params=USER_PARAMS,
-        json={"created_by": admin_id},
+        json={},
     )
     assert response.status_code == 403
 
@@ -398,10 +385,8 @@ async def test_process_csv_imports_taggings_from_source_nr(
     response = client.post(
         f"/api/v1/csv/{upload_id}/process",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
-            "created_by": admin_id,
-            "source_nominal_roll_id": str(sample_nominal_roll.id),
+                        "source_nominal_roll_id": str(sample_nominal_roll.id),
         },
     )
     assert response.status_code == 201, response.text
@@ -459,7 +444,6 @@ async def test_process_csv_imports_taggings_matching_pers_no(
     upload = client.post(
         "/api/v1/csv/upload",
         files={"file": ("fixture_caa260220.csv", raw, "text/csv")},
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=super_admin_token_headers,
     )
     upload_id = upload.json()["id"]
@@ -467,10 +451,8 @@ async def test_process_csv_imports_taggings_matching_pers_no(
     response = client.post(
         f"/api/v1/csv/{upload_id}/process",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
-            "created_by": admin_id,
-            "source_nominal_roll_id": str(sample_nominal_roll.id),
+                        "source_nominal_roll_id": str(sample_nominal_roll.id),
         },
     )
     assert response.status_code == 201, response.text
@@ -498,7 +480,6 @@ async def test_process_csv_blank_pers_no_stored_as_null(
     upload = client.post(
         "/api/v1/csv/upload",
         files={"file": ("fixture_caa260220.csv", raw, "text/csv")},
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=super_admin_token_headers,
     )
     upload_id = upload.json()["id"]
@@ -506,8 +487,7 @@ async def test_process_csv_blank_pers_no_stored_as_null(
     response = client.post(
         f"/api/v1/csv/{upload_id}/process",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
-        json={"created_by": admin_id},
+        json={},
     )
     assert response.status_code == 201, response.text
     data = response.json()
@@ -531,8 +511,7 @@ async def test_process_csv_unknown_upload_404(
     response = client.post(
         "/api/v1/csv/does-not-exist/process",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
-        json={"created_by": admin_id},
+        json={},
     )
     assert response.status_code == 404
 
@@ -548,7 +527,6 @@ async def test_process_csv_unparseable_filename_400(
     upload = client.post(
         "/api/v1/csv/upload",
         files={"file": ("no_caa_token.csv", raw, "text/csv")},
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=super_admin_token_headers,
     )
     upload_id = upload.json()["id"]
@@ -556,8 +534,7 @@ async def test_process_csv_unparseable_filename_400(
     response = client.post(
         f"/api/v1/csv/{upload_id}/process",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
-        json={"created_by": admin_id},
+        json={},
     )
     assert response.status_code == 400
     assert "caaYYMMDD" in response.json()["detail"]
@@ -600,7 +577,6 @@ async def test_process_csv_maps_callup_status_and_remarks(
     upload = client.post(
         "/api/v1/csv/upload",
         files={"file": ("fixture_caa260330.csv", raw, "text/csv")},
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
         headers=super_admin_token_headers,
     )
     upload_id = upload.json()["id"]
@@ -608,8 +584,7 @@ async def test_process_csv_maps_callup_status_and_remarks(
     response = client.post(
         f"/api/v1/csv/{upload_id}/process",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
-        json={"created_by": admin_id},
+        json={},
     )
     assert response.status_code == 201, response.text
     nr_id = response.json()["nominal_roll_id"]

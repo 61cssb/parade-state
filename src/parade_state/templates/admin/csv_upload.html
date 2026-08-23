@@ -93,8 +93,6 @@
 
 {% block scripts %}
 <script>
-    const ADMIN_USER_ID = "{{ user.id }}";
-    const ADMIN_USER_ROLE = "{{ user.role }}";
 
     async function uploadCsv() {
         const fileInput = document.getElementById('csvFile');
@@ -118,7 +116,7 @@
         formData.append('file', file);
 
         try {
-            const response = await fetch('/api/v1/csv/upload?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE + '&auto_process=true', {
+            const response = await fetch('/api/v1/csv/upload?&auto_process=true', {
                 method: 'POST',
                 body: formData,
             });
@@ -182,13 +180,13 @@
         btn.textContent = 'Processing...';
         statusDiv.innerHTML = '<p style="color: #6b7280;">Processing CSV into Nominal Roll...</p>';
 
-        const body = { created_by: ADMIN_USER_ID };
+        const body = {};
         if (sourceNr) {
             body.source_nominal_roll_id = sourceNr;
         }
 
         try {
-            const response = await fetch('/api/v1/csv/' + uploadId + '/process?user_role=' + ADMIN_USER_ROLE, {
+            const response = await fetch('/api/v1/csv/' + uploadId + '/process', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),

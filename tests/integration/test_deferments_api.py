@@ -13,10 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from parade_state.models import Deferment, Personnel
 
 
-# Common query params reused across endpoints.
-SUPER_ADMIN_PARAMS = {"user_id": "super-admin-test-id", "user_role": "super_admin"}
-ADMIN_PARAMS = {"user_id": "admin-user-id", "user_role": "admin"}
-USER_PARAMS = {"user_id": "regular-user-id", "user_role": "user"}
 
 
 # ============================================================================
@@ -32,10 +28,9 @@ async def test_admin_role_cannot_list_deferments(
     response = client.get(
         "/api/v1/deferments",
         headers=admin_token_headers,
-        params=ADMIN_PARAMS,
     )
     assert response.status_code == 403
-    assert "super admins" in response.json()["detail"].lower()
+    assert response.json()["detail"] == "Super admin access required"
 
 
 @pytest.mark.asyncio
@@ -46,7 +41,6 @@ async def test_regular_user_cannot_create_deferment(
     response = client.post(
         "/api/v1/deferments",
         headers=user_token_headers,
-        params=USER_PARAMS,
         json={"personnel_id": str(sample_personnel[0].id), "reason": "Medical Grounds"},
     )
     assert response.status_code == 403
@@ -66,7 +60,6 @@ async def test_create_deferment_snapshots_rank_and_subunit(
     response = client.post(
         "/api/v1/deferments",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"personnel_id": str(person.id), "reason": "Medical Grounds"},
     )
     assert response.status_code == 201
@@ -85,7 +78,6 @@ async def test_create_deferment_for_nonexistent_personnel_404(
     response = client.post(
         "/api/v1/deferments",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"personnel_id": "nonexistent-id", "reason": "Work"},
     )
     assert response.status_code == 404
@@ -102,7 +94,6 @@ async def test_create_deferment_for_archived_personnel_400(
     response = client.post(
         "/api/v1/deferments",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"personnel_id": str(person.id), "reason": "Work"},
     )
     assert response.status_code == 400
@@ -137,7 +128,6 @@ async def test_approve_deferment_sets_personnel_deferred(
     create = client.post(
         "/api/v1/deferments",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"personnel_id": str(person.id), "reason": "Medical Grounds"},
     )
     deferment_id = create.json()["id"]
@@ -145,7 +135,6 @@ async def test_approve_deferment_sets_personnel_deferred(
     response = client.patch(
         f"/api/v1/deferments/{deferment_id}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"status": "Approved"},
     )
     assert response.status_code == 200
@@ -164,7 +153,6 @@ async def test_approved_to_non_neutral_reverts_to_called_up(
     deferment_id = client.post(
         "/api/v1/deferments",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"personnel_id": str(person.id), "reason": "Work"},
     ).json()["id"]
 
@@ -172,7 +160,6 @@ async def test_approved_to_non_neutral_reverts_to_called_up(
     client.patch(
         f"/api/v1/deferments/{deferment_id}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"status": "Approved"},
     )
     assert (await _refresh_personnel(db_session, str(person.id))).callup_status == "Deferred"
@@ -181,7 +168,6 @@ async def test_approved_to_non_neutral_reverts_to_called_up(
     client.patch(
         f"/api/v1/deferments/{deferment_id}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"status": new_status},
     )
     assert (await _refresh_personnel(db_session, str(person.id))).callup_status == "Called Up"
@@ -197,14 +183,12 @@ async def test_approved_to_neutral_status_leaves_callup_unchanged(
     deferment_id = client.post(
         "/api/v1/deferments",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"personnel_id": str(person.id), "reason": "Work"},
     ).json()["id"]
 
     client.patch(
         f"/api/v1/deferments/{deferment_id}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"status": "Approved"},
     )
     assert (await _refresh_personnel(db_session, str(person.id))).callup_status == "Deferred"
@@ -212,7 +196,6 @@ async def test_approved_to_neutral_status_leaves_callup_unchanged(
     client.patch(
         f"/api/v1/deferments/{deferment_id}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"status": neutral_status},
     )
     # Stays Deferred — neutral statuses don't touch callup_status
@@ -227,7 +210,6 @@ async def test_transition_between_non_approved_statuses_no_callup_change(
     deferment_id = client.post(
         "/api/v1/deferments",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"personnel_id": str(person.id), "reason": "Work"},
     ).json()["id"]
 
@@ -235,7 +217,6 @@ async def test_transition_between_non_approved_statuses_no_callup_change(
         client.patch(
             f"/api/v1/deferments/{deferment_id}",
             headers=super_admin_token_headers,
-            params=SUPER_ADMIN_PARAMS,
             json={"status": new_status},
         )
         assert (
@@ -257,14 +238,12 @@ async def test_delete_approved_deferment_reverts_callup(
     deferment_id = client.post(
         "/api/v1/deferments",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"personnel_id": str(person.id), "reason": "Work"},
     ).json()["id"]
 
     client.patch(
         f"/api/v1/deferments/{deferment_id}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"status": "Approved"},
     )
     assert (await _refresh_personnel(db_session, str(person.id))).callup_status == "Deferred"
@@ -272,7 +251,6 @@ async def test_delete_approved_deferment_reverts_callup(
     response = client.delete(
         f"/api/v1/deferments/{deferment_id}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
     )
     assert response.status_code == 200
     assert (await _refresh_personnel(db_session, str(person.id))).callup_status == "Called Up"
@@ -286,7 +264,6 @@ async def test_delete_non_approved_deferment_no_callup_change(
     deferment_id = client.post(
         "/api/v1/deferments",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"personnel_id": str(person.id), "reason": "Work"},
     ).json()["id"]
     # Status stays "Pending action" → delete should not change callup_status
@@ -295,7 +272,6 @@ async def test_delete_non_approved_deferment_no_callup_change(
     response = client.delete(
         f"/api/v1/deferments/{deferment_id}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
     )
     assert response.status_code == 200
     assert (await _refresh_personnel(db_session, str(person.id))).callup_status == before
@@ -314,26 +290,23 @@ async def test_list_filters_by_status(
     client.post(
         "/api/v1/deferments",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"personnel_id": str(p1.id), "reason": "Work"},
     )
     approved_id = client.post(
         "/api/v1/deferments",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"personnel_id": str(p2.id), "reason": "Medical Grounds"},
     ).json()["id"]
     client.patch(
         f"/api/v1/deferments/{approved_id}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"status": "Approved"},
     )
 
     response = client.get(
         "/api/v1/deferments",
         headers=super_admin_token_headers,
-        params={**SUPER_ADMIN_PARAMS, "status": "Approved"},
+        params={"status": "Approved"},
     )
     assert response.status_code == 200
     items = response.json()

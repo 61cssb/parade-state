@@ -13,6 +13,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.api.subunit_access import WILDCARD
+from parade_state.auth.dependencies import (
+    require_authenticated_user,
+    require_super_admin_user,
+)
 from parade_state.db import get_db_session
 from parade_state.models import (
     NominalRoll,
@@ -31,15 +35,6 @@ router = APIRouter()
 # ============================================================================
 # Scope grants (NR-scoped access — issues #4 and #28)
 # ============================================================================
-
-
-def _require_super_admin(role: str) -> None:
-    """Authorize super_admin only."""
-    if role != "super_admin":
-        raise HTTPException(
-            status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="Only super admins can manage scope assignments",
-        )
 
 
 async def _load_nr_or_404(db: AsyncSession, nominal_roll_id: str) -> NominalRoll:
@@ -130,8 +125,7 @@ async def grant_subunit_assignment(
     nominal_roll_id: str,
     user_id: str,
     payload: UserSubunitAssignmentCreate,
-    granted_by: str = Query(..., description="User ID granting the assignment"),
-    user_role: str = Query(..., description="Role of granting user"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Grant a user scope for one (unit, sub_unit_1) pair on an NR.
@@ -139,9 +133,9 @@ async def grant_subunit_assignment(
     Super-admin only. ``*`` wildcards a column (unit='*' = any unit,
     sub_unit_1='*' = every sub-unit of the unit), but both must not be
     wildcards. Concrete values must match values present on the NR's
-    roster (case-sensitive).
+    roster (case-sensitive). Caller identity is session-derived
+    (issue 31); ``created_by`` is stamped from the session user.
     """
-    _require_super_admin(user_role)
     await _load_nr_or_404(db, nominal_roll_id)
 
     target = (
@@ -177,7 +171,7 @@ async def grant_subunit_assignment(
         nominal_roll_id=nominal_roll_id,
         unit=payload.unit,
         sub_unit_1=payload.sub_unit_1,
-        created_by=granted_by,
+        created_by=str(user.id),
     )
     db.add(assignment)
     try:
@@ -197,8 +191,7 @@ async def grant_subunit_assignment(
 )
 async def nr_scope_options(
     nominal_roll_id: str,
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="Role of requesting user"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Units and unit→sub_unit_1 values present on an NR's roster.
@@ -208,7 +201,6 @@ async def nr_scope_options(
     sub-unit value — such personnel are covered by sub_unit_1='*'
     grants, not by a NULL-valued grant.
     """
-    _require_super_admin(user_role)
     await _load_nr_or_404(db, nominal_roll_id)
 
     locations = await _roster_locations(db, nominal_roll_id)
@@ -229,8 +221,7 @@ async def nr_scope_options(
 )
 async def list_subunit_assignments_for_nr(
     nominal_roll_id: str,
-    requesting_user_id: str = Query(..., description="User ID making the request"),
-    requesting_user_role: str = Query(..., description="Role of requesting user"),
+    user: User = Depends(require_authenticated_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List all scope grants on an NR (with the NR's display label).
@@ -241,10 +232,8 @@ async def list_subunit_assignments_for_nr(
     query = select(UserSubunitAssignment).where(
         UserSubunitAssignment.nominal_roll_id == nominal_roll_id
     )
-    if requesting_user_role != "super_admin":
-        query = query.where(
-            UserSubunitAssignment.user_id == requesting_user_id
-        )
+    if user.role != "super_admin":
+        query = query.where(UserSubunitAssignment.user_id == str(user.id))
     result = await db.execute(query)
     label = _nr_display_label(nr)
     return [
@@ -261,15 +250,15 @@ async def list_subunit_assignments_for_nr(
 )
 async def list_subunit_assignments_for_user(
     user_id: str,
-    requesting_user_id: str = Query(..., description="User ID making the request"),
-    requesting_user_role: str = Query(..., description="Role of requesting user"),
+    user: User = Depends(require_authenticated_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List a user's scope grants across all NRs (with display labels).
 
-    Users see only their own. Super-admin sees any user.
+    Users see only their own. Super-admin sees any user. Caller identity
+    is session-derived (issue 31).
     """
-    if requesting_user_id != user_id and requesting_user_role != "super_admin":
+    if str(user.id) != user_id and user.role != "super_admin":
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
             detail="You can only view your own scope assignments",
@@ -297,12 +286,11 @@ async def revoke_subunit_assignment(
     nominal_roll_id: str,
     user_id: str,
     assignment_id: str,
-    revoked_by: str = Query(..., description="User ID revoking the assignment"),
-    user_role: str = Query(..., description="Role of revoking user"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Revoke a scope grant. Super-admin only."""
-    _require_super_admin(user_role)
+
     assignment = (
         await db.execute(
             select(UserSubunitAssignment).where(

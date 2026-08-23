@@ -44,8 +44,6 @@
     </style>
 
     <script>
-        const ADMIN_USER_ID = "{{ user.id }}";
-        const ADMIN_USER_ROLE = "{{ user.role }}";
         const CONFIRMATION_WORD = "PURGE";
 
         const confirmInput = document.getElementById('confirmText');
@@ -66,8 +64,6 @@
 
             const params = new URLSearchParams({
                 confirmation: confirmInput.value.trim(),
-                user_id: ADMIN_USER_ID,
-                user_role: ADMIN_USER_ROLE,
             });
 
             try {

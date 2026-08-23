@@ -28,6 +28,7 @@ async def test_list_audit_logs_empty(
 @pytest.mark.asyncio
 async def test_list_audit_logs_after_csv_upload(
     client: TestClient,
+    super_admin_token_headers: dict[str, str],
     admin_token_headers: dict[str, str],
 ):
     """Test that CSV upload creates an audit entry visible in the list."""
@@ -36,8 +37,7 @@ async def test_list_audit_logs_after_csv_upload(
     upload_response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("test.csv", csv_content, "text/csv")},
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
-        headers=admin_token_headers,
+        headers=super_admin_token_headers,
     )
     assert upload_response.status_code == 200
 

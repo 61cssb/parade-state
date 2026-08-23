@@ -9,8 +9,9 @@ from fastapi import status as http_status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from parade_state.auth.dependencies import require_super_admin_user
 from parade_state.db import get_db_session
-from parade_state.models import Deferment, Personnel
+from parade_state.models import Deferment, Personnel, User
 from parade_state.models.schemas import (
     DefermentCreate,
     DefermentResponse,
@@ -28,15 +29,6 @@ router = APIRouter()
 # Deferment statuses that belong to a later workflow phase. Setting a deferment
 # to either of these does NOT update personnel.callup_status.
 _DEFERMENT_STATUSES_NEUTRAL = {"Not called up", "Do not call up"}
-
-
-def _require_super_admin(user_role: str) -> None:
-    """Authorize super_admin only."""
-    if user_role != "super_admin":
-        raise HTTPException(
-            status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="Only super admins can manage deferments",
-        )
 
 
 def _apply_callup_transition(
@@ -98,8 +90,7 @@ def _to_response(
 
 @router.get("", response_model=list[DefermentResponse])
 async def list_deferments(
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     personnel_id: str | None = Query(None),
     nominal_roll_id: str | None = Query(None),
     status_filter: str | None = Query(None, alias="status"),
@@ -113,7 +104,6 @@ async def list_deferments(
     Requires super_admin role. ``nominal_roll_id`` filters via the deferment's
     linked personnel record.
     """
-    _require_super_admin(user_role)
 
     query = (
         select(Deferment, Personnel.nominal_roll_id)
@@ -138,8 +128,7 @@ async def list_deferments(
 @router.post("", response_model=DefermentResponse, status_code=http_status.HTTP_201_CREATED)
 async def create_deferment(
     payload: DefermentCreate,
-    user_id: str = Query(..., description="User ID creating the deferment"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> DefermentResponse:
     """Create a new deferment.
@@ -148,7 +137,7 @@ async def create_deferment(
     linked personnel at creation time. New deferments start with
     ``status="Pending action"`` so callup_status is not affected.
     """
-    _require_super_admin(user_role)
+    user_id = str(user.id)
 
     result = await db.execute(
         select(Personnel).where(Personnel.id == payload.personnel_id)
@@ -188,12 +177,10 @@ async def create_deferment(
 @router.get("/{deferment_id}", response_model=DefermentResponse)
 async def get_deferment(
     deferment_id: str,
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> DefermentResponse:
     """Fetch a single deferment by id."""
-    _require_super_admin(user_role)
 
     row = (
         await db.execute(
@@ -215,8 +202,7 @@ async def get_deferment(
 async def update_deferment(
     deferment_id: str,
     payload: DefermentUpdate,
-    user_id: str = Query(..., description="User ID making the update"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> DefermentResponse:
     """Update a deferment.
@@ -224,7 +210,7 @@ async def update_deferment(
     Status changes drive the linked personnel's ``callup_status`` via
     ``_apply_callup_transition``.
     """
-    _require_super_admin(user_role)
+    user_id = str(user.id)
 
     result = await db.execute(
         select(Deferment).where(Deferment.id == deferment_id)
@@ -279,8 +265,7 @@ async def update_deferment(
 @router.delete("/{deferment_id}")
 async def delete_deferment(
     deferment_id: str,
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Delete a deferment.
@@ -288,7 +273,6 @@ async def delete_deferment(
     If the deferment was Approved, revert the linked personnel's
     ``callup_status`` to ``Called Up``.
     """
-    _require_super_admin(user_role)
 
     result = await db.execute(
         select(Deferment).where(Deferment.id == deferment_id)

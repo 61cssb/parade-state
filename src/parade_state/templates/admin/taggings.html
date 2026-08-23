@@ -188,8 +188,6 @@
 
 {% block scripts %}
 <script>
-    const ADMIN_USER_ID = "{{ user.id }}";
-    const ADMIN_USER_ROLE = "{{ user.role }}";
     const ACTIVE_NOMINAL_ROLL_ID = "{{ nominal_roll_filter }}";
     const ACTIVE_TAGGING_ID = "{{ tagging.id if tagging else '' }}";
     let editId = null;
@@ -220,8 +218,6 @@
     async function loadPersonnel() {
         const params = new URLSearchParams({
             nominal_roll_id: ACTIVE_NOMINAL_ROLL_ID,
-            user_id: ADMIN_USER_ID,
-            user_role: ADMIN_USER_ROLE,
             limit: '500',
         });
         const res = await fetch('/api/v1/personnel?' + params.toString());
@@ -378,7 +374,7 @@
         try {
             const [personnel, taggingRes] = await Promise.all([
                 loadPersonnel(),
-                fetch('/api/v1/taggings/' + id + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE),
+                fetch('/api/v1/taggings/' + id + '),
             ]);
             if (!taggingRes.ok) throw new Error('Failed to load tagging');
             const tagging = await taggingRes.json();
@@ -459,7 +455,7 @@
 
         try {
             const res = await fetch(
-                '/api/v1/taggings/' + editId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/taggings/' + editId + ',
                 { method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) }
             );
             if (res.ok) {
@@ -498,8 +494,7 @@
         // We need the source tagging id — load via list endpoint filtered by NR.
         try {
             const listRes = await fetch(
-                '/api/v1/taggings?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE +
-                '&nominal_roll_id=' + encodeURIComponent(sourceNr)
+                '/api/v1/taggings?nominal_roll_id=' + encodeURIComponent(sourceNr)
             );
             if (!listRes.ok) throw new Error('Failed to load source taggings');
             const list = await listRes.json();
@@ -510,7 +505,7 @@
             const sourceTaggingId = list[0].id;
 
             const res = await fetch(
-                '/api/v1/taggings/' + sourceTaggingId + '/clone?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/taggings/' + sourceTaggingId + '/clone',
                 { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ target_nominal_roll_id: ACTIVE_NOMINAL_ROLL_ID }) }
             );
             if (res.ok) {

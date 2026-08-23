@@ -243,8 +243,6 @@
 
     // --- Scope grants (issue #28) — super-admin only; the API enforces it. ---
 
-    const CURRENT_USER_ID = '{{ user.id | e }}';
-    const CURRENT_USER_ROLE = '{{ user.role | e }}';
     const scopeOptionsCache = {};
     const scopeAssignmentsCache = {};
 
@@ -310,8 +308,6 @@
 
     async function loadScopeAssignments(userId) {
         const params = new URLSearchParams({
-            requesting_user_id: CURRENT_USER_ID,
-            requesting_user_role: CURRENT_USER_ROLE,
         });
         const response = await fetch(
             '/api/v1/access-control/users/' + userId + '/subunit-assignments?' + params
@@ -337,8 +333,6 @@
         }
         if (!scopeOptionsCache[nrId]) {
             const params = new URLSearchParams({
-                user_id: CURRENT_USER_ID,
-                user_role: CURRENT_USER_ROLE,
             });
             const response = await fetch(
                 '/api/v1/access-control/nominal-rolls/' + nrId + '/scope-options?' + params
@@ -395,8 +389,6 @@
             return;
         }
         const params = new URLSearchParams({
-            granted_by: CURRENT_USER_ID,
-            user_role: CURRENT_USER_ROLE,
         });
         const response = await fetch(
             '/api/v1/access-control/nominal-rolls/' + nrId +
@@ -421,8 +413,6 @@
         }
         const nrId = assignmentNrByUser(userId, assignmentId);
         const params = new URLSearchParams({
-            revoked_by: CURRENT_USER_ID,
-            user_role: CURRENT_USER_ROLE,
         });
         const response = await fetch(
             '/api/v1/access-control/nominal-rolls/' + nrId +

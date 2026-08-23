@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from parade_state.auth.dependencies import require_admin_user, require_super_admin_user
 from parade_state.db import get_db_session
 from parade_state.models import (
     CALLUP_STATUSES,
@@ -103,8 +104,7 @@ def _parse_csv_columns(raw_bytes: bytes) -> tuple[list[str], int]:
 @router.post("/upload", response_model=CsvUploadResponse)
 async def upload_csv(
     file: UploadFile,
-    user_id: str = Query(..., description="User ID uploading the file"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     auto_process: bool = Query(
         False,
         description=(
@@ -128,22 +128,12 @@ async def upload_csv(
     validation passes; any processing failure is reported via
     ``process_error`` without failing the upload itself.
 
-    Super-admin only (issue #28 tightening): ingesting a CSV creates a
-    whole new NR — an NR-lifecycle operation like create/delete/activate,
-    not a scoped write, so regular admins no longer perform it.
+    Caller identity is session-derived (issue 31). Super-admin only
+    (issue #28 tightening): ingesting a CSV creates a whole new NR — an
+    NR-lifecycle operation like create/delete/activate, not a scoped
+    write, so regular admins no longer perform it.
     """
-    if user_role != "super_admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only super admins can upload CSV files",
-        )
-
-    user_result = await db.execute(select(User).where(User.id == user_id))
-    if not user_result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
+    user_id = str(user.id)
 
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(
@@ -247,7 +237,9 @@ async def upload_csv(
     if auto_process:
         try:
             process_result = await _process_upload_into_nr(
-                db, upload, CsvUploadProcessRequest(created_by=user_id)
+                db, upload,
+                CsvUploadProcessRequest(source_nominal_roll_id=None),
+                created_by=user_id,
             )
         except HTTPException as exc:
             # The upload is stored and committed; only the processing
@@ -275,21 +267,14 @@ async def upload_csv(
 async def list_csv_uploads(
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> list[CsvUploadListItem]:
     """List recent CSV uploads (metadata only, no raw_content).
 
-    Returns a paginated list ordered by uploaded_at desc.
-
-    Requires admin or super_admin role.
+    Returns a paginated list ordered by uploaded_at desc. Caller identity
+    is session-derived (issue 31); requires admin or super_admin.
     """
-    if user_role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can view CSV uploads",
-        )
 
     query = (
         select(
@@ -363,7 +348,7 @@ def _parse_csv_rows(raw_bytes: bytes) -> tuple[list[str], list[list[str]]]:
 async def process_csv_upload(
     upload_id: str,
     payload: CsvUploadProcessRequest,
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> CsvUploadProcessResponse:
     """Process a stored CsvUpload into a full NominalRoll pipeline.
@@ -378,14 +363,12 @@ async def process_csv_upload(
     Personnel in the source tagging with no pers_no match in the new NR
     are surfaced in the response.
 
+    Caller identity is session-derived (issue 31); provenance
+    (``created_by``) is stamped from the session, never the body.
     Super-admin only (issue #28 tightening): processing mints a whole new
     NR — an NR-lifecycle operation, not a scoped write.
     """
-    if user_role != "super_admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only super admins can process CSV uploads",
-        )
+    user_id = str(user.id)
 
     # Load the upload.
     upload = (
@@ -397,11 +380,11 @@ async def process_csv_upload(
             detail=f"CSV upload not found: {upload_id}",
         )
 
-    return await _process_upload_into_nr(db, upload, payload)
+    return await _process_upload_into_nr(db, upload, payload, created_by=user_id)
 
 
 async def _process_upload_into_nr(
-    db: AsyncSession, upload: CsvUpload, payload: CsvUploadProcessRequest
+    db: AsyncSession, upload: CsvUpload, payload: CsvUploadProcessRequest, created_by: str
 ) -> CsvUploadProcessResponse:
     """Core CSV → NominalRoll pipeline, shared by the process endpoint
     and the upload endpoint's auto-processing.
@@ -457,7 +440,6 @@ async def _process_upload_into_nr(
             ),
         )
 
-    created_by = payload.created_by
 
     # Create the NominalRoll (personnel_count set after Personnel insert).
     nominal_roll = NominalRoll(
