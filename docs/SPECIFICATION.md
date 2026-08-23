@@ -630,8 +630,8 @@ DiscussionComment
 | Delete post (cascades comments) or comment | no (403) | yes |
 
 Author-only edits are enforced server-side: the API derives identity from
-the session token (`require_admin_user_flexible`), never from
-client-supplied user ids.
+the session token (`require_admin_user`), never from client-supplied user
+ids.
 
 #### 3.6.4 Board semantics
 

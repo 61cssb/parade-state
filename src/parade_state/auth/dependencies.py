@@ -5,14 +5,15 @@ to handle authentication and authorization.
 
 ## Key Dependencies
 
-### Basic Authentication
-- `get_current_user` - Extract and validate authenticated user from request
-- `get_current_user_optional` - Get user without requiring authentication
+### Authentication
+- `require_authenticated_user` - Resolve and validate the session user
 
 ### Authorization
 - `require_admin_user` - Require admin or super_admin role
 - `require_super_admin_user` - Require super_admin role
-- `check_access_level` - Factory for custom access level requirements
+
+Caller identity is session-derived on every endpoint (issue 31): Bearer
+header or HttpOnly cookie only — never query params or request bodies.
 
 ## Usage
 
@@ -87,55 +88,6 @@ def _resolve_session_token(
     if credentials and credentials.credentials:
         return credentials.credentials
     return cookies.get_auth_token(request)
-
-
-async def get_current_user_optional(
-    request: Request,
-) -> User | None:
-    """Get current user from session without requiring authentication.
-
-    Extracts the session token from the Bearer header or the auth cookie
-    and validates it, but returns None instead of raising exception if not
-    authenticated.
-
-    Useful for endpoints that have different behavior for authenticated
-    vs anonymous users.
-
-    Args:
-        request: FastAPI Request object
-
-    Returns:
-        User object if authenticated and valid, None otherwise
-
-    Example:
-        ```python
-        @router.get("/content")
-        async def get_content(
-            current_user: User | None = Depends(get_current_user_optional),
-        ):
-            if current_user:
-                return {"content": "premium", "user": current_user.name}
-            else:
-                return {"content": "free"}
-        ```
-    """
-    token = _resolve_session_token(request, None)
-
-    if not token:
-        return None
-
-    async for db in get_db_session():
-        session = await get_valid_session(db, token, update_last_accessed=True)
-        if not session:
-            return None
-
-        result = await db.execute(select(User).where(User.id == session.user_id))
-        user = result.scalar_one_or_none()
-
-        if user and user.status == "active":
-            return user
-
-    return None
 
 
 async def require_authenticated_user(
@@ -295,46 +247,3 @@ async def require_super_admin_user(
     return user
 
 
-def check_access_level(required_access_level_order: int):
-    """Dependency factory to check user access level.
-
-    Creates a dependency that validates the user has an access level
-    with at least the specified order value.
-
-    Args:
-        required_access_level_order: Minimum access level order required
-
-    Returns:
-        Dependency function that validates access level
-
-    Example:
-        ```python
-        # Create dependency for level 3 access
-        require_level_3 = check_access_level(3)
-
-        @router.get("/sensitive-data")
-        async def sensitive_data(
-            current_user: User = Depends(require_level_3),
-        ):
-            # current_user.access_level.level_order >= 3
-            return {"sensitive": "data"}
-        ```
-    """
-
-    async def check_access(
-        request: Request,
-        credentials: HTTPAuthorizationCredentials | None = Depends(security),
-    ) -> User:
-        user = await require_authenticated_user(request, credentials)
-
-        if not user.access_level_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No access level assigned",
-            )
-
-        # This would require fetching the AccessLevel to check the level_order
-        # For now, just ensure user has some access level
-        return user
-
-    return check_access

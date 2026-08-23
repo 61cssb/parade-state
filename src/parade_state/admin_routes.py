@@ -8,10 +8,7 @@ from urllib.parse import urlsplit
 
 from parade_state.api.subunit_access import get_scope_grants, grant_matches
 from parade_state.api.tagging import _load_nr_tagging
-from parade_state.auth.admin_dependencies import (
-    get_current_admin_user_optional,
-    require_admin_user_flexible,
-)
+from parade_state.auth.admin_dependencies import get_current_admin_user_optional
 from parade_state.db import get_session_maker
 from parade_state.features import require_feature
 from parade_state.models import (
@@ -34,7 +31,6 @@ from parade_state.models import (
 from parade_state.utils import markdown, utc_dt
 
 router = APIRouter()
-depends_admin = Depends(require_admin_user_flexible)
 
 # Audit log filter dropdown options (mirrors AuditLog model enum values)
 AUDIT_ENTITY_TYPES = [
