@@ -362,9 +362,8 @@ async def test_roll_management_panel_placement(
 @pytest.mark.asyncio
 async def test_manual_personnel_appears_in_attendance_view(
     client: TestClient,
-    admin_token_headers: dict[str, str],
+    super_admin_token_headers: dict[str, str],
     sample_attendance_scope,
-    sample_users,
     db_session,
     monkeypatch,
 ):
@@ -374,8 +373,6 @@ async def test_manual_personnel_appears_in_attendance_view(
     from parade_state.web import attendance as web_attendance
 
     nr = sample_attendance_scope
-    admin_id = str(sample_users["admin"].id)
-    super_params = {"user_id": admin_id, "user_role": "super_admin"}
 
     def _add(name: str, **overrides) -> dict:
         payload = {
@@ -387,8 +384,7 @@ async def test_manual_personnel_appears_in_attendance_view(
         payload.update(overrides)
         response = client.post(
             "/api/v1/personnel",
-            headers=admin_token_headers,
-            params=super_params,
+            headers=super_admin_token_headers,
             json=payload,
         )
         assert response.status_code == 201, response.text

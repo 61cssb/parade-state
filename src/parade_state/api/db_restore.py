@@ -2,9 +2,11 @@
 
 import asyncio
 
-from fastapi import APIRouter, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 
 from parade_state import db
+from parade_state.auth.dependencies import require_super_admin_user
+from parade_state.models import User
 from parade_state.config import get_settings
 from parade_state.db.restore import RestoreError, restore_from_dump
 
@@ -21,8 +23,7 @@ _restore_lock = asyncio.Lock()
 async def restore_database(
     file: UploadFile,
     confirmation: str = Query(..., description="Must equal the database name"),
-    user_id: str = Query(..., description="User ID triggering the restore"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
 ) -> dict:
     """Restore the application database from a decrypted dump archive.
 
@@ -31,13 +32,8 @@ async def restore_database(
     keys) and performs a verify-then-swap restore. Returns the
     verification summary.
 
-    Requires super_admin role.
+    Caller identity is session-derived (issue 31); requires super_admin.
     """
-    if user_role != "super_admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only super admins can restore the database",
-        )
 
     settings = get_settings()
     if not settings.RESTORE_ENABLED:
@@ -89,7 +85,7 @@ async def restore_database(
 
     async with _restore_lock:
         try:
-            return await restore_from_dump(dump, operator_id=user_id)
+            return await restore_from_dump(dump, operator_id=str(user.id))
         except RestoreError as exc:
             raise HTTPException(
                 status_code=exc.status_code,

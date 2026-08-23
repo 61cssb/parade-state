@@ -12,7 +12,7 @@ from parade_state.models import AuditLog, CsvUpload
 @pytest.mark.asyncio
 async def test_upload_csv_success(
     client: TestClient,
-    admin_token_headers: dict[str, str],
+    super_admin_token_headers: dict[str, str],
     admin_id: str,
     db_session,
 ):
@@ -22,8 +22,7 @@ async def test_upload_csv_success(
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("test.csv", csv_content, "text/csv")},
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
-        headers=admin_token_headers,
+        headers=super_admin_token_headers,
     )
 
     assert response.status_code == 200
@@ -61,7 +60,7 @@ async def test_upload_csv_success(
 @pytest.mark.asyncio
 async def test_upload_csv_duplicate_detection(
     client: TestClient,
-    admin_token_headers: dict[str, str],
+    super_admin_token_headers: dict[str, str],
     admin_id: str,
 ):
     """Test that uploading the same file twice returns is_duplicate=True."""
@@ -71,8 +70,7 @@ async def test_upload_csv_duplicate_detection(
     response1 = client.post(
         "/api/v1/csv/upload",
         files={"file": ("test.csv", csv_content, "text/csv")},
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
-        headers=admin_token_headers,
+        headers=super_admin_token_headers,
     )
     assert response1.status_code == 200
     assert response1.json()["is_duplicate"] is False
@@ -81,8 +79,7 @@ async def test_upload_csv_duplicate_detection(
     response2 = client.post(
         "/api/v1/csv/upload",
         files={"file": ("test_copy.csv", csv_content, "text/csv")},
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
-        headers=admin_token_headers,
+        headers=super_admin_token_headers,
     )
     assert response2.status_code == 200
     data2 = response2.json()
@@ -103,26 +100,24 @@ async def test_upload_csv_permission_denied(
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("test.csv", csv_content, "text/csv")},
-        params={"user_id": user_id, "user_role": "user"},
         headers=user_token_headers,
     )
 
     assert response.status_code == 403
-    assert "Only super admins" in response.json()["detail"]
+    assert response.json()["detail"] == "Super admin access required"
 
 
 @pytest.mark.asyncio
 async def test_upload_csv_empty_file(
     client: TestClient,
-    admin_token_headers: dict[str, str],
+    super_admin_token_headers: dict[str, str],
     admin_id: str,
 ):
     """Test that empty files are rejected."""
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("empty.csv", b"", "text/csv")},
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
-        headers=admin_token_headers,
+        headers=super_admin_token_headers,
     )
 
     assert response.status_code == 400
@@ -132,15 +127,14 @@ async def test_upload_csv_empty_file(
 @pytest.mark.asyncio
 async def test_upload_csv_wrong_extension(
     client: TestClient,
-    admin_token_headers: dict[str, str],
+    super_admin_token_headers: dict[str, str],
     admin_id: str,
 ):
     """Test that non-CSV files are rejected."""
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("test.txt", b"some content", "text/plain")},
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
-        headers=admin_token_headers,
+        headers=super_admin_token_headers,
     )
 
     assert response.status_code == 400
@@ -148,31 +142,39 @@ async def test_upload_csv_wrong_extension(
 
 
 @pytest.mark.asyncio
-async def test_upload_csv_user_not_found(
+async def test_upload_csv_deleted_user_session_401(
     client: TestClient,
-    admin_token_headers: dict[str, str],
+    client_as,
+    db_session,
 ):
-    """Test that uploading with a non-existent user ID returns 404."""
+    """A session whose user row no longer exists is rejected with 401.
+
+    Pre-#31 the endpoint 404'd on a nonexistent ``user_id`` param; with
+    session-derived identity the dependency re-resolves the user on every
+    request, so deleting the user invalidates the session immediately.
+    """
     csv_content = b"rank,name\nPTE,John\n"
+
+    from sqlalchemy import delete as sa_delete
+
+    from parade_state.models import User
+
+    client = await client_as("super_admin")
+    await db_session.execute(sa_delete(User).where(User.id == "super-admin-test-id"))
+    await db_session.commit()
 
     response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("test.csv", csv_content, "text/csv")},
-        params={
-            "user_id": "nonexistent-user-id-12345",
-            "user_role": "super_admin",
-        },
-        headers=admin_token_headers,
     )
 
-    assert response.status_code == 404
-    assert "User not found" in response.json()["detail"]
+    assert response.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_list_csv_uploads(
     client: TestClient,
-    admin_token_headers: dict[str, str],
+    super_admin_token_headers: dict[str, str],
     admin_id: str,
     db_session,
 ):
@@ -195,8 +197,7 @@ async def test_list_csv_uploads(
 
     response = client.get(
         "/api/v1/csv/uploads",
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
-        headers=admin_token_headers,
+        headers=super_admin_token_headers,
     )
 
     assert response.status_code == 200
@@ -231,7 +232,7 @@ async def test_list_csv_uploads_pagination(
 
     response = client.get(
         "/api/v1/csv/uploads",
-        params={"user_id": admin_id, "user_role": "admin", "limit": 2, "offset": 0},
+        params={"limit": 2, "offset": 0},
         headers=admin_token_headers,
     )
 
@@ -242,7 +243,7 @@ async def test_list_csv_uploads_pagination(
     # Get next page
     response2 = client.get(
         "/api/v1/csv/uploads",
-        params={"user_id": admin_id, "user_role": "admin", "limit": 2, "offset": 2},
+        params={"limit": 2, "offset": 2},
         headers=admin_token_headers,
     )
     assert response2.status_code == 200
@@ -260,7 +261,6 @@ async def test_list_csv_uploads_permission_denied(
 
     response = client.get(
         "/api/v1/csv/uploads",
-        params={"user_id": user_id, "user_role": "user"},
         headers=user_token_headers,
     )
 

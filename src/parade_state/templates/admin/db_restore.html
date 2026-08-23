@@ -66,8 +66,6 @@
 </style>
 
 <script>
-    const ADMIN_USER_ID = "{{ user.id }}";
-    const ADMIN_USER_ROLE = "{{ user.role }}";
     const DATABASE_NAME = "{{ database_name }}";
 
     const fileInput = document.getElementById('dumpFile');
@@ -95,8 +93,6 @@
 
         const params = new URLSearchParams({
             confirmation: confirmInput.value.trim(),
-            user_id: ADMIN_USER_ID,
-            user_role: ADMIN_USER_ROLE,
         });
 
         try {

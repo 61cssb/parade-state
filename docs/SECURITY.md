@@ -101,26 +101,38 @@ if not ids.is_valid(personnel_id):
 
 ### Use Dependency Injection for Authorization
 
-**Check permissions at the endpoint level:**
+**Identity is always session-derived (issue 31).** Resolve the caller with
+the shared dependencies from `auth/dependencies.py` — never from query
+parameters, request bodies, or anything the client sends:
 
-✅ **Do use dependency injection:**
+✅ **Do use the session dependencies:**
 ```python
-from fastapi import Depends
+from parade_state.auth.dependencies import require_admin_user
 
 async def update_personnel(
     personnel_id: str,
-    user_id: str = Query(...),
-    user_role: str = Query(...),
+    user: User = Depends(require_admin_user),  # or require_super_admin_user
     db: AsyncSession = Depends(get_db_session),
 ):
-    # Check permissions
-    if user_role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=403,
-            detail="Only admins can update personnel"
-        )
-    # Proceed with update
+    # user.id / user.role come from the validated session; unauthenticated
+    # callers already got 401, under-tier callers 403.
+    # Proceed with update, stamping provenance from str(user.id)
 ```
+
+❌ **Never accept identity from the client** (the pre-#31 pattern — this
+is the spoofing hole issue 31 closed):
+```python
+async def update_personnel(
+    personnel_id: str,
+    user_id: str = Query(...),    # anyone can send ?user_id=<super-admin>
+    user_role: str = Query(...),  # ...and ?user_role=super_admin
+    ...
+):
+```
+
+A structural test (`tests/integration/test_no_client_identity.py`) fails
+the suite if any `/api/v1` route reintroduces identity params, alongside
+a spoof regression suite asserting the params have no effect.
 
 ### Implement Role-Based Access Control
 
@@ -151,7 +163,8 @@ no access scoping at all:
 
 - **Mutations are super-admin only** (403 otherwise), enforced
   server-side on every grouping API route — not just hidden buttons
-- **Reads are open to every authenticated role** (page and API)
+- **Reads require an authenticated admin** (issue 31 tightened the API
+  from open-with-params to `require_admin_user`; anonymous gets 401)
 - **Reachability follows the active nominal roll**: groupings on the roll
   currently active for attendance are listable/readable; groupings on
   non-active rolls are retained in the database but unreachable (404)
@@ -160,13 +173,8 @@ no access scoping at all:
   off): flag-off means 404 for every role, super-admins included
 
 ```python
-def _require_super_admin(user_role: str) -> None:
-    """Authorize super_admin only (grouping mutations)."""
-    if user_role != "super_admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only super admins can manage groupings",
-        )
+# Grouping mutations authorize via the shared dependency (issue 31):
+user: User = Depends(require_super_admin_user)
 ```
 
 ### NR-Scoped Write Access
@@ -184,8 +192,8 @@ def _require_super_admin(user_role: str) -> None:
 
 ```python
 # Personnel/attendance reads and writes gated per NR by scope grants
-# (api/subunit_access.py — the single enforcement seam; issue #31 will
-# only change how user_id/user_role are sourced)
+# (api/subunit_access.py — the single enforcement seam; callers pass the
+# session-derived user.id / user.role since issue #31 landed)
 async def list_writable_personnel(user_id: str, user_role: str, nominal_roll_id: str):
     grants = await get_scope_grants(db, user_id, nominal_roll_id)
     locations = await resolve_effective_locations(db, pids, tagging_id)
@@ -226,6 +234,7 @@ async def check_subunit_access(
 - Include user context in audit logs
 
 **❌ DON'T:**
+- Accept caller identity from query params or request bodies (session only)
 - Skip access checks for "read-only" operations
 - Assume super admins don't need validation
 - Filter data after retrieval (filter at query level)

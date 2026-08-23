@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from parade_state.auth.dependencies import require_admin_user, require_super_admin_user
 from parade_state.db import get_db_session
 from parade_state.models import (
     AuditLog,
@@ -42,6 +43,7 @@ from parade_state.models.schemas import (
     MemberStateUpdate,
     MembershipSetRequest,
 )
+from parade_state.models import User
 from parade_state.utils import utc_dt
 
 router = APIRouter()
@@ -50,15 +52,6 @@ router = APIRouter()
 # ============================================================================
 # Helpers
 # ============================================================================
-
-
-def _require_super_admin(user_role: str) -> None:
-    """Authorize super_admin only."""
-    if user_role != "super_admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only super admins can manage groupings",
-        )
 
 
 async def _active_nr(db: AsyncSession) -> NominalRoll | None:
@@ -275,12 +268,11 @@ def _apply_group_set(grouping: Grouping, items: list[GroupingGroupItem]) -> None
 @router.post("/", response_model=GroupingResponse, status_code=status.HTTP_201_CREATED)
 async def create_grouping(
     grouping_data: GroupingCreate,
-    user_id: str = Query(..., description="User ID creating the grouping"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Create a grouping on the nominal roll active for attendance."""
-    _require_super_admin(user_role)
+    user_id = str(user.id)
 
     nr = await _active_nr(db)
     if nr is None:
@@ -333,8 +325,7 @@ async def create_grouping(
 
 @router.get("/", response_model=list[GroupingResponse])
 async def list_groupings(
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List the groupings on the attendance-active NR."""
@@ -363,8 +354,7 @@ async def list_groupings(
 @router.get("/{grouping_id}", response_model=GroupingResponse)
 async def get_grouping(
     grouping_id: str,
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get one grouping on the attendance-active NR."""
@@ -376,8 +366,7 @@ async def get_grouping(
 async def update_grouping(
     grouping_id: str,
     update_data: GroupingUpdate,
-    user_id: str = Query(..., description="User ID making the update"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Update a grouping's label and group enums.
@@ -385,7 +374,8 @@ async def update_grouping(
     ``multiple_membership`` / ``allow_ungrouped`` are immutable after
     creation — change attempts get a 400 pointing at clone-and-replace.
     """
-    _require_super_admin(user_role)
+    user_id = str(user.id)
+
     grouping = await _load_grouping(grouping_id, db)
 
     if update_data.multiple_membership is not None and (
@@ -436,12 +426,12 @@ async def update_grouping(
 @router.delete("/{grouping_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_grouping(
     grouping_id: str,
-    user_id: str = Query(..., description="User ID making the deletion"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Delete a grouping; groups, memberships and member state cascade."""
-    _require_super_admin(user_role)
+    user_id = str(user.id)
+
     grouping = await _load_grouping(grouping_id, db)
 
     _audit(db, user_id, grouping, "delete", {"label": grouping.label})
@@ -463,12 +453,11 @@ async def set_personnel_groups(
     grouping_id: str,
     personnel_id: str,
     payload: MembershipSetRequest,
-    user_id: str = Query(..., description="User ID making the change"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Set a serviceman's full group membership set within a grouping."""
-    _require_super_admin(user_role)
+
     grouping = await _load_grouping(grouping_id, db)
 
     personnel = (
@@ -536,8 +525,7 @@ async def update_member_state(
     grouping_id: str,
     personnel_id: str,
     payload: MemberStateUpdate,
-    user_id: str = Query(..., description="User ID making the change"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Update a serviceman's grouping checkbox / free-text remarks.
@@ -545,7 +533,8 @@ async def update_member_state(
     Both fields are intentionally generic — their meaning is left to the
     unit's standardisation.
     """
-    _require_super_admin(user_role)
+    user_id = str(user.id)
+
     grouping = await _load_grouping(grouping_id, db)
 
     personnel = (
@@ -598,8 +587,7 @@ async def update_member_state(
 async def clone_grouping(
     grouping_id: str,
     payload: GroupingCloneRequest,
-    user_id: str = Query(..., description="User ID making the clone"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Clone a grouping on the same NR under a fresh label.
@@ -607,7 +595,8 @@ async def clone_grouping(
     Structure (group enums with positions + both flags) always carries
     over; memberships and member state only when the dialog opts in.
     """
-    _require_super_admin(user_role)
+    user_id = str(user.id)
+
     source = await _load_grouping(grouping_id, db)
     await _ensure_label_available(db, payload.label, source.nominal_roll_id)
 
@@ -668,8 +657,7 @@ async def clone_grouping(
              status_code=status.HTTP_201_CREATED)
 async def copy_grouping_from_previous_nr(
     payload: GroupingCopyRequest,
-    user_id: str = Query(..., description="User ID making the copy"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Copy a grouping from the previously activated NR onto the active one.
@@ -679,7 +667,7 @@ async def copy_grouping_from_previous_nr(
     so new-NR personnel without a match start ungrouped. Member state is
     not copied: checkbox / remarks are per-cycle operational state.
     """
-    _require_super_admin(user_role)
+    user_id = str(user.id)
 
     active = await _active_nr(db)
     if active is None or active.attendance_activated_at is None:
@@ -816,8 +804,7 @@ async def copy_grouping_from_previous_nr(
 @router.get("/{grouping_id}/export")
 async def export_grouping_csv(
     grouping_id: str,
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Export the grouping table exactly as displayed.

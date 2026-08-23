@@ -10,12 +10,10 @@ from parade_state.models import AuditLog
 async def test_list_audit_logs_empty(
     client: TestClient,
     admin_token_headers: dict[str, str],
-    admin_id: str,
 ):
     """Test listing audit logs when none exist."""
     response = client.get(
         "/api/v1/audit/logs",
-        params={"user_id": admin_id, "user_role": "admin"},
         headers=admin_token_headers,
     )
 
@@ -30,9 +28,8 @@ async def test_list_audit_logs_empty(
 @pytest.mark.asyncio
 async def test_list_audit_logs_after_csv_upload(
     client: TestClient,
+    super_admin_token_headers: dict[str, str],
     admin_token_headers: dict[str, str],
-    admin_id: str,
-    db_session,
 ):
     """Test that CSV upload creates an audit entry visible in the list."""
     csv_content = b"rank,name\nPTE,John\n"
@@ -40,14 +37,12 @@ async def test_list_audit_logs_after_csv_upload(
     upload_response = client.post(
         "/api/v1/csv/upload",
         files={"file": ("test.csv", csv_content, "text/csv")},
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
-        headers=admin_token_headers,
+        headers=super_admin_token_headers,
     )
     assert upload_response.status_code == 200
 
     response = client.get(
         "/api/v1/audit/logs",
-        params={"user_id": admin_id, "user_role": "admin"},
         headers=admin_token_headers,
     )
 
@@ -94,8 +89,6 @@ async def test_list_audit_logs_filter_by_entity_type(
     response = client.get(
         "/api/v1/audit/logs",
         params={
-            "user_id": admin_id,
-            "user_role": "admin",
             "entity_type": "user",
         },
         headers=admin_token_headers,
@@ -138,8 +131,6 @@ async def test_list_audit_logs_filter_by_action(
     response = client.get(
         "/api/v1/audit/logs",
         params={
-            "user_id": admin_id,
-            "user_role": "admin",
             "action": "delete",
         },
         headers=admin_token_headers,
@@ -185,8 +176,6 @@ async def test_list_audit_logs_filter_by_target_user_id(
     response = client.get(
         "/api/v1/audit/logs",
         params={
-            "user_id": admin_id,
-            "user_role": "admin",
             "target_user_id": user_id,
         },
         headers=admin_token_headers,
@@ -222,8 +211,6 @@ async def test_list_audit_logs_pagination(
     response = client.get(
         "/api/v1/audit/logs",
         params={
-            "user_id": admin_id,
-            "user_role": "admin",
             "limit": 2,
             "offset": 0,
         },
@@ -239,8 +226,6 @@ async def test_list_audit_logs_pagination(
     response2 = client.get(
         "/api/v1/audit/logs",
         params={
-            "user_id": admin_id,
-            "user_role": "admin",
             "limit": 2,
             "offset": 4,
         },
@@ -284,7 +269,6 @@ async def test_list_audit_logs_default_ordering(
 
     response = client.get(
         "/api/v1/audit/logs",
-        params={"user_id": admin_id, "user_role": "admin"},
         headers=admin_token_headers,
     )
 
@@ -297,26 +281,46 @@ async def test_list_audit_logs_default_ordering(
 async def test_list_audit_logs_permission_denied(
     client: TestClient,
     user_token_headers: dict[str, str],
-    sample_users,
 ):
     """Test that regular users cannot view audit logs."""
-    user_id = str(sample_users["user"].id)
-
     response = client.get(
         "/api/v1/audit/logs",
-        params={"user_id": user_id, "user_role": "user"},
         headers=user_token_headers,
     )
 
     assert response.status_code == 403
-    assert "Only admins" in response.json()["detail"]
+    assert response.json()["detail"] == "Admin access required"
+
+
+@pytest.mark.asyncio
+async def test_list_audit_logs_requires_session(client: TestClient):
+    """Unauthenticated calls are rejected with 401, not treated as any user."""
+    response = client.get("/api/v1/audit/logs")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_list_audit_logs_ignores_spoofed_identity_params(
+    client: TestClient,
+    user_token_headers: dict[str, str],
+):
+    """Appending ?user_id=&user_role=super_admin must not escalate (issue 31)."""
+    response = client.get(
+        "/api/v1/audit/logs",
+        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
+        headers=user_token_headers,
+    )
+
+    # The session says regular user; the query params are ignored entirely.
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Admin access required"
 
 
 @pytest.mark.asyncio
 async def test_list_audit_logs_null_user_id(
     client: TestClient,
     admin_token_headers: dict[str, str],
-    admin_id: str,
     db_session,
 ):
     """Test that system entries (user_id=None) don't break the join."""
@@ -333,7 +337,6 @@ async def test_list_audit_logs_null_user_id(
 
     response = client.get(
         "/api/v1/audit/logs",
-        params={"user_id": admin_id, "user_role": "admin"},
         headers=admin_token_headers,
     )
 
@@ -368,7 +371,6 @@ async def test_list_audit_logs_includes_user_name(
 
     response = client.get(
         "/api/v1/audit/logs",
-        params={"user_id": admin_id, "user_role": "admin"},
         headers=admin_token_headers,
     )
 

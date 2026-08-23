@@ -185,8 +185,6 @@
 
 {% block scripts %}
 <script>
-    const ADMIN_USER_ID = "{{ user.id }}";
-    const ADMIN_USER_ROLE = "{{ user.role }}";
     const ACTIVE_NOMINAL_ROLL_ID = "{{ nominal_roll_filter }}";
     let editId = null;
 
@@ -247,8 +245,6 @@
 
         const params = new URLSearchParams({
             nominal_roll_id: ACTIVE_NOMINAL_ROLL_ID,
-            user_id: ADMIN_USER_ID,
-            user_role: ADMIN_USER_ROLE,
             limit: '500',
         });
         if (search) params.set('search', search);
@@ -299,7 +295,7 @@
 
         try {
             const res = await fetch(
-                '/api/v1/deferments?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/deferments',
                 { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) }
             );
             if (res.ok) {
@@ -346,7 +342,7 @@
         };
         try {
             const res = await fetch(
-                '/api/v1/deferments/' + editId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/deferments/' + editId + ',
                 { method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) }
             );
             if (res.ok) {
@@ -365,7 +361,7 @@
         if (!confirm('Delete deferment for "' + rankName + '"? This cannot be undone.')) return;
         try {
             const res = await fetch(
-                '/api/v1/deferments/' + id + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/deferments/' + id + ',
                 { method: 'DELETE' }
             );
             if (res.ok) {

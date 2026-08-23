@@ -76,10 +76,12 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   the missing assignment; grants managed from the /admin/users Scope
   panel (roster-validated) via the access-control API; CSV upload/process
   tightened to super-admin. The board stays org-wide for admins (posts
-  carry no NR linkage — recorded decision). Caller identity is still the
-  spoofable query-param interface; issue 31
-  (issues/31-high-server-side-identity.md) swaps it to sessions through
-  the `api/subunit_access.py` seam
+  carry no NR linkage — recorded decision). Caller identity is
+  session-derived on every `/api/v1` endpoint (issue 31 ✅): the shared
+  dependencies in `auth/dependencies.py` resolve the session user, the
+  spoofable query params are gone, and
+  `tests/integration/test_no_client_identity.py` enforces it structurally
+  + behaviorally
 - **Unit Strength** report at `/admin` (replaced the dashboard): the
   parade state rolled up by effective sub-unit 1/2 into the Officer/WOSE/
   Total × In/Out/Current/% strength format (In = Called Up, Current =

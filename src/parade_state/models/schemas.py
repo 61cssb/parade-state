@@ -585,7 +585,6 @@ class CsvUploadProcessRequest(BaseModel):
     """
 
     source_nominal_roll_id: str | None = Field(None, min_length=1)
-    created_by: str = Field(..., min_length=1)
 
 
 class CsvUploadProcessUnmatchedItem(BaseModel):

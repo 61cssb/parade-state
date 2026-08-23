@@ -6,9 +6,16 @@ info:
   description: |
     API for the Battalion Parade State Management System.
 
-    ## Authentication
-    All endpoints (except `/auth/*`) require a valid session cookie obtained via Google OAuth.
-    Session cookies are `HttpOnly`, `Secure`, `SameSite=Strict`.
+    ## Authentication (issue 31)
+    All endpoints (except `/auth/*`) derive the caller's identity from the
+    authenticated session — the HttpOnly `session_token` cookie set by the
+    Google OAuth callback, or the same token as a Bearer header for
+    non-browser clients. No endpoint accepts identity from query parameters
+    or request bodies; provenance (`created_by`, `updated_by`, …) is stamped
+    server-side from the session user. Unauthenticated calls return 401;
+    calls below the endpoint's role tier or outside the caller's scope
+    grants return 403. Role is re-read from the database on every request,
+    so role changes take effect immediately.
 
     ## Access control
     Two enforcement dimensions applied on every data endpoint:
@@ -128,9 +135,9 @@ tags:
   - name: discussions
     description: >
       Discussions board (issue 24) — admins and super-admins only.
-      Unlike older routers, identity comes from the session token
-      (Bearer/cookie), never client-supplied user_id/user_role params,
-      so author-only edit rules are enforced server-side.
+      Identity comes from the session token (Bearer/cookie), never
+      client-supplied params, so author-only edit rules are enforced
+      server-side.
       Feature-flagged: every /api/v1/discussions/* route returns 404 for
       all roles (super-admins included) unless FEATURE_DISCUSSIONS=true
       (on in development, off in production).
@@ -180,14 +187,6 @@ paths:
           required: true
           schema: { type: string }
           description: Must equal the current database name
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string }
       requestBody:
         content:
           multipart/form-data:
@@ -234,14 +233,6 @@ paths:
           required: true
           schema: { type: string }
           description: Must equal PURGE
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string }
       responses:
         "200":
           description: Purge completed; body includes purged_counts per table
@@ -268,14 +259,6 @@ paths:
           in: path
           required: true
           schema: { type: string }
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string, enum: [super_admin, admin, user] }
       responses:
         '200':
           description: The updated nominal roll (attendance_active = true)
@@ -298,14 +281,6 @@ paths:
           in: path
           required: true
           schema: { type: string }
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string, enum: [super_admin, admin, user] }
       responses:
         '200':
           description: The updated nominal roll (attendance_active = false)
@@ -332,14 +307,6 @@ paths:
         rank) are honoured so the CSV matches what the caller sees; unlike
         the view there is no 1000-row cap.
       parameters:
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string, enum: [super_admin, admin, user] }
         - name: search
           in: query
           required: false
@@ -1737,14 +1704,6 @@ paths:
         Super-admin only. Returns deferments filtered by optional query params.
         `estab_id` joins through the deferment's linked personnel record.
       parameters:
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string, enum: [super_admin, admin, user] }
         - name: personnel_id
           in: query
           schema: { type: string }
@@ -1803,14 +1762,6 @@ paths:
         at creation time. New deferments start with `status="Pending action"`,
         so callup_status is not affected.
       parameters:
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string, enum: [super_admin, admin, user] }
       requestBody:
         required: true
         content:
@@ -1844,14 +1795,6 @@ paths:
       tags: [deferments]
       summary: Fetch a single deferment
       parameters:
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string, enum: [super_admin, admin, user] }
       responses:
         '200': { description: The deferment }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -1864,14 +1807,6 @@ paths:
         Approved → Deferred; Approved → non-neutral → Called Up;
         `Not called up` / `Do not call up` are neutral (no change).
       parameters:
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string, enum: [super_admin, admin, user] }
       requestBody:
         required: true
         content:
@@ -1903,14 +1838,6 @@ paths:
         If the deleted deferment was Approved, the linked personnel's
         `callup_status` reverts to `Called Up`.
       parameters:
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string, enum: [super_admin, admin, user] }
       responses:
         '200':
           description: Deleted
@@ -2113,14 +2040,6 @@ paths:
         Super-admin only. Returns tagging summaries (no entries). Entry counts
         are computed via a correlated subquery.
       parameters:
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string, enum: [super_admin, admin, user] }
         - name: nominal_roll_id
           in: query
           schema: { type: string }
@@ -2161,14 +2080,6 @@ paths:
         personnel's canonical subunit. Personnel must belong to the tagging's
         nominal roll (400 otherwise).
       parameters:
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string, enum: [super_admin, admin, user] }
       requestBody:
         required: true
         content:
@@ -2204,14 +2115,6 @@ paths:
           in: path
           required: true
           schema: { type: string }
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string, enum: [super_admin, admin, user] }
       responses:
         '200':
           description: Tagging detail
@@ -2232,14 +2135,6 @@ paths:
           in: path
           required: true
           schema: { type: string }
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string, enum: [super_admin, admin, user] }
       requestBody:
         required: true
         content:
@@ -2272,14 +2167,6 @@ paths:
           in: path
           required: true
           schema: { type: string }
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string, enum: [super_admin, admin, user] }
       responses:
         '200':
           description: Deleted
@@ -2311,14 +2198,6 @@ paths:
           in: path
           required: true
           schema: { type: string }
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string, enum: [super_admin, admin, user] }
       requestBody:
         required: true
         content:
@@ -2367,14 +2246,6 @@ paths:
         upload itself always succeeds and stays stored/unprocessed for
         the manual processing flow.
       parameters:
-        - name: user_id
-          in: query
-          required: true
-          schema: { type: string, format: uuid }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string, enum: [super_admin, admin, user] }
         - name: auto_process
           in: query
           required: false
@@ -2448,19 +2319,14 @@ paths:
           in: path
           required: true
           schema: { type: string }
-        - name: user_role
-          in: query
-          required: true
-          schema: { type: string, enum: [super_admin, admin, user] }
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [created_by]
+              required: []
               properties:
-                created_by: { type: string, format: uuid }
                 source_nominal_roll_id: { type: string, format: uuid, nullable: true }
       responses:
         '201':

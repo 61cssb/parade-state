@@ -14,6 +14,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.config import get_settings
+from parade_state.auth.dependencies import require_super_admin_user
 from parade_state.db import get_db_session
 from parade_state.models import (
     Attendance,
@@ -60,8 +61,7 @@ PURGE_TABLES: tuple[type, ...] = (
 @router.post("/purge")
 async def purge_all_data(
     confirmation: str = Query(..., description=f"Must equal {CONFIRMATION_WORD}"),
-    user_id: str = Query(..., description="User ID triggering the purge"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Delete all nominal rolls and downstream data (testing-only).
@@ -72,13 +72,10 @@ async def purge_all_data(
     levels, sessions, global column mappings, and existing audit entries
     are preserved.
 
-    Requires super_admin role and PURGE_ENABLED on the deployment.
+    Caller identity is session-derived (issue 31). Requires super_admin
+    role and PURGE_ENABLED on the deployment.
     """
-    if user_role != "super_admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only super admins can purge application data",
-        )
+    user_id = str(user.id)
 
     settings = get_settings()
     if not settings.PURGE_ENABLED:

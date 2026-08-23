@@ -22,8 +22,9 @@ from parade_state.api.subunit_access import (
     in_scope_pids,
 )
 from parade_state.api.tagging import _load_nr_tagging
+from parade_state.auth.dependencies import require_admin_user
 from parade_state.db import get_db_session
-from parade_state.models import Attendance, NominalRoll, Personnel, TaggingEntry
+from parade_state.models import Attendance, NominalRoll, Personnel, TaggingEntry, User
 from parade_state.models.attendance import ATTENDANCE_STATUSES, PRESENT_LIKE_STATUSES
 from parade_state.models.schemas import (
     AttendanceBulkUpsert,
@@ -106,17 +107,17 @@ async def get_roster_for_scope(
 async def list_attendance(
     nominal_roll_id: str = Query(..., description="NR to list attendance for"),
     date: utc_dt.date = Query(..., description="Attendance date"),
-    user_id: str = Query(..., description="User ID for authorization"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List attendance rows for an NR on a given date.
 
-    Personnel without an attendance row for that date are not included
-    (callers should synthesize default rows from the roster when needed).
-    Read scoping (issue #28): ``super_admin`` sees every row; everyone
-    else only rows whose personnel fall inside their (unit, sub_unit_1)
-    scope — deny-by-default, 403 with no grants on the NR.
+    Caller identity is session-derived (issue 31). Personnel without an
+    attendance row for that date are not included (callers should
+    synthesize default rows from the roster when needed). Read scoping
+    (issue #28): ``super_admin`` sees every row; everyone else only rows
+    whose personnel fall inside their (unit, sub_unit_1) scope —
+    deny-by-default, 403 with no grants on the NR.
     """
     nr = (
         await db.execute(
@@ -130,7 +131,7 @@ async def list_attendance(
         )
     tagging_id = await applied_tagging_id(db, nr)
 
-    await assert_nr_accessible(db, user_id, user_role, nominal_roll_id)
+    await assert_nr_accessible(db, str(user.id), user.role, nominal_roll_id)
 
     result = await db.execute(
         select(Attendance).where(
@@ -144,8 +145,8 @@ async def list_attendance(
 
     accessible = await in_scope_pids(
         db,
-        user_id,
-        user_role,
+        str(user.id),
+        user.role,
         nominal_roll_id,
         tagging_id,
         {row.personnel_id for row in rows},
@@ -158,18 +159,19 @@ async def list_attendance(
 @router.put("/upsert", response_model=list[AttendanceResponse])
 async def bulk_upsert_attendance(
     payload: AttendanceBulkUpsert,
-    user_id: str = Query(..., description="User ID recording attendance"),
-    user_role: str = Query(..., description="User role"),
+    user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Bulk upsert attendance rows for an NR's roster.
 
-    Enforces that the NR is the one currently active for attendance AND that
-    the caller's scope covers each target personnel's effective
-    (unit, sub_unit_1) (403 otherwise; super_admin bypasses). Each entry is
-    keyed on (personnel_id, date); existing rows are updated, new rows are
-    created with snapshot data from Personnel.
+    Caller identity is session-derived (issue 31). Enforces that the NR is
+    the one currently active for attendance AND that the caller's scope
+    covers each target personnel's effective (unit, sub_unit_1) (403
+    otherwise; super_admin bypasses). Each entry is keyed on
+    (personnel_id, date); existing rows are updated, new rows are created
+    with snapshot data from Personnel.
     """
+    user_id = str(user.id)
     nr = await require_attendance_active(payload.nominal_roll_id, db)
     tagging_id = await applied_tagging_id(db, nr)
 
@@ -179,7 +181,7 @@ async def bulk_upsert_attendance(
     await assert_locations_in_scope(
         db,
         user_id,
-        user_role,
+        user.role,
         payload.nominal_roll_id,
         personnel_ids,
         tagging_id,
@@ -294,20 +296,20 @@ async def copy_remarks(
             "matches (the attendance page's filter)"
         ),
     ),
-    user_id: str = Query(..., description="User ID triggering the copy"),
-    user_role: str = Query(..., description="User role"),
+    user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Copy remarks from one (date, slot) to another for the scoped roster.
 
-    Scope: the active Called Up roster, optionally narrowed to an effective
-    sub_unit_1 (the page's view filter), intersected with the caller's
-    (unit, sub_unit_1) write scope (super_admin bypasses;
-    deny-by-default: no grants → 403). Rows with an empty source remark are
-    skipped (the
-    destination keeps its remark); missing destination rows are created
-    (statuses default to absent). Source and destination must differ.
+    Caller identity is session-derived (issue 31). Scope: the active
+    Called Up roster, optionally narrowed to an effective sub_unit_1 (the
+    page's view filter), intersected with the caller's (unit, sub_unit_1)
+    write scope (super_admin bypasses; deny-by-default: no grants → 403).
+    Rows with an empty source remark are skipped (the destination keeps
+    its remark); missing destination rows are created (statuses default
+    to absent). Source and destination must differ.
     """
+    user_id = str(user.id)
     if source_slot not in ("am", "pm") or dest_slot not in ("am", "pm"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -340,9 +342,9 @@ async def copy_remarks(
 
     # Write access (scope rule): super_admin → all; deny-by-default.
     all_pids = {str(p.id) for p in roster}
-    await assert_nr_accessible(db, user_id, user_role, nominal_roll_id)
+    await assert_nr_accessible(db, user_id, user.role, nominal_roll_id)
     accessible_pids = await in_scope_pids(
-        db, user_id, user_role, nominal_roll_id, tagging_id, all_pids
+        db, user_id, user.role, nominal_roll_id, tagging_id, all_pids
     )
 
     rows = (
@@ -455,20 +457,21 @@ async def export_attendance_csv(
             "matches (the attendance page's filter)"
         ),
     ),
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role"),
+    user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Export the attendance marking table exactly as displayed.
 
-    Columns: Unit, Sub-unit 1-3, Category, Rank, Name, AM/PM Status and
-    Remarks. The roster is the active Called Up personnel with the NR's 1:1
-    tagging overlay applied, ordered like the marking page; personnel
-    without an attendance row for the date export as Absent (the page's
-    default). Read scoping mirrors the page: super_admin exports the whole
-    roster, everyone else only rows inside their (unit, sub_unit_1) scope
-    (403 with no grants on the NR).
+    Caller identity is session-derived (issue 31). Columns: Unit, Sub-unit
+    1-3, Category, Rank, Name, AM/PM Status and Remarks. The roster is
+    the active Called Up personnel with the NR's 1:1 tagging overlay
+    applied, ordered like the marking page; personnel without an
+    attendance row for the date export as Absent (the page's default).
+    Read scoping mirrors the page: super_admin exports the whole roster,
+    everyone else only rows inside their (unit, sub_unit_1) scope (403
+    with no grants on the NR).
     """
+    user_id = str(user.id)
     nr = (
         await db.execute(
             select(NominalRoll).where(NominalRoll.id == nominal_roll_id)
@@ -528,11 +531,11 @@ async def export_attendance_csv(
         ]
 
     # Read scoping (scope rule, same deny-by-default as writes).
-    await assert_nr_accessible(db, user_id, user_role, nominal_roll_id)
+    await assert_nr_accessible(db, user_id, user.role, nominal_roll_id)
     accessible_pids = await in_scope_pids(
         db,
         user_id,
-        user_role,
+        user.role,
         nominal_roll_id,
         tagging_id,
         {str(p.id) for p in roster},

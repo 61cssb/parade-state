@@ -166,7 +166,7 @@
         {# Export carries the current filters so the CSV matches the table
            exactly as displayed (same contract as the grouping export). #}
         {% if selected_nominal_roll %}
-        <a href="/api/v1/nominal-rolls/{{ selected_nominal_roll.id }}/export?user_id={{ user.id | urlencode }}&user_role={{ user.role | urlencode }}{% if search %}&search={{ search | urlencode }}{% endif %}{% if unit %}&unit={{ unit | urlencode }}{% endif %}{% if sub_unit_1 %}&sub_unit_1={{ sub_unit_1 | urlencode }}{% endif %}{% if sub_unit_2 %}&sub_unit_2={{ sub_unit_2 | urlencode }}{% endif %}{% if category %}&category={{ category | urlencode }}{% endif %}{% if rank %}&rank={{ rank | urlencode }}{% endif %}"
+        <a href="/api/v1/nominal-rolls/{{ selected_nominal_roll.id }}/export?{% if search %}&search={{ search | urlencode }}{% endif %}{% if unit %}&unit={{ unit | urlencode }}{% endif %}{% if sub_unit_1 %}&sub_unit_1={{ sub_unit_1 | urlencode }}{% endif %}{% if sub_unit_2 %}&sub_unit_2={{ sub_unit_2 | urlencode }}{% endif %}{% if category %}&category={{ category | urlencode }}{% endif %}{% if rank %}&rank={{ rank | urlencode }}{% endif %}"
            class="btn" style="background: #e5e7eb; color: #374151; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.25rem; font-size: 0.875rem;">Export CSV</a>
         {% endif %}
     </div>
@@ -501,8 +501,6 @@
 <script>
     {# Roll management (merged from the retired admin nominal rolls page).
        Acts on the currently selected roll only. #}
-    const ADMIN_USER_ID = "{{ user.id }}";
-    const ADMIN_USER_ROLE = "{{ user.role }}";
     const SINGAPORE_OFFSET = "+08:00";
     // Acts on the selected roll; openCreateModal re-affirms it for the modal.
     let activeNominalRollId = "{{ selected_nominal_roll.id }}";
@@ -517,7 +515,7 @@
         if (!confirm('Mark the nominal roll with CAA date ' + caa + ' as active for attendance?\n\nAny currently active nominal roll is deactivated automatically.')) return;
         try {
             const response = await fetch(
-                '/api/v1/nominal-rolls/' + nominalRollId + '/activate-attendance?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/nominal-rolls/' + nominalRollId + '/activate-attendance',
                 { method: 'POST' }
             );
             if (response.ok) {
@@ -536,7 +534,7 @@
         if (!confirm('Deactivate attendance for the nominal roll with CAA date ' + caa + '?\n\nAttendance is inactive until another roll is marked "Use for Attendance".')) return;
         try {
             const response = await fetch(
-                '/api/v1/nominal-rolls/' + nominalRollId + '/deactivate-attendance?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/nominal-rolls/' + nominalRollId + '/deactivate-attendance',
                 { method: 'POST' }
             );
             if (response.ok) {
@@ -561,7 +559,7 @@
         if (!confirm(message)) return;
         try {
             const response = await fetch(
-                '/api/v1/nominal-rolls/' + nominalRollId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/nominal-rolls/' + nominalRollId,
                 { method: 'DELETE' }
             );
             if (response.ok) {
@@ -643,7 +641,7 @@
 
         try {
             const response = await fetch(
-                '/api/v1/personnel?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/personnel',
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -700,7 +698,7 @@
 
         try {
             const response = await fetch(
-                '/api/v1/nominal-rolls/' + activeNominalRollId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/nominal-rolls/' + activeNominalRollId,
                 {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
@@ -788,7 +786,7 @@
 
         try {
             const response = await fetch(
-                '/api/v1/nominal-rolls/' + activeNominalRollId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/nominal-rolls/' + activeNominalRollId,
                 {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
@@ -828,7 +826,7 @@
     async function patchPersonnel(pid, body) {
         try {
             const response = await fetch(
-                '/api/v1/personnel/' + pid + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/personnel/' + pid,
                 {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
@@ -900,8 +898,6 @@
 {% endif %}
 {% if user.role == 'super_admin' and selected_nominal_roll %}
 <script>
-    const USER_ID = "{{ user.id }}";
-    const USER_ROLE = "{{ user.role }}";
     // Staged (unapplied) cell edits persist per roll, so they survive a page
     // refresh. Cleared only by Apply (per person) or Discard (all).
     const STAGE_KEY = 'ps:nr-edits:' + "{{ selected_nominal_roll.id }}";
@@ -1140,7 +1136,6 @@
             try {
                 const res = await fetch(
                     '/api/v1/personnel/' + encodeURIComponent(pid) +
-                    '?user_id=' + USER_ID + '&user_role=' + USER_ROLE,
                     {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },

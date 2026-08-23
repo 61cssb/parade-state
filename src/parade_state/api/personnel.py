@@ -14,6 +14,7 @@ from parade_state.api.subunit_access import (
     grant_matches,
     resolve_effective_locations,
 )
+from parade_state.auth.dependencies import require_admin_user, require_super_admin_user
 from parade_state.db import get_db_session
 from parade_state.models import (
     PRESENT_LIKE_STATUSES,
@@ -24,6 +25,7 @@ from parade_state.models import (
     SOURCE_MANUAL,
     Tagging,
     TaggingEntry,
+    User,
 )
 from parade_state.models.schemas import (
     PersonnelAttendanceHistoryItem,
@@ -317,11 +319,12 @@ async def list_personnel(
     sort_order: str | None = Query(None, description="Sort order (asc, desc)"),
     limit: int = Query(100, ge=1, le=1000, description="Number of results to return"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
-    user_id: str = Query(..., description="User ID for authorization"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List personnel with filtering and sorting (admin/super_admin only).
+
+    Caller identity is session-derived (issue 31).
 
     Sorting:
     - Can sort by: name, rank, unit, status, created_at, updated_at
@@ -351,21 +354,15 @@ async def list_personnel(
         offset=offset,
     )
 
-    if user_role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="Only admins can list personnel",
-        )
-
-    if user_role != "super_admin":
+    if user.role != "super_admin":
         allowed_nrs: set[str] | None = None
         if params.nominal_roll_id:
             await assert_nr_accessible(
-                db, user_id, user_role, params.nominal_roll_id
+                db, user.id, user.role, params.nominal_roll_id
             )
         else:
             # Cross-NR request: restrict to NRs with at least one grant.
-            allowed_nrs = await accessible_nr_ids(db, user_id, user_role)
+            allowed_nrs = await accessible_nr_ids(db, user.id, user.role)
             if not allowed_nrs:
                 return []
 
@@ -378,7 +375,7 @@ async def list_personnel(
         # candidate set first and paginate the survivors.
         result = await db.execute(query)
         rows = list(result.scalars().all())
-        rows = await _filter_rows_in_scope(db, user_id, rows)
+        rows = await _filter_rows_in_scope(db, user.id, rows)
         personnel_list = rows[params.offset : params.offset + params.limit]
     else:
         query = select(Personnel)
@@ -425,25 +422,21 @@ async def list_personnel(
 )
 async def create_personnel(
     personnel_create: PersonnelCreate,
-    user_id: str = Query(..., description="User ID for authorization"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Manually add a serviceman to a nominal roll (super-admin only).
 
-    Covers the gap where a person is missing from the ingested CSV: the row
-    is created with ``source="manual"`` and otherwise behaves like any other
-    serviceman (attendance, callup/remarks editing, groupings). ``pers_no``
-    may be NULL when not yet known — the per-roll unique constraint treats
-    NULLs as distinct, and a super-admin can fill it in later via PATCH.
-    Manual adds live only on the roll they were added to; the next CSV
-    upload creates a new roll that will not include them.
+    Caller identity is session-derived (issue 31). Covers the gap where a
+    person is missing from the ingested CSV: the row is created with
+    ``source="manual"`` and otherwise behaves like any other serviceman
+    (attendance, callup/remarks editing, groupings). ``pers_no`` may be
+    NULL when not yet known — the per-roll unique constraint treats NULLs
+    as distinct, and a super-admin can fill it in later via PATCH. Manual
+    adds live only on the roll they were added to; the next CSV upload
+    creates a new roll that will not include them.
     """
-    if user_role != "super_admin":
-        raise HTTPException(
-            status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="Only super-admins can add personnel manually",
-        )
+    user_id = str(user.id)
 
     nr = (
         await db.execute(
@@ -562,21 +555,15 @@ async def create_personnel(
 @router.get("/personnel/{personnel_id}", response_model=PersonnelResponse)
 async def get_personnel(
     personnel_id: str,
-    user_id: str = Query(..., description="User ID for authorization"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get personnel by ID (admin/super_admin only).
 
-    Issue #28: the personnel's effective (unit, sub_unit_1) must fall
-    inside the caller's scope (403 otherwise; super_admin bypasses).
+    Caller identity is session-derived (issue 31). Issue #28: the
+    personnel's effective (unit, sub_unit_1) must fall inside the
+    caller's scope (403 otherwise; super_admin bypasses).
     """
-    if user_role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="Only admins can view personnel",
-        )
-
     result = await db.execute(select(Personnel).where(Personnel.id == personnel_id))
     personnel = result.scalar_one_or_none()
 
@@ -586,7 +573,7 @@ async def get_personnel(
             detail="Personnel not found",
         )
 
-    await _assert_personnel_in_scope(db, user_id, user_role, personnel)
+    await _assert_personnel_in_scope(db, str(user.id), user.role, personnel)
 
     return PersonnelResponse(
             id=personnel.id,
@@ -614,29 +601,23 @@ async def get_personnel(
 async def update_personnel(
     personnel_id: str,
     personnel_update: PersonnelUpdate,
-    user_id: str = Query(..., description="User ID for authorization"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Update personnel information.
 
-    Under the 1:1 tagging model the NominalRoll is read-only. Identity
-    fields (``rank``, ``name``) are rejected with 409. Unit/subunit edits
-    are recorded as a TaggingEntry overlay on the personnel's NR tagging.
-    ``status`` is still applied directly to the personnel row. Response
-    fields return the **effective** values (``to_*`` if tagged else
-    canonical).
+    Caller identity is session-derived (issue 31). Under the 1:1 tagging
+    model the NominalRoll is read-only. Identity fields (``rank``,
+    ``name``) are rejected with 409. Unit/subunit edits are recorded as a
+    TaggingEntry overlay on the personnel's NR tagging. ``status`` is
+    still applied directly to the personnel row. Response fields return
+    the **effective** values (``to_*`` if tagged else canonical).
 
     Issue #28 write scoping: the personnel's effective (unit, sub_unit_1)
     must be inside the caller's scope before anything is applied (403
     otherwise; super_admin bypasses).
     """
-    # Check permissions
-    if user_role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="Only admins can update personnel records",
-        )
+    user_id = str(user.id)
 
     update_data = personnel_update.model_dump(exclude_unset=True)
 
@@ -654,7 +635,7 @@ async def update_personnel(
     # pers_no is the fill-in-later flow for manual adds: super-admin only.
     # Admins keep every other PATCH field (status / callup_status / remarks).
     pers_no_update_present = "pers_no" in update_data
-    if pers_no_update_present and user_role != "super_admin":
+    if pers_no_update_present and user.role != "super_admin":
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Only super-admins can change personnel numbers",
@@ -683,7 +664,7 @@ async def update_personnel(
         )
 
     # Scope gate before any mutation (or tagging-entry redirect).
-    await _assert_personnel_in_scope(db, user_id, user_role, personnel)
+    await _assert_personnel_in_scope(db, user_id, user.role, personnel)
 
     # Apply status / callup_status / remarks directly to the personnel row
     # (still allowed). Changing callup_status away from "Called Up" only
@@ -787,16 +768,17 @@ async def get_personnel_attendance_history(
     ),
     limit: int = Query(100, ge=1, le=1000, description="Number of results to return"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
-    user_id: str = Query(..., description="User ID for authorization"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get attendance history for a personnel member.
 
-    Returns per-day AM/PM attendance with summary statistics. AM and PM slots
-    are counted independently toward totals. Supports date range filtering and
-    pagination. Issue #28: the personnel's effective (unit, sub_unit_1) must
-    be inside the caller's scope (403 otherwise; super_admin bypasses).
+    Caller identity is session-derived (issue 31). Returns per-day AM/PM
+    attendance with summary statistics. AM and PM slots are counted
+    independently toward totals. Supports date range filtering and
+    pagination. Issue #28: the personnel's effective (unit, sub_unit_1)
+    must be inside the caller's scope (403 otherwise; super_admin
+    bypasses).
     """
     # Resolve personnel (and its NR).
     personnel_result = await db.execute(
@@ -809,7 +791,7 @@ async def get_personnel_attendance_history(
             detail="Personnel not found",
         )
 
-    await _assert_personnel_in_scope(db, user_id, user_role, personnel)
+    await _assert_personnel_in_scope(db, str(user.id), user.role, personnel)
 
     resolved_nr = personnel.nominal_roll_id
     if nominal_roll_id and nominal_roll_id != resolved_nr:

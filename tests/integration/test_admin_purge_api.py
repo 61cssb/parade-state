@@ -31,10 +31,6 @@ from parade_state.models import (
 
 PURGE_URL = "/api/v1/admin/purge"
 
-SUPER_ADMIN_PARAMS = {"user_id": "super-admin-test-id", "user_role": "super_admin"}
-ADMIN_PARAMS = {"user_id": "admin-user-id", "user_role": "admin"}
-
-
 @pytest.fixture
 async def seeded_downstream_data(
     db_session: AsyncSession,
@@ -81,39 +77,38 @@ async def seeded_downstream_data(
 
 
 @pytest.mark.asyncio
-async def test_purge_forbidden_for_plain_admin(client: TestClient):
+async def test_purge_forbidden_for_plain_admin(client: TestClient, client_as):
     """Non-super-admins get 403 before anything else happens."""
-    response = client.post(
-        PURGE_URL, params={**ADMIN_PARAMS, "confirmation": "PURGE"}
-    )
+    client = await client_as("admin")
+    response = client.post(PURGE_URL, params={"confirmation": "PURGE"})
     assert response.status_code == 403
-    assert "super admin" in response.json()["detail"].lower()
+    assert response.json()["detail"] == "Super admin access required"
 
 
 @pytest.mark.asyncio
-async def test_purge_rejects_wrong_confirmation(client: TestClient):
+async def test_purge_rejects_wrong_confirmation(client: TestClient, client_as):
     """The type-to-confirm guard must match the exact word."""
+    client = await client_as("super_admin")
     response = client.post(
-        PURGE_URL, params={**SUPER_ADMIN_PARAMS, "confirmation": "purge"}
+        PURGE_URL, params={"confirmation": "purge"}
     )
     assert response.status_code == 400
     assert "PURGE" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_purge_disabled_deployment(client: TestClient, monkeypatch):
+async def test_purge_disabled_deployment(client: TestClient, client_as, monkeypatch):
     """PURGE_ENABLED=false short-circuits with 400."""
+    client = await client_as("super_admin")
     monkeypatch.setattr(get_settings(), "PURGE_ENABLED", False)
-    response = client.post(
-        PURGE_URL, params={**SUPER_ADMIN_PARAMS, "confirmation": "PURGE"}
-    )
+    response = client.post(PURGE_URL, params={"confirmation": "PURGE"})
     assert response.status_code == 400
     assert "PURGE_ENABLED" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
 async def test_purge_deletes_downstream_and_preserves_the_rest(
-    client: TestClient,
+    client: TestClient, client_as,
     db_session: AsyncSession,
     sample_users,
     sample_attendance,
@@ -132,10 +127,8 @@ async def test_purge_deletes_downstream_and_preserves_the_rest(
     mappings_before = await count(ColumnMapping)
     assert users_before >= 3  # sample admin+user plus well-known identities
 
-    response = client.post(
-        PURGE_URL,
-        params={"user_id": admin_id, "user_role": "super_admin", "confirmation": "PURGE"},
-    )
+    client = await client_as("super_admin")
+    response = client.post(PURGE_URL, params={"confirmation": "PURGE"})
     assert response.status_code == 200
     body = response.json()
     counts = body["purged_counts"]
@@ -164,7 +157,8 @@ async def test_purge_deletes_downstream_and_preserves_the_rest(
     # Users, access levels, sessions, and column mappings survive.
     assert await count(User) == users_before
     assert await count(AccessLevel) == levels_before
-    assert await count(UserSession) == 0
+    # The one minted session (client_as) survives — purge never touches sessions.
+    assert await count(UserSession) == 1
     assert await count(ColumnMapping) == mappings_before
 
     # Audit log preserved, and the purge itself is recorded with counts.
@@ -178,18 +172,15 @@ async def test_purge_deletes_downstream_and_preserves_the_rest(
     assert purge_entry.entity_type == "database"
     assert purge_entry.entity_id == "purge"
     assert purge_entry.action == "delete"
-    assert purge_entry.user_id == admin_id
+    assert purge_entry.user_id == "super-admin-test-id"
     assert '"nominal_rolls": 1' in purge_entry.description
     assert audit_entries[0].id == seeded_downstream_data["audit"].id
 
 
 @pytest.mark.asyncio
-async def test_purge_on_empty_database_is_a_no_op(client: TestClient, sample_users):
+async def test_purge_on_empty_database_is_a_no_op(client: TestClient, client_as):
     """Purging with nothing seeded succeeds and reports zero counts."""
-    admin_id = str(sample_users["admin"].id)
-    response = client.post(
-        PURGE_URL,
-        params={"user_id": admin_id, "user_role": "super_admin", "confirmation": "PURGE"},
-    )
+    client = await client_as("super_admin")
+    response = client.post(PURGE_URL, params={"confirmation": "PURGE"})
     assert response.status_code == 200
     assert response.json()["purged_counts"]["nominal_rolls"] == 0

@@ -920,12 +920,19 @@ an env-var change plus restart with no other action.
 - Has subunit scope: one or more (nominal roll, unit, sub-unit 1) grants
 - Write scope: attendance status, Notes, Remarks — for rows within scope only
 
-**Caller identity caveat (issue 31):** the JSON API still learns the
-caller's `user_id`/`user_role` from client-supplied query parameters —
-spoofable design debt that predates scoping. Every scope decision flows
-through the shared module (`api/subunit_access.py`) precisely so that
-issue 31 (session-derived identity) is an edge swap; until it lands, API
-authorization is advisory rather than a hard boundary.
+**Caller identity (issue 31, landed):** every `/api/v1` endpoint derives
+the caller's identity from the authenticated session (HttpOnly
+`session_token` cookie or Bearer header → `UserSession` → active `User`
+row) via the shared dependencies in `auth/dependencies.py`. No endpoint
+accepts identity from query parameters or request bodies; provenance
+fields (`created_by`, `updated_by`, `granted_by`, …) and audit stamps are
+set server-side from the session user. Unauthenticated calls get 401;
+authenticated calls below the required tier (or outside their scope
+grants) get 403. Role is re-read from the `User` row on every request, so
+demotions take effect on the caller's next request. A structural test
+(`tests/integration/test_no_client_identity.py`) walks every registered
+route to keep identity params from reappearing, alongside a spoof
+regression suite proving `?user_role=super_admin` changes nothing.
 
 ### 5.2 Account Lifecycle
 

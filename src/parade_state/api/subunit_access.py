@@ -18,12 +18,11 @@ blanks fail validation instead of widening access):
 no grants on an NR means no access there, and a personnel row with a
 NULL effective sub_unit_1 matches only ``sub_unit_1='*'`` grants.
 
-**The seam (issue #31):** caller identity currently arrives as explicit
-``user_id`` / ``user_role`` arguments — today supplied by (spoofable)
-query parameters at the API edge. Every scope decision in the codebase
-must flow through this module so that switching to session-derived
-identity only changes how these arguments are sourced, never how scope
-is computed.
+**The seam (issue #31, landed):** callers pass explicit ``user_id`` /
+``user_role`` arguments, sourced at the API edge from the session-derived
+user (``Depends(require_admin_user)`` et al.) — never from client input.
+Every scope decision flows through this module, so identity sourcing and
+scope computation stay independently changeable.
 """
 
 from collections.abc import Iterable

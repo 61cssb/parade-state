@@ -26,8 +26,6 @@ async def test_history_basic_stats(
         f"/api/v1/personnel/{personnel_id}/attendance-history",
         headers=admin_token_headers,
         params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
         },
     )
     assert response.status_code == 200
@@ -80,8 +78,6 @@ async def test_history_date_filter(
         params={
             "date_from": today,
             "date_to": today,
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
         },
     )
     assert response.status_code == 200
@@ -105,8 +101,6 @@ async def test_history_ordering_desc(
         f"/api/v1/personnel/{personnel_id}/attendance-history",
         headers=admin_token_headers,
         params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
         },
     )
     assert response.status_code == 200
@@ -127,8 +121,6 @@ async def test_history_invalid_personnel_404(
         "/api/v1/personnel/00000000-0000-0000-0000-000000000000/attendance-history",
         headers=admin_token_headers,
         params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
         },
     )
     assert response.status_code == 404
@@ -149,8 +141,6 @@ async def test_history_wrong_nominal_roll_400(
         headers=admin_token_headers,
         params={
             "nominal_roll_id": "00000000-0000-0000-0000-000000000000",
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
         },
     )
     assert response.status_code == 400
@@ -171,8 +161,6 @@ async def test_history_no_records(
         f"/api/v1/personnel/{personnel_id}/attendance-history",
         headers=admin_token_headers,
         params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
         },
     )
     assert response.status_code == 200

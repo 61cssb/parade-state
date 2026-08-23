@@ -166,7 +166,7 @@
                grouping export): selected roll + date + sub-unit filter,
                scoped to the caller's Subunit-1 access server-side. #}
             {% if attendance_rows %}
-            <a href="/api/v1/attendance/export?user_id={{ user.id | urlencode }}&user_role={{ user.role | urlencode }}&nominal_roll_id={{ selected_nominal_roll_id | urlencode }}&date={{ target_date.strftime('%Y-%m-%d') }}{% if sub_unit_1_filter %}&sub_unit_1={{ sub_unit_1_filter | urlencode }}{% endif %}"
+            <a href="/api/v1/attendance/export?nominal_roll_id={{ selected_nominal_roll_id | urlencode }}&date={{ target_date.strftime('%Y-%m-%d') }}{% if sub_unit_1_filter %}&sub_unit_1={{ sub_unit_1_filter | urlencode }}{% endif %}"
                class="btn" style="background: #e5e7eb; color: #374151; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.25rem; font-size: 0.875rem;">Export CSV</a>
             {% endif %}
         </div>
@@ -337,8 +337,6 @@
 
 {% block scripts %}
 <script>
-    const USER_ID = "{{ user.id }}";
-    const USER_ROLE = "{{ user.role }}";
     const NOMINAL_ROLL_ID = "{{ selected_nominal_roll_id }}";
     const TARGET_DATE = "{{ target_date.strftime('%Y-%m-%d') }}";
     const NR_CAA = "{{ nr_caa }}";
@@ -395,7 +393,7 @@
         };
         setSaveState('Saving…', 'info');
         try {
-            const response = await fetch('/api/v1/attendance/upsert?user_id=' + USER_ID + '&user_role=' + USER_ROLE, {
+            const response = await fetch('/api/v1/attendance/upsert', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ nominal_roll_id: NOMINAL_ROLL_ID, records: [payload] }),
@@ -529,8 +527,7 @@
         }
         let url = '/api/v1/attendance/copy-remarks?nominal_roll_id=' + NOMINAL_ROLL_ID +
             '&source_date=' + st.sd + '&source_slot=' + st.ss +
-            '&dest_date=' + st.dd + '&dest_slot=' + st.ds +
-            '&user_id=' + USER_ID + '&user_role=' + USER_ROLE;
+            '&dest_date=' + st.dd + '&dest_slot=' + st.ds;
         if (SUBUNIT_FILTER) url += '&sub_unit_1=' + encodeURIComponent(SUBUNIT_FILTER);
         try {
             const response = await fetch(url, { method: 'POST' });

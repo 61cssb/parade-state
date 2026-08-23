@@ -3,7 +3,7 @@
 Admins and super-admins create ``requests`` / ``bugs`` posts and comment
 on them; super-admins additionally triage (category / status changes,
 deletions). Regular users never reach this router — the
-``require_admin_user_flexible`` dependency resolves identity from the
+``require_admin_user`` dependency resolves identity from the
 session token (never client-supplied user ids), which is what makes the
 author-only edit rules enforceable server-side.
 
@@ -17,7 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from parade_state.auth.admin_dependencies import require_admin_user_flexible
+from parade_state.auth.dependencies import require_admin_user
 from parade_state.db import get_db_session
 from parade_state.models import AuditLog, DiscussionComment, DiscussionPost, User
 from parade_state.models.schemas import (
@@ -175,7 +175,7 @@ async def list_posts(
     category: str | None = None,
     status_filter: str | None = None,
     db: AsyncSession = Depends(get_db_session),
-    user: User = Depends(require_admin_user_flexible),
+    user: User = Depends(require_admin_user),
 ) -> list[DiscussionPostResponse]:
     """List board posts, newest first, optionally filtered.
 
@@ -205,7 +205,7 @@ async def list_posts(
 async def create_post(
     payload: DiscussionPostCreate,
     db: AsyncSession = Depends(get_db_session),
-    user: User = Depends(require_admin_user_flexible),
+    user: User = Depends(require_admin_user),
 ) -> DiscussionPostResponse:
     """Create a board post.
 
@@ -229,7 +229,7 @@ async def create_post(
 async def get_post(
     post_id: str,
     db: AsyncSession = Depends(get_db_session),
-    user: User = Depends(require_admin_user_flexible),
+    user: User = Depends(require_admin_user),
 ) -> DiscussionPostDetailResponse:
     """Fetch a single post with its comments (oldest first)."""
     post = await _get_post_or_404(db, post_id)
@@ -243,7 +243,7 @@ async def update_post(
     post_id: str,
     payload: DiscussionPostUpdate,
     db: AsyncSession = Depends(get_db_session),
-    user: User = Depends(require_admin_user_flexible),
+    user: User = Depends(require_admin_user),
 ) -> DiscussionPostResponse:
     """Edit a post's title/body — author only.
 
@@ -269,7 +269,7 @@ async def triage_post(
     post_id: str,
     payload: DiscussionPostTriage,
     db: AsyncSession = Depends(get_db_session),
-    user: User = Depends(require_admin_user_flexible),
+    user: User = Depends(require_admin_user),
 ) -> DiscussionPostResponse:
     """Change a post's category and/or status — super-admin only.
 
@@ -311,7 +311,7 @@ async def triage_post(
 async def delete_post(
     post_id: str,
     db: AsyncSession = Depends(get_db_session),
-    user: User = Depends(require_admin_user_flexible),
+    user: User = Depends(require_admin_user),
 ) -> dict:
     """Delete a post and its comments — super-admin only."""
     post = await _get_post_or_404(db, post_id)
@@ -336,7 +336,7 @@ async def create_comment(
     post_id: str,
     payload: DiscussionCommentCreate,
     db: AsyncSession = Depends(get_db_session),
-    user: User = Depends(require_admin_user_flexible),
+    user: User = Depends(require_admin_user),
 ) -> DiscussionCommentResponse:
     """Comment on a post — any admin or super-admin."""
     post = await _get_post_or_404(db, post_id)
@@ -357,7 +357,7 @@ async def update_comment(
     comment_id: str,
     payload: DiscussionCommentUpdate,
     db: AsyncSession = Depends(get_db_session),
-    user: User = Depends(require_admin_user_flexible),
+    user: User = Depends(require_admin_user),
 ) -> DiscussionCommentResponse:
     """Edit a comment's body — author only."""
     comment = await _get_comment_or_404(db, comment_id)
@@ -375,7 +375,7 @@ async def update_comment(
 async def delete_comment(
     comment_id: str,
     db: AsyncSession = Depends(get_db_session),
-    user: User = Depends(require_admin_user_flexible),
+    user: User = Depends(require_admin_user),
 ) -> dict:
     """Delete a comment — super-admin only."""
     comment = await _get_comment_or_404(db, comment_id)

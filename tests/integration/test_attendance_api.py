@@ -16,9 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 @pytest.mark.asyncio
 async def test_list_requires_nominal_roll_and_date(
-    client: TestClient, sample_nominal_roll, sample_attendance_scope
+    client: TestClient, client_as, sample_nominal_roll, sample_attendance_scope
 ):
     """Missing query params yield 422 (FastAPI validation)."""
+    client = await client_as("admin")
     response = client.get("/api/v1/attendance/")
     assert response.status_code == 422
 
@@ -26,22 +27,21 @@ async def test_list_requires_nominal_roll_and_date(
 @pytest.mark.asyncio
 async def test_list_returns_rows_for_date(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
     sample_attendance,
-    admin_id,
     admin_subunit_assignment,
 ):
     """List returns rows for the requested NR + date (scope-filtered)."""
+    client = await client_as("admin")
     today = date.today().isoformat()
     response = client.get(
         "/api/v1/attendance/",
         params={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "date": today,
-            "user_id": admin_id,
-            "user_role": "admin",
         },
     )
     assert response.status_code == 200
@@ -51,13 +51,13 @@ async def test_list_returns_rows_for_date(
 
 @pytest.mark.asyncio
 async def test_upsert_refuses_when_nr_not_active(
-    client: TestClient, sample_nominal_roll, sample_personnel, admin_id
+    client: TestClient, client_as, sample_nominal_roll, sample_personnel
 ):
     """When the NR is not the one active for attendance, upsert returns 400."""
+    client = await client_as("admin")
     today = date.today().isoformat()
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "records": [
@@ -77,13 +77,14 @@ async def test_upsert_refuses_when_nr_not_active(
 @pytest.mark.asyncio
 async def test_upsert_creates_then_updates(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
     admin_subunit_assignment,
-    admin_id,
 ):
     """Upsert creates a row, then a second upsert updates it in place."""
+    client = await client_as("admin")
     today = date.today().isoformat()
     pid = str(sample_personnel[0].id)
     nr_id = str(sample_nominal_roll.id)
@@ -91,7 +92,6 @@ async def test_upsert_creates_then_updates(
     # Create.
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={
             "nominal_roll_id": nr_id,
             "records": [
@@ -113,7 +113,6 @@ async def test_upsert_creates_then_updates(
     # Update same row.
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={
             "nominal_roll_id": nr_id,
             "records": [
@@ -137,20 +136,20 @@ async def test_upsert_creates_then_updates(
 @pytest.mark.asyncio
 async def test_upsert_rejects_personnel_not_on_nr(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
-    admin_id,
 ):
     """Upsert rejects a personnel_id that is not on the NR.
 
     Run as super_admin so the request reaches personnel validation rather than
     being short-circuited by the Subunit-1 access check.
     """
+    client = await client_as("super_admin")
     today = date.today().isoformat()
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "super_admin"},
         json={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "records": [
@@ -168,12 +167,12 @@ async def test_upsert_rejects_personnel_not_on_nr(
 
 @pytest.mark.asyncio
 async def test_activate_attendance_requires_super_admin(
-    client: TestClient, sample_nominal_roll, admin_id
+    client: TestClient, client_as, sample_nominal_roll
 ):
     """Non-super-admins cannot mark an NR active for attendance."""
+    client = await client_as("admin")
     response = client.post(
         f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/activate-attendance",
-        params={"user_id": admin_id, "user_role": "admin"},
     )
     assert response.status_code == 403
 
@@ -181,19 +180,19 @@ async def test_activate_attendance_requires_super_admin(
 @pytest.mark.asyncio
 async def test_activate_attendance_then_upsert_succeeds(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     admin_subunit_assignment,
-    admin_id,
 ):
     """Marking the NR "Use for Attendance" unblocks attendance upsert."""
+    client = await client_as("super_admin")
     nr_id = str(sample_nominal_roll.id)
     today = date.today().isoformat()
 
     # Activate (as super-admin).
     response = client.post(
         f"/api/v1/nominal-rolls/{nr_id}/activate-attendance",
-        params={"user_id": admin_id, "user_role": "super_admin"},
     )
     assert response.status_code == 200
     assert response.json()["attendance_active"] is True
@@ -201,7 +200,6 @@ async def test_activate_attendance_then_upsert_succeeds(
     # Now upsert works.
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={
             "nominal_roll_id": nr_id,
             "records": [
@@ -220,13 +218,14 @@ async def test_activate_attendance_then_upsert_succeeds(
 @pytest.mark.asyncio
 async def test_copy_remarks_is_well_formed(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_attendance_scope,
     sample_attendance,
     admin_subunit_assignment,
-    admin_id,
 ):
     """copy-remarks returns the documented shape (explicit source/dest)."""
+    client = await client_as("admin")
     today = date.today().isoformat()
     response = client.post(
         "/api/v1/attendance/copy-remarks",
@@ -236,8 +235,6 @@ async def test_copy_remarks_is_well_formed(
             "source_slot": "am",
             "dest_date": today,
             "dest_slot": "pm",
-            "user_id": admin_id,
-            "user_role": "admin",
         },
     )
     assert response.status_code == 200
@@ -249,9 +246,10 @@ async def test_copy_remarks_is_well_formed(
 
 @pytest.mark.asyncio
 async def test_copy_remarks_refuses_when_not_active(
-    client: TestClient, sample_nominal_roll, admin_id
+    client: TestClient, client_as, sample_nominal_roll
 ):
     """copy-remarks refuses (400) when the NR isn't active for attendance."""
+    client = await client_as("admin")
     today = date.today().isoformat()
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     response = client.post(
@@ -262,8 +260,6 @@ async def test_copy_remarks_refuses_when_not_active(
             "source_slot": "pm",
             "dest_date": today,
             "dest_slot": "am",
-            "user_id": admin_id,
-            "user_role": "admin",
         },
     )
     assert response.status_code == 400
@@ -289,11 +285,12 @@ async def _make_super_admin(db_session):
 @pytest.mark.asyncio
 async def test_copy_remarks_rejects_same_source_and_destination(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_attendance_scope,
-    admin_id,
 ):
     """Source and destination date+slot must differ (400 otherwise)."""
+    client = await client_as("admin")
     today = date.today().isoformat()
     response = client.post(
         "/api/v1/attendance/copy-remarks",
@@ -303,8 +300,6 @@ async def test_copy_remarks_rejects_same_source_and_destination(
             "source_slot": "pm",
             "dest_date": today,
             "dest_slot": "pm",
-            "user_id": admin_id,
-            "user_role": "admin",
         },
     )
     assert response.status_code == 400
@@ -314,6 +309,7 @@ async def test_copy_remarks_rejects_same_source_and_destination(
 @pytest.mark.asyncio
 async def test_copy_remarks_prev_day_pm_to_today_am(
     client: TestClient,
+    client_as,
     db_session,
     sample_nominal_roll,
     sample_personnel,
@@ -328,6 +324,7 @@ async def test_copy_remarks_prev_day_pm_to_today_am(
     from parade_state.models import Attendance
 
     sa = await _make_super_admin(db_session)
+    client = await client_as(sa)
     admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
     today = date.today()
@@ -366,8 +363,6 @@ async def test_copy_remarks_prev_day_pm_to_today_am(
             "source_slot": "pm",
             "dest_date": today.isoformat(),
             "dest_slot": "am",
-            "user_id": str(sa.id),
-            "user_role": "super_admin",
         },
     )
     assert response.status_code == 200
@@ -398,6 +393,7 @@ async def test_copy_remarks_prev_day_pm_to_today_am(
 @pytest.mark.asyncio
 async def test_copy_remarks_same_day_am_to_pm_overwrites(
     client: TestClient,
+    client_as,
     db_session,
     sample_nominal_roll,
     sample_personnel,
@@ -408,6 +404,7 @@ async def test_copy_remarks_same_day_am_to_pm_overwrites(
     from parade_state.models import Attendance
 
     sa = await _make_super_admin(db_session)
+    client = await client_as(sa)
     admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
     today = date.today()
@@ -433,8 +430,6 @@ async def test_copy_remarks_same_day_am_to_pm_overwrites(
             "source_slot": "am",
             "dest_date": today.isoformat(),
             "dest_slot": "pm",
-            "user_id": str(sa.id),
-            "user_role": "super_admin",
         },
     )
     assert response.status_code == 200
@@ -447,6 +442,7 @@ async def test_copy_remarks_same_day_am_to_pm_overwrites(
 @pytest.mark.asyncio
 async def test_copy_remarks_subunit_filter_scopes_the_copy(
     client: TestClient,
+    client_as,
     db_session,
     sample_nominal_roll,
     sample_personnel,
@@ -461,6 +457,7 @@ async def test_copy_remarks_subunit_filter_scopes_the_copy(
     from parade_state.models import Attendance
 
     sa = await _make_super_admin(db_session)
+    client = await client_as(sa)
     admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
     today = date.today()
@@ -489,8 +486,6 @@ async def test_copy_remarks_subunit_filter_scopes_the_copy(
             "dest_date": today.isoformat(),
             "dest_slot": "am",
             "sub_unit_1": "Platoon 1",
-            "user_id": str(sa.id),
-            "user_role": "super_admin",
         },
     )
     assert response.status_code == 200
@@ -513,6 +508,7 @@ async def test_copy_remarks_subunit_filter_scopes_the_copy(
 @pytest.mark.asyncio
 async def test_copy_remarks_filter_matches_effective_subunit(
     client: TestClient,
+    client_as,
     db_session,
     sample_nominal_roll,
     sample_personnel,
@@ -526,6 +522,7 @@ async def test_copy_remarks_filter_matches_effective_subunit(
     from parade_state.models import Attendance, Tagging, TaggingEntry
 
     sa = await _make_super_admin(db_session)
+    client = await client_as(sa)
     admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
     today = date.today()
@@ -562,8 +559,6 @@ async def test_copy_remarks_filter_matches_effective_subunit(
             "dest_date": today.isoformat(),
             "dest_slot": "am",
             "sub_unit_1": "Platoon 9",
-            "user_id": str(sa.id),
-            "user_role": "super_admin",
         },
     )
     assert response.status_code == 200
@@ -583,6 +578,7 @@ async def test_copy_remarks_filter_matches_effective_subunit(
 @pytest.mark.asyncio
 async def test_copy_remarks_allows_earlier_destination(
     client: TestClient,
+    client_as,
     db_session,
     sample_nominal_roll,
     sample_personnel,
@@ -594,6 +590,7 @@ async def test_copy_remarks_allows_earlier_destination(
     from parade_state.models import Attendance
 
     sa = await _make_super_admin(db_session)
+    client = await client_as(sa)
     admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
     today = date.today()
@@ -618,8 +615,6 @@ async def test_copy_remarks_allows_earlier_destination(
             "source_slot": "am",
             "dest_date": (today - timedelta(days=1)).isoformat(),
             "dest_slot": "pm",
-            "user_id": str(sa.id),
-            "user_role": "super_admin",
         },
     )
     assert response.status_code == 200
@@ -634,6 +629,7 @@ async def test_copy_remarks_allows_earlier_destination(
 @pytest.mark.asyncio
 async def test_per_row_upsert_single_record(
     client: TestClient,
+    client_as,
     db_session,
     sample_nominal_roll,
     sample_personnel,
@@ -647,13 +643,13 @@ async def test_per_row_upsert_single_record(
 
     from parade_state.models import Attendance, User
 
+    client = await client_as(sample_users["admin"])
     admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
     today = date.today().isoformat()
 
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={
             "nominal_roll_id": nr_id,
             "records": [
@@ -684,10 +680,10 @@ async def test_per_row_upsert_single_record(
     )
     db_session.add(outsider)
     await db_session.commit()
+    client = await client_as(outsider)
 
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": str(outsider.id), "user_role": "admin"},
         json={
             "nominal_roll_id": nr_id,
             "records": [
@@ -711,6 +707,7 @@ async def test_per_row_upsert_single_record(
 @pytest.mark.asyncio
 async def test_export_csv_columns_and_content(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
@@ -718,14 +715,13 @@ async def test_export_csv_columns_and_content(
 ):
     """Super-admin export mirrors the marking table: statuses as labels,
     missing rows default to Absent, remarks carried per slot."""
+    client = await client_as("super_admin")
     today = date.today().isoformat()
     response = client.get(
         "/api/v1/attendance/export",
         params={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "date": today,
-            "user_id": "super-admin-test-id",
-            "user_role": "super_admin",
         },
     )
     assert response.status_code == 200
@@ -754,22 +750,24 @@ async def test_export_csv_columns_and_content(
 @pytest.mark.asyncio
 async def test_export_csv_scopes_to_assigned_subunits(
     client: TestClient,
+    client_as,
     db_session: AsyncSession,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
     sample_attendance,
-    admin_id: str,
+    sample_users,
 ):
     """Admin export follows the Subunit-1 rule: 403 without assignments,
     assigned scope with them, and the page's sub-unit filter narrows it."""
     from parade_state.models import UserSubunitAssignment
 
+    client = await client_as(sample_users["admin"])
+    admin_id = str(sample_users["admin"].id)
+
     base = {
         "nominal_roll_id": str(sample_nominal_roll.id),
         "date": date.today().isoformat(),
-        "user_id": admin_id,
-        "user_role": "admin",
     }
 
     # Deny-by-default: no UserSubunitAssignment rows for this admin yet.

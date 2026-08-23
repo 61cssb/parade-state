@@ -185,12 +185,13 @@ async def test_create_resource_as_admin(
     # Arrange
     resource_data = {"name": "Test Resource"}
 
-    # Act
+    # Act — identity comes from the session headers; never send
+    # user_id/user_role params (issue 31: they are ignored, and the
+    # structural gate forbids endpoints from declaring them)
     response = client.post(
         "/api/v1/resources/",
         json=resource_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-id", "user_role": "admin"},
     )
 
     # Assert
@@ -234,7 +235,13 @@ class TestDomainBehavior:
 - **`client`** - FastAPI TestClient for API testing (synchronous interface)
 - **`test_db`** - Database engine and session factory with tables created
 - **`db_session`** - Database session for database operations
-- **`admin_token_headers`** - Authentication headers for admin user
+- **`admin_token_headers` / `user_token_headers` / `super_admin_token_headers`** -
+  Bearer headers carrying a real minted `UserSession` for the sample admin /
+  regular user / well-known super-admin (issue 31: sessions, not raw IDs)
+- **`client_as(user)`** (integration) - factory that authenticates the
+  client with the `session_token` cookie as a role shorthand
+  (`"admin"`, `"super_admin"`, `"user"`), a well-known user id, or a
+  `User` object — the cookie equivalent of the header fixtures
 - **`sample_grouping`** - Sample grouping (issue 26 model: label + two groups)
 - **`sample_personnel`** - Sample personnel entities
 - **`sample_users`** - Sample user entities

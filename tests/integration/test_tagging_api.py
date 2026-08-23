@@ -21,10 +21,6 @@ from parade_state.models import (
 from parade_state.utils import utc_dt
 
 
-# Common query params reused across endpoints.
-SUPER_ADMIN_PARAMS = {"user_id": "super-admin-test-id", "user_role": "super_admin"}
-ADMIN_PARAMS = {"user_id": "admin-user-id", "user_role": "admin"}
-USER_PARAMS = {"user_id": "regular-user-id", "user_role": "user"}
 
 
 # ============================================================================
@@ -100,10 +96,9 @@ async def test_admin_role_cannot_list_taggings(
     response = client.get(
         "/api/v1/taggings",
         headers=admin_token_headers,
-        params=ADMIN_PARAMS,
     )
     assert response.status_code == 403
-    assert "super admins" in response.json()["detail"].lower()
+    assert response.json()["detail"] == "Super admin access required"
 
 
 @pytest.mark.asyncio
@@ -113,7 +108,6 @@ async def test_regular_user_cannot_create_tagging(
     response = client.post(
         "/api/v1/taggings",
         headers=user_token_headers,
-        params=USER_PARAMS,
         json={
             "label": "user-attempt",
             "nominal_roll_id": str(sample_nominal_roll.id),
@@ -134,7 +128,6 @@ async def test_create_tagging_without_entries(
     response = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"label": "  trimmed  ", "nominal_roll_id": str(sample_nominal_roll.id)},
     )
     assert response.status_code == 201, response.text
@@ -155,7 +148,6 @@ async def test_create_tagging_snapshots_from_subunit(
     response = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "label": "cross-attach",
             "nominal_roll_id": str(sample_nominal_roll.id),
@@ -187,7 +179,6 @@ async def test_create_tagging_one_per_nr_409(
     first = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"label": "first", "nominal_roll_id": str(sample_nominal_roll.id)},
     )
     assert first.status_code == 201
@@ -195,7 +186,6 @@ async def test_create_tagging_one_per_nr_409(
     second = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"label": "second", "nominal_roll_id": str(sample_nominal_roll.id)},
     )
     assert second.status_code == 409
@@ -212,7 +202,6 @@ async def test_create_tagging_personnel_not_on_nr_400(
     response = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "label": "cross-nr-attempt",
             "nominal_roll_id": str(sample_personnel[0].nominal_roll_id),
@@ -236,7 +225,6 @@ async def test_create_tagging_duplicate_personnel_in_payload_400(
     response = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "label": "dup-person",
             "nominal_roll_id": str(sample_nominal_roll.id),
@@ -257,7 +245,6 @@ async def test_create_tagging_unknown_nominal_roll_404(
     response = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"label": "x", "nominal_roll_id": "nonexistent-nr"},
     )
     assert response.status_code == 404
@@ -276,20 +263,18 @@ async def test_list_filters_by_nominal_roll(
     client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"label": "on-first", "nominal_roll_id": str(sample_nominal_roll.id)},
     )
     client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"label": "on-second", "nominal_roll_id": str(other_nr.id)},
     )
 
     response = client.get(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params={**SUPER_ADMIN_PARAMS, "nominal_roll_id": str(sample_nominal_roll.id)},
+        params={"nominal_roll_id": str(sample_nominal_roll.id)},
     )
     assert response.status_code == 200
     items = response.json()
@@ -306,7 +291,6 @@ async def test_get_returns_entries(
     create = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "label": "with-entries",
             "nominal_roll_id": str(sample_nominal_roll.id),
@@ -321,7 +305,6 @@ async def test_get_returns_entries(
     response = client.get(
         f"/api/v1/taggings/{tagging_id}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
     )
     assert response.status_code == 200
     data = response.json()
@@ -335,7 +318,6 @@ async def test_get_unknown_tagging_404(
     response = client.get(
         "/api/v1/taggings/nonexistent",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
     )
     assert response.status_code == 404
 
@@ -352,7 +334,6 @@ async def test_patch_full_replaces_entries(
     create = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "label": "to-update",
             "nominal_roll_id": str(sample_nominal_roll.id),
@@ -367,7 +348,6 @@ async def test_patch_full_replaces_entries(
     response = client.patch(
         f"/api/v1/taggings/{tagging_id}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "label": "updated-label",
             "entries": [
@@ -399,7 +379,6 @@ async def test_patch_label_no_longer_globally_unique(
     a = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"label": "shared-label", "nominal_roll_id": str(sample_nominal_roll.id)},
     )
     assert a.status_code == 201
@@ -409,13 +388,12 @@ async def test_patch_label_no_longer_globally_unique(
         client.get(
             "/api/v1/taggings",
             headers=super_admin_token_headers,
-            params={**SUPER_ADMIN_PARAMS, "nominal_roll_id": str(other_nr.id)},
+            params={"nominal_roll_id": str(other_nr.id)},
         ).json()[0]["id"]
     )
     response = client.patch(
         f"/api/v1/taggings/{target}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"label": "shared-label"},
     )
     assert response.status_code == 200
@@ -428,7 +406,6 @@ async def test_patch_without_entries_preserves_entries(
     create = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "label": "keep-entries",
             "nominal_roll_id": str(sample_nominal_roll.id),
@@ -442,7 +419,6 @@ async def test_patch_without_entries_preserves_entries(
     response = client.patch(
         f"/api/v1/taggings/{tagging_id}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"remarks": "updated remarks only"},
     )
     assert response.status_code == 200
@@ -462,7 +438,6 @@ async def test_delete_cascades_entries(
     create = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "label": "doomed",
             "nominal_roll_id": str(sample_nominal_roll.id),
@@ -476,7 +451,6 @@ async def test_delete_cascades_entries(
     response = client.delete(
         f"/api/v1/taggings/{tagging_id}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
     )
     assert response.status_code == 200
 
@@ -502,7 +476,6 @@ async def test_delete_refuses_when_nr_has_attendance(
     create = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "label": "linked",
             "nominal_roll_id": str(sample_nominal_roll.id),
@@ -530,7 +503,6 @@ async def test_delete_refuses_when_nr_has_attendance(
     response = client.delete(
         f"/api/v1/taggings/{tagging_id}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
     )
     assert response.status_code == 409
     assert "attendance" in response.json()["detail"].lower()
@@ -555,7 +527,6 @@ async def test_tagging_does_not_mutate_personnel(
     create = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "label": "overlay-test",
             "nominal_roll_id": str(sample_nominal_roll.id),
@@ -571,7 +542,6 @@ async def test_tagging_does_not_mutate_personnel(
     client.patch(
         f"/api/v1/taggings/{tagging_id}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "entries": [
                 {"personnel_id": p_id, "to_unit": "Another Coy"},
@@ -609,7 +579,6 @@ async def test_clone_matches_by_pers_no(
     create = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "label": "clone-source",
             "nominal_roll_id": str(sample_nominal_roll.id),
@@ -625,7 +594,6 @@ async def test_clone_matches_by_pers_no(
     response = client.post(
         f"/api/v1/taggings/{source_id}/clone",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"target_nominal_roll_id": str(other_nr.id)},
     )
     assert response.status_code == 200, response.text
@@ -674,7 +642,6 @@ async def test_clone_null_pers_no_source_surfaces_unmatched(
     create = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "label": "null-pers-no-source",
             "nominal_roll_id": str(sample_nominal_roll.id),
@@ -688,7 +655,6 @@ async def test_clone_null_pers_no_source_surfaces_unmatched(
     response = client.post(
         f"/api/v1/taggings/{source_id}/clone",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"target_nominal_roll_id": str(other_nr.id)},
     )
     assert response.status_code == 200, response.text
@@ -706,7 +672,6 @@ async def test_clone_same_nr_400(
     create = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"label": "self-clone", "nominal_roll_id": str(sample_nominal_roll.id)},
     )
     source_id = create.json()["id"]
@@ -714,7 +679,6 @@ async def test_clone_same_nr_400(
     response = client.post(
         f"/api/v1/taggings/{source_id}/clone",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "target_nominal_roll_id": str(sample_nominal_roll.id),
         },
@@ -734,13 +698,12 @@ async def test_clone_skips_existing_target_entries(
         client.get(
             "/api/v1/taggings",
             headers=super_admin_token_headers,
-            params={**SUPER_ADMIN_PARAMS, "nominal_roll_id": str(other_nr.id)},
+            params={"nominal_roll_id": str(other_nr.id)},
         ).json()[0]
     )
     pre = client.patch(
         f"/api/v1/taggings/{target_tagging['id']}",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "entries": [
                 {"personnel_id": str(mirrored[0].id), "to_unit": "Existing Unit"},
@@ -753,7 +716,6 @@ async def test_clone_skips_existing_target_entries(
     create = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "label": "clone-source",
             "nominal_roll_id": str(sample_nominal_roll.id),
@@ -768,7 +730,6 @@ async def test_clone_skips_existing_target_entries(
     response = client.post(
         f"/api/v1/taggings/{source_id}/clone",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={"target_nominal_roll_id": str(other_nr.id)},
     )
     assert response.status_code == 200
@@ -796,7 +757,6 @@ async def test_delete_nominal_roll_cascades_taggings(
     create = client.post(
         "/api/v1/taggings",
         headers=super_admin_token_headers,
-        params=SUPER_ADMIN_PARAMS,
         json={
             "label": "cascade-test",
             "nominal_roll_id": nr_id,
