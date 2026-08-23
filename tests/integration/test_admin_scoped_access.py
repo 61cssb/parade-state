@@ -91,12 +91,13 @@ def _names(response_json) -> set[str]:
 
 @pytest.mark.asyncio
 async def test_unit_wildcard_sub_grant_covers_whole_unit(
-    client: TestClient, db_session, sample_nominal_roll, sample_personnel,
+    client: TestClient, client_as, db_session, sample_nominal_roll, sample_personnel,
     sample_users,
 ):
     """(unit='Coy A', sub_unit_1='*') sees every Coy A row — including
     Coy A personnel with a NULL sub_unit_1 — but nothing from Coy B."""
     admin_id = str(sample_users["admin"].id)
+    client = await client_as(sample_users["admin"])
     await _extra_personnel(db_session, sample_nominal_roll.id)
     await _grant(db_session, sample_nominal_roll.id, admin_id, "Coy A", "*")
 
@@ -105,8 +106,6 @@ async def test_unit_wildcard_sub_grant_covers_whole_unit(
         params={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "limit": 100,
-            "user_id": admin_id,
-            "user_role": "admin",
         },
     )
     assert response.status_code == 200
@@ -115,12 +114,13 @@ async def test_unit_wildcard_sub_grant_covers_whole_unit(
 
 @pytest.mark.asyncio
 async def test_composite_grant_sees_only_that_pair(
-    client: TestClient, db_session, sample_nominal_roll, sample_personnel,
+    client: TestClient, client_as, db_session, sample_nominal_roll, sample_personnel,
     sample_users,
 ):
     """(unit='Coy A', sub_unit_1='Platoon 1') sees exactly Coy A / Platoon 1 —
     not Coy B / Platoon 1, not NULL-sub-unit rows."""
     admin_id = str(sample_users["admin"].id)
+    client = await client_as(sample_users["admin"])
     await _extra_personnel(db_session, sample_nominal_roll.id)
     await _grant(db_session, sample_nominal_roll.id, admin_id, "Coy A", "Platoon 1")
 
@@ -129,8 +129,6 @@ async def test_composite_grant_sees_only_that_pair(
         params={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "limit": 100,
-            "user_id": admin_id,
-            "user_role": "admin",
         },
     )
     assert response.status_code == 200
@@ -139,12 +137,13 @@ async def test_composite_grant_sees_only_that_pair(
 
 @pytest.mark.asyncio
 async def test_subunit_only_grant_spans_units(
-    client: TestClient, db_session, sample_nominal_roll, sample_personnel,
+    client: TestClient, client_as, db_session, sample_nominal_roll, sample_personnel,
     sample_users,
 ):
     """(unit='*', sub_unit_1='Platoon 1') — the pre-#28 shape — sees
     Platoon 1 under every unit."""
     admin_id = str(sample_users["admin"].id)
+    client = await client_as(sample_users["admin"])
     await _extra_personnel(db_session, sample_nominal_roll.id)
     await _grant(db_session, sample_nominal_roll.id, admin_id, "*", "Platoon 1")
 
@@ -153,8 +152,6 @@ async def test_subunit_only_grant_spans_units(
         params={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "limit": 100,
-            "user_id": admin_id,
-            "user_role": "admin",
         },
     )
     assert response.status_code == 200
@@ -163,19 +160,19 @@ async def test_subunit_only_grant_spans_units(
 
 @pytest.mark.asyncio
 async def test_null_sub_unit_only_matched_by_wildcard_grants(
-    client: TestClient, db_session, sample_nominal_roll, sample_personnel,
+    client: TestClient, client_as, db_session, sample_nominal_roll, sample_personnel,
     sample_users,
 ):
     """A NULL effective sub_unit_1 is invisible to concrete-subunit grants
     (closes the pre-#28 hole) and visible under sub-unit wildcards."""
     admin_id = str(sample_users["admin"].id)
+    client = await client_as(sample_users["admin"])
     extra = await _extra_personnel(db_session, sample_nominal_roll.id)
     dan = extra[1]  # Coy B, no sub-unit
 
     await _grant(db_session, sample_nominal_roll.id, admin_id, "Coy B", "Platoon 1")
     response = client.get(
         f"/api/v1/personnel/{dan.id}",
-        params={"user_id": admin_id, "user_role": "admin"},
     )
     assert response.status_code == 403
     assert "Coy B/(no sub-unit)" in response.json()["detail"]
@@ -183,7 +180,6 @@ async def test_null_sub_unit_only_matched_by_wildcard_grants(
     await _grant(db_session, sample_nominal_roll.id, admin_id, "Coy B", "*")
     response = client.get(
         f"/api/v1/personnel/{dan.id}",
-        params={"user_id": admin_id, "user_role": "admin"},
     )
     assert response.status_code == 200
 
@@ -195,39 +191,36 @@ async def test_null_sub_unit_only_matched_by_wildcard_grants(
 
 @pytest.mark.asyncio
 async def test_no_grants_denies_all_scoped_surfaces(
-    client: TestClient, db_session, sample_nominal_roll, sample_personnel,
+    client: TestClient, client_as, db_session, sample_nominal_roll, sample_personnel,
     sample_users, sample_attendance_scope, sample_attendance,
 ):
     """An admin with zero grants gets 403s on scoped NR surfaces and an
     empty cross-NR list — never other people's rows."""
     admin_id = str(sample_users["admin"].id)
+    client = await client_as(sample_users["admin"])
     nr_id = str(sample_nominal_roll.id)
     today = date.today().isoformat()
     pid = str(sample_personnel[0].id)
 
     assert client.get(
         "/api/v1/personnel",
-        params={"nominal_roll_id": nr_id, "user_id": admin_id, "user_role": "admin"},
+        params={"nominal_roll_id": nr_id},
     ).status_code == 403
 
     assert client.get(
         "/api/v1/personnel",
-        params={"user_id": admin_id, "user_role": "admin"},
     ).json() == []
 
     assert client.get(
         f"/api/v1/personnel/{pid}",
-        params={"user_id": admin_id, "user_role": "admin"},
     ).status_code == 403
 
     assert client.get(
         f"/api/v1/personnel/{pid}/attendance-history",
-        params={"user_id": admin_id, "user_role": "admin"},
     ).status_code == 403
 
     assert client.patch(
         f"/api/v1/personnel/{pid}",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={"remarks": "should not apply"},
     ).status_code == 403
 
@@ -235,29 +228,24 @@ async def test_no_grants_denies_all_scoped_surfaces(
         "/api/v1/attendance/",
         params={
             "nominal_roll_id": nr_id, "date": today,
-            "user_id": admin_id, "user_role": "admin",
         },
     ).status_code == 403
 
     assert client.get(
         f"/api/v1/nominal-rolls/{nr_id}",
-        params={"user_id": admin_id, "user_role": "admin"},
     ).status_code == 403
 
     assert client.patch(
         f"/api/v1/nominal-rolls/{nr_id}",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={"notes": "nope"},
     ).status_code == 403
 
     assert client.get(
         f"/api/v1/nominal-rolls/{nr_id}/export",
-        params={"user_id": admin_id, "user_role": "admin"},
     ).status_code == 403
 
     listed = client.get(
         "/api/v1/nominal-rolls",
-        params={"user_id": admin_id, "user_role": "admin"},
     )
     assert listed.status_code == 200
     assert listed.json() == []
@@ -265,38 +253,39 @@ async def test_no_grants_denies_all_scoped_surfaces(
 
 @pytest.mark.asyncio
 async def test_super_admin_bypasses_all_scoped_surfaces(
-    client: TestClient, db_session, sample_nominal_roll, sample_personnel,
-    sample_attendance_scope,
+    client: TestClient, client_as, db_session, sample_nominal_roll,
+    sample_personnel, sample_attendance_scope,
 ):
     """Super-admin needs no grants anywhere."""
+    client = await client_as("super_admin")
     nr_id = str(sample_nominal_roll.id)
     today = date.today().isoformat()
     pid = str(sample_personnel[0].id)
 
     assert client.get(
         "/api/v1/personnel",
-        params={"nominal_roll_id": nr_id, **SUPER_ADMIN},
+        params={"nominal_roll_id": nr_id},
     ).status_code == 200
 
     assert client.get(
-        f"/api/v1/personnel/{pid}", params=SUPER_ADMIN,
+        f"/api/v1/personnel/{pid}",
     ).status_code == 200
 
     assert client.get(
-        f"/api/v1/personnel/{pid}/attendance-history", params=SUPER_ADMIN,
+        f"/api/v1/personnel/{pid}/attendance-history",
     ).status_code == 200
 
     assert client.get(
         "/api/v1/attendance/",
-        params={"nominal_roll_id": nr_id, "date": today, **SUPER_ADMIN},
+        params={"nominal_roll_id": nr_id, "date": today},
     ).status_code == 200
 
     assert client.get(
-        f"/api/v1/nominal-rolls/{nr_id}", params=SUPER_ADMIN,
+        f"/api/v1/nominal-rolls/{nr_id}",
     ).status_code == 200
 
     assert client.get(
-        f"/api/v1/nominal-rolls/{nr_id}/export", params=SUPER_ADMIN,
+        f"/api/v1/nominal-rolls/{nr_id}/export",
     ).status_code == 200
 
 
@@ -307,12 +296,13 @@ async def test_super_admin_bypasses_all_scoped_surfaces(
 
 @pytest.mark.asyncio
 async def test_tagging_remap_moves_person_out_of_scope(
-    client: TestClient, db_session, sample_nominal_roll, sample_personnel,
+    client: TestClient, client_as, db_session, sample_nominal_roll, sample_personnel,
     sample_users,
 ):
     """A Platoon 1 admin loses a person the tagging remaps to Platoon 2 —
     absent from the list, 403 on detail and PATCH."""
     admin_id = str(sample_users["admin"].id)
+    client = await client_as(sample_users["admin"])
     nr_id = str(sample_nominal_roll.id)
     john = sample_personnel[0]  # Coy A / Platoon 1
 
@@ -337,33 +327,31 @@ async def test_tagging_remap_moves_person_out_of_scope(
 
     listed = client.get(
         "/api/v1/personnel",
-        params={"nominal_roll_id": nr_id, "limit": 100,
-                "user_id": admin_id, "user_role": "admin"},
+        params={"nominal_roll_id": nr_id, "limit": 100},
     )
     assert listed.status_code == 200
     assert "John Doe" not in _names(listed.json())
 
     assert client.get(
         f"/api/v1/personnel/{john.id}",
-        params={"user_id": admin_id, "user_role": "admin"},
     ).status_code == 403
 
     assert client.patch(
         f"/api/v1/personnel/{john.id}",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={"remarks": "blocked"},
     ).status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_tagging_remap_moves_person_into_scope(
-    client: TestClient, db_session, sample_nominal_roll, sample_personnel,
+    client: TestClient, client_as, db_session, sample_nominal_roll, sample_personnel,
     sample_users,
 ):
     """A Platoon 1 admin gains the person the tagging remaps from
     Platoon 2 into Platoon 1 — the overlay, not the canonical row,
     decides."""
     admin_id = str(sample_users["admin"].id)
+    client = await client_as(sample_users["admin"])
     nr_id = str(sample_nominal_roll.id)
     bob = sample_personnel[2]  # Coy A / Platoon 2 canonically
 
@@ -388,26 +376,25 @@ async def test_tagging_remap_moves_person_into_scope(
 
     listed = client.get(
         "/api/v1/personnel",
-        params={"nominal_roll_id": nr_id, "limit": 100,
-                "user_id": admin_id, "user_role": "admin"},
+        params={"nominal_roll_id": nr_id, "limit": 100},
     )
     assert listed.status_code == 200
     assert "Bob Johnson" in _names(listed.json())
 
     assert client.get(
         f"/api/v1/personnel/{bob.id}",
-        params={"user_id": admin_id, "user_role": "admin"},
     ).status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_pagination_over_scoped_rows_under_overlay(
-    client: TestClient, db_session, sample_nominal_roll, sample_personnel,
+    client: TestClient, client_as, db_session, sample_nominal_roll, sample_personnel,
     sample_users,
 ):
     """offset/limit pages over the in-scope subset only — every scoped row
     appears exactly once across pages, out-of-scope rows never."""
     admin_id = str(sample_users["admin"].id)
+    client = await client_as(sample_users["admin"])
     nr_id = str(sample_nominal_roll.id)
     await _extra_personnel(db_session, sample_nominal_roll.id)
 
@@ -437,7 +424,6 @@ async def test_pagination_over_scoped_rows_under_overlay(
             "/api/v1/personnel",
             params={
                 "nominal_roll_id": nr_id, "limit": 1, "offset": offset,
-                "user_id": admin_id, "user_role": "admin",
             },
         )
         assert page.status_code == 200
@@ -454,18 +440,18 @@ async def test_pagination_over_scoped_rows_under_overlay(
 
 @pytest.mark.asyncio
 async def test_client_filters_cannot_widen_scope(
-    client: TestClient, db_session, sample_nominal_roll, sample_personnel,
+    client: TestClient, client_as, db_session, sample_nominal_roll, sample_personnel,
     sample_users,
 ):
     """Asking for a different unit/sub-unit than granted yields empty
     results — never foreign rows; granted filters still narrow."""
     admin_id = str(sample_users["admin"].id)
+    client = await client_as(sample_users["admin"])
     nr_id = str(sample_nominal_roll.id)
     await _extra_personnel(db_session, sample_nominal_roll.id)
     await _grant(db_session, nr_id, admin_id, "Coy A", "Platoon 1")
 
-    base = {"nominal_roll_id": nr_id, "limit": 100,
-            "user_id": admin_id, "user_role": "admin"}
+    base = {"nominal_roll_id": nr_id, "limit": 100}
 
     other_unit = client.get("/api/v1/personnel", params={**base, "unit": "Coy B"})
     assert other_unit.status_code == 200
@@ -490,19 +476,19 @@ async def test_client_filters_cannot_widen_scope(
 
 @pytest.mark.asyncio
 async def test_patch_out_of_scope_403_names_location(
-    client: TestClient, db_session, sample_nominal_roll, sample_personnel,
+    client: TestClient, client_as, db_session, sample_nominal_roll, sample_personnel,
     sample_users,
 ):
     """PATCH outside the grant fails 403 with the attendance-style message
     naming the unit/sub-unit pair; in-scope PATCH succeeds."""
     admin_id = str(sample_users["admin"].id)
+    client = await client_as(sample_users["admin"])
     nr_id = str(sample_nominal_roll.id)
     await _grant(db_session, nr_id, admin_id, "Coy A", "Platoon 1")
 
     bob = sample_personnel[2]  # Coy A / Platoon 2
     denied = client.patch(
         f"/api/v1/personnel/{bob.id}",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={"remarks": "nope"},
     )
     assert denied.status_code == 403
@@ -512,7 +498,6 @@ async def test_patch_out_of_scope_403_names_location(
     john = sample_personnel[0]  # Coy A / Platoon 1
     allowed = client.patch(
         f"/api/v1/personnel/{john.id}",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={"remarks": "fine"},
     )
     assert allowed.status_code == 200
@@ -526,7 +511,7 @@ async def test_patch_out_of_scope_403_names_location(
 
 @pytest.mark.asyncio
 async def test_nr_list_shows_only_granted_rolls(
-    client: TestClient, db_session, sample_nominal_roll, sample_users,
+    client: TestClient, client_as, db_session, sample_nominal_roll, sample_users,
 ):
     """The NR list for a regular admin contains exactly the NRs they hold
     grants on; a grant-less roll is absent."""
@@ -541,9 +526,9 @@ async def test_nr_list_shows_only_granted_rolls(
     await db_session.commit()
 
     admin_id = str(sample_users["admin"].id)
+    client = await client_as(sample_users["admin"])
     listed = client.get(
         "/api/v1/nominal-rolls",
-        params={"user_id": admin_id, "user_role": "admin"},
     )
     assert listed.status_code == 200
     assert listed.json() == []
@@ -551,7 +536,6 @@ async def test_nr_list_shows_only_granted_rolls(
     await _grant(db_session, sample_nominal_roll.id, admin_id, "Coy A", "*")
     listed = client.get(
         "/api/v1/nominal-rolls",
-        params={"user_id": admin_id, "user_role": "admin"},
     )
     ids = {item["id"] for item in listed.json()}
     assert ids == {str(sample_nominal_roll.id)}

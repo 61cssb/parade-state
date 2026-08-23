@@ -153,18 +153,18 @@ async def test_list_for_user_self_only(
 @pytest.mark.asyncio
 async def test_upsert_denied_without_assignment(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
     sample_users,
 ):
     """An admin with no assignment on the NR gets 403 on upsert."""
-    regular_id = str(sample_users["user"].id)
+    client = await client_as(sample_users["admin"])
     today = date.today().isoformat()
 
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": regular_id, "user_role": "user"},
         json={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "records": [
@@ -184,12 +184,14 @@ async def test_upsert_denied_without_assignment(
 @pytest.mark.asyncio
 async def test_upsert_allowed_with_matching_assignment(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
     sample_users,
 ):
     """An admin granted the right sub_unit_1 can upsert."""
+    client = await client_as(sample_users["admin"])
     admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
     today = date.today().isoformat()
@@ -203,7 +205,6 @@ async def test_upsert_allowed_with_matching_assignment(
     # Upsert for a Platoon 1 person → OK.
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={
             "nominal_roll_id": nr_id,
             "records": [
@@ -222,12 +223,14 @@ async def test_upsert_allowed_with_matching_assignment(
 @pytest.mark.asyncio
 async def test_upsert_denied_for_unassigned_subunit(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
     sample_users,
 ):
     """An admin granted Platoon 1 cannot upsert for a Platoon 2 person."""
+    client = await client_as(sample_users["admin"])
     admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
     today = date.today().isoformat()
@@ -240,7 +243,6 @@ async def test_upsert_denied_for_unassigned_subunit(
     # personnel[2] is in Platoon 2 → 403.
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={
             "nominal_roll_id": nr_id,
             "records": [
@@ -260,15 +262,16 @@ async def test_upsert_denied_for_unassigned_subunit(
 @pytest.mark.asyncio
 async def test_upsert_super_admin_bypasses(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
 ):
     """Super-admin can upsert for any subunit without assignments."""
+    client = await client_as("super_admin")
     today = date.today().isoformat()
     response = client.put(
         "/api/v1/attendance/upsert",
-        params=SUPER_ADMIN,
         json={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "records": [
@@ -287,6 +290,7 @@ async def test_upsert_super_admin_bypasses(
 @pytest.mark.asyncio
 async def test_upsert_tagging_aware_effective_subunit(
     client: TestClient,
+    client_as,
     db_session: AsyncSession,
     sample_nominal_roll,
     sample_personnel,
@@ -336,9 +340,9 @@ async def test_upsert_tagging_aware_effective_subunit(
     )
 
     # Upsert for personnel[2] (canonical Platoon 2, effective Platoon 1) → OK.
+    client = await client_as(sample_users["admin"])
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={
             "nominal_roll_id": nr_id,
             "records": [
@@ -362,13 +366,14 @@ async def test_upsert_tagging_aware_effective_subunit(
 @pytest.mark.asyncio
 async def test_copy_remarks_denied_without_assignment(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_attendance_scope,
     sample_attendance,
     sample_users,
 ):
     """copy-remarks returns 403 when the caller has no assignment on the NR."""
-    regular_id = str(sample_users["user"].id)
+    client = await client_as(sample_users["admin"])
     today = date.today().isoformat()
 
     response = client.post(
@@ -379,8 +384,6 @@ async def test_copy_remarks_denied_without_assignment(
             "source_slot": "am",
             "dest_date": today,
             "dest_slot": "pm",
-            "user_id": regular_id,
-            "user_role": "user",
         },
     )
     assert response.status_code == 403

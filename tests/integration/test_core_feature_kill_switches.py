@@ -33,8 +33,6 @@ def _attendance_list_params(nominal_roll_id: str) -> dict:
     return {
         "nominal_roll_id": nominal_roll_id,
         "date": "2026-08-20",
-        "user_id": "super-admin-test-id",
-        "user_role": "super_admin",
     }
 
 NR_NAV_HREFS = ('href="/admin/csv-upload"', 'href="/nominal-roll"', 'href="/admin/taggings"')

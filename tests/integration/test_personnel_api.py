@@ -32,10 +32,6 @@ async def test_list_personnel_without_grouping_context_as_admin(
     response = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
     )
 
     assert response.status_code == 200
@@ -60,11 +56,7 @@ async def test_list_personnel_without_grouping_context_as_user_forbidden(
         "get",
         "/api/v1/personnel",
         user_token_headers,
-        expected_detail="Only admins can list personnel",
-        params={
-            "user_id": "user-id",
-            "user_role": "user",
-        },
+        expected_detail="Admin access required",
     )
 
 
@@ -86,8 +78,6 @@ async def test_list_personnel_with_unit_filter(
         headers=admin_token_headers,
         params={
             "unit": first_unit,
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
         },
     )
 
@@ -123,8 +113,6 @@ async def test_list_personnel_with_sub_unit_filter(
             headers=admin_token_headers,
             params={
                     "sub_unit_1": sub_unit,
-                "user_id": str(sample_users["admin"].id),
-                "user_role": "admin",
             },
         )
 
@@ -155,8 +143,6 @@ async def test_list_personnel_with_search(
         headers=admin_token_headers,
         params={
             "search": search_term,
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
         },
     )
 
@@ -192,8 +178,6 @@ async def test_list_personnel_with_search_by_pers_no(
         headers=admin_token_headers,
         params={
             "search": search_term,
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
         },
     )
 
@@ -223,10 +207,6 @@ async def test_get_personnel_by_id_without_grouping_context_as_admin(
     response = client.get(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
     )
 
     assert response.status_code == 200
@@ -247,11 +227,7 @@ async def test_get_personnel_by_id_without_grouping_context_as_user_forbidden(
         "get",
         f"/api/v1/personnel/{sample_personnel[0].id}",
         user_token_headers,
-        expected_detail="Only admins can view personnel",
-        params={
-            "user_id": "user-id",
-            "user_role": "user",
-        },
+        expected_detail="Admin access required",
     )
 
 
@@ -274,10 +250,6 @@ async def test_update_personnel_as_admin(
     response = client.patch(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
         json=update_data,
     )
 
@@ -306,15 +278,10 @@ async def test_update_personnel_remap_upserts_tagging_entry(
     (correctly) 403 the second edit (see test_admin_scoped_access).
     """
     p = sample_personnel[0]
-    base_params = {
-        "user_id": "super-admin-test-id",
-        "user_role": "super_admin",
-    }
 
     r1 = client.patch(
         f"/api/v1/personnel/{p.id}",
         headers=super_admin_token_headers,
-        params=base_params,
         json={"sub_unit_1": "New S1"},
     )
     assert r1.status_code == 200
@@ -323,7 +290,6 @@ async def test_update_personnel_remap_upserts_tagging_entry(
     r2 = client.patch(
         f"/api/v1/personnel/{p.id}",
         headers=super_admin_token_headers,
-        params=base_params,
         json={"sub_unit_2": "New S2"},
     )
     assert r2.status_code == 200
@@ -347,8 +313,6 @@ async def test_update_personnel_identity_fields_rejected(
             f"/api/v1/personnel/{sample_personnel[0].id}",
             headers=admin_token_headers,
             params={
-                    "user_id": str(sample_users["admin"].id),
-                "user_role": "admin",
             },
             json=payload,
         )
@@ -371,11 +335,7 @@ async def test_update_personnel_as_user_forbidden(
         "patch",
         f"/api/v1/personnel/{sample_personnel[0].id}",
         user_token_headers,
-        expected_detail="Only admins can update personnel records",
-        params={
-            "user_id": "user-id",
-            "user_role": "user",
-        },
+        expected_detail="Admin access required",
         json_data=update_data,
     )
 
@@ -397,10 +357,6 @@ async def test_update_personnel_status(
     response = client.patch(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
         json=update_data,
     )
 
@@ -429,8 +385,6 @@ async def test_list_personnel_with_status_filter(
         headers=admin_token_headers,
         params={
             "status": "archived",
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
         },
     )
 
@@ -462,8 +416,6 @@ async def test_list_personnel_with_category_filter(
         headers=admin_token_headers,
         params={
             "category": "Officer",
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
         },
     )
     assert officer_resp.status_code == 200
@@ -478,8 +430,6 @@ async def test_list_personnel_with_category_filter(
         headers=admin_token_headers,
         params={
             "category": "WOSE",
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
         },
     )
     assert wose_resp.status_code == 200
@@ -492,10 +442,6 @@ async def test_list_personnel_with_category_filter(
     all_resp = client.get(
         "/api/v1/personnel",
         headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
     )
     assert all_resp.status_code == 200
     categories = {p["category"] for p in all_resp.json()}
@@ -521,10 +467,6 @@ async def test_update_personnel_status_only_does_not_touch_tagging(
     response = client.patch(
         f"/api/v1/personnel/{p.id}",
         headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
         json={"status": "archived"},
     )
     assert response.status_code == 200
@@ -552,10 +494,6 @@ async def test_update_personnel_recomputes_category(
     response = client.patch(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
         json={"rank": "CPT"},
     )
     assert response.status_code == 409
@@ -572,10 +510,6 @@ async def test_list_personnel_with_pagination(
         client,
         "/api/v1/personnel",
         admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
     )
 
 
@@ -591,10 +525,6 @@ async def test_get_personnel_invalid_id(
         "get",
         "/api/v1/personnel/invalid-personnel-id",
         admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
     )
 
 
@@ -609,10 +539,6 @@ async def test_update_personnel_invalid_id(
     response = client.patch(
         "/api/v1/personnel/invalid-personnel-id",
         headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
         json={"unit": "Some Unit"},
     )
 
@@ -640,10 +566,6 @@ async def test_update_personnel_sets_audit_trail(
     get_response = client.get(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
     )
 
     assert get_response.status_code == 200
@@ -655,10 +577,6 @@ async def test_update_personnel_sets_audit_trail(
     response = client.patch(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
         json={"status": "archived"},
     )
 
@@ -687,8 +605,6 @@ async def test_list_personnel_sort_by_name_asc(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
             "sort_by": "name",
             "sort_order": "asc",
         },
@@ -716,8 +632,6 @@ async def test_list_personnel_sort_by_name_desc(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
             "sort_by": "name",
             "sort_order": "desc",
         },
@@ -745,8 +659,6 @@ async def test_list_personnel_sort_by_rank(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
             "sort_by": "rank",
             "sort_order": "asc",
         },
@@ -774,8 +686,6 @@ async def test_list_personnel_sort_by_status(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
             "sort_by": "status",
             "sort_order": "asc",
         },
@@ -803,8 +713,6 @@ async def test_list_personnel_invalid_sort_field_ignored(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
             "sort_by": "invalid_field",  # Invalid field
             "sort_order": "asc",
         },
@@ -832,10 +740,6 @@ async def test_update_personnel_invalid_status(
     response = client.patch(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
         json=update_data,
     )
 
@@ -860,10 +764,6 @@ async def test_update_personnel_empty_rank(
     response = client.patch(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
         json=update_data,
     )
 
@@ -888,10 +788,6 @@ async def test_update_personnel_too_long_name(
     response = client.patch(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
         json=update_data,
     )
 
@@ -912,10 +808,6 @@ async def test_personnel_response_includes_audit_fields(
     response = client.get(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
     )
 
     assert response.status_code == 200
@@ -946,8 +838,6 @@ async def test_list_personnel_with_filters_and_sorting(
         "/api/v1/personnel",
         headers=admin_token_headers,
         params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
             "status": "archived",
             "sort_by": "name",
             "sort_order": "asc",
@@ -991,10 +881,6 @@ async def test_update_personnel_callup_status_all_values(
     response = client.patch(
         f"/api/v1/personnel/{p.id}",
         headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
         json={"callup_status": callup_status},
     )
 
@@ -1023,10 +909,6 @@ async def test_update_personnel_callup_status_invalid_rejected(
     response = client.patch(
         f"/api/v1/personnel/{p.id}",
         headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "admin",
-        },
         json={"callup_status": bad_value},
     )
 
@@ -1045,15 +927,10 @@ async def test_update_personnel_remarks_set_and_clear(
     """Remarks are settable, whitespace-normalised, and clearable (empty
     string or explicit null both clear)."""
     p = sample_personnel[0]
-    base_params = {
-        "user_id": str(sample_users["admin"].id),
-        "user_role": "admin",
-    }
 
     r1 = client.patch(
         f"/api/v1/personnel/{p.id}",
         headers=admin_token_headers,
-        params=base_params,
         json={"remarks": "  On course until Friday  "},
     )
     assert r1.status_code == 200
@@ -1062,7 +939,6 @@ async def test_update_personnel_remarks_set_and_clear(
     r2 = client.patch(
         f"/api/v1/personnel/{p.id}",
         headers=admin_token_headers,
-        params=base_params,
         json={"remarks": ""},
     )
     assert r2.status_code == 200
@@ -1072,14 +948,12 @@ async def test_update_personnel_remarks_set_and_clear(
     r3 = client.patch(
         f"/api/v1/personnel/{p.id}",
         headers=admin_token_headers,
-        params=base_params,
         json={"remarks": "temp"},
     )
     assert r3.status_code == 200
     r4 = client.patch(
         f"/api/v1/personnel/{p.id}",
         headers=admin_token_headers,
-        params=base_params,
         json={"remarks": None},
     )
     assert r4.status_code == 200
@@ -1100,7 +974,6 @@ async def test_update_personnel_callup_fields_as_user_forbidden(
         response = client.patch(
             f"/api/v1/personnel/{p.id}",
             headers=user_token_headers,
-            params={"user_id": "user-id", "user_role": "user"},
             json=payload,
         )
         assert response.status_code == 403, payload
@@ -1126,8 +999,7 @@ def _create_payload(nominal_roll_id: str, **overrides) -> dict:
 @pytest.mark.asyncio
 async def test_create_personnel_manual_without_pers_no(
     client: TestClient,
-    admin_token_headers: dict[str, str],
-    sample_users,
+    super_admin_token_headers: dict[str, str],
     sample_nominal_roll,
     sample_personnel,
     db_session,
@@ -1135,12 +1007,11 @@ async def test_create_personnel_manual_without_pers_no(
     """Super-admin can add a serviceman with unknown pers_no. The row carries
     source="manual", the defaults make it manageable like any other row, the
     roll's personnel_count increments, and the create is audited."""
-    admin_id = str(sample_users["admin"].id)
+    super_admin_id = "super-admin-test-id"
 
     response = client.post(
         "/api/v1/personnel",
-        headers=admin_token_headers,
-        params={"user_id": admin_id, "user_role": "super_admin"},
+        headers=super_admin_token_headers,
         json=_create_payload(sample_nominal_roll.id),
     )
 
@@ -1151,7 +1022,7 @@ async def test_create_personnel_manual_without_pers_no(
     assert data["status"] == "active"
     assert data["callup_status"] == "Called Up"
     assert data["category"] == "WOSE"  # inferred from PTE
-    assert data["created_by"] == admin_id
+    assert data["created_by"] == super_admin_id
 
     await db_session.refresh(sample_nominal_roll)
     assert sample_nominal_roll.personnel_count == 4  # 3 sample rows + 1
@@ -1166,13 +1037,12 @@ async def test_create_personnel_manual_without_pers_no(
         )
     ).scalar_one()
     assert "Manually added" in audit.description
-    assert audit.user_id == admin_id
+    assert audit.user_id == super_admin_id
 
     # Multiple unknown-pers_no rows per roll are legal (NULLs are distinct).
     second = client.post(
         "/api/v1/personnel",
-        headers=admin_token_headers,
-        params={"user_id": admin_id, "user_role": "super_admin"},
+        headers=super_admin_token_headers,
         json=_create_payload(sample_nominal_roll.id, name="Second Manual"),
     )
     assert second.status_code == 201
@@ -1181,8 +1051,7 @@ async def test_create_personnel_manual_without_pers_no(
 @pytest.mark.asyncio
 async def test_create_personnel_manual_with_pers_no_and_fields(
     client: TestClient,
-    admin_token_headers: dict[str, str],
-    sample_users,
+    super_admin_token_headers: dict[str, str],
     sample_nominal_roll,
     db_session,
 ):
@@ -1190,11 +1059,7 @@ async def test_create_personnel_manual_with_pers_no_and_fields(
     remarks (whitespace-normalised) round-trip."""
     response = client.post(
         "/api/v1/personnel",
-        headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "super_admin",
-        },
+        headers=super_admin_token_headers,
         json=_create_payload(
             sample_nominal_roll.id,
             rank="LTA",
@@ -1243,30 +1108,21 @@ async def test_create_personnel_permission_gates(
         response = client.post(
             "/api/v1/personnel",
             headers=headers,
-            params={
-                "user_id": str(sample_users["admin"].id),
-                "user_role": role,
-            },
             json=_create_payload(sample_nominal_roll.id),
         )
         assert response.status_code == 403, role
-        assert "super-admin" in response.json()["detail"]
+        assert response.json()["detail"] == "Super admin access required"
 
 
 @pytest.mark.asyncio
 async def test_create_personnel_unknown_nominal_roll(
     client: TestClient,
-    admin_token_headers: dict[str, str],
-    sample_users,
+    super_admin_token_headers: dict[str, str],
 ):
     """An unknown nominal_roll_id is a 404, not a 500 (FK guard)."""
     response = client.post(
         "/api/v1/personnel",
-        headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "super_admin",
-        },
+        headers=super_admin_token_headers,
         json=_create_payload("00000000-0000-0000-0000-000000000000"),
     )
     assert response.status_code == 404
@@ -1276,18 +1132,13 @@ async def test_create_personnel_unknown_nominal_roll(
 @pytest.mark.asyncio
 async def test_create_personnel_invalid_rank(
     client: TestClient,
-    admin_token_headers: dict[str, str],
-    sample_users,
+    super_admin_token_headers: dict[str, str],
     sample_nominal_roll,
 ):
     """Unknown ranks are rejected with 400 and the valid rank list."""
     response = client.post(
         "/api/v1/personnel",
-        headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "super_admin",
-        },
+        headers=super_admin_token_headers,
         json=_create_payload(sample_nominal_roll.id, rank="SGT"),
     )
     assert response.status_code == 400
@@ -1299,7 +1150,7 @@ async def test_create_personnel_invalid_rank(
 @pytest.mark.asyncio
 async def test_create_personnel_duplicate_pers_no_within_roll(
     client: TestClient,
-    admin_token_headers: dict[str, str],
+    super_admin_token_headers: dict[str, str],
     sample_users,
     sample_nominal_roll,
     sample_personnel,
@@ -1308,12 +1159,10 @@ async def test_create_personnel_duplicate_pers_no_within_roll(
     """Duplicate pers_no on the same roll is a 409; the same pers_no on a
     different roll stays allowed (matches CSV semantics)."""
     admin_id = str(sample_users["admin"].id)
-    super_params = {"user_id": admin_id, "user_role": "super_admin"}
 
     dup = client.post(
         "/api/v1/personnel",
-        headers=admin_token_headers,
-        params=super_params,
+        headers=super_admin_token_headers,
         json=_create_payload(
             sample_nominal_roll.id, pers_no="10000001"  # sample_personnel[0]
         ),
@@ -1332,8 +1181,7 @@ async def test_create_personnel_duplicate_pers_no_within_roll(
 
     ok = client.post(
         "/api/v1/personnel",
-        headers=admin_token_headers,
-        params=super_params,
+        headers=super_admin_token_headers,
         json=_create_payload(other_roll.id, pers_no="10000001"),
     )
     assert ok.status_code == 201
@@ -1347,36 +1195,30 @@ async def test_create_personnel_duplicate_pers_no_within_roll(
 @pytest.mark.asyncio
 async def test_update_personnel_pers_no_set_and_clear(
     client: TestClient,
-    admin_token_headers: dict[str, str],
-    sample_users,
+    super_admin_token_headers: dict[str, str],
     db_session,
     sample_personnel,
 ):
     """Super-admin can fill in pers_no later and clear it again (empty or
     explicit null); updates stamp updated_at/updated_by."""
     p = sample_personnel[0]
-    base_params = {
-        "user_id": str(sample_users["admin"].id),
-        "user_role": "super_admin",
-    }
+    super_admin_id = "super-admin-test-id"
 
     r1 = client.patch(
         f"/api/v1/personnel/{p.id}",
-        headers=admin_token_headers,
-        params=base_params,
+        headers=super_admin_token_headers,
         json={"pers_no": " 77770001 "},
     )
     assert r1.status_code == 200, r1.text
     assert r1.json()["pers_no"] == "77770001"  # stripped
     await db_session.refresh(p)
     assert p.pers_no == "77770001"
-    assert p.updated_by == str(sample_users["admin"].id)
+    assert p.updated_by == super_admin_id
     assert p.updated_at is not None
 
     r2 = client.patch(
         f"/api/v1/personnel/{p.id}",
-        headers=admin_token_headers,
-        params=base_params,
+        headers=super_admin_token_headers,
         json={"pers_no": ""},
     )
     assert r2.status_code == 200
@@ -1385,15 +1227,13 @@ async def test_update_personnel_pers_no_set_and_clear(
 
     r3 = client.patch(
         f"/api/v1/personnel/{p.id}",
-        headers=admin_token_headers,
-        params=base_params,
+        headers=super_admin_token_headers,
         json={"pers_no": "77770002"},
     )
     assert r3.status_code == 200
     r4 = client.patch(
         f"/api/v1/personnel/{p.id}",
-        headers=admin_token_headers,
-        params=base_params,
+        headers=super_admin_token_headers,
         json={"pers_no": None},
     )
     assert r4.status_code == 200
@@ -1404,8 +1244,7 @@ async def test_update_personnel_pers_no_set_and_clear(
 @pytest.mark.asyncio
 async def test_update_personnel_pers_no_duplicate_rejected(
     client: TestClient,
-    admin_token_headers: dict[str, str],
-    sample_users,
+    super_admin_token_headers: dict[str, str],
     sample_personnel,
     db_session,
 ):
@@ -1414,11 +1253,7 @@ async def test_update_personnel_pers_no_duplicate_rejected(
     p = sample_personnel[0]  # 10000001
     response = client.patch(
         f"/api/v1/personnel/{p.id}",
-        headers=admin_token_headers,
-        params={
-            "user_id": str(sample_users["admin"].id),
-            "user_role": "super_admin",
-        },
+        headers=super_admin_token_headers,
         json={"pers_no": "10000002"},  # sample_personnel[1]
     )
     assert response.status_code == 409
@@ -1437,12 +1272,10 @@ async def test_update_personnel_pers_no_as_admin_forbidden(
 ):
     """Admins cannot change pers_no (403) but keep the other PATCH fields."""
     p = sample_personnel[0]
-    params = {"user_id": str(sample_users["admin"].id), "user_role": "admin"}
 
     blocked = client.patch(
         f"/api/v1/personnel/{p.id}",
         headers=admin_token_headers,
-        params=params,
         json={"pers_no": "12345678"},
     )
     assert blocked.status_code == 403
@@ -1451,7 +1284,6 @@ async def test_update_personnel_pers_no_as_admin_forbidden(
     allowed = client.patch(
         f"/api/v1/personnel/{p.id}",
         headers=admin_token_headers,
-        params=params,
         json={"remarks": "admins keep this"},
     )
     assert allowed.status_code == 200
@@ -1467,7 +1299,6 @@ async def test_update_personnel_pers_no_as_user_forbidden(
     response = client.patch(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=user_token_headers,
-        params={"user_id": "user-id", "user_role": "user"},
         json={"pers_no": "12345678"},
     )
     assert response.status_code == 403
@@ -1482,12 +1313,7 @@ async def test_personnel_response_includes_source(
     sample_personnel,
 ):
     """The source provenance field is part of every personnel response."""
-    params = {
-        "user_id": str(sample_users["admin"].id),
-        "user_role": "admin",
-    }
-
-    listing = client.get("/api/v1/personnel", headers=admin_token_headers, params=params)
+    listing = client.get("/api/v1/personnel", headers=admin_token_headers)
     assert listing.status_code == 200
     assert all("source" in row for row in listing.json())
     assert all(row["source"] is None for row in listing.json())  # CSV rows
@@ -1495,7 +1321,6 @@ async def test_personnel_response_includes_source(
     single = client.get(
         f"/api/v1/personnel/{sample_personnel[0].id}",
         headers=admin_token_headers,
-        params=params,
     )
     assert single.status_code == 200
     assert single.json()["source"] is None
