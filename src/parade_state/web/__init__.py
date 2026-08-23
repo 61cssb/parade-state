@@ -27,8 +27,10 @@ This package is intentionally separate from:
 
 Frontend should:
 1. Direct users to `/auth/login` for authentication
-2. Handle callback at `/auth/callback?token=xxx`
-3. Store token and use for API calls: `Authorization: Bearer xxx`
+2. The OAuth callback (`/auth/callback?code=xxx&state=xxx`) sets the
+   HttpOnly session cookie server-side — no client-side token handling
+3. Same-origin fetches authenticate via the cookie automatically;
+   non-browser clients may send the same token as `Authorization: Bearer`
 
 ## Documentation
 

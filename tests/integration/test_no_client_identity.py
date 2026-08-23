@@ -190,3 +190,42 @@ async def test_regular_user_with_spoofed_params_still_rejected(
     response = client.get("/api/v1/personnel", params=SPOOF_PARAMS)
     assert response.status_code == 403
     assert response.json()["detail"] == "Admin access required"
+
+
+# ============================================================================
+# 3. Token transport — never in URLs
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_token_query_param_no_longer_authenticates(
+    client: TestClient, db_session
+):
+    """A valid session token passed as ?token= must not authenticate.
+
+    The pre-#31 flexible token source accepted it; tokens in URLs leak
+    into request logs, browser history and Referer headers, so the page
+    dependencies now resolve only Bearer headers and the session cookie.
+    Pinned here so the source cannot quietly return.
+    """
+    from parade_state.auth.session import create_user_session
+    from parade_state.utils.cookies import AUTH_COOKIE_NAME
+
+    session = await create_user_session(
+        db_session,
+        user_id="super-admin-test-id",
+        email="super-admin-test@example.com",
+        name="super-admin-test",
+        role="super_admin",
+    )
+
+    # Fresh client, no cookie: the token in the URL authenticates nothing
+    # (the page bounces to the login page).
+    anonymous = client.get("/admin", params={"token": session.token}, follow_redirects=False)
+    assert anonymous.status_code == 302
+    assert anonymous.headers["location"] == "/auth/login"
+
+    # The same token via its cookie works as before.
+    client.cookies.set(AUTH_COOKIE_NAME, session.token)
+    authenticated = client.get("/admin")
+    assert authenticated.status_code == 200
