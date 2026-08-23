@@ -1,7 +1,10 @@
-"""Flexible authentication dependencies for admin interface.
+"""Optional authentication dependencies for page routes.
 
-This module provides authentication dependencies that work with multiple
-token sources (Authorization header, cookie, query param) for the admin interface.
+This module provides the return-None-instead-of-raising variants pages
+need (login/no-access redirects), resolving tokens from the Authorization
+header, cookie, or query param. The strict ``require_admin_user_flexible``
+variant was removed after issue 31: every API endpoint authenticates via
+``auth/dependencies.py``, which accepts only Bearer or cookie tokens.
 """
 
 from fastapi import Depends, HTTPException, Request, status
@@ -127,69 +130,3 @@ async def get_current_user_optional(
     return None
 
 
-async def require_admin_user_flexible(
-    request: Request,
-) -> User:
-    """Require admin user for protected endpoints (flexible token sources).
-
-    Validates authentication and checks if user has admin or super_admin role.
-    Accepts tokens from multiple sources (header, cookie, query param).
-
-    Args:
-        request: FastAPI Request object
-
-    Returns:
-        Authenticated admin User object
-
-    Raises:
-        HTTPException 401: If not authenticated
-        HTTPException 403: If authenticated but not admin
-    """
-    token = await get_token_from_request(request)
-
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated - no valid token found",
-        )
-
-    # Get database session maker
-    from parade_state.db import get_session_maker
-
-    session_maker = get_session_maker()
-    if not session_maker:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database connection error",
-        )
-
-    async with session_maker() as db:
-        session = await get_valid_session(db, token, update_last_accessed=True)
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired session token",
-            )
-
-        result = await db.execute(select(User).where(User.id == session.user_id))
-        user = result.scalar_one_or_none()
-
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found",
-            )
-
-        if user.status != "active":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"User account is {user.status}",
-            )
-
-        if user.role not in ["admin", "super_admin"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Admin access required",
-            )
-
-        return user

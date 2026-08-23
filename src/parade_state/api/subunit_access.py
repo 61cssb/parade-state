@@ -29,7 +29,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from fastapi import HTTPException, status
-from sqlalchemy import ColumnElement, and_, false, or_, select, true
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.models import Personnel, TaggingEntry, UserSubunitAssignment
@@ -66,31 +66,6 @@ def grant_matches(
             continue
         return True
     return False
-
-
-def scope_conditions(grants: Iterable[ScopeGrant]) -> ColumnElement[bool]:
-    """SQL WHERE fragment matching Personnel rows against the grants.
-
-    Uses canonical ``unit``/``sub_unit_1`` — only valid when no tagging
-    overlay applies to the queried rows (callers with an active overlay
-    must filter via :func:`resolve_effective_locations` in Python
-    instead). A NULL ``sub_unit_1`` matches only wildcard-subunit grants,
-    mirroring :func:`grant_matches`.
-    """
-    clauses = [
-        and_(
-            Personnel.unit == grant.unit if grant.unit != WILDCARD else true(),
-            (
-                Personnel.sub_unit_1 == grant.sub_unit_1
-                if grant.sub_unit_1 != WILDCARD
-                else true()
-            ),
-        )
-        for grant in grants
-    ]
-    if not clauses:
-        return false()
-    return or_(*clauses)
 
 
 def location_label(eff_unit: str | None, eff_sub1: str | None) -> str:
