@@ -250,8 +250,9 @@ async def test_example(client, sample_users, sample_grouping):
   unique per (user, NR, unit, sub_unit_1). Migration `k1f2a3b4c5d6` (issue
   #4) + `u2b3c4d5e6f7` (issue #28 unit dimension; validated on the
   repro-pg roundtrip).
-- Shared enforcement module `api/subunit_access.py` (the seam for issue
-  #31's session identity): `get_scope_grants`, `grant_matches`,
+- Shared enforcement module `api/subunit_access.py` (issue #31 ✅ landed:
+  callers pass the session-derived `user.id`/`user.role` from the
+  `auth/dependencies.py` dependencies): `get_scope_grants`, `grant_matches`,
   `resolve_effective_locations` (tagging overlay applied verbatim, else
   canonical), `assert_nr_accessible` / `assert_locations_in_scope` (write
   403s naming the missing "unit/sub-unit"), `in_scope_pids` (non-raising
