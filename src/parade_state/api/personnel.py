@@ -773,12 +773,11 @@ async def get_personnel_attendance_history(
 ):
     """Get attendance history for a personnel member.
 
-    Caller identity is session-derived (issue 31). Returns per-day AM/PM
-    attendance with summary statistics. AM and PM slots are counted
-    independently toward totals. Supports date range filtering and
-    pagination. Issue #28: the personnel's effective (unit, sub_unit_1)
-    must be inside the caller's scope (403 otherwise; super_admin
-    bypasses).
+    Caller identity is session-derived (issue 31). Returns per-day
+    attendance (single daily session, issue 33) with summary statistics.
+    Supports date range filtering and pagination. Issue #28: the
+    personnel's effective (unit, sub_unit_1) must be inside the caller's
+    scope (403 otherwise; super_admin bypasses).
     """
     # Resolve personnel (and its NR).
     personnel_result = await db.execute(
@@ -817,39 +816,37 @@ async def get_personnel_attendance_history(
     result = await db.execute(query)
     records = list(result.scalars().all())
 
-    # Build items + stats (AM and PM each count as one slot).
+    # Build items + stats (one session per day — issue 33).
     attendance_items = []
-    present_count = 0
-    absent_count = 0
+    present_days = 0
+    absent_days = 0
 
     for record in records:
-        for slot_value in (record.status_am, record.status_pm):
-            if slot_value in PRESENT_LIKE_STATUSES:
-                present_count += 1
-            else:
-                absent_count += 1
+        if record.status in PRESENT_LIKE_STATUSES:
+            present_days += 1
+        else:
+            absent_days += 1
 
         attendance_items.append(
             PersonnelAttendanceHistoryItem(
                 id=record.id,
                 nominal_roll_id=record.nominal_roll_id,
                 date=record.date,
-                status_am=record.status_am,
-                remarks_am=record.remarks_am,
-                status_pm=record.status_pm,
-                remarks_pm=record.remarks_pm,
+                status=record.status,
+                reason=record.reason,
+                remarks=record.remarks,
                 created_at=record.created_at,
                 updated_at=record.updated_at,
             )
         )
 
-    total_slots = present_count + absent_count
-    attendance_rate = (present_count / total_slots * 100) if total_slots else 0.0
+    total_days = present_days + absent_days
+    attendance_rate = (present_days / total_days * 100) if total_days else 0.0
 
     stats = PersonnelAttendanceHistoryStats(
-        total_slots=total_slots,
-        present_count=present_count,
-        absent_count=absent_count,
+        total_days=total_days,
+        present_days=present_days,
+        absent_days=absent_days,
         attendance_rate=round(attendance_rate, 2),
     )
 

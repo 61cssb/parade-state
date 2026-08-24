@@ -492,8 +492,7 @@ async def test_delete_refuses_when_nr_has_attendance(
             personnel_id=str(sample_personnel[0].id),
             nominal_roll_id=str(sample_nominal_roll.id),
             date=date.today(),
-            status_am="present",
-            status_pm="absent",
+            status="present",
             created_by="super-admin-test-id",
             updated_by="super-admin-test-id",
         )

@@ -1,10 +1,10 @@
 """Attendance management API endpoints.
 
-Attendance is taken against the Nominal Roll that is currently **active for
-attendance** (one row per person/day, AM and PM slots), always with the NR's
-1:1 tagging overlay applied. Writes are only permitted against the active NR
-(a super-admin marks an NR "Use for Attendance" on the nominal-rolls API).
-Updates are upserts keyed on (personnel_id, date).
+Attendance is taken once daily against the Nominal Roll that is currently
+**active for attendance** (one row per person/day, single session), always
+with the NR's 1:1 tagging overlay applied. Writes are only permitted against
+the active NR (a super-admin marks an NR "Use for Attendance" on the
+nominal-rolls API). Updates are upserts keyed on (personnel_id, date).
 """
 
 import csv
@@ -25,7 +25,8 @@ from parade_state.api.tagging import _load_nr_tagging
 from parade_state.auth.dependencies import require_admin_user
 from parade_state.db import get_db_session
 from parade_state.models import Attendance, NominalRoll, Personnel, TaggingEntry, User
-from parade_state.models.attendance import ATTENDANCE_STATUSES, PRESENT_LIKE_STATUSES
+from parade_state.models.attendance import PRESENT_LIKE_STATUSES
+from parade_state.models.personnel import INPRO_STATUS_LABELS
 from parade_state.models.schemas import (
     AttendanceBulkUpsert,
     AttendanceResponse,
@@ -83,17 +84,16 @@ async def get_roster_for_scope(
     nominal_roll_id: str,
     db: AsyncSession,
 ) -> list[Personnel]:
-    """Active, non-deferred personnel on an NR (the attendance roster).
+    """Active personnel on an NR (the attendance roster).
 
-    Interim rule (issue 32, until #33): everyone except ``deferred``
-    attends — i.e. yet_to_inpro + inproed. Deferred personnel are hidden;
-    their attendance records (if any) are preserved untouched.
+    Issue 33: everyone on the NR attends — deferred personnel included.
+    The marking page's Inpro filter is a view concern; hiding them here
+    would silently narrow copy-remarks.
     """
     result = await db.execute(
         select(Personnel).where(
             Personnel.nominal_roll_id == nominal_roll_id,
             Personnel.status == "active",
-            Personnel.inpro_status != "deferred",
         )
     )
     return list(result.scalars().all())
@@ -228,10 +228,9 @@ async def bulk_upsert_attendance(
                 personnel_id=entry.personnel_id,
                 nominal_roll_id=payload.nominal_roll_id,
                 date=entry.date,
-                status_am=entry.status_am,
-                remarks_am=entry.remarks_am,
-                status_pm=entry.status_pm,
-                remarks_pm=entry.remarks_pm,
+                status=entry.status,
+                reason=entry.reason,
+                remarks=entry.remarks,
                 notes_snapshot=None,
                 unit_snapshot=person.unit,
                 sub_unit_1_snapshot=person.sub_unit_1,
@@ -246,10 +245,9 @@ async def bulk_upsert_attendance(
             db.add(record)
             existing_by_key[key] = record
         else:
-            record.status_am = entry.status_am
-            record.remarks_am = entry.remarks_am
-            record.status_pm = entry.status_pm
-            record.remarks_pm = entry.remarks_pm
+            record.status = entry.status
+            record.reason = entry.reason
+            record.remarks = entry.remarks
             record.updated_by = user_id
             record.updated_at = now
             record.last_edit_at = now
@@ -277,19 +275,18 @@ async def bulk_upsert_attendance(
 # Copy Remarks endpoint
 # ============================================================================
 #
-# Issue 20: the caller names the source (date + slot) and destination
-# (date + slot) explicitly — the old time-of-day inference lives on only as
-# the modal's prefill defaults. Blank source remarks leave the destination
-# untouched; destination rows are created on demand.
+# Issue 20 (reworked for issue 33's single session): the caller names the
+# source date and destination date explicitly — the old time-of-day
+# inference lives on only as the modal's prefill defaults. Blank source
+# remarks leave the destination untouched; destination rows are created on
+# demand.
 
 
 @router.post("/copy-remarks", response_model=CopyRemarksResponse)
 async def copy_remarks(
     nominal_roll_id: str = Query(..., description="NR to copy remarks for"),
     source_date: utc_dt.date = Query(..., description="Copy-from date"),
-    source_slot: str = Query(..., description="Copy-from slot: am or pm"),
     dest_date: utc_dt.date = Query(..., description="Copy-to date"),
-    dest_slot: str = Query(..., description="Copy-to slot: am or pm"),
     sub_unit_1: str | None = Query(
         None,
         description=(
@@ -300,26 +297,22 @@ async def copy_remarks(
     user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Copy remarks from one (date, slot) to another for the scoped roster.
+    """Copy remarks from one date to another for the scoped roster.
 
     Caller identity is session-derived (issue 31). Scope: the active
-    attendance roster (non-deferred), optionally narrowed to an effective sub_unit_1 (the
-    page's view filter), intersected with the caller's (unit, sub_unit_1)
-    write scope (super_admin bypasses; deny-by-default: no grants → 403).
-    Rows with an empty source remark are skipped (the destination keeps
-    its remark); missing destination rows are created (statuses default
-    to absent). Source and destination must differ.
+    attendance roster (all NR personnel — issue 33), optionally narrowed
+    to an effective sub_unit_1 (the page's view filter), intersected with
+    the caller's (unit, sub_unit_1) write scope (super_admin bypasses;
+    deny-by-default: no grants → 403). Rows with an empty source remark
+    are skipped (the destination keeps its remark); missing destination
+    rows are created (status defaults to absent). Source and destination
+    dates must differ.
     """
     user_id = str(user.id)
-    if source_slot not in ("am", "pm") or dest_slot not in ("am", "pm"):
+    if source_date == dest_date:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="source_slot and dest_slot must each be 'am' or 'pm'",
-        )
-    if source_date == dest_date and source_slot == dest_slot:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Source and destination must differ",
+            detail="Source and destination dates must differ",
         )
 
     nr = await require_attendance_active(nominal_roll_id, db)
@@ -369,9 +362,7 @@ async def copy_remarks(
         if accessible_pids is not None and pid not in accessible_pids:
             continue  # outside the caller's effective (unit, sub_unit_1) scope
         source = by_key.get((pid, source_date))
-        source_remark = (
-            source.remarks_pm if source_slot == "pm" else source.remarks_am
-        ) if source else None
+        source_remark = source.remarks if source else None
 
         if not source_remark:
             skipped += 1  # blank/missing source → leave destination untouched
@@ -389,8 +380,7 @@ async def copy_remarks(
                 personnel_id=pid,
                 nominal_roll_id=nominal_roll_id,
                 date=dest_date,
-                status_am="absent",
-                status_pm="absent",
+                status="absent",
                 unit_snapshot=person.unit,
                 sub_unit_1_snapshot=person.sub_unit_1,
                 sub_unit_2_snapshot=person.sub_unit_2,
@@ -404,10 +394,7 @@ async def copy_remarks(
             db.add(target)
             by_key[(pid, dest_date)] = target
 
-        if dest_slot == "pm":
-            target.remarks_pm = source_remark
-        else:
-            target.remarks_am = source_remark
+        target.remarks = source_remark
         target.updated_by = user_id
         target.updated_at = now_naive
         target.last_edit_at = now_naive
@@ -418,9 +405,7 @@ async def copy_remarks(
     return CopyRemarksResponse(
         nominal_roll_id=nominal_roll_id,
         source_date=source_date,
-        source_slot=source_slot,
         dest_date=dest_date,
-        dest_slot=dest_slot,
         updated=updated,
         skipped=skipped,
     )
@@ -431,19 +416,19 @@ async def copy_remarks(
 # ============================================================================
 
 
-# Display labels for the exported statuses — exactly the option labels the
-# attendance page renders (raw enum values like "yet_to_inpro" would be
-# unreadable in a spreadsheet).
+# Display labels for the exported statuses and reasons — exactly the option
+# labels the attendance page renders (raw enum values like "early_outpro"
+# would be unreadable in a spreadsheet).
 _STATUS_LABELS = {
     "present": "Present",
     "absent": "Absent",
-    "time_off": "Time Off",
+}
+_REASON_LABELS = {
     "mc": "MC",
-    "yet_to_inpro": "Yet to Inpro",
-    "outpro": "Outpro",
-    "reporting_sick": "Reporting Sick",
-    "late": "Late",
-    "att_out": "Att Out",
+    "off": "Off",
+    "early_outpro": "Early Outpro",
+    "other": "Other",
+    "awol": "AWOL",
 }
 
 
@@ -464,8 +449,9 @@ async def export_attendance_csv(
     """Export the attendance marking table exactly as displayed.
 
     Caller identity is session-derived (issue 31). Columns: Unit, Sub-unit
-    1-3, Category, Rank, Name, AM/PM Status and Remarks. The roster is
-    the active non-deferred personnel with the NR's 1:1 tagging overlay
+    1-3, Category, Rank, Name, Inpro Status, Status, Reason, Remarks —
+    mirroring the marking page (issue 33). The roster is all active NR
+    personnel (deferred included) with the NR's 1:1 tagging overlay
     applied, ordered like the marking page; personnel without an
     attendance row for the date export as Absent (the page's default).
     Read scoping mirrors the page: super_admin exports the whole roster,
@@ -492,7 +478,6 @@ async def export_attendance_csv(
                 .where(
                     Personnel.nominal_roll_id == nominal_roll_id,
                     Personnel.status == "active",
-                    Personnel.inpro_status != "deferred",
                 )
                 .order_by(
                     Personnel.unit,
@@ -561,8 +546,7 @@ async def export_attendance_csv(
     writer.writerow(
         [
             "Unit", "Sub-unit 1", "Sub-unit 2", "Sub-unit 3", "Category",
-            "Rank", "Name", "AM Status", "AM Remarks", "PM Status",
-            "PM Remarks",
+            "Rank", "Name", "Inpro Status", "Status", "Reason", "Remarks",
         ]
     )
     for person in roster:
@@ -579,14 +563,16 @@ async def export_attendance_csv(
                 person.category,
                 person.rank,
                 person.full_name,
+                INPRO_STATUS_LABELS.get(person.inpro_status, person.inpro_status),
                 _STATUS_LABELS.get(
-                    record.status_am if record else "absent", "absent"
+                    record.status if record else "absent", "absent"
                 ),
-                record.remarks_am if record and record.remarks_am else "",
-                _STATUS_LABELS.get(
-                    record.status_pm if record else "absent", "absent"
+                (
+                    _REASON_LABELS.get(record.reason, record.reason)
+                    if record and record.reason
+                    else ""
                 ),
-                record.remarks_pm if record and record.remarks_pm else "",
+                record.remarks if record and record.remarks else "",
             ]
         )
 
@@ -612,10 +598,12 @@ async def attendance_counts_for_date(
     nominal_roll_id: str,
     date: utc_dt.date,
     db: AsyncSession,
-) -> dict[str, dict[str, int]]:
-    """Return AM/PM present/absent/total counts for an NR on a date.
+) -> dict[str, int]:
+    """Return single-session present/absent/total counts for an NR on a date.
 
-    Shape: ``{"am": {"present": n, "absent": n, "total": n}, "pm": {...}}``.
+    Shape: ``{"present": n, "absent": n, "total": n}`` — counts attendance
+    rows only (roster members without a row are absent by default and are
+    not included).
     """
     result = await db.execute(
         select(Attendance).where(
@@ -627,14 +615,11 @@ async def attendance_counts_for_date(
     )
     rows = list(result.scalars().all())
 
-    counts = {"am": {"present": 0, "absent": 0, "total": 0},
-              "pm": {"present": 0, "absent": 0, "total": 0}}
+    counts = {"present": 0, "absent": 0, "total": 0}
     for row in rows:
-        for slot in ("am", "pm"):
-            value = row.status_am if slot == "am" else row.status_pm
-            counts[slot]["total"] += 1
-            if value in PRESENT_LIKE_STATUSES:
-                counts[slot]["present"] += 1
-            else:
-                counts[slot]["absent"] += 1
+        counts["total"] += 1
+        if row.status in PRESENT_LIKE_STATUSES:
+            counts["present"] += 1
+        else:
+            counts["absent"] += 1
     return counts

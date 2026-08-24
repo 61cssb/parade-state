@@ -12,13 +12,16 @@ from .personnel import INPRO_STATUSES
 AttendanceStatus = Literal[
     "present",
     "absent",
-    "time_off",
+]
+
+# Optional reason classifying an attendance row's remarks — never feeds
+# present/absent aggregation (issue 33).
+AttendanceReason = Literal[
     "mc",
-    "yet_to_inpro",
-    "outpro",
-    "reporting_sick",
-    "late",
-    "att_out",
+    "off",
+    "early_outpro",
+    "other",
+    "awol",
 ]
 
 # ============================================================================
@@ -220,20 +223,20 @@ class SessionListParams(BaseModel):
 # Attendance Schemas
 # ============================================================================
 #
-# Attendance is NR/Tagging-scoped with hardcoded AM/PM slots. One record per
-# (personnel, date) carries status + remarks for both AM and PM.
+# Attendance is NR/Tagging-scoped and taken once daily (single session,
+# issue 33). One record per (personnel, date) carries status + optional
+# reason + remarks.
 # Sessions are no longer user-managed (see /api/v1/sessions 410 stub).
 
 
 class AttendanceUpsert(BaseModel):
-    """Schema for a single per-person AM/PM attendance entry in a bulk upsert."""
+    """Schema for a single per-person attendance entry in a bulk upsert."""
 
     personnel_id: str
     date: utc_dt.date
-    status_am: AttendanceStatus = "absent"
-    remarks_am: str | None = None
-    status_pm: AttendanceStatus = "absent"
-    remarks_pm: str | None = None
+    status: AttendanceStatus = "absent"
+    reason: AttendanceReason | None = None
+    remarks: str | None = None
 
 
 class AttendanceResponse(BaseModel):
@@ -243,10 +246,9 @@ class AttendanceResponse(BaseModel):
     personnel_id: str
     nominal_roll_id: str
     date: utc_dt.date
-    status_am: str
-    remarks_am: str | None
-    status_pm: str
-    remarks_pm: str | None
+    status: str
+    reason: str | None
+    remarks: str | None
     notes_snapshot: str | None
     unit_snapshot: str | None
     sub_unit_1_snapshot: str | None
@@ -272,13 +274,11 @@ class AttendanceBulkUpsert(BaseModel):
 
 
 class CopyRemarksResponse(BaseModel):
-    """Schema for the copy-remarks endpoint result (explicit source/dest)."""
+    """Schema for the copy-remarks endpoint result (date-to-date copy)."""
 
     nominal_roll_id: str
     source_date: utc_dt.date
-    source_slot: Literal["am", "pm"]
     dest_date: utc_dt.date
-    dest_slot: Literal["am", "pm"]
     updated: int
     skipped: int
 
@@ -459,10 +459,9 @@ class PersonnelAttendanceHistoryItem(BaseModel):
     id: str
     nominal_roll_id: str
     date: utc_dt.date
-    status_am: str
-    remarks_am: str | None
-    status_pm: str
-    remarks_pm: str | None
+    status: str
+    reason: str | None
+    remarks: str | None
     created_at: utc_dt.datetime
     updated_at: utc_dt.datetime
 
@@ -471,16 +470,12 @@ class PersonnelAttendanceHistoryItem(BaseModel):
 
 
 class PersonnelAttendanceHistoryStats(BaseModel):
-    """Schema for attendance history statistics.
+    """Schema for attendance history statistics (one session per day)."""
 
-    AM and PM slots are counted independently toward totals (so one day with
-    both slots present contributes 2 to ``total_slots``).
-    """
-
-    total_slots: int
-    present_count: int
-    absent_count: int
-    attendance_rate: float  # Percentage of present-like slots vs total
+    total_days: int
+    present_days: int
+    absent_days: int
+    attendance_rate: float  # Percentage of present days vs total
 
 
 class PersonnelAttendanceHistoryResponse(BaseModel):

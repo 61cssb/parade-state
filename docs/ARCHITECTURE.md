@@ -607,8 +607,8 @@ UserSubunitScope — were removed in the issue 26 redesign.)
 ```
 Nominal Roll (the one active for attendance; 1:1 Tagging overlay applied)
  │
- └── AttendanceRecord (per-personnel per-day)
-      ├── status_am / remarks_am, status_pm / remarks_pm
+ └── AttendanceRecord (per-personnel per-day, single session — issue 33)
+      ├── status (present/absent) / reason (nullable enum) / remarks
       └── unit_snapshot / sub_unit_*_snapshot (frozen at write time)
 ```
 

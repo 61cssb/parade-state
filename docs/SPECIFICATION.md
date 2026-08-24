@@ -38,7 +38,7 @@ Grouping (a labelled set of groups on the NR active for attendance) —
 **Key Concepts:**
 - **Nominal Roll**: Base source of truth, uploaded from CSV, pinned by CAA date, read-only — unit/subunit edits are recorded on the NR's Tagging. Exactly one NR is **active for attendance** at a time (super-admin toggles "Use for Attendance" / "Deactivate Attendance" in the /nominal-roll view's Roll management panel; activating another NR auto-switches).
 - **Tagging**: 1:1 with an NR; the overlay of person → subunit remaps; never mutates the NR; always applied when attendance is taken against the active NR.
-- **Attendance**: One row per `(personnel, date)`, carrying `status_am`/`remarks_am` and `status_pm`/`remarks_pm` (statuses from the nine-value operational enum). AM and PM are hardcoded — there is no longer a user-managed Session model. Writes are only permitted against the active NR.
+- **Attendance**: One row per `(personnel, date)`, carrying a `status` (present/absent), an optional `reason` enum classifying the remarks, and `remarks` — a single session per day (issue 33). There is no user-managed Session model. Writes are only permitted against the active NR.
 - **Grouping**: A labelled, closed vocabulary of groups based on a nominal roll. Servicemen on the roll hold memberships in the groups plus a per-grouping checkbox and free-text remarks. A separate feature — groupings never read or write attendance.
 
 ### 1.3 Scope
@@ -47,7 +47,7 @@ Grouping (a labelled set of groups on the NR active for attendance) —
 - CSV ingestion with CAA versioning, column mapping, diff detection
 - Grouping management: create, clone (same-roll), copy from the previously
   activated roll (cross-roll, re-linked by pers_no)
-- Attendance taking: AM/PM (hardcoded), nine-status operational reporting enum, NR-scoped with the 1:1 Tagging overlay applied, active-NR gating
+- Attendance taking: single daily session, present/absent + optional reason enum, NR-scoped with the 1:1 Tagging overlay applied, active-NR gating
 - Row access control (access level + subunit scope) and column sensitivity control
 - Parade state table view scoped to user access with inline editing
 - Admin UI: enums, users, column sensitivity, column mapping, grouping/tagging/attendance management
@@ -168,12 +168,13 @@ GroupingMemberState
   semantics are intentionally unspecified; standardisation is left to each
   unit
 
-### 2.3 Attendance (AM/PM hardcoded, active-NR model)
+### 2.3 Attendance (single daily session, active-NR model)
 
-**AM and PM are hardcoded; there is no user-managed Session model and no
-separate scope table.** Attendance is taken against the one Nominal Roll
-currently **active for attendance** (`NominalRoll.attendance_active`), with
-the NR's 1:1 Tagging overlay always applied.
+**Parade state is taken once daily; there is no user-managed Session model,
+no AM/PM split, and no separate scope table** (issue 33). Attendance is
+taken against the one Nominal Roll currently **active for attendance**
+(`NominalRoll.attendance_active`), with the NR's 1:1 Tagging overlay always
+applied.
 
 ```
 Attendance (one row per personnel/day)
@@ -181,14 +182,25 @@ Attendance (one row per personnel/day)
 ├── personnel_id: UUID (FK Personnel, on_delete=CASCADE)
 ├── nominal_roll_id: UUID (FK NominalRoll, on_delete=CASCADE)
 ├── date: date
-├── status_am / remarks_am: attendance_status enum + text
-├── status_pm / remarks_pm: attendance_status enum + text
+├── status: attendance_status enum — present | absent (default absent)
+├── reason: attendance_reason enum (nullable) — mc | off | early_outpro | other | awol
+├── remarks: text
 ├── notes_snapshot, unit_snapshot, sub_unit_{1,2,3}_snapshot: text
 └── audit: created_at/by, updated_at/by, last_edit_at/by, is_retroactive_edit
 ```
 
-**Constraints:**
+**Constraints & rules:**
 - UNIQUE(personnel_id, date) — one attendance row per person per day
+- **Reason classifies remarks and never feeds reporting** — strength and
+  history aggregation use present/absent only. Reason is optional
+  regardless of status (remarks exist on Present rows too); "lateness" is
+  free text in Remarks, not a status or reason
+- The marking roster is **everyone** on the active NR (deferred included);
+  the page's Inpro Status column (read-only, rendered just before the
+  status) and its filter (e.g. hide Deferred) are view concerns only —
+  filtering hides rows but never deletes or alters their records.
+  Early-outpro'd servicemen keep appearing daily; marking them is user
+  responsibility
 - Attendance writes (upsert / copy-remarks) are refused (400) unless the
   target NR is the one active for attendance
 - A Tagging whose NR has any attendance rows cannot be deleted (409) —
@@ -199,24 +211,24 @@ Attendance (one row per personnel/day)
   (`/attendance`) defaults to the active NR and shows the tagging-overlaid
   roster — Unit, Sub-unit 1, Sub-unit 2, and Sub-unit 3 columns all display
   effective (overlay) values. Rows **autosave** (issue 19): each row PUTs
-  itself on status change or remarks blur — no Save button; a failed save
-  marks the row (red edge) and retries on the next edit. Tagged rows are
-  highlighted yellow only in the NR view, never here. With no active NR the
-  page shows an inactive message instead of the marking table. Write access
-  is gated per-NR by `UserSubunitAssignment` scope grants on the effective
-  (unit, sub_unit_1) — see §5.3.
+  itself on status/reason change or remarks blur — no Save button; a failed
+  save marks the row (red edge) and retries on the next edit. Tagged rows
+  are highlighted yellow only in the NR view, never here. With no active NR
+  the page shows an inactive message instead of the marking table. Write
+  access is gated per-NR by `UserSubunitAssignment` scope grants on the
+  effective (unit, sub_unit_1) — see §5.3.
 
-**"Copy Remarks" semantics (issue 20):**
-- Explicit source (date + AM/PM) and destination (date + AM/PM), chosen in
-  a modal that confirms the effect in plain language; the old time-of-day
-  behaviour (before noon: previous-day PM → today AM; after noon: today AM
-  → today PM) survives only as the modal's prefill
-- Scope: the active attendance roster (non-deferred) ∩ the page's effective-sub_unit_1
-  filter (optional `sub_unit_1` param) ∩ the caller's write access
-  (super_admin bypasses; deny-by-default: no assignments → 403)
+**"Copy Remarks" semantics (issue 20, single-session rework):**
+- Explicit source date and destination date, chosen in a modal that
+  confirms the effect in plain language; the previous day is the prefill
+  default
+- Scope: the active attendance roster (all NR personnel) ∩ the page's
+  effective-sub_unit_1 filter (optional `sub_unit_1` param) ∩ the caller's
+  write access (super_admin bypasses; deny-by-default: no assignments →
+  403)
 - Blank/missing source remarks are skipped — the destination keeps its
-  remark; missing destination rows are created on demand (statuses default
-  `absent`); source and destination must differ (400 otherwise)
+  remark; missing destination rows are created on demand (status defaults
+  `absent`); source and destination dates must differ (400 otherwise)
 
 ---
 
@@ -543,9 +555,9 @@ client-side and applied in a batch, so a misclick costs nothing:
 
 ### 3.5 Attendance Tracking
 
-#### 3.5.1 Attendance (NR/Tagging-scoped, AM/PM)
+#### 3.5.1 Attendance (NR/Tagging-scoped, single daily session)
 
-**Per-personnel per-day attendance with hardcoded AM and PM slots.**
+**Per-personnel per-day attendance, one session per day (issue 33).**
 
 ```
 Attendance
@@ -553,21 +565,25 @@ Attendance
 ├── personnel_id: UUID (FK Personnel, on_delete=CASCADE)
 ├── nominal_roll_id: UUID (FK NominalRoll, on_delete=CASCADE)
 ├── date: date
-├── status_am / remarks_am: attendance_status enum + text (default 'absent')
-├── status_pm / remarks_pm: attendance_status enum + text (default 'absent')
+├── status: attendance_status enum (default 'absent')
+├── reason: attendance_reason enum (nullable)
+├── remarks: text
 ├── notes_snapshot: str (legacy column, now always NULL)
 ├── unit_snapshot, sub_unit_{1,2,3}_snapshot: str (roster snapshot at row creation)
 ├── created_at/by, updated_at/by, last_edit_at/by, is_retroactive_edit: audit
 ```
 
-**Status enum** (`attendance_status`): `present`, `absent`, `time_off`, `mc`,
-`yet_to_inpro`, `outpro`, `reporting_sick`, `late`, `att_out`.
-`present` and `late` count as "present-like" when aggregating.
+**Status enum** (`attendance_status`): `present`, `absent`. Only `present`
+counts as present when aggregating.
+
+**Reason enum** (`attendance_reason`, nullable): `mc`, `off`,
+`early_outpro`, `other`, `awol`. Reason classifies remarks; it is optional
+regardless of status and never feeds aggregation.
 
 **Constraints:**
 - UNIQUE(personnel_id, date) — one row per person per day
 - Writes are refused (400) unless the NR is the one active for attendance
-- AM/PM slots are counted independently toward attendance-rate totals
+- Days (not slots) count toward attendance-rate totals
 
 #### 3.5.2 Unit Strength Report
 
@@ -583,14 +599,15 @@ subunits fall into a `(none)` bucket. Columns: **Officer / WOSE / Total**
 (`Personnel.category`), each **In / Out / Current / %**:
 
 - **In** — personnel on the NR active for attendance with
-  `inpro_status != 'deferred'` (active personnel rows only; issue 32
-  interim rule)
-- **Current** — slot status `present` or `late` (present-like)
-- **Out** — every other status; unmarked personnel count as `absent`
+  `inpro_status != 'deferred'` (active personnel rows only; the Inpro
+  column on the marking page carries the distinction, and reason never
+  participates)
+- **Current** — status `present` (single daily session, issue 33)
+- **Out** — `absent`; unmarked personnel count as `absent`
 - **%** — `Current ÷ In`, whole percent; 0% when In is 0
 
-The date and AM/PM slot are URL params (server default: today, AM); a
-first-visit script re-defaults them from the browser's local datetime.
+The date is a URL param (server default: today); a first-visit script
+re-defaults it from the browser's local datetime.
 Super-admins see the whole unit; regular admins see only the sections
 inside their (unit, sub_unit_1) scope grants (deny-by-default, the same
 `UserSubunitAssignment` machinery as attendance marking — §5.3), with

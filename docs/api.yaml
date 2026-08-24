@@ -81,24 +81,27 @@ tags:
       (default off).
   - name: sessions
     description: >
-      DEPRECATED (issue #4). Sessions were removed — AM/PM are now hardcoded
-      slots on Attendance rows. All /api/v1/sessions/* routes
+      DEPRECATED (issue #4). Sessions were removed — attendance is taken
+      once daily (issue 33). All /api/v1/sessions/* routes
       return 410 Gone. Retained here as a signpost; detailed paths below are
       stale and will be pruned in a follow-up.
   - name: attendance
     description: >
-      Attendance with hardcoded AM/PM slots, taken against the Nominal Roll
-      currently active for attendance (with its 1:1 tagging applied).
-      Per-row and bulk upsert; copy-remarks copies an explicit source
-      (date + slot) to a destination (date + slot), optionally narrowed to
+      Single-session daily attendance (issue 33: status present/absent +
+      optional reason enum mc/off/early_outpro/other/awol + remarks),
+      taken against the Nominal Roll currently active for attendance
+      (with its 1:1 tagging applied). The roster is everyone on the NR
+      (deferred included). Per-row and bulk upsert; copy-remarks copies an
+      explicit source date to a destination date, optionally narrowed to
       an effective sub_unit_1 (the attendance page's view filter). Writes
       require the target NR to be the active one (400 otherwise) and are
       gated by Subunit-1 assignment (403; super_admin bypasses;
       tagging-aware effective sub_unit_1).
       GET /attendance/export streams the marking table for an NR + date as
-      CSV (statuses as display labels; no-record rows export as Absent),
-      honouring the page's sub_unit_1 filter and the same Subunit-1 read
-      scoping as the page.
+      CSV (Unit, Sub-units 1-3, Category, Rank, Name, Inpro Status,
+      Status, Reason, Remarks — statuses/reasons as display labels;
+      no-record rows export as Absent), honouring the page's sub_unit_1
+      filter and the same Subunit-1 read scoping as the page.
       Kill-switched: every /api/v1/attendance/* route returns 404 for all
       roles (super-admins included) when FEATURE_ATTENDANCE=false
       (default on; unset = available).

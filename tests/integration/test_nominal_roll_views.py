@@ -417,8 +417,9 @@ async def test_manual_personnel_appears_in_attendance_view(
     monkeypatch,
 ):
     """A manually added serviceman with the defaults (active + yet_to_inpro)
-    shows up in the attendance view immediately; a deferred manual add
-    stays hidden there (the NR view remains the management surface)."""
+    shows up in the attendance view immediately; a deferred manual add is
+    listed too (issue 33 — roster is everyone) and the Inpro filter hides
+    it (the NR view remains the management surface)."""
     from parade_state.web import attendance as web_attendance
 
     nr = sample_attendance_scope
@@ -458,6 +459,15 @@ async def test_manual_personnel_appears_in_attendance_view(
     monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
 
     response = client.get("/attendance", params={"nominal_roll_id": str(nr.id)})
+    assert response.status_code == 200
+    assert "Immediate Manual" in response.text
+    assert "Deferred Manual" in response.text  # issue 33: everyone is listed
+
+    # The Inpro Status filter hides the deferred add.
+    response = client.get(
+        "/attendance",
+        params={"nominal_roll_id": str(nr.id), "inpro_status": "yet_to_inpro"},
+    )
     assert response.status_code == 200
     assert "Immediate Manual" in response.text
     assert "Deferred Manual" not in response.text

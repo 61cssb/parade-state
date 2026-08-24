@@ -517,11 +517,11 @@ async def sample_attendance(
     sample_nominal_roll,
     sample_users,
 ):
-    """Create sample attendance rows (AM/PM) for testing.
+    """Create sample attendance rows (single session) for testing.
 
     Builds two days of history for the first personnel member:
-    - Today: AM present, PM absent (remarks)
-    - Yesterday: AM late (remarks), PM absent
+    - Today: absent with reason + remarks
+    - Yesterday: present with remarks
     """
     admin_id = str(sample_users["admin"].id)
     nominal_roll_id = str(sample_nominal_roll.id)
@@ -533,9 +533,9 @@ async def sample_attendance(
             personnel_id=str(sample_personnel[0].id),
             nominal_roll_id=nominal_roll_id,
             date=today,
-            status_am="present",
-            status_pm="absent",
-            remarks_pm="Sick leave",
+            status="absent",
+            reason="mc",
+            remarks="Sick leave",
             created_by=admin_id,
             updated_by=admin_id,
         ),
@@ -543,9 +543,8 @@ async def sample_attendance(
             personnel_id=str(sample_personnel[0].id),
             nominal_roll_id=nominal_roll_id,
             date=yesterday,
-            status_am="late",
-            remarks_am="Official duty",
-            status_pm="absent",
+            status="present",
+            remarks="Official duty",
             created_by=admin_id,
             updated_by=admin_id,
         ),
@@ -553,8 +552,7 @@ async def sample_attendance(
             personnel_id=str(sample_personnel[1].id),
             nominal_roll_id=nominal_roll_id,
             date=today,
-            status_am="present",
-            status_pm="present",
+            status="present",
             created_by=admin_id,
             updated_by=admin_id,
         ),

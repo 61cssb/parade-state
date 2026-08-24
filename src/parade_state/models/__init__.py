@@ -6,6 +6,8 @@ from .access import (
     UserSubunitAssignment,
 )
 from .attendance import (
+    ATTENDANCE_REASON_LABELS,
+    ATTENDANCE_REASONS,
     ATTENDANCE_STATUSES,
     PRESENT_LIKE_STATUSES,
     Attendance,
@@ -39,6 +41,8 @@ __all__ = [
     "User",
     "UserSubunitAssignment",
     "ATTENDANCE_STATUSES",
+    "ATTENDANCE_REASONS",
+    "ATTENDANCE_REASON_LABELS",
     "PRESENT_LIKE_STATUSES",
     "INPRO_STATUSES",
     "INPRO_STATUS_LABELS",
