@@ -83,16 +83,17 @@ async def get_roster_for_scope(
     nominal_roll_id: str,
     db: AsyncSession,
 ) -> list[Personnel]:
-    """Active, Called Up personnel on an NR (the attendance roster).
+    """Active, non-deferred personnel on an NR (the attendance roster).
 
-    Non-Called-Up callup statuses are hidden; their attendance records
-    (if any) are preserved untouched.
+    Interim rule (issue 32, until #33): everyone except ``deferred``
+    attends — i.e. yet_to_inpro + inproed. Deferred personnel are hidden;
+    their attendance records (if any) are preserved untouched.
     """
     result = await db.execute(
         select(Personnel).where(
             Personnel.nominal_roll_id == nominal_roll_id,
             Personnel.status == "active",
-            Personnel.callup_status == "Called Up",
+            Personnel.inpro_status != "deferred",
         )
     )
     return list(result.scalars().all())
@@ -302,7 +303,7 @@ async def copy_remarks(
     """Copy remarks from one (date, slot) to another for the scoped roster.
 
     Caller identity is session-derived (issue 31). Scope: the active
-    Called Up roster, optionally narrowed to an effective sub_unit_1 (the
+    attendance roster (non-deferred), optionally narrowed to an effective sub_unit_1 (the
     page's view filter), intersected with the caller's (unit, sub_unit_1)
     write scope (super_admin bypasses; deny-by-default: no grants → 403).
     Rows with an empty source remark are skipped (the destination keeps
@@ -464,7 +465,7 @@ async def export_attendance_csv(
 
     Caller identity is session-derived (issue 31). Columns: Unit, Sub-unit
     1-3, Category, Rank, Name, AM/PM Status and Remarks. The roster is
-    the active Called Up personnel with the NR's 1:1 tagging overlay
+    the active non-deferred personnel with the NR's 1:1 tagging overlay
     applied, ordered like the marking page; personnel without an
     attendance row for the date export as Absent (the page's default).
     Read scoping mirrors the page: super_admin exports the whole roster,
@@ -491,7 +492,7 @@ async def export_attendance_csv(
                 .where(
                     Personnel.nominal_roll_id == nominal_roll_id,
                     Personnel.status == "active",
-                    Personnel.callup_status == "Called Up",
+                    Personnel.inpro_status != "deferred",
                 )
                 .order_by(
                     Personnel.unit,

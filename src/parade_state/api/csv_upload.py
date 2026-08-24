@@ -13,7 +13,6 @@ from sqlalchemy.orm import selectinload
 from parade_state.auth.dependencies import require_admin_user, require_super_admin_user
 from parade_state.db import get_db_session
 from parade_state.models import (
-    CALLUP_STATUSES,
     AuditLog,
     ColumnMetadata,
     CsvUpload,
@@ -46,20 +45,39 @@ router = APIRouter()
 # Maximum upload size: 10 MB
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024
 
-# Case-insensitive lookup for the CSV "Callup Decision" column.
-_CALLUP_BY_CASEFOLD: dict[str, str] = {s.casefold(): s for s in CALLUP_STATUSES}
+# Interim CSV shim (issue 32 → #34): the legacy CSV "Callup Decision"
+# column is remapped onto the inpro lifecycle here so old-format uploads
+# keep working until the new CSV format contract lands (#34). Both real
+# fixtures carry Yes/No decisions, so those map directly; the retired
+# callup-decision vocabulary is honoured for older files.
+_LEGACY_YES = frozenset({"yes", "called up"})
+_LEGACY_NO = frozenset({"no", "deferred"})
 
 
-def _resolve_callup_status(raw_decision: str | int | None) -> str:
-    """Map the raw CSV Callup Decision onto the callup_status enum.
+def _resolve_inpro_status(raw_decision: str | int | None) -> tuple[str, str | None]:
+    """Map the raw CSV Callup Decision onto the inpro_status enum.
 
-    Blank → "Called Up" (model default); an exact (case-insensitive) match
-    passes through; any other non-blank value → "Other" (the raw value is
-    preserved in ``extra_fields`` for audit).
+    Returns ``(inpro_status, remark_note)`` (case-insensitive, issue 32
+    fixture-profiling delta 2026-08-24):
+
+    - ``Yes`` / blank / ``Called Up`` → ``("yet_to_inpro", None)`` (model
+      default);
+    - ``No`` / ``Deferred`` → ``("deferred", None)`` — ``No`` approximates
+      #34's future skip: the row is kept off the interim non-deferred
+      roster;
+    - anything else (legacy ``Disrupted`` / ``MR`` / ``Age Limit`` /
+      ``Other`` or an unknown value) → ``("yet_to_inpro", "Previously: <value>")``
+      — the note is appended to ``personnel.remarks`` so the legacy decision
+      survives (the raw value also stays in ``extra_fields`` for audit).
     """
     if not raw_decision:
-        return "Called Up"
-    return _CALLUP_BY_CASEFOLD.get(str(raw_decision).casefold(), "Other")
+        return "yet_to_inpro", None
+    folded = str(raw_decision).casefold()
+    if folded in _LEGACY_YES:
+        return "yet_to_inpro", None
+    if folded in _LEGACY_NO:
+        return "deferred", None
+    return "yet_to_inpro", f"Previously: {raw_decision}"
 
 
 def _join_personnel_remarks(
@@ -500,6 +518,16 @@ async def _process_upload_into_nr(
             )
             continue
 
+        inpro_status, legacy_note = _resolve_inpro_status(
+            extra_fields.get("callup_decision")
+        )
+        remarks = _join_personnel_remarks(
+            extra_fields.get("reason"),
+            extra_fields.get("remarks"),
+        )
+        if legacy_note:
+            remarks = f"{remarks}; {legacy_note}" if remarks else legacy_note
+
         db.add(
             Personnel(
                 nominal_roll_id=nominal_roll.id,
@@ -513,13 +541,8 @@ async def _process_upload_into_nr(
                 sub_unit_3=core_values.get("sub_unit_3") or None,
                 extra_fields=extra_fields,
                 status="active",
-                callup_status=_resolve_callup_status(
-                    extra_fields.get("callup_decision")
-                ),
-                remarks=_join_personnel_remarks(
-                    extra_fields.get("reason"),
-                    extra_fields.get("remarks"),
-                ),
+                inpro_status=inpro_status,
+                remarks=remarks,
                 created_by=created_by,
             )
         )

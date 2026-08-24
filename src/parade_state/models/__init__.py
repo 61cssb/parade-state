@@ -26,7 +26,12 @@ from .grouping import (
     GroupingMemberState,
     GroupingMembership,
 )
-from .personnel import CALLUP_STATUSES, SOURCE_MANUAL, Personnel
+from .personnel import (
+    INPRO_STATUSES,
+    INPRO_STATUS_LABELS,
+    SOURCE_MANUAL,
+    Personnel,
+)
 from .tagging import Tagging, TaggingEntry
 
 __all__ = [
@@ -35,7 +40,8 @@ __all__ = [
     "UserSubunitAssignment",
     "ATTENDANCE_STATUSES",
     "PRESENT_LIKE_STATUSES",
-    "CALLUP_STATUSES",
+    "INPRO_STATUSES",
+    "INPRO_STATUS_LABELS",
     "Attendance",
     "AuditLog",
     "UserSession",

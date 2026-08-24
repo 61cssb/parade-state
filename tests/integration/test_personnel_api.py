@@ -856,45 +856,48 @@ async def test_list_personnel_with_filters_and_sorting(
 
 
 # ============================================================================
-# Callup status & remarks (issue 06 — NR status & remarks columns)
+# Inpro status & remarks (issue 06 columns; issue 32 inpro lifecycle)
 # ============================================================================
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "callup_status",
-    ["Called Up", "Deferred", "Disrupted", "MR", "Age Limit", "Other"],
+    "inpro_status",
+    ["inproed", "yet_to_inpro", "deferred"],
 )
-async def test_update_personnel_callup_status_all_values(
+async def test_update_personnel_inpro_status_all_values(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
     admin_subunit_assignment,
     db_session,
     sample_personnel,
-    callup_status: str,
+    inpro_status: str,
 ):
-    """Admins can set any of the six callup statuses; the row and response
+    """Admins can set any of the three inpro statuses; the row and response
     reflect the change immediately."""
     p = sample_personnel[0]
 
     response = client.patch(
         f"/api/v1/personnel/{p.id}",
         headers=admin_token_headers,
-        json={"callup_status": callup_status},
+        json={"inpro_status": inpro_status},
     )
 
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["callup_status"] == callup_status
+    assert data["inpro_status"] == inpro_status
 
     await db_session.refresh(p)
-    assert p.callup_status == callup_status
+    assert p.inpro_status == inpro_status
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("bad_value", ["Not Called Up", "deferred", "called", ""])
-async def test_update_personnel_callup_status_invalid_rejected(
+@pytest.mark.parametrize(
+    "bad_value",
+    ["Called Up", "Deferred", "Disrupted", "MR", "yet to inpro", ""],
+)
+async def test_update_personnel_inpro_status_invalid_rejected(
     client: TestClient,
     admin_token_headers: dict[str, str],
     sample_users,
@@ -902,14 +905,14 @@ async def test_update_personnel_callup_status_invalid_rejected(
     sample_personnel,
     bad_value: str,
 ):
-    """Values outside the six-status enum are rejected with 422. The check is
-    case-sensitive: 'deferred' is not 'Deferred'."""
+    """Values outside the three-status enum are rejected with 422 — including
+    the retired callup vocabulary (issue 32)."""
     p = sample_personnel[0]
 
     response = client.patch(
         f"/api/v1/personnel/{p.id}",
         headers=admin_token_headers,
-        json={"callup_status": bad_value},
+        json={"inpro_status": bad_value},
     )
 
     assert response.status_code == 422, bad_value
@@ -962,15 +965,15 @@ async def test_update_personnel_remarks_set_and_clear(
 
 
 @pytest.mark.asyncio
-async def test_update_personnel_callup_fields_as_user_forbidden(
+async def test_update_personnel_inpro_fields_as_user_forbidden(
     client: TestClient,
     user_token_headers: dict[str, str],
     sample_personnel,
 ):
-    """Non-admins cannot change callup_status or remarks."""
+    """Non-admins cannot change inpro_status or remarks."""
     p = sample_personnel[0]
 
-    for payload in ({"callup_status": "Deferred"}, {"remarks": "nope"}):
+    for payload in ({"inpro_status": "deferred"}, {"remarks": "nope"}):
         response = client.patch(
             f"/api/v1/personnel/{p.id}",
             headers=user_token_headers,
@@ -1020,7 +1023,7 @@ async def test_create_personnel_manual_without_pers_no(
     assert data["pers_no"] is None
     assert data["source"] == "manual"
     assert data["status"] == "active"
-    assert data["callup_status"] == "Called Up"
+    assert data["inpro_status"] == "yet_to_inpro"
     assert data["category"] == "WOSE"  # inferred from PTE
     assert data["created_by"] == super_admin_id
 
@@ -1055,7 +1058,7 @@ async def test_create_personnel_manual_with_pers_no_and_fields(
     sample_nominal_roll,
     db_session,
 ):
-    """Full-field manual create: pers_no, sub-units, callup override and
+    """Full-field manual create: pers_no, sub-units, inpro override and
     remarks (whitespace-normalised) round-trip."""
     response = client.post(
         "/api/v1/personnel",
@@ -1068,7 +1071,7 @@ async def test_create_personnel_manual_with_pers_no_and_fields(
             unit="Coy B",
             sub_unit_1="Platoon 3",
             sub_unit_2="  ",
-            callup_status="Deferred",
+            inpro_status="deferred",
             remarks="  On course  ",
         ),
     )
@@ -1081,7 +1084,7 @@ async def test_create_personnel_manual_with_pers_no_and_fields(
     assert data["unit"] == "Coy B"
     assert data["sub_unit_1"] == "Platoon 3"
     assert data["sub_unit_2"] is None  # blank becomes NULL
-    assert data["callup_status"] == "Deferred"
+    assert data["inpro_status"] == "deferred"
     assert data["remarks"] == "On course"
 
     row = (

@@ -401,7 +401,7 @@ async def list_personnel(
             sub_unit_2=p.sub_unit_2,
             sub_unit_3=p.sub_unit_3,
             status=p.status,
-            callup_status=p.callup_status,
+            inpro_status=p.inpro_status,
             remarks=p.remarks,
             source=p.source,
             created_at=p.created_at,
@@ -430,7 +430,7 @@ async def create_personnel(
     Caller identity is session-derived (issue 31). Covers the gap where a
     person is missing from the ingested CSV: the row is created with
     ``source="manual"`` and otherwise behaves like any other serviceman
-    (attendance, callup/remarks editing, groupings). ``pers_no`` may be
+    (attendance, inpro/remarks editing, groupings). ``pers_no`` may be
     NULL when not yet known — the per-roll unique constraint treats NULLs
     as distinct, and a super-admin can fill it in later via PATCH. Manual
     adds live only on the roll they were added to; the next CSV upload
@@ -494,7 +494,7 @@ async def create_personnel(
         sub_unit_1=personnel_create.sub_unit_1,
         sub_unit_2=personnel_create.sub_unit_2,
         sub_unit_3=personnel_create.sub_unit_3,
-        callup_status=personnel_create.callup_status or "Called Up",
+        inpro_status=personnel_create.inpro_status or "yet_to_inpro",
         remarks=personnel_create.remarks,
         source=SOURCE_MANUAL,
         created_by=user_id,
@@ -542,7 +542,7 @@ async def create_personnel(
         sub_unit_2=personnel.sub_unit_2,
         sub_unit_3=personnel.sub_unit_3,
         status=personnel.status,
-        callup_status=personnel.callup_status,
+        inpro_status=personnel.inpro_status,
         remarks=personnel.remarks,
         source=personnel.source,
         created_at=personnel.created_at,
@@ -587,7 +587,7 @@ async def get_personnel(
             sub_unit_2=personnel.sub_unit_2,
             sub_unit_3=personnel.sub_unit_3,
             status=personnel.status,
-            callup_status=personnel.callup_status,
+            inpro_status=personnel.inpro_status,
             remarks=personnel.remarks,
             source=personnel.source,
             created_at=personnel.created_at,
@@ -633,7 +633,7 @@ async def update_personnel(
         )
 
     # pers_no is the fill-in-later flow for manual adds: super-admin only.
-    # Admins keep every other PATCH field (status / callup_status / remarks).
+    # Admins keep every other PATCH field (status / inpro_status / remarks).
     pers_no_update_present = "pers_no" in update_data
     if pers_no_update_present and user.role != "super_admin":
         raise HTTPException(
@@ -642,14 +642,14 @@ async def update_personnel(
         )
 
     # Partition the remaining update into remap (-> tagging) vs direct
-    # personnel-column updates (status / callup_status / remarks).
+    # personnel-column updates (status / inpro_status / remarks).
     remap_updates = {
         field: value
         for field, value in update_data.items()
         if field in _REMAP_FIELDS
     }
     status_update = update_data.get("status")
-    callup_status_update = update_data.get("callup_status")
+    inpro_status_update = update_data.get("inpro_status")
     # Membership check (not `is not None`): an explicit null clears remarks.
     remarks_update_present = "remarks" in update_data
 
@@ -666,16 +666,16 @@ async def update_personnel(
     # Scope gate before any mutation (or tagging-entry redirect).
     await _assert_personnel_in_scope(db, user_id, user.role, personnel)
 
-    # Apply status / callup_status / remarks directly to the personnel row
-    # (still allowed). Changing callup_status away from "Called Up" only
-    # hides the person from the attendance view — existing attendance
+    # Apply status / inpro_status / remarks directly to the personnel row
+    # (still allowed). Setting inpro_status to "deferred" only hides the
+    # person from the attendance roster (until #33) — existing attendance
     # records are never touched.
     if status_update is not None:
         personnel.status = status_update
         personnel.updated_at = utc_dt.db_utcnow()
         personnel.updated_by = user_id
-    if callup_status_update is not None:
-        personnel.callup_status = callup_status_update
+    if inpro_status_update is not None:
+        personnel.inpro_status = inpro_status_update
         personnel.updated_at = utc_dt.db_utcnow()
         personnel.updated_by = user_id
     if remarks_update_present:
@@ -741,7 +741,7 @@ async def update_personnel(
         sub_unit_2=entry.to_sub_unit_2 if entry else personnel.sub_unit_2,
         sub_unit_3=entry.to_sub_unit_3 if entry else personnel.sub_unit_3,
         status=personnel.status,
-        callup_status=personnel.callup_status,
+        inpro_status=personnel.inpro_status,
         remarks=personnel.remarks,
         source=personnel.source,
         created_at=personnel.created_at,

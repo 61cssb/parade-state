@@ -166,7 +166,7 @@
         {# Export carries the current filters so the CSV matches the table
            exactly as displayed (same contract as the grouping export). #}
         {% if selected_nominal_roll %}
-        <a href="/api/v1/nominal-rolls/{{ selected_nominal_roll.id }}/export?{% if search %}&search={{ search | urlencode }}{% endif %}{% if unit %}&unit={{ unit | urlencode }}{% endif %}{% if sub_unit_1 %}&sub_unit_1={{ sub_unit_1 | urlencode }}{% endif %}{% if sub_unit_2 %}&sub_unit_2={{ sub_unit_2 | urlencode }}{% endif %}{% if category %}&category={{ category | urlencode }}{% endif %}{% if rank %}&rank={{ rank | urlencode }}{% endif %}"
+        <a href="/api/v1/nominal-rolls/{{ selected_nominal_roll.id }}/export?{% if search %}&search={{ search | urlencode }}{% endif %}{% if unit %}&unit={{ unit | urlencode }}{% endif %}{% if sub_unit_1 %}&sub_unit_1={{ sub_unit_1 | urlencode }}{% endif %}{% if sub_unit_2 %}&sub_unit_2={{ sub_unit_2 | urlencode }}{% endif %}{% if category %}&category={{ category | urlencode }}{% endif %}{% if rank %}&rank={{ rank | urlencode }}{% endif %}{% if inpro_status %}&inpro_status={{ inpro_status | urlencode }}{% endif %}"
            class="btn" style="background: #e5e7eb; color: #374151; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.25rem; font-size: 0.875rem;">Export CSV</a>
         {% endif %}
     </div>
@@ -270,8 +270,15 @@
             <option value="{{ r }}" {% if rank == r %}selected{% endif %}>{{ r }}</option>
             {% endfor %}
         </select>
+        <select name="inpro_status" onchange="this.form.submit()"
+                style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            <option value="" {% if not inpro_status %}selected{% endif %}>All inpro statuses</option>
+            {% for value, label in inpro_labels.items() %}
+            <option value="{{ value }}" {% if inpro_status == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
         <button type="submit" class="btn btn-primary">Filter</button>
-        {% if search or unit or sub_unit_1 or sub_unit_2 or category or rank %}
+        {% if search or unit or sub_unit_1 or sub_unit_2 or category or rank or inpro_status %}
         <a href="/nominal-roll?nominal_roll_id={{ selected_nominal_roll.id }}" class="btn" style="background: #e5e7eb; color: #374151; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.25rem; font-size: 0.875rem;">Clear</a>
         {% endif %}
     </form>
@@ -317,7 +324,7 @@
                     <th style="padding: 0.5rem;">Rank</th>
                     <th style="padding: 0.5rem;">Full Name</th>
                     <th style="padding: 0.5rem;">Pers No</th>
-                    <th style="padding: 0.5rem;">Callup</th>
+                    <th style="padding: 0.5rem;">Inpro Status</th>
                     <th style="padding: 0.5rem;">Remarks</th>
                 </tr>
             </thead>
@@ -341,13 +348,13 @@
                     </td>
                     <td style="padding: 0.5rem; white-space: nowrap;">
                         {% if user.role == 'admin' or user.role == 'super_admin' %}
-                        <select data-pid="{{ p.id }}" data-prev="{{ p.callup_status }}" onchange="onCallupChange(this)" style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem; background: #fff; color: #111827;" title="Callup decision status">
-                            {% for s in callup_statuses %}
-                            <option value="{{ s }}"{% if s == p.callup_status %} selected{% endif %}>{{ s }}</option>
+                        <select data-pid="{{ p.id }}" data-prev="{{ p.inpro_status }}" onchange="onInproChange(this)" style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem; background: #fff; color: #111827;" title="Inpro status">
+                            {% for value, label in inpro_labels.items() %}
+                            <option value="{{ value }}"{% if value == p.inpro_status %} selected{% endif %}>{{ label }}</option>
                             {% endfor %}
                         </select>
                         {% else %}
-                        {{ p.callup_status }}
+                        {{ inpro_labels.get(p.inpro_status, p.inpro_status) }}
                         {% endif %}
                     </td>
                     <td style="padding: 0.5rem; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
@@ -451,10 +458,10 @@
                 <input type="text" id="svc-pers-no" maxlength="20" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-family: monospace;" placeholder="Leave blank if not yet known">
             </div>
             <div style="flex: 1;">
-                <label for="svc-callup" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Callup Status</label>
-                <select id="svc-callup" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: #fff;">
-                    {% for s in callup_statuses %}
-                    <option value="{{ s }}"{% if s == 'Called Up' %} selected{% endif %}>{{ s }}</option>
+                <label for="svc-inpro" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Inpro Status</label>
+                <select id="svc-inpro" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: #fff;">
+                    {% for value, label in inpro_labels.items() %}
+                    <option value="{{ value }}"{% if value == 'yet_to_inpro' %} selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                 </select>
             </div>
@@ -589,7 +596,7 @@
         document.getElementById('add-modal-nr-caa').textContent = caa;
         document.getElementById('add-modal-status').innerHTML = '';
         document.getElementById('add-serviceman-form').reset();
-        document.getElementById('svc-callup').value = 'Called Up';
+        document.getElementById('svc-inpro').value = 'yet_to_inpro';
         document.getElementById('add-modal-backdrop').style.display = 'block';
         modal.style.display = 'block';
         document.getElementById('svc-rank').focus();
@@ -618,7 +625,7 @@
         const sub1 = document.getElementById('svc-sub1').value.trim();
         const sub2 = document.getElementById('svc-sub2').value.trim();
         const sub3 = document.getElementById('svc-sub3').value.trim();
-        const callup = document.getElementById('svc-callup').value;
+        const inpro = document.getElementById('svc-inpro').value;
         const remarks = document.getElementById('svc-remarks').value.trim();
 
         if (!rank || !name || !unit) {
@@ -635,7 +642,7 @@
             sub_unit_1: sub1 || null,
             sub_unit_2: sub2 || null,
             sub_unit_3: sub3 || null,
-            callup_status: callup,
+            inpro_status: inpro,
             remarks: remarks || null,
         };
 
@@ -819,7 +826,7 @@
         display.style.display = '';
     }
 
-    // --- Per-person callup status & remarks (admin / super_admin) ---
+    // --- Per-person inpro status & remarks (admin / super_admin) ---
     // Immediate PATCH on change, like the roll-management saves above.
     // The staged-edits flow below is super_admin-only unit/subunit remapping.
     {% if user.role == 'admin' or user.role == 'super_admin' %}
@@ -841,18 +848,18 @@
         }
     }
 
-    async function onCallupChange(sel) {
+    async function onInproChange(sel) {
         const pid = sel.getAttribute('data-pid');
         const prev = sel.getAttribute('data-prev');
         const value = sel.value;
-        const err = await patchPersonnel(pid, { callup_status: value });
+        const err = await patchPersonnel(pid, { inpro_status: value });
         if (err) {
             sel.value = prev;  // revert — the DB kept the old value
-            showPageStatus('Callup status update failed: ' + err, 'error');
+            showPageStatus('Inpro status update failed: ' + err, 'error');
             return;
         }
         sel.setAttribute('data-prev', value);
-        showPageStatus('Callup status updated.', 'success');
+        showPageStatus('Inpro status updated.', 'success');
     }
 
     async function onPersonnelRemarksChange(input) {

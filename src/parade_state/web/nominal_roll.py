@@ -21,7 +21,7 @@ from parade_state.api.subunit_access import (
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
 from parade_state.models import (
-    CALLUP_STATUSES,
+    INPRO_STATUS_LABELS,
     NominalRoll,
     Personnel,
     Tagging,
@@ -60,6 +60,7 @@ def _optional_conditions(
     sub_unit_2: str | None,
     category: str | None,
     rank: str | None,
+    inpro_status: str | None,
 ) -> list[ColumnElement[bool]]:
     """User-supplied filters applied to both list and count queries."""
     conds: list[ColumnElement[bool]] = []
@@ -76,6 +77,8 @@ def _optional_conditions(
         conds.append(Personnel.category == category)
     if rank:
         conds.append(Personnel.rank == rank)
+    if inpro_status:
+        conds.append(Personnel.inpro_status == inpro_status)
     return conds
 
 
@@ -130,14 +133,16 @@ async def nominal_roll_view(
     sub_unit_2: str | None = None,
     category: str | None = None,
     rank: str | None = None,
+    inpro_status: str | None = None,
 ):
     """Render the nominal roll browser page.
 
     Shows a nominal roll selector and a table of personnel for the selected
     roll. Filters: text search (name/pers no), unit, sub-unit 1, sub-unit 2,
-    category (Officer / WOSE), and rank. Sub-unit and rank dropdowns cascade
-    off the filters above them so they only list values present in the
-    currently-filtered population.
+    category (Officer / WOSE), rank, and Inpro status (issue 32 — e.g. hide
+    Deferred). Sub-unit and rank dropdowns cascade off the filters above
+    them so they only list values present in the currently-filtered
+    population.
     """
     current_user = await get_current_user_optional(request)
     if not current_user:
@@ -171,11 +176,11 @@ async def nominal_roll_view(
                 edit_unit_options=[], edit_sub1_options=[],
                 edit_sub2_options=[], edit_sub3_options=[],
                 rank_choices=[],
-                callup_statuses=list(CALLUP_STATUSES),
+                inpro_labels=INPRO_STATUS_LABELS,
                 personnel=[], search=search or "",
                 unit=unit or "", sub_unit_1=sub_unit_1 or "",
                 sub_unit_2=sub_unit_2 or "", category=category or "",
-                rank=rank or "",
+                rank=rank or "", inpro_status=inpro_status or "",
                 total_count=0,
             )
 
@@ -195,6 +200,7 @@ async def nominal_roll_view(
         filters = _optional_conditions(
             search=search, unit=unit, sub_unit_1=sub_unit_1,
             sub_unit_2=sub_unit_2, category=category, rank=rank,
+            inpro_status=inpro_status,
         )
 
         # Issue #28 scope state for regular admins: grants on the selected
@@ -350,7 +356,7 @@ async def nominal_roll_view(
                 "sub_unit_1": entry.to_sub_unit_1 if entry else p.sub_unit_1,
                 "sub_unit_2": entry.to_sub_unit_2 if entry else p.sub_unit_2,
                 "sub_unit_3": entry.to_sub_unit_3 if entry else p.sub_unit_3,
-                "callup_status": p.callup_status,
+                "inpro_status": p.inpro_status,
                 "remarks": p.remarks,
                 "source": p.source,
                 "is_changed": is_changed,
@@ -389,7 +395,7 @@ async def nominal_roll_view(
             ("WOSE", sorted(ranks.WOSE_RANKS)),
             ("Military Expert", [f"ME{i}" for i in range(1, 10)]),
         ],
-        callup_statuses=list(CALLUP_STATUSES),
+        inpro_labels=INPRO_STATUS_LABELS,
         personnel=personnel_data,
         search=search or "",
         unit=unit or "",
@@ -397,6 +403,7 @@ async def nominal_roll_view(
         sub_unit_2=sub_unit_2 or "",
         category=category or "",
         rank=rank or "",
+        inpro_status=inpro_status or "",
         total_count=total_count,
         no_assignments=no_assignments,
     )
@@ -417,7 +424,7 @@ def _render(
     edit_sub2_options: list,
     edit_sub3_options: list,
     rank_choices: list,
-    callup_statuses: list,
+    inpro_labels: dict,
     personnel: list,
     search: str,
     unit: str,
@@ -425,7 +432,8 @@ def _render(
     sub_unit_2: str,
     category: str,
     rank: str,
-    total_count: int,
+    inpro_status: str = "",
+    total_count: int = 0,
     no_assignments: bool = False,
 ) -> HTMLResponse:
     templates_dir = request.app.state.templates_dir
@@ -455,7 +463,7 @@ def _render(
         edit_sub2_options=edit_sub2_options,
         edit_sub3_options=edit_sub3_options,
         rank_choices=rank_choices,
-        callup_statuses=callup_statuses,
+        inpro_labels=inpro_labels,
         personnel=personnel,
         search=search,
         unit=unit,
@@ -463,6 +471,7 @@ def _render(
         sub_unit_2=sub_unit_2,
         category=category,
         rank=rank,
+        inpro_status=inpro_status,
         total_count=total_count,
         no_assignments=no_assignments,
     )

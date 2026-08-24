@@ -472,7 +472,7 @@ async def test_export_csv_columns_and_content(
     rows = list(csv.reader(io.StringIO(response.text)))
     assert rows[0] == [
         "Unit", "Sub Unit 1", "Sub Unit 2", "Sub Unit 3",
-        "Category", "Rank", "Full Name", "Pers No", "Callup", "Remarks",
+        "Category", "Rank", "Full Name", "Pers No", "Inpro Status", "Remarks",
     ]
     assert len(rows) == 4  # header + all three sample personnel
     by_name = {row[6]: row for row in rows[1:]}
@@ -480,7 +480,7 @@ async def test_export_csv_columns_and_content(
     assert by_name["John Doe"][1] == "Platoon 1"
     assert by_name["John Doe"][2] == "Section 1"
     assert by_name["John Doe"][7] == "10000001"
-    assert by_name["John Doe"][8] == "Called Up"
+    assert by_name["John Doe"][8] == "yet_to_inpro"
 
 
 @pytest.mark.asyncio

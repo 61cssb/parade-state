@@ -310,7 +310,7 @@ async def test_user_attendance_subunit_filter_is_effective_aware(
 
 
 @pytest.mark.asyncio
-async def test_attendance_hides_non_called_up_personnel(
+async def test_attendance_hides_deferred_personnel(
     client: TestClient,
     sample_nominal_roll,
     sample_attendance_scope,
@@ -319,18 +319,19 @@ async def test_attendance_hides_non_called_up_personnel(
     db_session,
     monkeypatch,
 ):
-    """Only Called Up personnel render on the attendance page; every other
-    callup status is filtered out of the roster (issue 06)."""
+    """Interim roster rule (issue 32, until #33): everyone except deferred
+    renders on the attendance page — yet_to_inpro and inproed alike."""
     from parade_state.web import attendance as web_attendance
     from parade_state.models import User
 
-    # John Doe → Deferred, Jane Smith stays Called Up.
-    sample_personnel[0].callup_status = "Deferred"
-    db_session.add(sample_personnel[0])
+    # John Doe → deferred, Jane Smith → inproed, Bob stays yet_to_inpro.
+    sample_personnel[0].inpro_status = "deferred"
+    sample_personnel[1].inpro_status = "inproed"
+    db_session.add_all(sample_personnel[:2])
     await db_session.commit()
 
     super_admin = User(
-        email="super-callup@example.com",
+        email="super-inpro@example.com",
         name="Super Admin",
         role="super_admin",
         status="active",
@@ -347,8 +348,9 @@ async def test_attendance_hides_non_called_up_personnel(
         "/attendance", params={"nominal_roll_id": str(sample_nominal_roll.id)}
     )
     assert response.status_code == 200
-    assert "Jane Smith" in response.text  # Called Up → visible
-    assert "John Doe" not in response.text  # Deferred → hidden
+    assert "Jane Smith" in response.text  # inproed → visible
+    assert "Bob Johnson" in response.text  # yet_to_inpro (default) → visible
+    assert "John Doe" not in response.text  # deferred → hidden
 
 
 @pytest.mark.asyncio
@@ -361,7 +363,7 @@ async def test_attendance_hidden_person_records_preserved(
     db_session,
     monkeypatch,
 ):
-    """Flipping a person off Called Up is non-destructive: existing
+    """Flipping a person to deferred is non-destructive: existing
     attendance records survive untouched, the person is simply hidden from
     the attendance view (and rendered with no special treatment anywhere)."""
     from parade_state.web import attendance as web_attendance
@@ -382,8 +384,8 @@ async def test_attendance_hidden_person_records_preserved(
     db_session.add(record)
     await db_session.commit()
 
-    # Post-hoc status change away from Called Up.
-    p.callup_status = "MR"
+    # Post-hoc status change to deferred.
+    p.inpro_status = "deferred"
     db_session.add(p)
     await db_session.commit()
 
