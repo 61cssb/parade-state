@@ -541,37 +541,43 @@ async def test_process_csv_unparseable_filename_400(
 
 
 @pytest.mark.asyncio
-async def test_process_csv_maps_callup_status_and_remarks(
+async def test_process_csv_legacy_callup_decision_remapped_to_inpro(
     client: TestClient,
     super_admin_token_headers: dict[str, str],
     admin_id: str,
     db_session: AsyncSession,
 ):
-    """CSV Callup Decision → personnel.callup_status; Reason + first Remarks
-    → personnel.remarks (issue 06).
+    """Interim CSV shim (issue 32 → #34, fixture-profiling delta
+    2026-08-24): the legacy Callup Decision column — which the real
+    fixtures populate with Yes/No — is remapped onto the 3-value inpro
+    lifecycle; Reason + first Remarks join into personnel.remarks.
 
-    - exact values pass through ("Called Up", "MR")
-    - blank decision defaults to "Called Up"
-    - case-insensitive match ("deferred" → "Deferred")
-    - unrecognised non-blank values ("Not Called Up", "Do Not Call Up")
-      collapse to "Other" with the raw value preserved in extra_fields
-    - remarks join the non-empty Reason + first Remarks columns
+    - "Yes" / "Called Up" / blank → yet_to_inpro (model default, no remark)
+    - "No" / "deferred" (case-insensitive) → deferred (No approximates
+      #34's future skip — kept off the interim non-deferred roster)
+    - every other value ("Not Called Up", "Do Not Call Up", "MR", ...)
+      → yet_to_inpro with "Previously: <value>" appended to remarks
+    - the raw decision stays in extra_fields for audit
     """
     raw = _make_csv_bytes(
         [
             # decision, reason(col9), remarks(col10)
             ["U", "S1", "", "", "PTE", "Alpha", "PTE Alpha", "p101",
-             "Called Up", "course", "att_out ok", "5", "1", "n", "2024-01-01", "3", "A", "x"],
+             "Yes", "course", "att_out ok", "5", "1", "n", "2024-01-01", "3", "A", "x"],
             ["U", "S1", "", "", "PTE", "Bravo", "PTE Bravo", "p102",
              "", "", "mc follow-up", "5", "1", "n", "2024-01-01", "3", "A", "x"],
             ["U", "S1", "", "", "PTE", "Charlie", "PTE Charlie", "p103",
-             "deferred", "work", "", "5", "1", "n", "2024-01-01", "3", "A", "x"],
+             "no", "work", "", "5", "1", "n", "2024-01-01", "3", "A", "x"],
             ["U", "S1", "", "", "PTE", "Delta", "PTE Delta", "p104",
              "Not Called Up", "", "", "5", "1", "n", "2024-01-01", "3", "A", "x"],
             ["U", "S1", "", "", "PTE", "Echo", "PTE Echo", "p105",
              "Do Not Call Up", "medical", "", "5", "1", "n", "2024-01-01", "3", "A", "x"],
             ["U", "S1", "", "", "PTE", "Foxtrot", "PTE Foxtrot", "p106",
              "MR", "", "", "5", "1", "n", "2024-01-01", "3", "A", "x"],
+            ["U", "S1", "", "", "PTE", "Golf", "PTE Golf", "p107",
+             "Called Up", "", "", "5", "1", "n", "2024-01-01", "3", "A", "x"],
+            ["U", "S1", "", "", "PTE", "Hotel", "PTE Hotel", "p108",
+             "Deferred", "", "", "5", "1", "n", "2024-01-01", "3", "A", "x"],
         ]
     )
     upload = client.post(
@@ -594,23 +600,32 @@ async def test_process_csv_maps_callup_status_and_remarks(
     )).scalars().all()
     by_name = {p.full_name: p for p in rows}
 
-    assert by_name["Alpha"].callup_status == "Called Up"
-    assert by_name["Alpha"].remarks == "course; att_out ok"
+    assert by_name["Alpha"].inpro_status == "yet_to_inpro"
+    assert by_name["Alpha"].remarks == "course; att_out ok"  # no Previously note
     # Raw CSV values stay in extra_fields for audit.
-    assert by_name["Alpha"].extra_fields["callup_decision"] == "Called Up"
+    assert by_name["Alpha"].extra_fields["callup_decision"] == "Yes"
 
-    assert by_name["Bravo"].callup_status == "Called Up"  # blank → default
-    assert by_name["Bravo"].remarks == "mc follow-up"      # reason empty → remarks only
+    assert by_name["Bravo"].inpro_status == "yet_to_inpro"  # blank → default
+    assert by_name["Bravo"].remarks == "mc follow-up"       # reason empty → remarks only
 
-    assert by_name["Charlie"].callup_status == "Deferred"  # case-insensitive match
+    assert by_name["Charlie"].inpro_status == "deferred"    # "No" → deferred
     assert by_name["Charlie"].remarks == "work"
-    assert by_name["Charlie"].extra_fields["callup_decision"] == "deferred"
+    assert by_name["Charlie"].extra_fields["callup_decision"] == "no"
 
-    assert by_name["Delta"].callup_status == "Other"       # unrecognised legacy value
+    # Unrecognised legacy values: yet_to_inpro + the decision survives as a
+    # remark (its semantics otherwise vanish from the 3-value lifecycle).
+    assert by_name["Delta"].inpro_status == "yet_to_inpro"
+    assert by_name["Delta"].remarks == "Previously: Not Called Up"
     assert by_name["Delta"].extra_fields["callup_decision"] == "Not Called Up"
 
-    assert by_name["Echo"].callup_status == "Other"
-    assert by_name["Echo"].remarks == "medical"
+    assert by_name["Echo"].inpro_status == "yet_to_inpro"
+    assert by_name["Echo"].remarks == "medical; Previously: Do Not Call Up"
 
-    assert by_name["Foxtrot"].callup_status == "MR"
-    assert by_name["Foxtrot"].remarks is None              # both columns empty
+    assert by_name["Foxtrot"].inpro_status == "yet_to_inpro"
+    assert by_name["Foxtrot"].remarks == "Previously: MR"   # both columns empty → note only
+
+    # Retired callup-decision vocabulary still honoured for older files.
+    assert by_name["Golf"].inpro_status == "yet_to_inpro"
+    assert by_name["Golf"].remarks is None
+    assert by_name["Hotel"].inpro_status == "deferred"
+    assert by_name["Hotel"].remarks is None

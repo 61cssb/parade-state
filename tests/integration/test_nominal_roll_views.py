@@ -153,7 +153,7 @@ async def test_nominal_roll_read_only_for_non_super_admins(
 
 
 @pytest.mark.asyncio
-async def test_nominal_roll_shows_callup_column_for_all_statuses(
+async def test_nominal_roll_shows_inpro_column_for_all_statuses(
     client: TestClient,
     sample_nominal_roll,
     sample_personnel,
@@ -161,18 +161,18 @@ async def test_nominal_roll_shows_callup_column_for_all_statuses(
     db_session,
     monkeypatch,
 ):
-    """The NR table shows every callup status — the NR is the management
-    surface; only the attendance view filters (issue 06)."""
+    """The NR table shows every inpro status — the NR is the management
+    surface; only the attendance view filters (issue 32)."""
     from parade_state.web import nominal_roll as web_nominal_roll
     from parade_state.models import User
 
-    sample_personnel[0].callup_status = "Deferred"
+    sample_personnel[0].inpro_status = "deferred"
     sample_personnel[0].remarks = "Course till Friday"
     db_session.add(sample_personnel[0])
     await db_session.commit()
 
     super_admin = User(
-        email="super-callup-nr@example.com",
+        email="super-inpro-nr@example.com",
         name="Super Admin",
         role="super_admin",
         status="active",
@@ -189,15 +189,64 @@ async def test_nominal_roll_shows_callup_column_for_all_statuses(
         "/nominal-roll", params={"nominal_roll_id": str(sample_nominal_roll.id)}
     )
     assert response.status_code == 200
-    assert "Callup" in response.text  # column header
-    # All six options are offered to admins/super-admins.
-    for status in ("Called Up", "Deferred", "Disrupted", "MR", "Age Limit", "Other"):
-        assert f">{status}</option>" in response.text
+    assert "Inpro Status" in response.text  # column header
+    # All three options are offered to admins/super-admins (label text).
+    for label in ("Inpro'ed", "Yet to Inpro", "Deferred"):
+        assert f">{label}</option>" in response.text
+    # The stored snake_case value rides along in the option value attr.
+    assert '<option value="yet_to_inpro"' in response.text
     # Remarks come from the personnel column, not extra_fields.
     assert "Course till Friday" in response.text
     # Inline-edit wiring: immediate PATCH handlers for admins and above.
-    assert "onCallupChange" in response.text
+    assert "onInproChange" in response.text
     assert "onPersonnelRemarksChange" in response.text
+
+
+@pytest.mark.asyncio
+async def test_nominal_roll_filters_by_inpro_status(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_users,
+    admin_subunit_assignment,
+    db_session,
+    monkeypatch,
+):
+    """The Inpro Status filter (issue 32) narrows the browser table — e.g.
+    hiding deferred personnel — and the Clear link resets it."""
+    from parade_state.web import nominal_roll as web_nominal_roll
+
+    sample_personnel[0].inpro_status = "deferred"
+    sample_personnel[1].inpro_status = "inproed"
+    db_session.add_all(sample_personnel[:2])
+    await db_session.commit()
+
+    async def _fake_current_user(_request):
+        return sample_users["admin"]
+
+    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+
+    base = {"nominal_roll_id": str(sample_nominal_roll.id)}
+
+    # Deferred-only view.
+    response = client.get("/nominal-roll", params={**base, "inpro_status": "deferred"})
+    assert response.status_code == 200
+    assert "John Doe" in response.text
+    assert "Jane Smith" not in response.text
+    assert "Bob Johnson" not in response.text
+
+    # Inpro'ed-only view.
+    response = client.get("/nominal-roll", params={**base, "inpro_status": "inproed"})
+    assert response.status_code == 200
+    assert "Jane Smith" in response.text
+    assert "John Doe" not in response.text
+
+    # Unfiltered shows everyone (the NR is the management surface).
+    response = client.get("/nominal-roll", params=base)
+    assert response.status_code == 200
+    assert "John Doe" in response.text
+    assert "Jane Smith" in response.text
+    assert "Bob Johnson" in response.text
 
 
 @pytest.mark.asyncio
@@ -240,7 +289,7 @@ async def test_nominal_roll_add_serviceman_wiring(
     monkeypatch,
 ):
     """Super-admins get the Add Serviceman button + modal (datalists for
-    rank/unit/sub-units, callup defaulting to Called Up), a "manual" badge
+    rank/unit/sub-units, inpro defaulting to Yet to Inpro), a "manual" badge
     beside UI-added names, and an inline-editable pers_no cell."""
     from parade_state.web import nominal_roll as web_nominal_roll
 
@@ -276,7 +325,7 @@ async def test_nominal_roll_add_serviceman_wiring(
     assert "closeAddModal" in response.text
     # Rank is a closed set — a plain select with optgroups (no native
     # datalist popup: placement is browser-controlled and mispositions),
-    # matching the Callup Status select styling.
+    # matching the Inpro Status select styling.
     assert "<select id=\"svc-rank\"" in response.text
     assert '<optgroup label="Officer">' in response.text
     assert '<optgroup label="WOSE">' in response.text
@@ -367,8 +416,8 @@ async def test_manual_personnel_appears_in_attendance_view(
     db_session,
     monkeypatch,
 ):
-    """A manually added serviceman with the defaults (active + Called Up)
-    shows up in the attendance view immediately; a non-Called-Up manual add
+    """A manually added serviceman with the defaults (active + yet_to_inpro)
+    shows up in the attendance view immediately; a deferred manual add
     stays hidden there (the NR view remains the management surface)."""
     from parade_state.web import attendance as web_attendance
 
@@ -391,8 +440,8 @@ async def test_manual_personnel_appears_in_attendance_view(
         return response.json()
 
     attending = _add("Immediate Manual")
-    assert attending["callup_status"] == "Called Up"
-    _add("Deferred Manual", callup_status="Deferred")
+    assert attending["inpro_status"] == "yet_to_inpro"
+    _add("Deferred Manual", inpro_status="deferred")
 
     super_admin = User(
         email="super-att@example.com",

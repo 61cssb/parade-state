@@ -733,7 +733,7 @@ async def test_export_csv_columns_and_content(
         "Unit", "Sub-unit 1", "Sub-unit 2", "Sub-unit 3", "Category",
         "Rank", "Name", "AM Status", "AM Remarks", "PM Status", "PM Remarks",
     ]
-    assert len(rows) == 4  # header + whole Called Up roster
+    assert len(rows) == 4  # header + whole non-deferred roster
     by_name = {row[6]: row for row in rows[1:]}
     # John Doe: AM present, PM absent with remark (sample_attendance today).
     assert by_name["John Doe"][7] == "Present"

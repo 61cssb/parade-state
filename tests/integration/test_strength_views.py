@@ -3,9 +3,9 @@
 The report aggregates the attendance-active NR's parade state into the
 strength reporting format: Officer/WOSE/Total column groups of
 In/Out/Current/%, grouped by effective sub_unit_1 (shown once) and
-sub_unit_2 with SUBTOTALs and a unit TOTAL. In counts Called Up
-personnel, Current the present/late marks for the selected slot, Out
-everyone else (unmarked = absent).
+sub_unit_2 with SUBTOTALs and a unit TOTAL. In counts non-deferred
+personnel (issue 32 interim roster rule), Current the present/late marks
+for the selected slot, Out everyone else (unmarked = absent).
 """
 
 import re
@@ -200,7 +200,7 @@ async def test_non_called_up_and_archived_excluded(
     sample_attendance_scope,
     sample_attendance,
 ):
-    """In counts only active Called Up personnel: a Deferred and an
+    """In counts only active non-deferred personnel: a deferred and an
     archived person (same subunits, some marked present) must not move
     any number."""
     admin_id = str(sample_users["admin"].id)
@@ -216,7 +216,7 @@ async def test_non_called_up_and_archived_excluded(
                 unit="Coy A",
                 sub_unit_1="Platoon 1",
                 sub_unit_2="Section 1",
-                callup_status="Deferred",
+                inpro_status="deferred",
                 created_by=admin_id,
             ),
             Personnel(

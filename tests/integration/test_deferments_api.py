@@ -1,8 +1,10 @@
 """Behavioral tests for deferments API endpoints.
 
 Covers: super_admin-only authorization, snapshot-on-create, and the
-callup_status transition rules (Approved → Deferred; Approved → non-neutral
-reverts to Called Up; Not called up / Do not call up leave callup unchanged).
+inpro_status transition rules (issue 32): approving never auto-sets the
+personnel status — the admin UI prompts and PATCHes separately; moving an
+approved deferment to ANY other status, or deleting it, always reverts the
+person to yet_to_inpro).
 """
 
 import pytest
@@ -101,12 +103,12 @@ async def test_create_deferment_for_archived_personnel_400(
 
 
 # ============================================================================
-# Callup transition rules
+# Inpro transition rules (issue 32)
 # ============================================================================
 
 
 async def _refresh_personnel(db_session: AsyncSession, person_id: str) -> Personnel:
-    """Re-fetch a personnel row to read the latest callup_status.
+    """Re-fetch a personnel row to read the latest inpro_status.
 
     Uses ``populate_existing`` so SQLAlchemy overwrites the identity-map cached
     object with the committed-by-API row from a different session.
@@ -121,9 +123,12 @@ async def _refresh_personnel(db_session: AsyncSession, person_id: str) -> Person
 
 
 @pytest.mark.asyncio
-async def test_approve_deferment_sets_personnel_deferred(
+async def test_approve_deferment_leaves_inpro_status_unchanged(
     client: TestClient, super_admin_token_headers, sample_personnel, db_session: AsyncSession
 ):
+    """Approval never auto-sets inpro_status (issue 32): the admin UI prompts
+    "set Inpro status to Deferred?" and PATCHes the personnel separately —
+    declining leaves the person untouched."""
     person = sample_personnel[0]
     create = client.post(
         "/api/v1/deferments",
@@ -140,12 +145,12 @@ async def test_approve_deferment_sets_personnel_deferred(
     assert response.status_code == 200
 
     refreshed = await _refresh_personnel(db_session, str(person.id))
-    assert refreshed.callup_status == "Deferred"
+    assert refreshed.inpro_status == "yet_to_inpro"  # untouched
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("new_status", ["Withdrawn", "Rejected", "To Resubmit"])
-async def test_approved_to_non_neutral_reverts_to_called_up(
+async def test_approved_to_other_status_reverts_to_yet_to_inpro(
     client: TestClient, super_admin_token_headers, sample_personnel, db_session: AsyncSession,
     new_status,
 ):
@@ -156,29 +161,36 @@ async def test_approved_to_non_neutral_reverts_to_called_up(
         json={"personnel_id": str(person.id), "reason": "Work"},
     ).json()["id"]
 
-    # Approve first
+    # Approve, then mark the person deferred (the prompted flow).
     client.patch(
         f"/api/v1/deferments/{deferment_id}",
         headers=super_admin_token_headers,
         json={"status": "Approved"},
     )
-    assert (await _refresh_personnel(db_session, str(person.id))).callup_status == "Deferred"
+    client.patch(
+        f"/api/v1/personnel/{person.id}",
+        headers=super_admin_token_headers,
+        json={"inpro_status": "deferred"},
+    )
+    assert (await _refresh_personnel(db_session, str(person.id))).inpro_status == "deferred"
 
-    # Now move away from Approved to a non-neutral status
+    # Moving away from Approved always reverts to yet_to_inpro.
     client.patch(
         f"/api/v1/deferments/{deferment_id}",
         headers=super_admin_token_headers,
         json={"status": new_status},
     )
-    assert (await _refresh_personnel(db_session, str(person.id))).callup_status == "Called Up"
+    assert (await _refresh_personnel(db_session, str(person.id))).inpro_status == "yet_to_inpro"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("neutral_status", ["Not called up", "Do not call up"])
-async def test_approved_to_neutral_status_leaves_callup_unchanged(
+async def test_approved_to_neutral_status_also_reverts(
     client: TestClient, super_admin_token_headers, sample_personnel, db_session: AsyncSession,
     neutral_status,
 ):
+    """Issue 32: the revert is unconditional — even neutral (later-phase)
+    statuses reset the person to yet_to_inpro."""
     person = sample_personnel[0]
     deferment_id = client.post(
         "/api/v1/deferments",
@@ -191,19 +203,56 @@ async def test_approved_to_neutral_status_leaves_callup_unchanged(
         headers=super_admin_token_headers,
         json={"status": "Approved"},
     )
-    assert (await _refresh_personnel(db_session, str(person.id))).callup_status == "Deferred"
+    client.patch(
+        f"/api/v1/personnel/{person.id}",
+        headers=super_admin_token_headers,
+        json={"inpro_status": "deferred"},
+    )
+    assert (await _refresh_personnel(db_session, str(person.id))).inpro_status == "deferred"
 
     client.patch(
         f"/api/v1/deferments/{deferment_id}",
         headers=super_admin_token_headers,
         json={"status": neutral_status},
     )
-    # Stays Deferred — neutral statuses don't touch callup_status
-    assert (await _refresh_personnel(db_session, str(person.id))).callup_status == "Deferred"
+    assert (await _refresh_personnel(db_session, str(person.id))).inpro_status == "yet_to_inpro"
 
 
 @pytest.mark.asyncio
-async def test_transition_between_non_approved_statuses_no_callup_change(
+async def test_cancel_reverts_even_if_person_was_inproed(
+    client: TestClient, super_admin_token_headers, sample_personnel, db_session: AsyncSession
+):
+    """The revert target is always yet_to_inpro — a person manually marked
+    inproed while an approved deferment existed is still reset (issue 32)."""
+    person = sample_personnel[0]
+    deferment_id = client.post(
+        "/api/v1/deferments",
+        headers=super_admin_token_headers,
+        json={"personnel_id": str(person.id), "reason": "Work"},
+    ).json()["id"]
+
+    client.patch(
+        f"/api/v1/deferments/{deferment_id}",
+        headers=super_admin_token_headers,
+        json={"status": "Approved"},
+    )
+    client.patch(
+        f"/api/v1/personnel/{person.id}",
+        headers=super_admin_token_headers,
+        json={"inpro_status": "inproed"},
+    )
+    assert (await _refresh_personnel(db_session, str(person.id))).inpro_status == "inproed"
+
+    client.patch(
+        f"/api/v1/deferments/{deferment_id}",
+        headers=super_admin_token_headers,
+        json={"status": "Withdrawn"},
+    )
+    assert (await _refresh_personnel(db_session, str(person.id))).inpro_status == "yet_to_inpro"
+
+
+@pytest.mark.asyncio
+async def test_transition_between_non_approved_statuses_no_inpro_change(
     client: TestClient, super_admin_token_headers, sample_personnel, db_session: AsyncSession
 ):
     person = sample_personnel[0]
@@ -220,8 +269,8 @@ async def test_transition_between_non_approved_statuses_no_callup_change(
             json={"status": new_status},
         )
         assert (
-            (await _refresh_personnel(db_session, str(person.id))).callup_status
-            == "Called Up"
+            (await _refresh_personnel(db_session, str(person.id))).inpro_status
+            == "yet_to_inpro"
         )
 
 
@@ -231,7 +280,7 @@ async def test_transition_between_non_approved_statuses_no_callup_change(
 
 
 @pytest.mark.asyncio
-async def test_delete_approved_deferment_reverts_callup(
+async def test_delete_approved_deferment_reverts_inpro(
     client: TestClient, super_admin_token_headers, sample_personnel, db_session: AsyncSession
 ):
     person = sample_personnel[0]
@@ -246,18 +295,23 @@ async def test_delete_approved_deferment_reverts_callup(
         headers=super_admin_token_headers,
         json={"status": "Approved"},
     )
-    assert (await _refresh_personnel(db_session, str(person.id))).callup_status == "Deferred"
+    client.patch(
+        f"/api/v1/personnel/{person.id}",
+        headers=super_admin_token_headers,
+        json={"inpro_status": "deferred"},
+    )
+    assert (await _refresh_personnel(db_session, str(person.id))).inpro_status == "deferred"
 
     response = client.delete(
         f"/api/v1/deferments/{deferment_id}",
         headers=super_admin_token_headers,
     )
     assert response.status_code == 200
-    assert (await _refresh_personnel(db_session, str(person.id))).callup_status == "Called Up"
+    assert (await _refresh_personnel(db_session, str(person.id))).inpro_status == "yet_to_inpro"
 
 
 @pytest.mark.asyncio
-async def test_delete_non_approved_deferment_no_callup_change(
+async def test_delete_non_approved_deferment_no_inpro_change(
     client: TestClient, super_admin_token_headers, sample_personnel, db_session: AsyncSession
 ):
     person = sample_personnel[0]
@@ -266,15 +320,15 @@ async def test_delete_non_approved_deferment_no_callup_change(
         headers=super_admin_token_headers,
         json={"personnel_id": str(person.id), "reason": "Work"},
     ).json()["id"]
-    # Status stays "Pending action" → delete should not change callup_status
-    before = (await _refresh_personnel(db_session, str(person.id))).callup_status
+    # Status stays "Pending action" → delete should not change inpro_status
+    before = (await _refresh_personnel(db_session, str(person.id))).inpro_status
 
     response = client.delete(
         f"/api/v1/deferments/{deferment_id}",
         headers=super_admin_token_headers,
     )
     assert response.status_code == 200
-    assert (await _refresh_personnel(db_session, str(person.id))).callup_status == before
+    assert (await _refresh_personnel(db_session, str(person.id))).inpro_status == before
 
 
 # ============================================================================
