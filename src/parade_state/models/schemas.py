@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from parade_state.utils import utc_dt
 
-from .personnel import CALLUP_STATUSES
+from .personnel import INPRO_STATUSES
 
 AttendanceStatus = Literal[
     "present",
@@ -309,7 +309,7 @@ class PersonnelResponse(PersonnelBase):
     id: str
     nominal_roll_id: str
     status: str
-    callup_status: str
+    inpro_status: str
     remarks: str | None
     source: str | None = None
     created_at: utc_dt.datetime
@@ -339,9 +339,9 @@ class PersonnelCreate(BaseModel):
     sub_unit_1: str | None = Field(None, max_length=255, description="Sub-unit level 1")
     sub_unit_2: str | None = Field(None, max_length=255, description="Sub-unit level 2")
     sub_unit_3: str | None = Field(None, max_length=255, description="Sub-unit level 3")
-    callup_status: str | None = Field(
-        "Called Up",
-        description=f"Callup decision status (one of: {', '.join(CALLUP_STATUSES)})",
+    inpro_status: str | None = Field(
+        "yet_to_inpro",
+        description=f"Inpro lifecycle status (one of: {', '.join(INPRO_STATUSES)})",
     )
     remarks: str | None = Field(
         None, max_length=2000, description="Per-person remarks (empty clears)"
@@ -361,12 +361,12 @@ class PersonnelCreate(BaseModel):
             return v.strip() or None
         return v
 
-    @field_validator("callup_status")
+    @field_validator("inpro_status")
     @classmethod
-    def _callup_status_must_be_known(cls, v: str | None) -> str | None:
-        if v is not None and v not in CALLUP_STATUSES:
+    def _inpro_status_must_be_known(cls, v: str | None) -> str | None:
+        if v is not None and v not in INPRO_STATUSES:
             raise ValueError(
-                f"callup_status must be one of: {', '.join(CALLUP_STATUSES)}"
+                f"inpro_status must be one of: {', '.join(INPRO_STATUSES)}"
             )
         return v
 
@@ -399,9 +399,9 @@ class PersonnelUpdate(BaseModel):
         pattern="^(active|archived)$",
         description="Personnel status (active or archived)",
     )
-    callup_status: str | None = Field(
+    inpro_status: str | None = Field(
         None,
-        description=f"Callup decision status (one of: {', '.join(CALLUP_STATUSES)})",
+        description=f"Inpro lifecycle status (one of: {', '.join(INPRO_STATUSES)})",
     )
     remarks: str | None = Field(
         None, max_length=2000, description="Per-person remarks (empty clears)"
@@ -412,12 +412,12 @@ class PersonnelUpdate(BaseModel):
         description="Personnel number (super-admin only; explicit null clears)",
     )
 
-    @field_validator("callup_status")
+    @field_validator("inpro_status")
     @classmethod
-    def _callup_status_must_be_known(cls, v: str | None) -> str | None:
-        if v is not None and v not in CALLUP_STATUSES:
+    def _inpro_status_must_be_known(cls, v: str | None) -> str | None:
+        if v is not None and v not in INPRO_STATUSES:
             raise ValueError(
-                f"callup_status must be one of: {', '.join(CALLUP_STATUSES)}"
+                f"inpro_status must be one of: {', '.join(INPRO_STATUSES)}"
             )
         return v
 

@@ -9,15 +9,19 @@ from parade_state.utils import utc_dt
 
 from ..db import Base
 
-# Callup decision statuses. Only "Called Up" personnel appear in attendance;
-# every other status is hidden from the attendance view (non-destructively).
-CALLUP_STATUSES: tuple[str, ...] = (
-    "Called Up",
-    "Deferred",
-    "Disrupted",
-    "MR",
-    "Age Limit",
-    "Other",
+# In-processing lifecycle statuses (issue 32). Stored vocabulary is
+# snake_case (attendance convention); UI labels live in
+# INPRO_STATUS_LABELS. Only "deferred" personnel are hidden from the
+# attendance roster (interim rule until #33); everyone else appears.
+INPRO_STATUSES: tuple[str, ...] = (
+    "inproed",
+    "yet_to_inpro",
+    "deferred",
+)
+INPRO_STATUS_LABELS: dict[str, str] = dict(
+    inproed="Inpro'ed",
+    yet_to_inpro="Yet to Inpro",
+    deferred="Deferred",
 )
 
 # Provenance marker for UI-added personnel rows. NULL means the row came from
@@ -65,9 +69,9 @@ class Personnel(Base):
         default="active",
         index=True,
     )
-    callup_status: Mapped[str] = mapped_column(
-        Enum(*CALLUP_STATUSES, name="personnel_callup_status"),
-        default="Called Up",
+    inpro_status: Mapped[str] = mapped_column(
+        Enum(*INPRO_STATUSES, name="personnel_inpro_status"),
+        default="yet_to_inpro",
         index=True,
     )
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
