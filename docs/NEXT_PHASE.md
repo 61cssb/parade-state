@@ -63,8 +63,9 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   itself is read-only
 - One system-wide **active-for-attendance** Nominal Roll (super-admin
   switch); `Attendance` rows per (personnel, date) with AM/PM
-  status + remarks; writes gated to the active NR; roster shows only
-  `callup_status = 'Called Up'` personnel (hiding is non-destructive —
+  status + remarks; writes gated to the active NR; roster shows all
+  non-deferred personnel — `inpro_status != 'deferred'`, i.e. yet_to_inpro
+  + inproed (issue 32 interim rule until #33; hiding is non-destructive —
   existing attendance records are preserved)
 - **Admin scoped access (issue #28)**: scope grants are
   (unit, sub_unit_1) pairs per NR on `UserSubunitAssignment` with the
@@ -84,7 +85,7 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   + behaviorally
 - **Unit Strength** report at `/admin` (replaced the dashboard): the
   parade state rolled up by effective sub-unit 1/2 into the Officer/WOSE/
-  Total × In/Out/Current/% strength format (In = Called Up, Current =
+  Total × In/Out/Current/% strength format (In = not deferred, Current =
   present/late, Out = rest); date + AM/PM slot; regular admins scoped to
   their assigned sub-units; on via `FEATURE_STRENGTH` in dev and prod
 - Groupings (issue 26 redesign, implemented on this branch): a labelled
@@ -99,7 +100,8 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   its displayed table (filters honoured, tagging overlay applied; the NR
   export has no row cap; the attendance export follows the Subunit-1 read
   scoping and labels statuses like the page)
-- Deferments (super-admin CRUD; `Personnel.callup_status`);
+- Deferments (super-admin CRUD; drives `Personnel.inpro_status` — issue 32:
+  approve prompts, cancel/delete revert to yet_to_inpro);
   **feature-flagged** (`FEATURE_DEFERMENTS`, dev-only until ready)
 - Discussions board (issue 24): admins/super-admins post `requests` /
   `bugs` items and comment in sanitized markdown; super-admins triage
@@ -222,7 +224,19 @@ Defer until CSV Step 3 (diff confirmation) forces it.
   from the funnel model): `callup_status` widened to six values + per-person
   `remarks`; CSV `Callup Decision`/`Reason`/`Remarks` mapped on ingest;
   attendance view shows only Called Up (non-destructive); inline admin
-  editing in the NR browser
+  editing in the NR browser — superseded 2026-08-24 by the issue 32 inpro
+  rework directly below
+- **2026-08-24:** Inpro status rework (Issue 32): `callup_status` renamed to
+  `inpro_status` with the 3-value lifecycle `inproed` / `yet_to_inpro`
+  (default) / `deferred` (migration `v3c4d5e6f7a8`; Disrupted/MR/Age
+  Limit/Other → yet_to_inpro + `Previously:` remark); attendance roster,
+  export and Unit Strength now gate on `!= 'deferred'` until #33; NR
+  browser column renamed "Inpro Status" with a user-side filter; deferment
+  approval prompts instead of auto-deferring, cancel/delete revert to
+  yet_to_inpro; interim CSV shim keeps old-format uploads working until
+  #34's new format (fixture profiling: the real Callup Decision columns
+  carry Yes/No — Yes → yet_to_inpro, No → deferred; the retired enum
+  vocabulary is still honoured for older files)
 - **2026-08-20:** Groupings redesigned (issue 26): the old
   modes/lifecycle/overrides/exclusions/notes/access-scoping design was
   replaced wholesale with a labelled set of groups per nominal roll —

@@ -211,7 +211,7 @@ Attendance (one row per personnel/day)
   a modal that confirms the effect in plain language; the old time-of-day
   behaviour (before noon: previous-day PM → today AM; after noon: today AM
   → today PM) survives only as the modal's prefill
-- Scope: the active Called Up roster ∩ the page's effective-sub_unit_1
+- Scope: the active attendance roster (non-deferred) ∩ the page's effective-sub_unit_1
   filter (optional `sub_unit_1` param) ∩ the caller's write access
   (super_admin bypasses; deny-by-default: no assignments → 403)
 - Blank/missing source remarks are skipped — the destination keeps its
@@ -309,7 +309,8 @@ Personnel
 ├── sub_unit_3: str
 ├── extra_fields: JSON (other CSV columns not mapped to canonical names; JSONB in PostgreSQL)
 ├── status: str ENUM ['active', 'archived']
-├── callup_status: str ENUM ['Called Up', 'Deferred', 'Disrupted', 'MR', 'Age Limit', 'Other']  (default: 'Called Up')
+├── inpro_status: str ENUM ['inproed', 'yet_to_inpro', 'deferred']  (default: 'yet_to_inpro')
+│   └── UI labels: "Inpro'ed" / "Yet to Inpro" / "Deferred"; UI column header "Inpro Status"
 ├── remarks: text (nullable; per-person remarks, distinct from the roll-level NominalRoll.remarks)
 ├── source: str | null (max 16) ← Provenance: NULL = CSV row, 'manual' = UI-added
 ├── created_at: datetime
@@ -331,29 +332,41 @@ Personnel
   memberships likewise. Cross-roll continuity (tagging transfer, grouping
   copy, history) follows the person via `pers_no`.
 
-**Callup status & remarks (issue 06):**
-- On ingest, `callup_status` is parsed from the CSV `Callup Decision` column:
-  exact (case-insensitive) match against the enum passes through; blank →
-  `Called Up`; any other non-blank value → `Other` (raw value preserved in
-  `extra_fields.callup_decision`).
+**Inpro status & remarks (issue 06 columns; issue 32 lifecycle):**
+- The stored vocabulary is the 3-value in-processing lifecycle
+  `inproed` / `yet_to_inpro` (default) / `deferred` (snake_case, attendance
+  convention). It replaces the retired callup-decision vocabulary
+  (`Called Up` / `Deferred` / `Disrupted` / `MR` / `Age Limit` / `Other`),
+  which conflated "will attend" with "why not".
+- **Interim CSV shim (issue 32 → #34):** old-format uploads keep working.
+  The CSV `Callup Decision` column — which the real fixtures populate with
+  `Yes`/`No` — is remapped (case-insensitive): `Yes` / blank /
+  `Called Up` → `yet_to_inpro`; `No` / `Deferred` → `deferred` (`No`
+  approximates #34's future skip — the row stays off the interim
+  non-deferred roster); every other value (`Disrupted` / `MR` /
+  `Age Limit` / `Other` / unknown) → `yet_to_inpro` with
+  `Previously: <value>` appended to `remarks` (the raw value also stays in
+  `extra_fields.callup_decision` for audit).
 - `remarks` joins the non-empty CSV `Reason` + first `Remarks` columns with
-  `"; "`; NULL when both are empty.
-- **Attendance visibility:** the attendance roster/view includes only
-  personnel with `callup_status = 'Called Up'`. All other statuses are hidden.
-- **Post-hoc changes are non-destructive:** changing a person's status away
-  from `Called Up` never deletes or alters existing attendance records — it
+  `"; "` (then the shim note, if any); NULL when everything is empty.
+- **Attendance visibility (interim rule until #33):** the attendance
+  roster/view/dashboard includes personnel with `inpro_status != 'deferred'`
+  — i.e. yet_to_inpro + inproed. Deferred personnel are hidden.
+- **Post-hoc changes are non-destructive:** changing a person's status to
+  `deferred` never deletes or alters existing attendance records — it
   only hides the person from the attendance view, with no distinct rendering
   of hidden rows anywhere.
-- Admins (admin + super_admin) can edit `callup_status` and `remarks` inline
+- Admins (admin + super_admin) can edit `inpro_status` and `remarks` inline
   in the NR management table (PATCH `/personnel/{id}`; enum-invalid values
-  are rejected with 422).
+  are rejected with 422). The NR browser table also offers a user-side
+  filter by Inpro status (e.g. hide Deferred).
 
 **Manual creation & pers_no fill-in-later (issue 26):**
 - `POST /api/v1/personnel` (super-admin only) creates a row on an existing
   nominal roll with `source='manual'`, `status='active'`, and
-  `callup_status` defaulting to `Called Up` — so the person appears in the
+  `inpro_status` defaulting to `yet_to_inpro` — so the person appears in the
   attendance view immediately and is otherwise managed like any CSV row
-  (callup/remarks editing, tagging overlay, groupings). `rank` must map to
+  (inpro/remarks editing, tagging overlay, groupings). `rank` must map to
   a category (400 otherwise, valid ranks listed); unknown NR → 404;
   duplicate `pers_no` within the roll → 409 (same pers_no on a *different*
   roll stays allowed, matching CSV semantics). Side effects:
@@ -409,7 +422,7 @@ Deferment
   or the nominal roll is superseded by a new CAA.
 - Visible to **super_admin only** (admin role gets 403). UI and user-type
   scoping to be tightened in a later phase.
-- See §4.6 for the callup_status transition rule driven by `status` changes.
+- See §4.6 for the inpro_status transition rule driven by `status` changes.
 
 ### 3.4 Tagging Overlay (1:1 with Nominal Roll)
 
@@ -570,7 +583,8 @@ subunits fall into a `(none)` bucket. Columns: **Officer / WOSE / Total**
 (`Personnel.category`), each **In / Out / Current / %**:
 
 - **In** — personnel on the NR active for attendance with
-  `callup_status = Called Up` (active personnel rows only)
+  `inpro_status != 'deferred'` (active personnel rows only; issue 32
+  interim rule)
 - **Current** — slot status `present` or `late` (present-like)
 - **Out** — every other status; unmarked personnel count as `absent`
 - **%** — `Current ÷ In`, whole percent; 0% when In is 0
@@ -776,33 +790,39 @@ Compute diff (current CSV vs prior CSV)
   ↓
 Create NominalRoll (CAA parsed from the filename, e.g. caaYYMMDD; no status
 workflow — every NR is equal)
-Populate Personnel records (callup_status from the CSV 'Callup Decision'
-column — blank → 'Called Up', unrecognised → 'Other'; remarks from
-'Reason' + first 'Remarks' joined with '; ')
+Populate Personnel records (inpro_status via the interim shim from the CSV
+'Callup Decision' column — Yes / blank / 'Called Up' → yet_to_inpro,
+No / 'Deferred' → deferred, anything else → yet_to_inpro +
+'Previously: <value>' remark; remarks from 'Reason' + first 'Remarks'
+joined with '; ')
 Persist ColumnMetadata for the source columns
 Auto-create the NR's empty 1:1 Tagging
 Optionally import taggings from another NR (chosen by the admin; entries
 copied across by `pers_no` match, no-clobber)
 ```
 
-### 4.6 Deferment Callup-Status Transition
+### 4.6 Deferment Inpro-Status Transition (issue 32)
 
-When a Deferment's `status` changes, the linked Personnel's `callup_status`
+When a Deferment's `status` changes, the linked Personnel's `inpro_status`
 follows this rule:
 
-| Deferment new status                                 | Personnel.callup_status                |
+| Deferment new status                                 | Personnel.inpro_status                 |
 |------------------------------------------------------|----------------------------------------|
-| `Approved`                                           | → `Deferred`                           |
-| Any non-Approved status, **previous** was Approved   | → `Called Up` (revert)                 |
-| `Not called up` / `Do not call up` (any prior)       | **No change** (neutral; later phase)   |
+| `Approved`                                           | **No change** (see below)              |
+| Any other status, **previous** was Approved          | → `yet_to_inpro` (unconditional revert)|
 | Other transitions (no Approved involvement)          | **No change**                          |
-| Deferment deleted, previous status was Approved      | → `Called Up` (revert)                 |
+| Deferment deleted, previous status was Approved      | → `yet_to_inpro` (revert)              |
 | Deferment deleted, previous status was not Approved  | **No change**                          |
 
+Approval no longer auto-defers the person: the deferments admin UI prompts
+"set Inpro status to Deferred?" after saving, and only a confirmation
+PATCHes the personnel row — declining leaves `inpro_status` untouched. The
+revert away from Approved is unconditional (`Not called up` / `Do not call
+up` included) and always targets `yet_to_inpro`, even if the person was
+manually marked `inproed` in the meantime.
+
 `Pending action` (the initial status) is never Approved, so creating a new
-deferment does not affect `callup_status`. `Not called up` and `Do not call up`
-belong to a later workflow phase and are explicitly excluded from driving
-callup transitions.
+deferment does not affect `inpro_status`.
 
 ### 4.7 Data Purge (Testing-Only)
 
@@ -883,7 +903,7 @@ an env-var change plus restart with no other action.
 | GroupingMemberState | (grouping_id, personnel_id) | (grouping_id), (personnel_id) | One state row per person per grouping |
 | Attendance | (personnel_id, date) | (personnel_id, date) | One row per person per day |
 | UserSubunitAssignment | (user_id, nominal_roll_id, unit, sub_unit_1) + CHECK not both `*` | (user_id), (nominal_roll_id) | One grant per user/NR/(unit, sub_unit_1); wildcard pair forbidden |
-| Personnel | — | (callup_status) | Callup status filter |
+| Personnel | — | (inpro_status) | Inpro status filter |
 | Deferment | — | (personnel_id), (status), (updated_at) | Deferment lookup |
 
 ---

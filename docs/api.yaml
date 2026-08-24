@@ -128,7 +128,9 @@ tags:
     description: Server-Sent Events for stale data detection
   - name: deferments
     description: >
-      Personnel deferments — super-admin only; drives callup_status.
+      Personnel deferments — super-admin only; drives inpro_status
+      (issue 32: approval leaves it to the UI prompt; leaving Approved
+      reverts to yet_to_inpro).
       Feature-flagged: every /api/v1/deferments/* route returns 404 for
       all roles (super-admins included) unless FEATURE_DEFERMENTS=true
       (on in development, off in production).
@@ -301,11 +303,11 @@ paths:
       summary: Export the nominal roll browser table as CSV
       description: |
         Admin-only export mirroring the Nominal Roll browser table — Unit,
-        Sub Unit 1-3, Category, Rank, Full Name, Pers No, Callup, Remarks —
-        with the roll's 1:1 tagging overlay applied, ordered like the view.
-        The view's filters (search, unit, sub_unit_1, sub_unit_2, category,
-        rank) are honoured so the CSV matches what the caller sees; unlike
-        the view there is no 1000-row cap.
+        Sub Unit 1-3, Category, Rank, Full Name, Pers No, Inpro Status,
+        Remarks — with the roll's 1:1 tagging overlay applied, ordered like
+        the view. The view's filters (search, unit, sub_unit_1, sub_unit_2,
+        category, rank, inpro_status) are honoured so the CSV matches what
+        the caller sees; unlike the view there is no 1000-row cap.
       parameters:
         - name: search
           in: query
@@ -1760,7 +1762,7 @@ paths:
         Super-admin only. Snapshots `rank_name` (`{rank} {full_name}`) and
         `sub_unit` (first non-null of sub_unit_1/2/3) from the linked personnel
         at creation time. New deferments start with `status="Pending action"`,
-        so callup_status is not affected.
+        so inpro_status is not affected.
       parameters:
       requestBody:
         required: true
@@ -1803,9 +1805,11 @@ paths:
       tags: [deferments]
       summary: Update a deferment
       description: |
-        Status changes drive the linked personnel's `callup_status`:
-        Approved → Deferred; Approved → non-neutral → Called Up;
-        `Not called up` / `Do not call up` are neutral (no change).
+        Status changes drive the linked personnel's `inpro_status` (issue 32):
+        Approved → no change (the admin UI prompts and PATCHes the personnel
+        separately); any transition away from Approved (any other status,
+        including `Not called up` / `Do not call up`) → unconditional revert
+        to `yet_to_inpro`; transitions with no Approved involvement → no change.
       parameters:
       requestBody:
         required: true
@@ -1836,7 +1840,7 @@ paths:
       summary: Delete a deferment
       description: |
         If the deleted deferment was Approved, the linked personnel's
-        `callup_status` reverts to `Called Up`.
+        `inpro_status` reverts to `yet_to_inpro`.
       parameters:
       responses:
         '200':
@@ -2307,13 +2311,15 @@ paths:
         across by `pers_no` matching instead of starting empty; unmatched
         source personnel are surfaced in the response.
 
-        Per-person callup data (issue 06): `Personnel.callup_status` is
-        parsed from the CSV `Callup Decision` column (exact case-insensitive
-        match against ['Called Up', 'Deferred', 'Disrupted', 'MR',
-        'Age Limit', 'Other']; blank → 'Called Up'; unrecognised → 'Other'
-        with the raw value kept in extra_fields). `Personnel.remarks` joins
-        the non-empty `Reason` + first `Remarks` columns with '; '. Only
-        'Called Up' personnel appear in the attendance view.
+        Per-person inpro data (issue 06 + issue 32 interim shim):
+        `Personnel.inpro_status` is derived from the legacy CSV `Callup
+        Decision` column (the real fixtures carry Yes/No): Yes / blank /
+        'Called Up' → 'yet_to_inpro'; No / 'Deferred', case-insensitive →
+        'deferred' (No approximates #34's future skip); any other value →
+        'yet_to_inpro' with 'Previously: <value>' appended to remarks and
+        the raw value kept in extra_fields. `Personnel.remarks` joins the
+        non-empty `Reason` + first `Remarks` columns with '; '. Only
+        non-deferred personnel appear in the attendance view (until #33).
       parameters:
         - name: uploadId
           in: path

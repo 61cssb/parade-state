@@ -96,7 +96,7 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 - `tests/integration/test_api.py` - Authentication, user management, role management (18 tests)
 - `tests/integration/test_attendance_api.py` - Attendance management, snapshots, constraints, CSV export scoping
 - `tests/integration/test_csv_upload_api.py` - CSV upload pipeline, hash dedup, mapping (9 tests)
-- `tests/integration/test_deferments_api.py` - Deferment CRUD, callup_status transitions, super_admin auth (15 tests)
+- `tests/integration/test_deferments_api.py` - Deferment CRUD, inpro_status transitions (issue 32), super_admin auth
 - `tests/integration/test_feature_flags.py` - Flag-off hides Deferments/Grouping entirely (nav, pages, API) for every role incl. super-admin; flag-on restore; env-var defaults (8 tests)
 - `tests/integration/test_environment_banner.py` - ENVIRONMENT_BANNER renders the top strip pre-auth (login) and post-auth, escapes its text, and emits no markup when unset (5 tests)
 - `tests/integration/test_groupings_api.py` - Groupings (issue 26 redesign): CRUD, group-enum set replacement, memberships, member state, clone, copy-from-previous-NR, CSV export, super-admin-only mutations, flag gating
@@ -325,9 +325,9 @@ async def test_example(client, sample_users, sample_grouping):
 - `/admin` now serves the **Unit Strength** report and the old admin
   dashboard (stat cards + recent audit activity) is removed; the post-login
   redirect to `/admin` is unchanged.
-- Aggregates the attendance-active NR's Called Up personnel by effective
+- Aggregates the attendance-active NR's non-deferred personnel by effective
   (tagging-aware) sub_unit_1/sub_unit_2 into the strength reporting format:
-  Officer/WOSE/Total column groups of In/Out/Current/% (In = Called Up,
+  Officer/WOSE/Total column groups of In/Out/Current/% (In = not deferred,
   Current = present/late for the selected slot, Out = everything else
   including unmarked-as-absent, % = Current ÷ In), with SUBTOTAL per
   sub_unit_1 (shown once per section), a unit TOTAL, and a `(none)` bucket
@@ -392,37 +392,50 @@ async def test_example(client, sample_users, sample_grouping):
 - Personnel deferment CRUD linked to a single nominal roll personnel record
 - `rank_name` and `sub_unit` snapshotted at creation from the linked personnel
 - Reason enum (12 values) and status enum (8 values)
-- Personnel `callup_status` field (`Called Up` / `Deferred` / `Disrupted` /
-  `MR` / `Age Limit` / `Other`; the original three-value enum was widened and
-  per-person `remarks` added — issue 06):
-  - Approved deferment → `Deferred`
-  - Reverting from Approved to a non-neutral status → `Called Up`
-  - `Not called up` / `Do not call up` deferment statuses are neutral (no callup change)
-  - Deleting an Approved deferment reverts to `Called Up`
+- Personnel `inpro_status` transitions (issue 32):
+  - Approving a deferment never auto-sets inpro_status — the admin UI
+    prompts "set Inpro status to Deferred?" and PATCHes the personnel
+    separately when confirmed (declining leaves it unchanged)
+  - Moving an Approved deferment to any other status (neutral statuses
+    included) → unconditional revert to `yet_to_inpro`
+  - Deleting an Approved deferment reverts to `yet_to_inpro`
 - Super-admin-only: API and admin UI enforce `role == "super_admin"`
 - Admin UI under `/admin/deferments` (nav link gated by super_admin role)
 - **Feature flag:** hidden entirely (nav, page, `/api/v1/deferments/*`) unless `FEATURE_DEFERMENTS=true` — 404 for all roles including super-admins
 - **Endpoints:** 5 deferment endpoints under `/api/v1/deferments`
-- **Tests:** 15 behavioral tests + flag gating (test_feature_flags.py)
+- **Tests:** behavioral transition tests + flag gating (test_feature_flags.py)
 
-**Callup status & remarks columns (✅ issue 06)**
-- `callup_status` widened to six values (`Called Up` default, `Deferred`,
-  `Disrupted`, `MR`, `Age Limit`, `Other`); legacy `Not Called Up` rows
-  migrated to `Other` (migration `q7d8e9f0a1b2`).
-- New per-person `Personnel.remarks` text column (distinct from roll-level
+**Inpro status & remarks columns (✅ issue 06; reworked by issue 32)**
+- `callup_status` (six-value callup-decision enum, issue 06) replaced by
+  `inpro_status` — the 3-value in-processing lifecycle `inproed` /
+  `yet_to_inpro` (default) / `deferred` — via migration `v3c4d5e6f7a8`
+  (PostgreSQL native-enum rebuild + SQLite batch rebuild). Mapping:
+  Called Up → yet_to_inpro; Deferred → deferred; Disrupted/MR/Age
+  Limit/Other → yet_to_inpro with `Previously: <value>` appended to
+  `remarks` (per-value remap counts logged; downgrade is lossy — inproed
+  collapses to Called Up and the appended remarks stay).
+- Per-person `Personnel.remarks` text column (distinct from roll-level
   `NominalRoll.remarks`).
-- CSV ingest maps `Callup Decision` → `callup_status` (case-insensitive
-  exact match; blank → `Called Up`; unrecognised → `Other`, raw kept in
-  `extra_fields`) and joins `Reason` + first `Remarks` → `remarks`.
-- Attendance roster/view filters to `callup_status = 'Called Up'`; hiding is
-  non-destructive — existing attendance records are never deleted or altered
-  and hidden rows render with no special treatment.
-- `PATCH /api/v1/personnel/{id}` accepts `callup_status` (422 on invalid) and
+- CSV ingest (interim shim until the #34 format lands): legacy `Callup
+  Decision` remapped — Yes / blank / Called Up → `yet_to_inpro`; No /
+  Deferred → `deferred` (the real fixtures carry Yes/No; No approximates
+  #34's future skip); anything else → `yet_to_inpro` + `Previously:
+  <value>` remark (raw kept in `extra_fields`) — and joins `Reason` +
+  first `Remarks` → `remarks`.
+- Attendance roster/view/dashboard filter to `inpro_status != 'deferred'`
+  (interim rule until #33); hiding is non-destructive — existing attendance
+  records are never deleted or altered and hidden rows render with no
+  special treatment.
+- `PATCH /api/v1/personnel/{id}` accepts `inpro_status` (422 on invalid) and
   `remarks` (empty/null clears); admin + super_admin.
-- NR browser table shows Callup + Remarks columns with inline editing
-  (select / text input, immediate PATCH) for admins and above.
-- **Tests:** personnel PATCH (parametrised enum + 403), CSV mapping,
-  attendance hiding + record preservation, NR view wiring
+- NR browser table shows Inpro Status + Remarks columns with inline editing
+  (select / text input, immediate PATCH) for admins and above, plus a
+  user-side filter by Inpro status (e.g. hide Deferred) carried into the
+  CSV export.
+- **Tests:** personnel PATCH (parametrised enum + 422 on the retired
+  vocabulary + 403), CSV shim mapping, attendance hiding + record
+  preservation, NR view wiring + filter, migration mapping
+  (test_migration_inpro_status.py runs the real alembic chain)
 
 **Add Serviceman: manual creation (✅ issue 26)**
 - New nullable `Personnel.source` provenance column (NULL = CSV row,
@@ -430,7 +443,7 @@ async def test_example(client, sample_users, sample_grouping):
   on `q7d8e9f0a1b2`), exposed in Personnel responses.
 - `POST /api/v1/personnel` (super-admin only; 403 otherwise): creates a row
   on an existing NR with `source='manual'`, `status='active'`,
-  `callup_status` default `Called Up`, category inferred via
+  `inpro_status` default `yet_to_inpro`, category inferred via
   `ranks.category_for_rank` (invalid rank → 400 listing valid ranks;
   unknown NR → 404; duplicate pers_no within the roll → 409 with
   IntegrityError fallback; same pers_no on a different roll allowed).
@@ -441,14 +454,14 @@ async def test_example(client, sample_users, sample_grouping):
 - `PATCH /api/v1/personnel/{id}` gains `pers_no` (fill-in-later):
   super-admin only (403 otherwise), membership semantics like `remarks`
   (explicit null / blank clears), per-roll uniqueness pre-check excluding
-  self → 409. Admins retain status/callup/remarks.
+  self → 409. Admins retain status/inpro/remarks.
 - NR browser: "Add Serviceman" button below the personnel table (a roster
   action — kept out of Roll management, which acts on the roll entity;
   shown even when filters match nothing, since that's the add flow) opens a
   modal (backdrop, Esc, inline status errors,
   reload on success). Rank is a select with Officer/WOSE/Military Expert
   optgroups (closed set — the native datalist popup mispositions and
-  mismatched the Callup Status select); open-vocab unit/sub-units keep
+  mismatched the Inpro Status select); open-vocab unit/sub-units keep
   datalist suggestions; "manual" badge beside the full name for
   `source='manual'` rows; inline-editable pers_no cell (onchange → PATCH,
   blank clears, revert on error) for super-admins, static text for others.
@@ -662,7 +675,7 @@ parade-state/
 │   │   ├── csv_ingestion.py     # Nominal Roll, CsvUpload, ColumnMapping, ColumnMetadata
 │   │   ├── deferments.py        # Deferment
 │   │   ├── grouping.py        # Grouping, GroupingGroup, GroupingMembership, GroupingMemberState
-│   │   ├── personnel.py         # Personnel (with callup_status)
+│   │   ├── personnel.py         # Personnel (with inpro_status)
 │   │   └── schemas.py           # Pydantic request/response schemas
 │   ├── utils/                   # Shared utilities (see CODE_STYLE.md)
 │   │   ├── __init__.py
