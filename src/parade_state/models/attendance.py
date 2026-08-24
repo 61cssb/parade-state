@@ -1,9 +1,10 @@
 """Attendance models.
 
-Attendance is taken twice daily (AM/PM, hardcoded) against the Nominal Roll
-that is currently **active for attendance** — always with the NR's 1:1
-Tagging overlay applied. One ``Attendance`` row per ``(personnel, date)``
-carries status + remarks for both AM and PM slots.
+Attendance is taken once daily against the Nominal Roll that is currently
+**active for attendance** — always with the NR's 1:1 Tagging overlay
+applied. One ``Attendance`` row per ``(personnel, date)`` carries a
+``status`` (present/absent), an optional ``reason`` classifying the
+remarks, and free-text ``remarks``.
 
 A super-admin marks an NR "Use for Attendance" (``NominalRoll.attendance_active``);
 writes are only permitted against that NR. There is no separate scope table.
@@ -26,22 +27,34 @@ if TYPE_CHECKING:
 ATTENDANCE_STATUSES: tuple[str, ...] = (
     "present",
     "absent",
-    "time_off",
+)
+
+# Optional reason classifying an attendance row's remarks. Never feeds
+# present/absent aggregation (issue 33) — strength reporting relies on
+# status only.
+ATTENDANCE_REASONS: tuple[str, ...] = (
     "mc",
-    "yet_to_inpro",
-    "outpro",
-    "reporting_sick",
-    "late",
-    "att_out",
+    "off",
+    "early_outpro",
+    "other",
+    "awol",
+)
+
+ATTENDANCE_REASON_LABELS: dict[str, str] = dict(
+    mc="MC",
+    off="Off",
+    early_outpro="Early Outpro",
+    other="Other",
+    awol="AWOL",
 )
 
 # Statuses counted as "present" when aggregating into present/absent buckets.
 # Everything not in this set counts as absent.
-PRESENT_LIKE_STATUSES: frozenset[str] = frozenset({"present", "late"})
+PRESENT_LIKE_STATUSES: frozenset[str] = frozenset({"present"})
 
 
 class Attendance(Base):
-    """Per-personnel per-day attendance, carrying AM and PM status + remarks.
+    """Per-personnel per-day attendance: status + optional reason + remarks.
 
     ``nominal_roll_id`` is always the parent NR of the personnel row (the
     active NR at write time). The unique constraint enforces one record per
@@ -58,16 +71,15 @@ class Attendance(Base):
     )
     date: Mapped[utc_dt.date] = mapped_column(Date, index=True)
 
-    status_am: Mapped[str] = mapped_column(
+    status: Mapped[str] = mapped_column(
         Enum(*ATTENDANCE_STATUSES, name="attendance_status"),
         default="absent",
     )
-    remarks_am: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status_pm: Mapped[str] = mapped_column(
-        Enum(*ATTENDANCE_STATUSES, name="attendance_status"),
-        default="absent",
+    reason: Mapped[str | None] = mapped_column(
+        Enum(*ATTENDANCE_REASONS, name="attendance_reason"),
+        nullable=True,
     )
-    remarks_pm: Mapped[str | None] = mapped_column(Text, nullable=True)
+    remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Roster snapshot at the time the record was created.
     notes_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -104,6 +116,6 @@ class Attendance(Base):
     def __repr__(self) -> str:
         return (
             f"<Attendance(personnel_id={self.personnel_id!r}, "
-            f"date={self.date!r}, status_am={self.status_am!r}, "
-            f"status_pm={self.status_pm!r})>"
+            f"date={self.date!r}, status={self.status!r}, "
+            f"reason={self.reason!r})>"
         )
