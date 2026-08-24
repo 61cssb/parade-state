@@ -1,6 +1,6 @@
 # Roadmap & Open Work
 
-**Last Updated:** 2026-08-20
+**Last Updated:** 2026-08-25
 **Status:** In production on Railway (admin-only access), with a separate
 hosted development environment (Issue 15) where test users try changes
 first. Test users (admins) coming on the weekend of 2026-08-22; annual
@@ -16,7 +16,7 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ## Current Snapshot
 
-- **Tests:** 503 SQLite passing (flags-on posture; flags-off gating has
+- **Tests:** 627 SQLite passing (flags-on posture; flags-off gating has
   dedicated tests). The suite runs against
   Postgres by setting `TEST_DATABASE_URL` (per-test databases).
 - **Access model:** `super_admin` + `admin` only. Unknown Google
@@ -62,11 +62,12 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   reads serve effective (`to_*`-overlaid) values; CSV-sourced NR data
   itself is read-only
 - One system-wide **active-for-attendance** Nominal Roll (super-admin
-  switch); `Attendance` rows per (personnel, date) with AM/PM
-  status + remarks; writes gated to the active NR; roster shows all
-  non-deferred personnel — `inpro_status != 'deferred'`, i.e. yet_to_inpro
-  + inproed (issue 32 interim rule until #33; hiding is non-destructive —
-  existing attendance records are preserved)
+  switch); `Attendance` rows per (personnel, date) with single-session
+  status (present/absent) + optional reason enum + remarks (issue 33);
+  writes gated to the active NR; the marking roster is **all** NR personnel
+  (deferred included) with a read-only Inpro Status column + filter —
+  filtering hides rows non-destructively, existing attendance records are
+  preserved
 - **Admin scoped access (issue #28)**: scope grants are
   (unit, sub_unit_1) pairs per NR on `UserSubunitAssignment` with the
   explicit `*` wildcard sentinel; matching follows the tagging-overlay
@@ -86,8 +87,9 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 - **Unit Strength** report at `/admin` (replaced the dashboard): the
   parade state rolled up by effective sub-unit 1/2 into the Officer/WOSE/
   Total × In/Out/Current/% strength format (In = not deferred, Current =
-  present/late, Out = rest); date + AM/PM slot; regular admins scoped to
-  their assigned sub-units; on via `FEATURE_STRENGTH` in dev and prod
+  present — single session, reason never participates, Out = rest); date
+  param; regular admins scoped to their assigned sub-units; on via
+  `FEATURE_STRENGTH` in dev and prod
 - Groupings (issue 26 redesign, implemented on this branch): a labelled
   set of groups on the attendance-active NR with memberships, per-person
   checkbox/remarks, clone, copy-from-previous-NR, slim CSV export —
@@ -197,6 +199,17 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-25:** Attendance single-session rework (Issue 33): the 9-value
+  AM/PM vocabulary collapsed to one daily session — `status`
+  (present/absent, default absent) + nullable `reason` enum
+  (mc/off/early_outpro/other/awol, classifies remarks, never feeds
+  reporting) + single `remarks` (migration `w4d5e6f7a8b9`; PM mapping wins
+  when its slot was marked, remarks joined `"; "`, "Late" appended); the
+  issue-32 interim roster gate is gone — the marking page lists **all** NR
+  personnel with a read-only Inpro Status column + filter, and the export
+  mirrors it (…, Inpro Status, Status, Reason, Remarks); Copy Remarks
+  became date→date; Unit Strength Current = present only (slot selector
+  removed); attendance-history stats count days
 - **2026-08-21:** Discussions board (issue 24): admins post `requests`/
   `bugs` items, comment in sanitized markdown (raw HTML escaped, unsafe
   link schemes scrubbed); super-admin triage (category/status, the only

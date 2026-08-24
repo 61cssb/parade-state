@@ -102,7 +102,7 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 - `tests/integration/test_groupings_api.py` - Groupings (issue 26 redesign): CRUD, group-enum set replacement, memberships, member state, clone, copy-from-previous-NR, CSV export, super-admin-only mutations, flag gating
 - `tests/integration/test_nominal_rolls_api.py` - Nominal Roll lifecycle (attendance activation auto-switch/deactivate, delete, label updates, CSV export)
 - `tests/integration/test_personnel_api.py` - Personnel management, search, filtering (12 tests)
-- `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (NR/Tagging-scoped, AM/PM slots)
+- `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (NR/Tagging-scoped, single session)
 - `tests/integration/test_sessions_410.py` - Sessions endpoints return 410 Gone (sessions removed in issue #4)
 - `tests/integration/test_users_api.py` - User CRUD, role/status transitions (3 tests)
 - `tests/integration/test_audit_api.py` - Audit log filtering and pagination (10 tests)
@@ -209,18 +209,22 @@ async def test_example(client, sample_users, sample_grouping):
 - **Endpoints:** 9 grouping endpoints (CRUD, membership set, member
   state, clone, copy-from-previous, export)
 
-**Attendance Session Management (🗑 Removed in issue #4)**
+**Attendance Session Management (🗑 Removed in issue #4; slots removed in #33)**
 - The user-managed `Session` model (open/closed/finalized) has been removed.
-- AM and PM are now hardcoded slots on a single `Attendance` row per person/day.
+- The AM/PM split was later removed too (issue 33): one session per day on a
+  single `Attendance` row per person/day.
 - `/api/v1/sessions/*` routes return 410 Gone as signposts.
 - Historical reporting views that depended on sessions are broken (see issue #4
   "Out of scope") and need separate consideration.
 
-**Attendance Management (✅ Active-NR model)**
-- Attendance is taken against the one Nominal Roll currently **active for
-  attendance** (`NominalRoll.attendance_active`), with its 1:1 tagging
-  applied: one `Attendance` row per `(personnel, date)` carrying
-  `status_am`/`remarks_am` and `status_pm`/`remarks_pm`.
+**Attendance Management (✅ Active-NR model, single session — issue 33)**
+- Attendance is taken once daily against the one Nominal Roll currently
+  **active for attendance** (`NominalRoll.attendance_active`), with its 1:1
+  tagging applied: one `Attendance` row per `(personnel, date)` carrying
+  `status` (present/absent), an optional `reason` enum, and `remarks`.
+- The marking roster is **everyone** on the NR (deferred included) — the
+  page's Inpro Status column + filter are view concerns (issue 33; the
+  issue-32 interim `!= 'deferred'` roster filter is gone).
 - The per-NR `AttendanceScope` table and the NR confirm/unconfirm workflow
   are **removed** (migration `n4c5d6e7f8a9`): super-admins toggle
   "Use for Attendance" / "Deactivate Attendance" on the admin Nominal Rolls
@@ -229,19 +233,24 @@ async def test_example(client, sample_users, sample_grouping):
   active NR the user view shows an inactive message and writes are refused.
 - Bulk upsert endpoint (`PUT /api/v1/attendance/upsert`) with snapshot capture;
   the same endpoint serves the per-row autosave payloads (single-record PUT).
-- "Copy Remarks" endpoint (`POST /api/v1/attendance/copy-remarks`, issue 20):
-  explicit source (date + slot) and destination (date + slot) — same
-  source/destination is rejected (400); an optional `sub_unit_1` param narrows
+- "Copy Remarks" endpoint (`POST /api/v1/attendance/copy-remarks`, issue 20;
+  single-session rework in #33): explicit source date and destination date —
+  same date is rejected (400); an optional `sub_unit_1` param narrows
   the copy to the attendance page's view filter (effective-value aware).
   Blank source remarks are skipped; missing destination rows are created.
 - CSV export (`GET /api/v1/attendance/export`, issue 27): streams the marking
-  table for an NR + date — statuses as display labels, personnel without a
-  row export as Absent (the page's default). Honours the page's `sub_unit_1`
-  filter and the Subunit-1 read-scoping rule (super_admin all; deny-by-default
-  403 otherwise), so an export never leaks outside the caller's view.
+  table for an NR + date — columns mirror the page (…, Name, Inpro Status,
+  Status, Reason, Remarks), statuses/reasons as display labels, personnel
+  without a row export as Absent (the page's default). Honours the page's
+  `sub_unit_1` filter and the Subunit-1 read-scoping rule (super_admin all;
+  deny-by-default 403 otherwise), so an export never leaks outside the
+  caller's view.
 - Tagging delete guarded (409) when its NR has attendance rows.
-- Attendance status enum: present, absent, time_off, mc, yet_to_inpro, outpro,
-  reporting_sick, late, att_out (default: absent).
+- Attendance status enum (issue 33): present, absent (default: absent).
+  Reason enum (nullable, never feeds reporting): mc, off, early_outpro,
+  other, awol. Migration `w4d5e6f7a8b9` collapses the legacy 9-value AM/PM
+  vocabulary per the issue-33 mapping table (PM wins when its slot was
+  marked; remarks joined with `"; "`; "Late" appended).
 
 **Scope Access (✅ issue #4 PR 2; ✅ extended by issue #28)**
 - `UserSubunitAssignment(user_id, nominal_roll_id, unit, sub_unit_1)` — a
@@ -285,28 +294,33 @@ async def test_example(client, sample_users, sample_grouping):
   filter non-bypass, pagination under overlay, grant CRUD validation,
   check constraint).
 
-**Attendance UI (✅ Active-NR model)**
+**Attendance UI (✅ Active-NR model, single session — issue 33)**
 - The separate super-admin `/admin/attendance` page is **removed** — it
   duplicated `/attendance`. All marking happens on `/attendance`: NR + date +
-  effective sub-unit-1 filters, roster editor with AM/PM status + remarks.
-- User-facing `/attendance`: defaults to the active NR; roster is filtered to
-  the caller's assigned subunits (tagging-aware effective sub_unit_1;
-  super_admin sees all) and shows the tagging overlay (yellow rows). With no
-  active NR it shows an inactive message instead of the marking table.
-- **Copy Remarks** lives on `/attendance` behind a modal (issue 20): explicit
-  source/destination day + AM/PM pickers (clamped to the NR's CAA → the
-  viewed day; prefilled with the old time-of-day pair), same source and
-  destination blocked, an earlier destination warns and needs a second
-  click, and the confirmation names the scope ("for N personnel in current
-  view. Existing destination remarks will be overwritten."). Open to all
-  admins — write perms are enforced server-side (sub-unit assignments, 403).
-- **Autosave (issue 19):** no Save button — each row PUTs itself on status
-  change or remarks blur (a "Saving…/Saved" indicator near the table; a
-  failed save red-edges the row and retries on the next edit). Tagged rows
-  are no longer highlighted here; yellow stays an NR-view-only signal.
-- **Export CSV (issue 27):** link in the table header (beside the AM/PM
-  counts) streams the displayed table for the selected NR + date +
-  sub-unit filter — same contract as the Grouping page's export.
+  effective sub-unit-1 + Inpro Status filters, roster editor with status +
+  reason + remarks.
+- User-facing `/attendance`: defaults to the active NR; the roster is **all
+  NR personnel** (deferred included — issue 33), filtered to the caller's
+  assigned subunits (tagging-aware effective sub_unit_1; super_admin sees
+  all) with a read-only Inpro Status column just before the status column
+  and an Inpro Status filter (e.g. hide Deferred). With no active NR it
+  shows an inactive message instead of the marking table.
+- **Copy Remarks** lives on `/attendance` behind a modal (issue 20;
+  single-session rework in #33): explicit source/destination date pickers
+  (clamped to the NR's CAA → the viewed day; prefilled with the previous
+  day), same source and destination blocked, an earlier destination warns
+  and needs a second click, and the confirmation names the scope ("for N
+  personnel in current view. Existing destination remarks will be
+  overwritten."). Open to all admins — write perms are enforced server-side
+  (sub-unit assignments, 403).
+- **Autosave (issue 19):** no Save button — each row PUTs itself on
+  status/reason change or remarks blur (a "Saving…/Saved" indicator near the
+  table; a failed save red-edges the row and retries on the next edit).
+  Tagged rows are no longer highlighted here; yellow stays an NR-view-only
+  signal.
+- **Export CSV (issue 27):** link in the table header (beside the
+  present/marked counts) streams the displayed table for the selected NR +
+  date + sub-unit filter — same contract as the Grouping page's export.
 - Nominal Roll management lives on `/nominal-roll` in the collapsed-by-default
   "Roll management" expander directly below the roll selector dropdown inside
   the selector card (the Grouping page's pattern; issue 22 — it acts on the
@@ -328,12 +342,14 @@ async def test_example(client, sample_users, sample_grouping):
 - Aggregates the attendance-active NR's non-deferred personnel by effective
   (tagging-aware) sub_unit_1/sub_unit_2 into the strength reporting format:
   Officer/WOSE/Total column groups of In/Out/Current/% (In = not deferred,
-  Current = present/late for the selected slot, Out = everything else
+  Current = present — single daily session, issue 33; reason never
+  participates, Out = everything else
   including unmarked-as-absent, % = Current ÷ In), with SUBTOTAL per
   sub_unit_1 (shown once per section), a unit TOTAL, and a `(none)` bucket
   for personnel without subunits. `unit` and `sub_unit_3` are ignored.
-- Date picker + AM/PM slot selector (URL params; server defaults today/AM,
-  re-defaulted from the browser's local datetime on first visit).
+- Date picker (URL param; server default today, re-defaulted from the
+  browser's local datetime on first visit). The AM/PM slot selector was
+  removed with the single-session rework (issue 33).
 - Super-admins see the whole unit; regular admins see only their assigned
   sub_unit_1 sections (same deny-by-default UserSubunitAssignment machinery
   as attendance marking) with TOTAL summing visible rows.
@@ -514,7 +530,7 @@ issue 26 groupings redesign removed that surface wholesale: personnel
 endpoints take no grouping parameters, responses carry no grouping
 fields, and access is nominal-roll-scoped via UserSubunitAssignment.
 The attendance-history endpoint (added later) is NR/Tagging-scoped with
-AM/PM slots.
+single-session per-day rows and stats (issue 33).
 
 ```python
 # ✅ Current personnel endpoints (no grouping parameters)
