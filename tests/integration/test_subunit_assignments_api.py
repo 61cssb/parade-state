@@ -5,7 +5,7 @@ tagging-aware effective (unit, sub_unit_1), super_admin bypass, and the
 super-admin grant CRUD endpoints (roster-validated, '*' wildcards).
 """
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -171,8 +171,7 @@ async def test_upsert_denied_without_assignment(
                 {
                     "personnel_id": str(sample_personnel[0].id),
                     "date": today,
-                    "status_am": "present",
-                    "status_pm": "absent",
+                    "status": "present",
                 }
             ],
         },
@@ -212,8 +211,7 @@ async def test_upsert_allowed_with_matching_assignment(
                 {
                     "personnel_id": str(sample_personnel[0].id),  # Platoon 1
                     "date": today,
-                    "status_am": "present",
-                    "status_pm": "present",
+                    "status": "present",
                 }
             ],
         },
@@ -251,8 +249,7 @@ async def test_upsert_denied_for_unassigned_subunit(
                 {
                     "personnel_id": str(sample_personnel[2].id),
                     "date": today,
-                    "status_am": "present",
-                    "status_pm": "present",
+                    "status": "present",
                 }
             ],
         },
@@ -280,8 +277,7 @@ async def test_upsert_super_admin_bypasses(
                 {
                     "personnel_id": str(sample_personnel[2].id),  # Platoon 2
                     "date": today,
-                    "status_am": "present",
-                    "status_pm": "present",
+                    "status": "present",
                 }
             ],
         },
@@ -352,8 +348,7 @@ async def test_upsert_tagging_aware_effective_subunit(
                 {
                     "personnel_id": str(sample_personnel[2].id),
                     "date": today,
-                    "status_am": "present",
-                    "status_pm": "present",
+                    "status": "present",
                 }
             ],
         },
@@ -378,15 +373,14 @@ async def test_copy_remarks_denied_without_assignment(
     """copy-remarks returns 403 when the caller has no assignment on the NR."""
     client = await client_as(sample_users["admin"])
     today = date.today().isoformat()
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
 
     response = client.post(
         "/api/v1/attendance/copy-remarks",
         params={
             "nominal_roll_id": str(sample_nominal_roll.id),
-            "source_date": today,
-            "source_slot": "am",
+            "source_date": yesterday,
             "dest_date": today,
-            "dest_slot": "pm",
         },
     )
     assert response.status_code == 403

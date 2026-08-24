@@ -310,7 +310,7 @@ async def test_user_attendance_subunit_filter_is_effective_aware(
 
 
 @pytest.mark.asyncio
-async def test_attendance_hides_deferred_personnel(
+async def test_attendance_lists_all_personnel_with_inpro_column(
     client: TestClient,
     sample_nominal_roll,
     sample_attendance_scope,
@@ -319,8 +319,8 @@ async def test_attendance_hides_deferred_personnel(
     db_session,
     monkeypatch,
 ):
-    """Interim roster rule (issue 32, until #33): everyone except deferred
-    renders on the attendance page — yet_to_inpro and inproed alike."""
+    """Issue 33: the roster is everyone on the NR — deferred included —
+    with a read-only Inpro Status column rendered before the status."""
     from parade_state.web import attendance as web_attendance
     from parade_state.models import User
 
@@ -348,13 +348,23 @@ async def test_attendance_hides_deferred_personnel(
         "/attendance", params={"nominal_roll_id": str(sample_nominal_roll.id)}
     )
     assert response.status_code == 200
-    assert "Jane Smith" in response.text  # inproed → visible
-    assert "Bob Johnson" in response.text  # yet_to_inpro (default) → visible
-    assert "John Doe" not in response.text  # deferred → hidden
+    # Read-only Inpro Status column between Name and Status.
+    assert "Inpro Status" in response.text
+    # Everyone renders, each with their inpro label.
+    assert "John Doe" in response.text  # deferred → still listed
+    assert "Jane Smith" in response.text  # inproed
+    assert "Bob Johnson" in response.text  # yet_to_inpro (default)
+    assert "Deferred" in response.text
+    assert "Inpro&#39;ed" in response.text or "Inpro'ed" in response.text
+    assert "Yet to Inpro" in response.text
+    # Single-session grid: one status column, one reason column.
+    assert "AM Status" not in response.text
+    assert "PM Status" not in response.text
+    assert 'class="reason-select"' in response.text
 
 
 @pytest.mark.asyncio
-async def test_attendance_hidden_person_records_preserved(
+async def test_attendance_inpro_filter_hides_deferred(
     client: TestClient,
     sample_nominal_roll,
     sample_attendance_scope,
@@ -363,9 +373,8 @@ async def test_attendance_hidden_person_records_preserved(
     db_session,
     monkeypatch,
 ):
-    """Flipping a person to deferred is non-destructive: existing
-    attendance records survive untouched, the person is simply hidden from
-    the attendance view (and rendered with no special treatment anywhere)."""
+    """The Inpro Status view filter narrows the roster (e.g. hide Deferred),
+    and filtering is non-destructive: attendance records survive untouched."""
     from parade_state.web import attendance as web_attendance
     from parade_state.models import Attendance, User
     from parade_state.utils import utc_dt
@@ -375,18 +384,17 @@ async def test_attendance_hidden_person_records_preserved(
         personnel_id=str(p.id),
         nominal_roll_id=str(sample_nominal_roll.id),
         date=utc_dt.utcnow().date(),
-        status_am="present",
-        remarks_am="marked earlier",
-        status_pm="present",
+        status="present",
+        remarks="marked earlier",
         created_by=str(sample_users["admin"].id),
         updated_by=str(sample_users["admin"].id),
     )
     db_session.add(record)
-    await db_session.commit()
 
-    # Post-hoc status change to deferred.
+    # John Doe → deferred, Jane Smith → inproed.
     p.inpro_status = "deferred"
-    db_session.add(p)
+    sample_personnel[1].inpro_status = "inproed"
+    db_session.add_all([p, sample_personnel[1]])
     await db_session.commit()
 
     super_admin = User(
@@ -403,14 +411,31 @@ async def test_attendance_hidden_person_records_preserved(
 
     monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
 
+    # Deferred filter: only John Doe.
     response = client.get(
-        "/attendance", params={"nominal_roll_id": str(sample_nominal_roll.id)}
+        "/attendance",
+        params={
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "inpro_status": "deferred",
+        },
     )
     assert response.status_code == 200
-    assert p.full_name not in response.text  # hidden from the view
+    assert "John Doe" in response.text
+    assert "Jane Smith" not in response.text
+    assert "Bob Johnson" not in response.text
 
-    # The attendance record itself is untouched.
+    # Inpro'ed filter: only Jane Smith; John's record survives untouched.
+    response = client.get(
+        "/attendance",
+        params={
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "inpro_status": "inproed",
+        },
+    )
+    assert response.status_code == 200
+    assert "Jane Smith" in response.text
+    assert "John Doe" not in response.text
+
     await db_session.refresh(record)
-    assert record.status_am == "present"
-    assert record.remarks_am == "marked earlier"
-    assert record.status_pm == "present"
+    assert record.status == "present"
+    assert record.remarks == "marked earlier"

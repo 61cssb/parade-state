@@ -4,8 +4,8 @@ The report aggregates the attendance-active NR's parade state into the
 strength reporting format: Officer/WOSE/Total column groups of
 In/Out/Current/%, grouped by effective sub_unit_1 (shown once) and
 sub_unit_2 with SUBTOTALs and a unit TOTAL. In counts non-deferred
-personnel (issue 32 interim roster rule), Current the present/late marks
-for the selected slot, Out everyone else (unmarked = absent).
+personnel, Current the present marks (single daily session, issue 33 —
+reason never participates), Out everyone else (unmarked = absent).
 """
 
 import re
@@ -67,8 +67,8 @@ def _text(response) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", response.text))
 
 
-def _get(client: TestClient, slot: str = "am"):
-    return client.get("/admin", params={"date": TODAY.isoformat(), "slot": slot})
+def _get(client: TestClient):
+    return client.get("/admin", params={"date": TODAY.isoformat()})
 
 
 # --- Auth / shell ---
@@ -108,58 +108,38 @@ async def test_super_admin_sees_full_report(
     sample_attendance_scope,
     sample_attendance,
 ):
-    """Full-unit AM report: grouped rows, SUBTOTALs, TOTAL, and the
-    date/slot controls. Sample roster: 2 WOSE in Platoon 1 (both AM
-    present), 1 Officer in Platoon 2 (unmarked = absent)."""
+    """Full-unit report: grouped rows, SUBTOTALs, TOTAL, and the date
+    control (no slot toggle — single session, issue 33). Sample roster:
+    2 WOSE in Platoon 1 (John absent-with-mc, Jane present), 1 Officer in
+    Platoon 2 (unmarked = absent)."""
     sa = await _make_super_admin(db_session)
     await _sign_in(client, db_session, sa)
 
     response = _get(client)
     assert response.status_code == 200
     raw = _raw(response)
-    assert 'name="date"' in raw and 'name="slot"' in raw
-    assert 'value="am" checked' in raw
+    assert 'name="date"' in raw
+    assert 'name="slot"' not in raw  # AM/PM toggle is gone
     body = _text(response)
 
     # Sections in order, sub_unit_1 shown once per section.
     assert body.index("Platoon 1") < body.index("Platoon 2")
 
-    # Row: Platoon 1 / Section 1 — WOSE present (current), no Officer.
-    assert "Section 1 0 0 0 0% 1 0 1 100% 1 0 1 100%" in body
-    # Row: Platoon 1 / Section 2 — WOSE present.
+    # Row: Platoon 1 / Section 1 — WOSE absent (mc) → out, no Officer.
+    assert "Section 1 0 0 0 0% 1 1 0 0% 1 1 0 0%" in body
+    # Row: Platoon 1 / Section 2 — WOSE present → current.
     assert "Section 2 0 0 0 0% 1 0 1 100% 1 0 1 100%" in body
-    # Platoon 1 SUBTOTAL: WOSE 2 current.
-    assert "SUBTOTAL 0 0 0 0% 2 0 2 100% 2 0 2 100%" in body
+    # Platoon 1 SUBTOTAL: WOSE 2 in, 1 current.
+    assert "SUBTOTAL 0 0 0 0% 2 1 1 50% 2 1 1 50%" in body
     # Row: Platoon 2 / Section 1 — Officer unmarked → out.
     assert "Section 1 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body
     assert "SUBTOTAL 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body
-    # Unit TOTAL: Officer 1 out, WOSE 2 current, 2 of 3 = 67%.
-    assert "TOTAL 1 1 0 0% 2 0 2 100% 3 1 2 67%" in body
-
-
-@pytest.mark.asyncio
-async def test_pm_slot_uses_pm_statuses(
-    client: TestClient,
-    db_session: AsyncSession,
-    sample_users,
-    sample_personnel,
-    sample_attendance_scope,
-    sample_attendance,
-):
-    """slot=pm reads the PM column: p0 absent, p1 present, Officer
-    unmarked."""
-    sa = await _make_super_admin(db_session)
-    await _sign_in(client, db_session, sa)
-
-    body = _text(_get(client, slot="pm"))
-
-    assert "Section 1 0 0 0 0% 1 1 0 0% 1 1 0 0%" in body  # p0 PM absent
-    assert "Section 2 0 0 0 0% 1 0 1 100% 1 0 1 100%" in body  # p1 PM present
+    # Unit TOTAL: Officer 1 out, WOSE 1 of 2, 1 of 3 = 33%.
     assert "TOTAL 1 1 0 0% 2 1 1 50% 3 2 1 33%" in body
 
 
 @pytest.mark.asyncio
-async def test_late_counts_as_current(
+async def test_reason_never_affects_buckets(
     client: TestClient,
     db_session: AsyncSession,
     sample_users,
@@ -167,15 +147,16 @@ async def test_late_counts_as_current(
     sample_attendance_scope,
     sample_attendance,
 ):
-    """Late is present-like: an Officer marked late AM is Current, not Out."""
+    """Reason classifies remarks but never feeds reporting: absent rows —
+    with or without a reason — are Out; only present is Current."""
     admin_id = str(sample_users["admin"].id)
     db_session.add(
         Attendance(
             personnel_id=str(sample_personnel[2].id),
             nominal_roll_id=str(sample_personnel[2].nominal_roll_id),
             date=TODAY,
-            status_am="late",
-            status_pm="mc",
+            status="absent",
+            reason="awol",
             created_by=admin_id,
             updated_by=admin_id,
         )
@@ -187,12 +168,15 @@ async def test_late_counts_as_current(
 
     body = _text(_get(client))
 
-    assert "Section 1 1 0 1 100% 0 0 0 0% 1 0 1 100%" in body
-    assert "TOTAL 1 0 1 100% 2 0 2 100% 3 0 3 100%" in body
+    # Officer absent (awol) → Out; John absent (mc, from the fixture) → Out;
+    # only Jane's present counts Current.
+    assert "Section 1 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body  # Officer
+    assert "Section 1 0 0 0 0% 1 1 0 0% 1 1 0 0%" in body  # John
+    assert "TOTAL 1 1 0 0% 2 1 1 50% 3 2 1 33%" in body
 
 
 @pytest.mark.asyncio
-async def test_non_called_up_and_archived_excluded(
+async def test_deferred_and_archived_excluded_from_in(
     client: TestClient,
     db_session: AsyncSession,
     sample_users,
@@ -240,8 +224,8 @@ async def test_non_called_up_and_archived_excluded(
 
     body = _text(_get(client))
 
-    assert "Section 1 0 0 0 0% 1 0 1 100% 1 0 1 100%" in body
-    assert "TOTAL 1 1 0 0% 2 0 2 100% 3 1 2 67%" in body
+    assert "Section 1 0 0 0 0% 1 1 0 0% 1 1 0 0%" in body
+    assert "TOTAL 1 1 0 0% 2 1 1 50% 3 2 1 33%" in body
 
 
 @pytest.mark.asyncio
@@ -281,7 +265,7 @@ async def test_tagging_overlay_regroups_rows(
 
     assert "Section 3 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body
     assert "Platoon 2" not in body
-    assert "SUBTOTAL 1 1 0 0% 2 0 2 100% 3 1 2 67%" in body  # Platoon 1
+    assert "SUBTOTAL 1 1 0 0% 2 1 1 50% 3 2 1 33%" in body  # Platoon 1
 
 
 @pytest.mark.asyncio
@@ -315,7 +299,7 @@ async def test_null_subunits_reported_in_none_bucket(
 
     # Unmarked → out: In 1, Out 1, Current 0.
     assert "(none) 0 0 0 0% 1 1 0 0% 1 1 0 0%" in body
-    assert "TOTAL 1 1 0 0% 3 1 2 67% 4 2 2 50%" in body
+    assert "TOTAL 1 1 0 0% 3 2 1 33% 4 3 1 25%" in body
 
 
 # --- Access scoping ---
@@ -351,7 +335,7 @@ async def test_admin_scoped_to_assigned_subunits(
     assert "Platoon 1" in body
     assert "Platoon 2" not in body
     # Officer (Platoon 2) invisible: TOTAL has no Officer In.
-    assert "TOTAL 0 0 0 0% 2 0 2 100% 2 0 2 100%" in body
+    assert "TOTAL 0 0 0 0% 2 1 1 50% 2 1 1 50%" in body
 
 
 @pytest.mark.asyncio
