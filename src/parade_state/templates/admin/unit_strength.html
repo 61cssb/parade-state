@@ -16,18 +16,6 @@
         font-weight: 600;
         color: #374151;
     }
-    .slot-toggle {
-        display: inline-flex;
-        gap: 0.75rem;
-        align-items: center;
-    }
-    .slot-toggle label {
-        display: inline-flex;
-        gap: 0.3rem;
-        align-items: center;
-        font-weight: 400;
-        cursor: pointer;
-    }
     .strength-table {
         width: 100%;
         border-collapse: collapse;
@@ -74,19 +62,10 @@
         <label for="date">Date:</label>
         <input type="date" name="date" id="date" value="{{ target_date.strftime('%Y-%m-%d') }}"
                onchange="this.form.submit()">
-        <div class="slot-toggle" role="group" aria-label="Attendance slot">
-            <span style="font-weight: 600; color: #374151;">Slot:</span>
-            <label><input type="radio" name="slot" value="am"
-                {% if slot == 'am' %}checked{% endif %}
-                onchange="this.form.submit()"> AM</label>
-            <label><input type="radio" name="slot" value="pm"
-                {% if slot == 'pm' %}checked{% endif %}
-                onchange="this.form.submit()"> PM</label>
-        </div>
     </form>
     <p style="color: #6b7280; margin-top: 1rem; margin-bottom: 0;">
-        In = on the nominal roll (not Deferred) · Current = Present/Late ·
-        Out = all other statuses (unmarked = absent).
+        In = on the nominal roll (not Deferred) · Current = Present ·
+        Out = Absent (unmarked = absent).
     </p>
 </div>
 
@@ -118,7 +97,7 @@
 {% else %}
 <div class="card">
     <h3>Unit Strength — {{ nr_label }}
-        · {{ target_date.strftime('%Y-%m-%d') }} · {{ slot|upper }}</h3>
+        · {{ target_date.strftime('%Y-%m-%d') }}</h3>
     <div class="table-wrap">
         <table class="strength-table">
             <thead>
@@ -172,32 +151,22 @@
 
 {% block scripts %}
 <script>
-    // Default date/slot from the browser's local datetime on first visit
+    // Default the date from the browser's local datetime on first visit
     // (URL without params): the server cannot know the viewer's timezone.
-    // Reloads once at most — after submit both params are in the URL.
+    // Reloads once at most — after submit the param is in the URL.
     (function () {
         var params = new URLSearchParams(window.location.search);
-        if (params.has('date') && params.has('slot')) return;
+        if (params.has('date')) return;
         var form = document.getElementById('strength-form');
         var now = new Date();
         var changed = false;
 
-        if (!params.has('date')) {
-            var localDate = now.getFullYear() + '-' +
-                String(now.getMonth() + 1).padStart(2, '0') + '-' +
-                String(now.getDate()).padStart(2, '0');
-            if (form.elements.date.value !== localDate) {
-                form.elements.date.value = localDate;
-                changed = true;
-            }
-        }
-        if (!params.has('slot')) {
-            var localSlot = now.getHours() < 12 ? 'am' : 'pm';
-            var checked = form.querySelector('input[name="slot"]:checked');
-            if (checked && checked.value !== localSlot) {
-                form.elements.slot.value = localSlot;
-                changed = true;
-            }
+        var localDate = now.getFullYear() + '-' +
+            String(now.getMonth() + 1).padStart(2, '0') + '-' +
+            String(now.getDate()).padStart(2, '0');
+        if (form.elements.date.value !== localDate) {
+            form.elements.date.value = localDate;
+            changed = true;
         }
         if (changed) form.submit();
     })();

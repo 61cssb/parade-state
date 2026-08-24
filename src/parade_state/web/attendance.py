@@ -22,6 +22,7 @@ from parade_state.models import (
     Personnel,
     TaggingEntry,
 )
+from parade_state.models.personnel import INPRO_STATUS_LABELS, INPRO_STATUSES
 from parade_state.utils import utc_dt
 
 router = APIRouter()
@@ -33,15 +34,17 @@ async def attendance_view(
     nominal_roll_id: str | None = None,
     date: utc_dt.date | None = None,
     sub_unit_1: str | None = None,
+    inpro_status: str | None = None,
 ):
     """Render the attendance marking page.
 
     Defaults to the NR currently active for attendance (if any). Lists the
-    roster with the NR's 1:1 tagging overlay applied, joined to the selected
-    day's attendance rows (AM/PM columns). Editing is enabled only when the
-    selected NR is the active one. Non-super-admins only see personnel whose
-    effective (unit, sub_unit_1) falls inside one of their scope grants on
-    the NR.
+    whole roster (deferred included — issue 33) with the NR's 1:1 tagging
+    overlay applied, joined to the selected day's attendance rows, with an
+    optional Inpro Status view filter (e.g. hide Deferred). Editing is
+    enabled only when the selected NR is the active one. Non-super-admins
+    only see personnel whose effective (unit, sub_unit_1) falls inside one
+    of their scope grants on the NR.
     """
     current_user = await get_current_user_optional(request)
     if not current_user:
@@ -91,17 +94,14 @@ async def attendance_view(
             tagging = await _load_nr_tagging(db, selected_nr_id, with_entries=False)
             applied_tagging_id = str(tagging.id) if tagging else None
 
+            # Issue 33: everyone on the NR attends — deferred included.
+            # The Inpro Status filter below is a view concern; existing
+            # attendance records for filtered-out personnel are preserved
+            # untouched.
             roster_result = await db.execute(
                 select(Personnel).where(
-                    and_(
-                        Personnel.nominal_roll_id == selected_nr_id,
-                        Personnel.status == "active",
-                        # Interim roster rule (issue 32, until #33): everyone
-                        # except deferred attends — yet_to_inpro + inproed.
-                        # Deferred personnel are hidden — existing attendance
-                        # records for them are preserved untouched.
-                        Personnel.inpro_status != "deferred",
-                    )
+                    Personnel.nominal_roll_id == selected_nr_id,
+                    Personnel.status == "active",
                 ).order_by(
                     Personnel.unit,
                     Personnel.sub_unit_1,
@@ -176,15 +176,18 @@ async def attendance_view(
                         "sub_unit_3": (
                             entry.to_sub_unit_3 if entry else person.sub_unit_3
                         ),
-                        "status_am": record.status_am if record else "absent",
-                        "remarks_am": record.remarks_am if record else "",
-                        "status_pm": record.status_pm if record else "absent",
-                        "remarks_pm": record.remarks_pm if record else "",
+                        "status": record.status if record else "absent",
+                        "reason": record.reason if record else None,
+                        "remarks": record.remarks if record else "",
+                        "inpro_status": person.inpro_status,
+                        "inpro_label": INPRO_STATUS_LABELS.get(
+                            person.inpro_status, person.inpro_status
+                        ),
                     }
                 )
 
             # Filter dropdown options: distinct effective sub_unit_1 across
-            # the user's whole visible roster (before the filter is applied).
+            # the user's whole visible roster (before the filters apply).
             subunit_options = sorted(
                 {
                     r["sub_unit_1"]
@@ -196,12 +199,18 @@ async def attendance_view(
                 attendance_rows = [
                     r for r in attendance_rows if r["sub_unit_1"] == sub_unit_1
                 ]
+            # Inpro Status view filter (issue 33) — e.g. hide Deferred.
+            # Unknown values are ignored (filter falls back to "all").
+            if inpro_status and inpro_status in INPRO_STATUSES:
+                attendance_rows = [
+                    r for r in attendance_rows
+                    if r["inpro_status"] == inpro_status
+                ]
 
         counts = (
             await attendance_counts_for_date(selected_nr_id, target_date, db)
             if selected_nr_id
-            else {"am": {"present": 0, "absent": 0, "total": 0},
-                  "pm": {"present": 0, "absent": 0, "total": 0}}
+            else {"present": 0, "absent": 0, "total": 0}
         )
 
     env = _get_templates(request)
@@ -226,6 +235,10 @@ async def attendance_view(
         target_date=target_date,
         sub_unit_1_filter=sub_unit_1 or "",
         subunit_options=subunit_options,
+        inpro_filter=(
+            inpro_status if inpro_status in INPRO_STATUSES else ""
+        ),
+        inpro_labels=INPRO_STATUS_LABELS,
         attendance_rows=attendance_rows,
         counts=counts,
         nr_caa=selected.caa.isoformat() if (selected and selected.caa) else "",

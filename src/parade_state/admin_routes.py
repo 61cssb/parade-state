@@ -159,16 +159,16 @@ def _strength_cells(buckets: dict[str, dict[str, int]]) -> dict:
 async def admin_unit_strength(
     request: Request,
     date: utc_dt.date | None = None,
-    slot: str = "am",
 ):
     """Render the Unit Strength report (issue 25).
 
     Aggregates the parade state of the NR active for attendance by
     effective sub_unit_1/sub_unit_2 into the strength reporting format:
     Officer/WOSE/Total column groups, each In/Out/Current/%. In counts
-    non-deferred personnel; Current those marked present/late in the selected
-    slot; Out everyone else (unmarked = absent). Unit and sub_unit_3 are
-    ignored — attached personnel from other units report here too.
+    non-deferred personnel; Current those marked present (single daily
+    session, issue 33 — reason never participates); Out everyone else
+    (unmarked = absent). Unit and sub_unit_3 are ignored — attached
+    personnel from other units report here too.
     Super-admins see the whole unit; regular admins see only the sections
     inside their (unit, sub_unit_1) scope grants on the NR.
     """
@@ -176,8 +176,6 @@ async def admin_unit_strength(
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
 
-    if slot not in ("am", "pm"):
-        slot = "am"
     target_date = date or utc_dt.utcnow().date()
 
     sections: list[dict] = []
@@ -237,15 +235,13 @@ async def admin_unit_strength(
             att_by_person = {a.personnel_id: a for a in attendance_rows}
 
             # (effective unit, effective sub_unit_1, effective sub_unit_2,
-            # category, slot status) per person; no attendance row = absent
+            # category, status) per person; no attendance row = absent
             # (model default).
             per_person: list[tuple[str | None, str | None, str | None, str, str]] = []
             for person in roster:
                 entry = entry_by_person.get(str(person.id))
                 record = att_by_person.get(str(person.id))
-                status = (
-                    record.status_pm if slot == "pm" else record.status_am
-                ) if record is not None else "absent"
+                status = record.status if record is not None else "absent"
                 per_person.append(
                     (
                         entry.to_unit if entry is not None else person.unit,
@@ -317,7 +313,6 @@ async def admin_unit_strength(
         active_page="strength",
         nr_label=nr_label,
         target_date=target_date,
-        slot=slot,
         sections=sections,
         total=total_cells,
         no_assignments=no_assignments,
