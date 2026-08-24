@@ -1,7 +1,10 @@
 """Deferment API endpoints.
 
-Super-admin-only CRUD for personnel deferments. Creating/approving a deferment
-drives the linked personnel's ``callup_status`` field.
+Super-admin-only CRUD for personnel deferments. Deferment status changes
+drive the linked personnel's ``inpro_status`` field (issue 32): approving
+prompts in the UI (the API leaves inpro_status untouched), while moving an
+approved deferment to any other status — or deleting it — always reverts
+the person to ``yet_to_inpro``.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -26,32 +29,32 @@ router = APIRouter()
 # Constants & helpers
 # ============================================================================
 
-# Deferment statuses that belong to a later workflow phase. Setting a deferment
-# to either of these does NOT update personnel.callup_status.
-_DEFERMENT_STATUSES_NEUTRAL = {"Not called up", "Do not call up"}
+# Deferment statuses that belong to a later workflow phase ("Not called
+# up" / "Do not call up"). They no longer gate the inpro transition: an
+# approved deferment reverting to these still resets inpro_status.
 
 
-def _apply_callup_transition(
+def _apply_inpro_transition(
     personnel: Personnel,
     old_status: str | None,
     new_status: str | None,
 ) -> None:
-    """Transition personnel.callup_status based on deferment status change.
+    """Transition personnel.inpro_status based on a deferment status change.
 
     Called on PATCH (``old_status`` → ``new_status``) and DELETE
     (``new_status`` passed as ``None``).
-    """
-    # Neutral statuses are a separate workflow phase — never touch callup_status.
-    if new_status in _DEFERMENT_STATUSES_NEUTRAL:
-        return
 
-    if new_status == "Approved":
-        personnel.callup_status = "Deferred"
-    elif old_status == "Approved":
-        # Moving away from Approved (to a non-neutral status, or via delete)
-        # → revert to Called Up.
-        personnel.callup_status = "Called Up"
-    # else: no Approved involvement → callup_status unchanged
+    Issue 32 semantics:
+
+    - Approving (``new_status == "Approved"``) does NOT touch inpro_status —
+      the admin UI prompts "set Inpro status to Deferred?" and PATCHes the
+      personnel separately if confirmed, so declining leaves it unchanged.
+    - Moving away from Approved (to any other status, or via delete) ALWAYS
+      reverts to ``yet_to_inpro`` — even if the person was manually marked
+      ``inproed`` in the meantime.
+    """
+    if old_status == "Approved" and new_status != "Approved":
+        personnel.inpro_status = "yet_to_inpro"
 
 
 def _snapshot_sub_unit(personnel: Personnel) -> str | None:
@@ -135,7 +138,7 @@ async def create_deferment(
 
     Snapshots ``rank_name`` (``{rank} {full_name}``) and ``sub_unit`` from the
     linked personnel at creation time. New deferments start with
-    ``status="Pending action"`` so callup_status is not affected.
+    ``status="Pending action"`` so inpro_status is not affected.
     """
     user_id = str(user.id)
 
@@ -207,8 +210,9 @@ async def update_deferment(
 ) -> DefermentResponse:
     """Update a deferment.
 
-    Status changes drive the linked personnel's ``callup_status`` via
-    ``_apply_callup_transition``.
+    Status changes drive the linked personnel's ``inpro_status`` via
+    ``_apply_inpro_transition`` (approval leaves it to the UI prompt;
+    leaving Approved reverts to ``yet_to_inpro``).
     """
     user_id = str(user.id)
 
@@ -235,14 +239,14 @@ async def update_deferment(
 
     new_status = deferment.status
 
-    # Drive callup_status on the linked personnel if anything could change.
+    # Drive inpro_status on the linked personnel if anything could change.
     if payload.status is not None:
         personnel_result = await db.execute(
             select(Personnel).where(Personnel.id == deferment.personnel_id)
         )
         personnel = personnel_result.scalar_one_or_none()
         if personnel is not None:
-            _apply_callup_transition(personnel, old_status, new_status)
+            _apply_inpro_transition(personnel, old_status, new_status)
 
     deferment.updated_at = utc_dt.ensure_naive(utc_dt.utcnow())
     deferment.updated_by = user_id
@@ -271,7 +275,7 @@ async def delete_deferment(
     """Delete a deferment.
 
     If the deferment was Approved, revert the linked personnel's
-    ``callup_status`` to ``Called Up``.
+    ``inpro_status`` to ``yet_to_inpro``.
     """
 
     result = await db.execute(
@@ -284,15 +288,15 @@ async def delete_deferment(
             detail=f"Deferment not found: {deferment_id}",
         )
 
-    # Revert callup_status if this deferment was Approved (treat delete as
-    # transitioning to None — Approved → None reverts to Called Up).
+    # Revert inpro_status if this deferment was Approved (treat delete as
+    # transitioning to None — Approved → anything reverts to yet_to_inpro).
     if deferment.status == "Approved":
         personnel_result = await db.execute(
             select(Personnel).where(Personnel.id == deferment.personnel_id)
         )
         personnel = personnel_result.scalar_one_or_none()
         if personnel is not None:
-            _apply_callup_transition(personnel, deferment.status, None)
+            _apply_inpro_transition(personnel, deferment.status, None)
 
     await db.delete(deferment)
     await db.commit()
