@@ -329,15 +329,17 @@ async def export_nominal_roll_csv(
     sub_unit_2: str | None = Query(None, description="Filter: sub-unit 2"),
     category: str | None = Query(None, description="Filter: category (Officer / WOSE)"),
     rank: str | None = Query(None, description="Filter: rank"),
+    inpro_status: str | None = Query(None, description="Filter: inpro status (inproed / yet_to_inpro / deferred)"),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Export the nominal roll browser table exactly as displayed.
 
-    Columns: Unit, Sub Unit 1-3, Category, Rank, Full Name, Pers No, Callup,
-    Remarks — with the roll's 1:1 tagging overlay applied, ordered like the
-    browser view. The view's filters (search, unit, sub-units, category,
-    rank) are honoured so the CSV matches what the caller sees. Unlike the
-    view there is no 1000-row cap: an export is always complete.
+    Columns: Unit, Sub Unit 1-3, Category, Rank, Full Name, Pers No, Inpro
+    Status, Remarks — with the roll's 1:1 tagging overlay applied, ordered
+    like the browser view. The view's filters (search, unit, sub-units,
+    category, rank, inpro status) are honoured so the CSV matches what the
+    caller sees. Unlike the view there is no 1000-row cap: an export is
+    always complete.
 
     Caller identity is session-derived (issue 31). Issue #28 read
     scoping: ``super_admin`` exports the whole roll; everyone else only
@@ -377,6 +379,8 @@ async def export_nominal_roll_csv(
         conds.append(Personnel.category == category)
     if rank:
         conds.append(Personnel.rank == rank)
+    if inpro_status:
+        conds.append(Personnel.inpro_status == inpro_status)
 
     personnel_rows = (
         (
@@ -426,7 +430,7 @@ async def export_nominal_roll_csv(
     writer.writerow(
         [
             "Unit", "Sub Unit 1", "Sub Unit 2", "Sub Unit 3",
-            "Category", "Rank", "Full Name", "Pers No", "Callup", "Remarks",
+            "Category", "Rank", "Full Name", "Pers No", "Inpro Status", "Remarks",
         ]
     )
     for person in personnel_rows:
@@ -443,7 +447,7 @@ async def export_nominal_roll_csv(
                 person.rank,
                 person.full_name,
                 person.pers_no or "",
-                person.callup_status,
+                person.inpro_status,
                 person.remarks or "",
             ]
         )

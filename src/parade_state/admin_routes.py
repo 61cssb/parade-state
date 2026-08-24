@@ -124,7 +124,7 @@ def _strength_buckets() -> dict[str, dict[str, int]]:
 def _strength_cell(bucket: dict[str, int]) -> dict[str, int]:
     """Render-ready In/Out/Current/% cell from one In/Current counter.
 
-    Out is the complement of Current within In (every Called Up person is
+    Out is the complement of Current within In (every rostered person is
     exactly one of Current/Out — unmarked attendance counts as absent),
     and % is Current over In, whole-number, 0 when In is 0.
     """
@@ -166,7 +166,7 @@ async def admin_unit_strength(
     Aggregates the parade state of the NR active for attendance by
     effective sub_unit_1/sub_unit_2 into the strength reporting format:
     Officer/WOSE/Total column groups, each In/Out/Current/%. In counts
-    Called Up personnel; Current those marked present/late in the selected
+    non-deferred personnel; Current those marked present/late in the selected
     slot; Out everyone else (unmarked = absent). Unit and sub_unit_3 are
     ignored — attached personnel from other units report here too.
     Super-admins see the whole unit; regular admins see only the sections
@@ -200,13 +200,14 @@ async def admin_unit_strength(
             )
 
             # The strength population is the attendance roster: active
-            # personnel on the NR with callup status Called Up.
+            # personnel on the NR who are not deferred (issue 32 interim
+            # rule — yet_to_inpro + inproed).
             roster = (
                 await db.execute(
                     select(Personnel).where(
                         Personnel.nominal_roll_id == nr_id,
                         Personnel.status == "active",
-                        Personnel.callup_status == "Called Up",
+                        Personnel.inpro_status != "deferred",
                     )
                 )
             ).scalars().all()

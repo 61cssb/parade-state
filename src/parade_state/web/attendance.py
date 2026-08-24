@@ -96,10 +96,11 @@ async def attendance_view(
                     and_(
                         Personnel.nominal_roll_id == selected_nr_id,
                         Personnel.status == "active",
-                        # Only Called Up personnel attend; other callup
-                        # statuses (Deferred, MR, ...) are hidden — existing
-                        # attendance records for them are preserved untouched.
-                        Personnel.callup_status == "Called Up",
+                        # Interim roster rule (issue 32, until #33): everyone
+                        # except deferred attends — yet_to_inpro + inproed.
+                        # Deferred personnel are hidden — existing attendance
+                        # records for them are preserved untouched.
+                        Personnel.inpro_status != "deferred",
                     )
                 ).order_by(
                     Personnel.unit,
