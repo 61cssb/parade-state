@@ -320,7 +320,10 @@ async def test_example(client, sample_users, sample_grouping):
   assigned subunits (tagging-aware effective sub_unit_1; super_admin sees
   all) with a read-only Inpro Status column just before the status column
   and an Inpro Status filter (e.g. hide Deferred). With no active NR it
-  shows an inactive message instead of the marking table.
+  shows an inactive message instead of the marking table. The viewed day
+  defaults server-side to UTC today; a first-visit script re-defaults it
+  to the browser's local day (best effort — mirrors the strength report;
+  UTC lagged SGT mornings until 08:00).
 - **Copy Remarks** lives on `/attendance` behind a modal (issue 20;
   single-session rework in #33): explicit source/destination date pickers
   (clamped to the NR's CAA → the viewed day; prefilled with the previous

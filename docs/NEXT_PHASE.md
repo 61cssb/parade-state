@@ -205,6 +205,14 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-26:** Sidebar reorder (direct to dev): Unit Strength moved
+  after Attendance — reporting follows marking
+- **2026-08-26:** Attendance local-day default: `/attendance` server
+  default for the viewed day is UTC today; a first-visit script (no
+  `?date=` in the URL) re-defaults to the browser's local day and
+  resubmits the filter form (filters preserved) — UTC was showing
+  yesterday until 08:00 SGT; explicit `?date=` and no-JS clients keep
+  the server default. Same pattern as the strength report's date picker
 - **2026-08-25:** Unit Strength basis toggle (Issue 36): `?basis=tagged|
   untagged` on `/admin` (default tagged, unknown → tagged); untagged
   groups under the original NR allocations (canonical Personnel columns,
