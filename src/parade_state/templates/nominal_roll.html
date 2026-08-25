@@ -1142,7 +1142,7 @@
         for (const pid of Object.keys(staged)) {
             try {
                 const res = await fetch(
-                    '/api/v1/personnel/' + encodeURIComponent(pid) +
+                    '/api/v1/personnel/' + encodeURIComponent(pid),
                     {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },

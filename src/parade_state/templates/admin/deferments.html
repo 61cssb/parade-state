@@ -345,7 +345,7 @@
         };
         try {
             const res = await fetch(
-                '/api/v1/deferments/' + editId + ',
+                '/api/v1/deferments/' + editId,
                 { method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) }
             );
             if (res.ok) {
@@ -389,7 +389,7 @@
         if (!confirm('Delete deferment for "' + rankName + '"? This cannot be undone.')) return;
         try {
             const res = await fetch(
-                '/api/v1/deferments/' + id + ',
+                '/api/v1/deferments/' + id,
                 { method: 'DELETE' }
             );
             if (res.ok) {

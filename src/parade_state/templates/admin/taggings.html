@@ -374,7 +374,7 @@
         try {
             const [personnel, taggingRes] = await Promise.all([
                 loadPersonnel(),
-                fetch('/api/v1/taggings/' + id + '),
+                fetch('/api/v1/taggings/' + id),
             ]);
             if (!taggingRes.ok) throw new Error('Failed to load tagging');
             const tagging = await taggingRes.json();
@@ -455,7 +455,7 @@
 
         try {
             const res = await fetch(
-                '/api/v1/taggings/' + editId + ',
+                '/api/v1/taggings/' + editId,
                 { method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) }
             );
             if (res.ok) {
