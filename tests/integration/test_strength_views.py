@@ -72,6 +72,12 @@ def _text(response) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", response.text))
 
 
+def _segment_checked(raw: str, value: str) -> bool:
+    """Whether the basis segmented control marks ``value`` as the active
+    (checked) segment — layout-tolerant over attribute order/whitespace."""
+    return re.search(rf'value="{value}"[^>]*\bchecked\b', raw) is not None
+
+
 def _get(client: TestClient, basis: str | None = None):
     params = {"date": TODAY.isoformat()}
     if basis is not None:
@@ -360,7 +366,8 @@ async def test_untagged_basis_groups_by_original_allocations(
     raw = _raw(response)
     assert "Untagged (original NR)" in raw  # heading names the basis
     assert "original nominal-roll" in raw  # legend explains the basis
-    assert 'value="untagged" selected' in raw  # toggle reflects it
+    assert _segment_checked(raw, "untagged")  # active segment
+    assert not _segment_checked(raw, "tagged")
     body = _text(response)
 
     assert "Section 1 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body  # Officer, home subunit
@@ -395,7 +402,8 @@ async def test_tagged_basis_selected_by_default_and_on_explicit_param(
         assert response.status_code == 200
         raw = _raw(response)
         assert "· Tagged" in raw
-        assert 'value="tagged" selected' in raw
+        assert _segment_checked(raw, "tagged")
+        assert not _segment_checked(raw, "untagged")
         body = _text(response)
         assert "Section 3 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body
         assert "Platoon 2" not in body

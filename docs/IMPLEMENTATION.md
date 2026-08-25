@@ -371,7 +371,8 @@ async def test_example(client, sample_users, sample_grouping):
   (tagging-applied) subunits; **untagged** groups under the original NR
   allocations — the canonical `Personnel` columns, tagging overlay not
   applied (`from_*` snapshots never consulted). Untagged is
-  super-admin-only: the toggle select renders for super-admins alone and
+  super-admin-only: the segmented Tagged/Untagged control (radio-based,
+  active segment highlighted) renders for super-admins alone and
   any other role explicitly requesting it gets the 403 no-access page.
   The heading names the active basis so rendered output is
   self-describing; the unit-wide TOTAL is allocation-independent and

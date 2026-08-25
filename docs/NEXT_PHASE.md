@@ -208,7 +208,8 @@ Defer until CSV Step 3 (diff confirmation) forces it.
   untagged` on `/admin` (default tagged, unknown → tagged); untagged
   groups under the original NR allocations (canonical Personnel columns,
   overlay not applied, `from_*` never consulted) — super-admin-only
-  (toggle select rendered for them alone; other roles requesting it get
+  (segmented Tagged/Untagged control rendered for them alone; other
+  roles requesting it get
   the 403 no-access page); heading names the basis; unit TOTAL identical
   on both bases; no schema/API changes
 - **2026-08-25:** Attendance day freeze (Issue 35): `attendance_freezes`
