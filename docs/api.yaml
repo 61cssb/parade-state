@@ -97,6 +97,14 @@ tags:
       require the target NR to be the active one (400 otherwise) and are
       gated by Subunit-1 assignment (403; super_admin bypasses;
       tagging-aware effective sub_unit_1).
+      Day freeze (issue 35): PUT /attendance/freeze {nominal_roll_id,
+      date} freezes a day on the active NR (super-admin only; 409 when
+      already frozen) and DELETE /attendance/freeze?nominal_roll_id=&date=
+      unfreezes it (404 when not frozen); both are audit-logged. Upsert
+      (any touched date) and copy-remarks (destination date) refuse
+      writes touching a frozen (NR, date) with 403 naming the freeze —
+      super-admins edit frozen days freely; reads and exports are never
+      blocked.
       GET /attendance/export streams the marking table for an NR + date as
       CSV (Unit, Sub-units 1-3, Category, Rank, Name, Inpro Status,
       Status, Reason, Remarks — statuses/reasons as display labels;

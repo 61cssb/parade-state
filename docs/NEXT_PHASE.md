@@ -16,7 +16,7 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ## Current Snapshot
 
-- **Tests:** 643 SQLite passing (flags-on posture; flags-off gating has
+- **Tests:** 652 SQLite passing (flags-on posture; flags-off gating has
   dedicated tests). The suite runs against
   Postgres by setting `TEST_DATABASE_URL` (per-test databases).
 - **Access model:** `super_admin` + `admin` only. Unknown Google
@@ -68,7 +68,9 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   writes gated to the active NR; the marking roster is **all** NR personnel
   (deferred included) with a read-only Inpro Status column + filter —
   filtering hides rows non-destructively, existing attendance records are
-  preserved
+  preserved; super-admins can **freeze** a day (issue 35) — frozen days
+  turn read-only for admins (403 on writes) while super-admins keep
+  editing, banner + freeze timestamp visible to every role
 - **Admin scoped access (issue #28)**: scope grants are
   (unit, sub_unit_1) pairs per NR on `UserSubunitAssignment` with the
   explicit `*` wildcard sentinel; matching follows the tagging-overlay
@@ -201,6 +203,15 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-25:** Attendance day freeze (Issue 35): `attendance_freezes`
+  table (one row per frozen NR/day, migration `x5e6f7a8b9c0` + widened
+  `audit_action`); super-admin-only `PUT/DELETE /api/v1/attendance/freeze`
+  (active-NR gated; 409 double-freeze / 404 unfreeze-miss; audit-logged
+  action `attendance_freeze`); upsert + copy-remarks 403 naming the
+  freeze when non-super-admins write a frozen day (super-admins keep
+  editing, retro rules unchanged); page: Freeze/Unfreeze toggle
+  (super-admins), frozen banner with timestamp (all roles), read-only
+  plain-text grid for admins — reads/exports/scope never blocked
 - **2026-08-25:** Two deploy-day hotfixes after the r20260825 switch:
   (1) the Docker image's Python 3.12 eagerly evaluates annotations, so
   issue 31's `user: User` signature without the import crash-looped the

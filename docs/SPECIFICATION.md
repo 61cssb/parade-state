@@ -232,6 +232,39 @@ Attendance (one row per personnel/day)
   remark; missing destination rows are created on demand (status defaults
   `absent`); source and destination dates must differ (400 otherwise)
 
+**Day freeze semantics (issue 35):**
+
+```
+AttendanceFreeze (one row per frozen NR/day)
+├── id: UUID (PK)
+├── nominal_roll_id: UUID (FK NominalRoll, on_delete=CASCADE)
+├── date: date
+├── created_at: datetime   (the "frozen at" timestamp shown in the banner)
+└── created_by: UUID (FK User)
+```
+
+- Row presence = frozen: `UNIQUE(nominal_roll_id, date)`; unfreezing
+  deletes the row. Freezes cascade with the NR (purge needs no cleanup).
+- **Super-admin-only toggle** (`PUT` / `DELETE /api/v1/attendance/freeze`)
+  — an NR-lifecycle-grade operation. Only the attendance-active NR can
+  be frozen (the `require_attendance_active` gate). Freezing an already
+  frozen (NR, date) → 409; unfreezing a day that is not frozen → 404.
+  Both directions are audit-logged (action `attendance_freeze`, entity
+  `nominal_roll`; the description names the direction).
+- **Write guard**: `PUT /attendance/upsert` (any touched date) and
+  `POST /attendance/copy-remarks` (the destination date) refuse writes
+  that touch a frozen (NR, date) with **403** naming the freeze —
+  "Attendance for \<date\> is frozen; super-admin required". Super-admins
+  write frozen days freely (retro-edit provenance still applies). 403 over
+  423 Locked for consistency with every other permission denial.
+- Freeze never blocks reads, exports, or scope filtering. A frozen
+  **source** date may still be copied from (it is only read).
+- **UI**: a Freeze/Unfreeze toggle on the attendance page's date-selector
+  row (super-admins only), a persistent frozen banner for every role
+  (naming the freeze timestamp), and a read-only grid for admins on
+  frozen days (plain text, no inputs → no autosave). The server-side
+  guard is authoritative — the read-only UI is UX, not the control.
+
 ---
 
 ## 3. Data Model Specification

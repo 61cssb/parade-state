@@ -256,6 +256,17 @@ async def test_example(client, sample_users, sample_grouping):
   other, awol. Migration `w4d5e6f7a8b9` collapses the legacy 9-value AM/PM
   vocabulary per the issue-33 mapping table (PM wins when its slot was
   marked; remarks joined with `"; "`; "Late" appended).
+- Day freeze (issue 35): `attendance_freezes` table (migration
+  `x5e6f7a8b9c0`; one row per frozen NR/day, cascades with the NR).
+  `PUT /api/v1/attendance/freeze` (JSON body) / `DELETE` (query params)
+  toggle it — super-admin only, active-NR gated, 409 on double-freeze /
+  404 on unfreezing a non-frozen day, audit-logged under action
+  `attendance_freeze` (entity `nominal_roll`). Upsert (any touched date)
+  and copy-remarks (destination date) 403 for non-super-admins when a
+  frozen (NR, date) is written; super-admins keep editing (retro-edit
+  rules unchanged). The attendance page shows a Freeze/Unfreeze toggle
+  (super-admins), a frozen banner naming the freeze timestamp (every
+  role), and a plain-text read-only grid for admins on frozen days.
 
 **Scope Access (✅ issue #4 PR 2; ✅ extended by issue #28)**
 - `UserSubunitAssignment(user_id, nominal_roll_id, unit, sub_unit_1)` — a
