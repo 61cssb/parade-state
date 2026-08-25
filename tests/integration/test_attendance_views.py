@@ -521,3 +521,41 @@ async def test_frozen_day_banner_and_readonly_grid(
     assert '<select class="status-select"' in response.text  # still editable
     assert 'id="freeze-toggle"' in response.text
     assert "Unfreeze day" in response.text
+
+
+@pytest.mark.asyncio
+async def test_attendance_default_date_is_utc_with_local_redefault(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_users,
+    db_session,
+    monkeypatch,
+):
+    """The viewed day defaults server-side to UTC today (an explicit ?date=
+    always wins); the page ships a first-visit script that re-defaults the
+    date to the browser's local day — the server cannot know the viewer's
+    timezone, and UTC lags SGT mornings until 08:00. Mirrors the strength
+    report's script."""
+    from parade_state.utils import utc_dt
+    from parade_state.web import attendance as web_attendance
+
+    sample_nominal_roll.attendance_active = True
+    sample_nominal_roll.attendance_activated_by = str(sample_users["admin"].id)
+    db_session.add(sample_nominal_roll)
+    await db_session.commit()
+
+    async def _fake_current_user(_request):
+        return sample_users["admin"]
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
+
+    # No date param: the rendered input carries the UTC-default date.
+    response = client.get("/attendance")
+    assert response.status_code == 200
+    assert f'value="{utc_dt.utcnow().date().isoformat()}"' in response.text
+    # Best-effort local re-default ships with the page, guarded to URLs
+    # without a date param, and resubmits the filter form so the other
+    # filters survive the reload.
+    assert "params.has('date')" in response.text
+    assert "dateInput.form.submit()" in response.text
