@@ -159,6 +159,7 @@ def _strength_cells(buckets: dict[str, dict[str, int]]) -> dict:
 async def admin_unit_strength(
     request: Request,
     date: utc_dt.date | None = None,
+    basis: str | None = None,
 ):
     """Render the Unit Strength report (issue 25).
 
@@ -171,10 +172,23 @@ async def admin_unit_strength(
     personnel from other units report here too.
     Super-admins see the whole unit; regular admins see only the sections
     inside their (unit, sub_unit_1) scope grants on the NR.
+
+    Reporting basis (issue 36): ``tagged`` (default) groups personnel
+    under their effective (tagging-applied) allocations; ``untagged``
+    groups them under the original NR allocations (the canonical
+    Personnel columns). Untagged is super-admin-only.
     """
     current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
+
+    # Absent/unknown basis values fall back to the tagged default.
+    if basis not in ("tagged", "untagged"):
+        basis = "tagged"
+    if basis == "untagged" and current_admin.role != "super_admin":
+        return _no_permission_response(
+            request, current_admin, "Unit Strength", "strength"
+        )
 
     target_date = date or utc_dt.utcnow().date()
 
@@ -211,18 +225,22 @@ async def admin_unit_strength(
             ).scalars().all()
 
             # Tagging overlay: effective unit/subunits come from the NR's
-            # 1:1 tagging entries where present (as in the attendance view).
+            # 1:1 tagging entries where present (as in the attendance
+            # view). On the untagged basis (issue 36) the overlay is not
+            # applied at all — personnel group under their canonical
+            # (original NR) allocations.
             entry_by_person: dict[str, TaggingEntry] = {}
-            tagging = await _load_nr_tagging(db, nr_id, with_entries=False)
-            if tagging is not None:
-                entries = (
-                    await db.execute(
-                        select(TaggingEntry).where(
-                            TaggingEntry.tagging_id == str(tagging.id)
+            if basis == "tagged":
+                tagging = await _load_nr_tagging(db, nr_id, with_entries=False)
+                if tagging is not None:
+                    entries = (
+                        await db.execute(
+                            select(TaggingEntry).where(
+                                TaggingEntry.tagging_id == str(tagging.id)
+                            )
                         )
-                    )
-                ).scalars().all()
-                entry_by_person = {str(e.personnel_id): e for e in entries}
+                    ).scalars().all()
+                    entry_by_person = {str(e.personnel_id): e for e in entries}
 
             attendance_rows = (
                 await db.execute(
@@ -311,6 +329,7 @@ async def admin_unit_strength(
             "role": current_admin.role,
         },
         active_page="strength",
+        basis=basis,
         nr_label=nr_label,
         target_date=target_date,
         sections=sections,

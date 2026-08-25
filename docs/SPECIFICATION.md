@@ -646,6 +646,20 @@ inside their (unit, sub_unit_1) scope grants (deny-by-default, the same
 TOTAL summing the visible rows and a guidance message for admins with no
 grants.
 
+**Reporting basis (issue 36):** `?basis=tagged|untagged` (default
+`tagged`; unknown values fall back to `tagged`). **Tagged** groups
+personnel under their effective (tagging-applied) allocations — the
+behavior of every other surface. **Untagged** groups them under the
+original NR allocations, i.e. the canonical `Personnel` unit/sub-unit
+columns the CSV loaded (the tagging overlay is not applied; the
+`TaggingEntry.from_*` snapshots are never consulted). Untagged is
+**super-admin-only**: the basis toggle renders for super-admins alone,
+and any other role explicitly requesting `basis=untagged` gets the 403
+no-access page; admins and below always report on the tagged basis.
+In/Current/Out semantics are per-person, so only the grouping (and the
+per-section subtotals) changes between bases — the unit-wide TOTAL is
+identical on both.
+
 ### 3.6 Discussions Board (issue 24)
 
 *Not yet shipped: hidden behind the `FEATURE_DISCUSSIONS` env-var flag (see

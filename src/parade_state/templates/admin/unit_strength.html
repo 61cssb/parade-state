@@ -16,6 +16,34 @@
         font-weight: 600;
         color: #374151;
     }
+    .segmented {
+        display: inline-flex;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+        overflow: hidden;
+    }
+    .segmented input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+    }
+    .segmented label {
+        margin: 0;
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
+        cursor: pointer;
+    }
+    .segmented label:last-of-type {
+        border-left: 1px solid #d1d5db;
+    }
+    .segmented input:checked + label {
+        background: #6366f1;
+        color: #fff;
+    }
+    .segmented input:focus-visible + label {
+        outline: 2px solid #6366f1;
+        outline-offset: -2px;
+    }
     .strength-table {
         width: 100%;
         border-collapse: collapse;
@@ -62,10 +90,25 @@
         <label for="date">Date:</label>
         <input type="date" name="date" id="date" value="{{ target_date.strftime('%Y-%m-%d') }}"
                onchange="this.form.submit()">
+        {% if user.role == 'super_admin' %}
+        <span style="font-weight: 600; color: #374151;">Basis:</span>
+        <div class="segmented" role="group" aria-label="Reporting basis">
+            <input type="radio" name="basis" id="basis-tagged" value="tagged"
+                   onchange="this.form.submit()"{% if basis == 'tagged' %} checked{% endif %}>
+            <label for="basis-tagged">Tagged</label>
+            <input type="radio" name="basis" id="basis-untagged" value="untagged"
+                   onchange="this.form.submit()"{% if basis == 'untagged' %} checked{% endif %}>
+            <label for="basis-untagged">Untagged</label>
+        </div>
+        {% endif %}
     </form>
     <p style="color: #6b7280; margin-top: 1rem; margin-bottom: 0;">
         In = on the nominal roll (not Deferred) · Current = Present ·
         Out = Absent (unmarked = absent).
+        {% if basis == 'untagged' %}
+        Untagged = personnel counted under their original nominal-roll
+        unit allocations (tagging not applied).
+        {% endif %}
     </p>
 </div>
 
@@ -97,7 +140,8 @@
 {% else %}
 <div class="card">
     <h3>Unit Strength — {{ nr_label }}
-        · {{ target_date.strftime('%Y-%m-%d') }}</h3>
+        · {{ target_date.strftime('%Y-%m-%d') }}
+        · {{ 'Untagged (original NR)' if basis == 'untagged' else 'Tagged' }}</h3>
     <div class="table-wrap">
         <table class="strength-table">
             <thead>
