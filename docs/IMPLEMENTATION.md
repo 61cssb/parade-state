@@ -366,6 +366,16 @@ async def test_example(client, sample_users, sample_grouping):
 - Date picker (URL param; server default today, re-defaulted from the
   browser's local datetime on first visit). The AM/PM slot selector was
   removed with the single-session rework (issue 33).
+- Reporting basis (✅ issue #36): `?basis=tagged|untagged` (default
+  `tagged`, unknown values fall back). Tagged groups under the effective
+  (tagging-applied) subunits; **untagged** groups under the original NR
+  allocations — the canonical `Personnel` columns, tagging overlay not
+  applied (`from_*` snapshots never consulted). Untagged is
+  super-admin-only: the toggle select renders for super-admins alone and
+  any other role explicitly requesting it gets the 403 no-access page.
+  The heading names the active basis so rendered output is
+  self-describing; the unit-wide TOTAL is allocation-independent and
+  identical on both bases.
 - Super-admins see the whole unit; regular admins see only their assigned
   sub_unit_1 sections (same deny-by-default UserSubunitAssignment machinery
   as attendance marking) with TOTAL summing visible rows.

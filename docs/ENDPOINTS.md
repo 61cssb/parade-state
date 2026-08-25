@@ -27,7 +27,7 @@ This document clarifies the different types of endpoints in the Parade State app
 - `GET /nominal-roll` - Nominal Roll browser (row-numbered roster table with unit/sub-unit columns, search, unit filter) — nominal roll selector dropdown plus an expandable roll-management panel (label/remarks editing, attendance toggle, Delete — merged from the retired admin nominal rolls page; the old Create Grouping modal was removed — grouping creation lives on the Grouping page); Export CSV link on the selector row streams the filtered table (tagging overlay applied, no row cap)
 
 **Admin Interface Routes:**
-- `GET /admin` - Unit Strength report (aggregated In/Out/Current/% by effective sub-unit; date + AM/PM slot params; subunit-scoped for regular admins) — replaced the admin dashboard; flag-gated by `FEATURE_STRENGTH`
+- `GET /admin` - Unit Strength report (aggregated In/Out/Current/% by effective sub-unit; date param; `basis=tagged|untagged` param — default tagged, unknown values = tagged, untagged = original NR allocations and super-admin only (403 otherwise); subunit-scoped for regular admins) — replaced the admin dashboard; flag-gated by `FEATURE_STRENGTH`
 - `GET /admin/users` - Users management page
 - `GET /admin/csv-upload` - Upload NR page (CSV upload with automatic processing into Nominal Rolls)
 - `GET /admin/settings` - Settings page

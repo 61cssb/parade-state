@@ -91,8 +91,9 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   parade state rolled up by effective sub-unit 1/2 into the Officer/WOSE/
   Total × In/Out/Current/% strength format (In = not deferred, Current =
   present — single session, reason never participates, Out = rest); date
-  param; regular admins scoped to their assigned sub-units; on via
-  `FEATURE_STRENGTH` in dev and prod
+  param; super-admin basis toggle tagged/untagged (issue 36 — untagged =
+  original NR allocations); regular admins scoped to their assigned
+  sub-units; on via `FEATURE_STRENGTH` in dev and prod
 - Groupings (issue 26 redesign, implemented on this branch): a labelled
   set of groups on the attendance-active NR with memberships, per-person
   checkbox/remarks, clone, copy-from-previous-NR, slim CSV export —
@@ -203,6 +204,13 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-25:** Unit Strength basis toggle (Issue 36): `?basis=tagged|
+  untagged` on `/admin` (default tagged, unknown → tagged); untagged
+  groups under the original NR allocations (canonical Personnel columns,
+  overlay not applied, `from_*` never consulted) — super-admin-only
+  (toggle select rendered for them alone; other roles requesting it get
+  the 403 no-access page); heading names the basis; unit TOTAL identical
+  on both bases; no schema/API changes
 - **2026-08-25:** Attendance day freeze (Issue 35): `attendance_freezes`
   table (one row per frozen NR/day, migration `x5e6f7a8b9c0` + widened
   `audit_action`); super-admin-only `PUT/DELETE /api/v1/attendance/freeze`
