@@ -588,12 +588,6 @@
                flags (Nominal Roll, Attendance) are default-on kill
                switches: they hide their entries only on an explicit
                "false". #}
-            {% if request.app.state.settings.FEATURE_STRENGTH %}
-            <a href="/admin" title="Unit Strength"
-               class="{% if active_page == 'strength' %}active{% endif %}">
-                <span class="icon">🪖</span><span>Unit Strength</span>
-            </a>
-            {% endif %}
             {% if request.app.state.settings.FEATURE_NOMINALROLL %}
             <a href="/admin/csv-upload" title="Upload NR"
                class="{% if active_page == 'csv-upload' %}active{% endif %}">
@@ -618,6 +612,12 @@
             <a href="/attendance" title="Attendance"
                class="{% if active_page == 'attendance' %}active{% endif %}">
                 <span class="icon">✅</span><span>Attendance</span>
+            </a>
+            {% endif %}
+            {% if request.app.state.settings.FEATURE_STRENGTH %}
+            <a href="/admin" title="Unit Strength"
+               class="{% if active_page == 'strength' %}active{% endif %}">
+                <span class="icon">🪖</span><span>Unit Strength</span>
             </a>
             {% endif %}
             {% if request.app.state.settings.FEATURE_GROUPING %}

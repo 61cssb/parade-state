@@ -384,10 +384,11 @@ async def test_example(client, sample_users, sample_grouping):
   roles including super-admins) unless `FEATURE_STRENGTH=true`.
 
 **Sidebar Restructure (✅ workflow pages + Admin section)**
-- The sidebar lists the workflow pages flat in order — Unit Strength (at
-  `/admin`, flag-gated; formerly the Dashboard), Upload NR
+- The sidebar lists the workflow pages flat in order — Upload NR
   (relabelled from "CSV Upload"; route unchanged), Nominal Roll, Taggings,
-  Deferments, Attendance, Grouping — followed by an **Admin** section:
+  Deferments, Attendance, Unit Strength (at
+  `/admin`, flag-gated; formerly the Dashboard — moved after Attendance
+  2026-08-26 so reporting follows marking), Grouping — followed by an **Admin** section:
   Users, Settings, Audit Log, Restore Backup (relabelled from "DB
   Restore"). All entries are visible to every signed-in admin; role-based
   section visibility is deferred until distinct roles exist.

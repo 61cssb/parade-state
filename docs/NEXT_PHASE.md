@@ -114,8 +114,9 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   (status, category — the only audit-logged board action) and delete;
   author-only edits enforced server-side from the session identity;
   **feature-flagged** (`FEATURE_DISCUSSIONS`, default off)
-- Sidebar: workflow pages flat (Unit Strength, Upload NR, Nominal Roll,
-  Taggings, Deferments, Attendance, Grouping, Discussions) + **Admin** section
+- Sidebar: workflow pages flat (Upload NR, Nominal Roll, Taggings,
+  Deferments, Attendance, Unit Strength, Grouping, Discussions — Unit
+  Strength moved after Attendance 2026-08-26) + **Admin** section
   (Users, Settings, Audit Log, Restore Backup); SA-only pages show an
   in-page no-access message for plain admins; flag-gated entries
   (Deferments, Grouping, Discussions, Unit Strength) render only when

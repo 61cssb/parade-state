@@ -36,7 +36,7 @@ This document clarifies the different types of endpoints in the Parade State app
 - `GET /admin/deferments` - Deferments management (super-admin only; in-page no-access message for plain admins)
 - `GET /admin/database-restore` - Restore Backup page (super-admin only; in-page no-access message for plain admins)
 
-**Note:** The sidebar lists the workflow pages flat (Unit Strength, Upload NR, Nominal Roll, Taggings, Deferments, Attendance, Grouping), then an **Admin** section (Users, Settings, Audit Log, Restore Backup). The former `/admin/nominal-rolls`, `/admin/groupings`, `/admin/groupings/{id}/personnel`, and `/admin/sessions` pages were retired when their management moved into the user-facing views; the Dashboard was replaced by the Unit Strength report. Sessions (AM/PM) are hardcoded; the REST APIs `/api/v1/groupings/*` and `/api/v1/sessions/*` remain separate.
+**Note:** The sidebar lists the workflow pages flat (Upload NR, Nominal Roll, Taggings, Deferments, Attendance, Unit Strength, Grouping), then an **Admin** section (Users, Settings, Audit Log, Restore Backup). The former `/admin/nominal-rolls`, `/admin/groupings`, `/admin/groupings/{id}/personnel`, and `/admin/sessions` pages were retired when their management moved into the user-facing views; the Dashboard was replaced by the Unit Strength report. Sessions (AM/PM) are hardcoded; the REST APIs `/api/v1/groupings/*` and `/api/v1/sessions/*` remain separate.
 
 **Characteristics:**
 - Return HTML responses (Jinja2 templates)
