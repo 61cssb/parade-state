@@ -283,6 +283,22 @@ class CopyRemarksResponse(BaseModel):
     skipped: int
 
 
+class AttendanceFreezeRequest(BaseModel):
+    """Schema for freeze/unfreeze: the (NR, date) being toggled."""
+
+    nominal_roll_id: str
+    date: utc_dt.date
+
+
+class AttendanceFreezeResponse(BaseModel):
+    """Schema for the freeze state after a freeze/unfreeze call."""
+
+    nominal_roll_id: str
+    date: utc_dt.date
+    frozen: bool
+    frozen_at: utc_dt.datetime | None = None
+
+
 # ============================================================================
 # Personnel Schemas
 # ============================================================================

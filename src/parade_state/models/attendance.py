@@ -8,6 +8,9 @@ remarks, and free-text ``remarks``.
 
 A super-admin marks an NR "Use for Attendance" (``NominalRoll.attendance_active``);
 writes are only permitted against that NR. There is no separate scope table.
+A super-admin may additionally freeze a day (``AttendanceFreeze``): frozen
+(NR, date) attendance stays super-admin-writable and becomes read-only for
+admins.
 """
 
 from typing import TYPE_CHECKING
@@ -118,4 +121,40 @@ class Attendance(Base):
             f"<Attendance(personnel_id={self.personnel_id!r}, "
             f"date={self.date!r}, status={self.status!r}, "
             f"reason={self.reason!r})>"
+        )
+
+
+class AttendanceFreeze(Base):
+    """Day-level attendance lock for a nominal roll (issue 35).
+
+    Row presence = the (NR, date) is frozen: admins get read-only cells
+    and 403s on writes, super-admins keep editing (retro-edit provenance
+    still applies). Unfreezing deletes the row. The freeze cascades with
+    the NR, so purged rolls take their freezes along.
+    """
+
+    __tablename__ = "attendance_freezes"
+
+    nominal_roll_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("nominal_rolls.id", ondelete="CASCADE"), index=True
+    )
+    date: Mapped[utc_dt.date] = mapped_column(Date, index=True)
+
+    created_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
+
+    nominal_roll: Mapped["NominalRoll"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "nominal_roll_id", "date", name="uq_attendance_freezes_nr_date"
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<AttendanceFreeze(nominal_roll_id={self.nominal_roll_id!r}, "
+            f"date={self.date!r})>"
         )
