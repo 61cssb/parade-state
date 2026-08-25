@@ -394,8 +394,10 @@ railway up --detach -m "what changed"
 railway deployment list   # poll to a terminal status — never trust queued/building
 ```
 
-Free-tier note: deploys to asia-southeast1 are refused during peak hours
-(08:00–20:00 SGT). Schedule deploys outside that window rather than
+Plan note: the workspace moved to the paid **Hobby plan (2026-08-25)**,
+which lifted the free tier's peak-hour deploy refusal for
+asia-southeast1 (08:00–20:00 SGT). If the plan ever changes back, that
+constraint returns — schedule deploys outside the window instead of
 retrying.
 
 **Bootstrapping a fresh development database:** the DB starts empty (no

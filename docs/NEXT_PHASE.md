@@ -201,6 +201,16 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-25:** Two deploy-day hotfixes after the r20260825 switch:
+  (1) the Docker image's Python 3.12 eagerly evaluates annotations, so
+  issue 31's `user: User` signature without the import crash-looped the
+  app at startup (local 3.14's lazy annotations hid it) — import added;
+  pre-deploy guard: `uv run -p 3.12` app import. (2) The issue-31
+  template sweep corrupted five fetch calls (missing comma turned the
+  staged-remap Apply into a 404ing GET; four unterminated strings killed
+  the Taggings/Deferments page JS) — all repaired; template JS has no
+  automated coverage (a node --check sweep over script blocks catches
+  the syntax class).
 - **2026-08-25:** CSV ingestion contract v2 (Issue 34): header-name
   matching replaces the index-based 18-column map — required columns
   (Unit incl. non-blank header, Sub Unit 1-3, Rank, Full Name, Callup
