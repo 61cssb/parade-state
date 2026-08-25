@@ -617,6 +617,13 @@ regardless of status and never feeds aggregation.
 - Writes are refused (400) unless the NR is the one active for attendance
 - Days (not slots) count toward attendance-rate totals
 
+**Marking-page day default:** the viewed day is a URL param; the server
+default is UTC today (no-JS fallback). A first-visit script (URL without
+a date param) re-defaults it to the browser's local day — best effort,
+since the server cannot know the viewer's timezone and UTC lags SGT
+mornings until 08:00 — resubmitting the filter form so the NR/sub-unit/
+inpro filters survive the reload. An explicit `?date=` always wins.
+
 #### 3.5.2 Unit Strength Report
 
 **The parade state aggregated into the strength reporting format** — page
