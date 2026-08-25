@@ -94,7 +94,9 @@ Nominal Roll
   `POST /nominal-rolls/{id}/deactivate-attendance`. With no active NR,
   the attendance view shows an inactive message and writes are refused.
 - Raw CSV stored immutably in csv_uploads (append-only; SHA-256 hash recorded)
-- Parsed personnel in personnel_snapshots: required columns as typed fields; all others in extra_fields JSON
+- Parsed personnel in personnel: contract-mapped columns as typed fields
+  (see §4.5 — CSV ingestion contract v2); unmapped extra columns are
+  ignored (only `orns` / `hk_ict` / `age_yr` land in extra_fields JSON)
 - **Read-only after ingestion** — unit/subunit edits are recorded on the NR's 1:1 Tagging, never on personnel rows
 
 **CSV → NR processing flow (app-side):**
@@ -319,7 +321,7 @@ Personnel
 ├── sub_unit_1: str
 ├── sub_unit_2: str
 ├── sub_unit_3: str
-├── extra_fields: JSON (other CSV columns not mapped to canonical names; JSONB in PostgreSQL)
+├── extra_fields: JSON (contract-mapped int columns: orns / hk_ict / age_yr; JSONB in PostgreSQL)
 ├── status: str ENUM ['active', 'archived']
 ├── inpro_status: str ENUM ['inproed', 'yet_to_inpro', 'deferred']  (default: 'yet_to_inpro')
 │   └── UI labels: "Inpro'ed" / "Yet to Inpro" / "Deferred"; UI column header "Inpro Status"
@@ -350,17 +352,14 @@ Personnel
   convention). It replaces the retired callup-decision vocabulary
   (`Called Up` / `Deferred` / `Disrupted` / `MR` / `Age Limit` / `Other`),
   which conflated "will attend" with "why not".
-- **Interim CSV shim (issue 32 → #34):** old-format uploads keep working.
-  The CSV `Callup Decision` column — which the real fixtures populate with
-  `Yes`/`No` — is remapped (case-insensitive): `Yes` / blank /
-  `Called Up` → `yet_to_inpro`; `No` / `Deferred` → `deferred` (`No`
-  approximates #34's future skip — the row stays off the interim
-  non-deferred roster); every other value (`Disrupted` / `MR` /
-  `Age Limit` / `Other` / unknown) → `yet_to_inpro` with
-  `Previously: <value>` appended to `remarks` (the raw value also stays in
-  `extra_fields.callup_decision` for audit).
-- `remarks` joins the non-empty CSV `Reason` + first `Remarks` columns with
-  `"; "` (then the shim note, if any); NULL when everything is empty.
+- **CSV ingestion (contract v2, issue 34):** new personnel default to
+  `yet_to_inpro`. The CSV `Callup Decision` column is a strict row filter
+  (see §4.5) — only `Yes` rows are stored at all, so no decision-derived
+  inpro status or remark exists; the issue-32 interim shim
+  (Yes/No remapping + `Previously: <value>` notes) is removed.
+- `remarks` stores the **first** `Remarks` CSV column verbatim (duplicate
+  `Remarks` headers are ignored after the first); NULL when blank. The CSV
+  `Reason` column is read but never stored.
 - **Attendance visibility (interim rule until #33):** the attendance
   roster/view/dashboard includes personnel with `inpro_status != 'deferred'`
   — i.e. yet_to_inpro + inproed. Deferred personnel are hidden.
@@ -777,6 +776,37 @@ external personnel number; the cross-roll person key is `pers_no` (see §3.2.1).
 
 ### 4.5 CSV Upload Pipeline
 
+**CSV ingestion contract v2 (issue 34, signed off 2026-08-24).** Columns
+are matched by **header name** — exact match after stripping surrounding
+whitespace, first occurrence of a name wins; extra columns are tolerated
+and ignored (nothing is captured into `extra_fields`).
+
+- **Required headers:** `Unit`, `Sub Unit 1`, `Sub Unit 2`, `Sub Unit 3`,
+  `Rank`, `Full Name`, `Callup Decision`, `Reason`, `Remarks`, `HK ICT`
+  and `ORNS` (alias `ORNS Yrs`). A missing required column — including a
+  blank `Unit` header (the pre-fix export shape) — rejects the upload with
+  an error naming the column. No positional fallback.
+- **Optional headers:** `Pers` (stored to `pers_no`; absent column or
+  blank cell → NULL, backfilled later via the personnel edit flow) and
+  `Age(Yr)` (stored to `extra_fields.age_yr`, int).
+- **Row filter (strict):** only rows whose `Callup Decision` is exactly
+  `Yes` (case-insensitive) are stored. Anything else — `No`, blank, `Y`,
+  free text — is skipped and counted in the process report/response
+  (`decision_skipped`). `Callup Decision` and `Reason` are read but never
+  stored anywhere.
+- **Storage map:** Unit / Sub Unit 1-3 / Rank / Full Name → core personnel
+  columns; first `Remarks` column only → `personnel.remarks`;
+  `ORNS`/`ORNS Yrs` → `extra_fields.orns` (int years) and `HK ICT` →
+  `extra_fields.hk_ict` (int). `category` (Officer/WOSE) is derived from
+  Rank (unchanged). New personnel default `inpro_status = yet_to_inpro`.
+- **Convergence:** the pre-v2 16-column WY2627 export (ORNS spelling,
+  `Age(Yr)`, no Pers, extras like `Work Year 1` / `Ineligible Reason`)
+  also ingests cleanly under the name-matching contract — no legacy mode.
+- The canonical fixture
+  (`61 CSSB WY2627 ICT - Callup Eligible (caa260220) - Callup status.csv`,
+  560 rows) processes into 397 personnel with 163 No rows skipped and 2
+  NULL-`pers_no` rows.
+
 ```
 Upload File
   ↓
@@ -807,11 +837,14 @@ Compute diff (current CSV vs prior CSV)
   ↓
 Create NominalRoll (CAA parsed from the filename, e.g. caaYYMMDD; no status
 workflow — every NR is equal)
-Populate Personnel records (inpro_status via the interim shim from the CSV
-'Callup Decision' column — Yes / blank / 'Called Up' → yet_to_inpro,
-No / 'Deferred' → deferred, anything else → yet_to_inpro +
-'Previously: <value>' remark; remarks from 'Reason' + first 'Remarks'
-joined with '; ')
+Validate the header against the contract v2 (missing required column,
+incl. blank Unit header → error naming the column)
+Filter rows: Callup Decision exactly 'Yes' (case-insensitive) → stored;
+everything else skipped and counted
+Populate Personnel records (core columns; optional Pers → pers_no, blank →
+NULL; first Remarks → remarks; ORNS/ORNS Yrs → extra_fields.orns,
+HK ICT → extra_fields.hk_ict, optional Age(Yr) → extra_fields.age_yr;
+inpro_status defaults to yet_to_inpro)
 Persist ColumnMetadata for the source columns
 Auto-create the NR's empty 1:1 Tagging
 Optionally import taggings from another NR (chosen by the admin; entries

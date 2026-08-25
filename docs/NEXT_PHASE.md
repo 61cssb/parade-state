@@ -16,7 +16,7 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ## Current Snapshot
 
-- **Tests:** 627 SQLite passing (flags-on posture; flags-off gating has
+- **Tests:** 643 SQLite passing (flags-on posture; flags-off gating has
   dedicated tests). The suite runs against
   Postgres by setting `TEST_DATABASE_URL` (per-test databases).
 - **Access model:** `super_admin` + `admin` only. Unknown Google
@@ -54,8 +54,9 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 - Google OAuth sign-in (host-independent), admin-only auth, audit log
 - CSV upload → process into Nominal Roll + Personnel + auto-tagging
-  (fixed canonical column map from the WY2627 fixture — see CSV Step 2);
-  taggings importable across NRs by `pers_no`; super-admins can also add a
+  (**ingestion contract v2** — header-name matching, strict Yes-only row
+  filter, optional Pers/Age(Yr); see SPECIFICATION §4.5); taggings
+  importable across NRs by `pers_no`; super-admins can also add a
   missing serviceman manually from the NR view (`source='manual'`, pers_no
   fill-in-later inline; per-roll, not propagated to future CSV rolls)
 - Tagging overlay, 1:1 per NR: unit/subunit edits land on the overlay;
@@ -162,10 +163,11 @@ carry-over.
 
 ### 5. CSV Step 2: column mapping — after the season (2026)
 
-The process endpoint uses the fixed canonical map from the WY2627 ICT
-fixture (`parade_state.utils.csv_constants`). Only one NR format is in
-play this season, so generalizing to arbitrary fixtures waits until
-post-season.
+The process endpoint uses the fixed header-name contract v2 (issue 34,
+`parade_state.utils.csv_constants`): required/optional columns matched by
+exact header name with a strict Yes-only row filter. Only this one export
+format is in play this season, so generalizing to admin-configurable
+mappings waits until post-season.
 
 ### 6. Performance & scalability (Phase 8) — as data grows
 
@@ -199,6 +201,18 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-25:** CSV ingestion contract v2 (Issue 34): header-name
+  matching replaces the index-based 18-column map — required columns
+  (Unit incl. non-blank header, Sub Unit 1-3, Rank, Full Name, Callup
+  Decision, Reason, Remarks, ORNS/ORNS-Yrs alias, HK ICT) validated with
+  named-column 400s; optional Pers (→ pers_no, blank/absent → NULL) and
+  Age(Yr) (→ extra_fields.age_yr); strict Yes-only row filter with
+  decision-skip counts (`decision_skipped`) in the process report; Reason
+  + Callup Decision read but never stored (issue-32 interim shim removed);
+  first Remarks column only; extra columns tolerated and ignored
+  (extra_fields carries just orns/hk_ict/age_yr); pre-v2 16-column export
+  ingests cleanly under the converged contract; canonical fixture =
+  397 stored / 163 skipped; demo ingester + demo DB regenerated
 - **2026-08-25:** Attendance single-session rework (Issue 33): the 9-value
   AM/PM vocabulary collapsed to one daily session — `status`
   (present/absent, default absent) + nullable `reason` enum
