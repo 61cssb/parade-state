@@ -590,11 +590,17 @@ class CsvUploadProcessUnmatchedItem(BaseModel):
 
 
 class CsvUploadProcessResponse(BaseModel):
-    """Schema for the process response — created NR plus ingestion diagnostics."""
+    """Schema for the process response — created NR plus ingestion diagnostics.
+
+    ``rows_skipped`` totals every non-stored data row: rows whose Callup
+    Decision was not Yes (``decision_skipped``, issue 34 strict filter)
+    plus rows skipped for unrecognized ranks.
+    """
 
     nominal_roll_id: str
     personnel_inserted: int
     rows_skipped: int
+    decision_skipped: int = 0
     tagging_entries_imported: int = 0
     unmatched: list[CsvUploadProcessUnmatchedItem] = []
 

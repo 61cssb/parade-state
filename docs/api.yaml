@@ -2242,7 +2242,7 @@ paths:
       tags: [csv]
       summary: Upload a CSV file for ingestion
       description: |
-        Admin/super-admin only. Accepts a multipart CSV (`.csv`, ≤10 MB),
+        Super-admin only. Accepts a multipart CSV (`.csv`, ≤10 MB),
         computes its SHA256 (duplicate files return the existing upload
         with `is_duplicate: true`), parses the header row and line count,
         and stores the raw content. With `auto_process=true` the stored
@@ -2304,7 +2304,7 @@ paths:
       tags: [csv]
       summary: Process a stored CSV upload into a Nominal Roll
       description: |
-        Admin/super-admin only. Reads the stored CsvUpload's raw content,
+        Super-admin only. Reads the stored CsvUpload's raw content,
         parses the CAA date from the `caaYYMMDD` token in the original
         filename, and inserts a full NR pipeline: NominalRoll +
         ColumnMetadata + Personnel + an auto-created empty 1:1 Tagging. The
@@ -2314,15 +2314,19 @@ paths:
         across by `pers_no` matching instead of starting empty; unmatched
         source personnel are surfaced in the response.
 
-        Per-person inpro data (issue 06 + issue 32 interim shim):
-        `Personnel.inpro_status` is derived from the legacy CSV `Callup
-        Decision` column (the real fixtures carry Yes/No): Yes / blank /
-        'Called Up' → 'yet_to_inpro'; No / 'Deferred', case-insensitive →
-        'deferred' (No approximates #34's future skip); any other value →
-        'yet_to_inpro' with 'Previously: <value>' appended to remarks and
-        the raw value kept in extra_fields. `Personnel.remarks` joins the
-        non-empty `Reason` + first `Remarks` columns with '; '. Only
-        non-deferred personnel appear in the attendance view (until #33).
+        CSV contract v2 (issue 34): columns are matched by header name
+        (first occurrence wins; extras ignored). Required headers: Unit,
+        Sub Unit 1-3, Rank, Full Name, Callup Decision, Reason, Remarks,
+        ORNS (alias ORNS Yrs) and HK ICT — a missing required column,
+        including a blank Unit header, is a 400 naming the column. Only
+        rows whose Callup Decision is exactly `Yes` (case-insensitive) are
+        stored; all other rows are skipped and counted (`decision_skipped`).
+        Callup Decision and Reason are read but never stored. Stored: core
+        personnel columns; optional Pers → `pers_no` (blank/absent → NULL);
+        first Remarks column only → `personnel.remarks`; ORNS/ORNS Yrs →
+        `extra_fields.orns` and HK ICT → `extra_fields.hk_ict` (ints);
+        optional Age(Yr) → `extra_fields.age_yr`. New personnel default
+        `inpro_status = 'yet_to_inpro'`.
       parameters:
         - name: uploadId
           in: path
@@ -2348,6 +2352,7 @@ paths:
                   nominal_roll_id: { type: string, format: uuid }
                   personnel_inserted: { type: integer }
                   rows_skipped: { type: integer }
+                  decision_skipped: { type: integer }
                   tagging_entries_imported: { type: integer }
                   unmatched:
                     type: array
@@ -2356,7 +2361,7 @@ paths:
                       properties:
                         pers_no: { type: string }
                         name: { type: string, nullable: true }
-        '400': { description: Unparseable filename or column count mismatch }
+        '400': { description: Unparseable filename, or a required CSV column is missing (including a blank Unit header) }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: Upload already processed, or CAA already exists }

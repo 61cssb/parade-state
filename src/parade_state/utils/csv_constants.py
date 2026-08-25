@@ -1,47 +1,56 @@
-"""Canonical CSV column mapping for the 61 CSSB WY2627 ICT fixture.
+"""CSV ingestion contract v2 (issue 34): header-name-based column matching.
 
-Single source of truth for the column layout used by both the standalone
-demo ingester (``experiments/csv_to_nr/ingest.py``) and the app-side CSV
-process endpoint (``parade_state.api.csv_upload``). Lifting these into a
+Single source of truth for the upload contract used by both the app-side
+CSV process endpoint (``parade_state.api.csv_upload``) and the standalone
+demo ingester (``experiments/csv_to_nr/ingest.py``). Lifting these into a
 shared module prevents the two call sites from drifting.
 
-The mapping is fixture-specific: it expects the 18-column layout of the
-WY2627 ICT callup-status CSV. To ingest a different fixture, extend or
-override ``CANONICAL_MAP`` at the call site.
+Contract (signed off 2026-08-24):
+
+- Columns are matched by **header name** (exact match after stripping
+  surrounding whitespace; the first occurrence of a name wins), not by
+  position. Extra columns are tolerated and ignored.
+- Required headers: ``Unit``, ``Sub Unit 1-3``, ``Rank``, ``Full Name``,
+  ``Callup Decision``, ``Reason``, ``Remarks``, ``HK ICT`` and ``ORNS``
+  (alias ``ORNS Yrs``). A missing required header — including a blank
+  ``Unit`` header — rejects the upload with an error naming the column.
+- Optional headers: ``Pers`` (stored to ``pers_no``; absent/blank → NULL)
+  and ``Age(Yr)`` (stored to ``extra_fields.age_yr``).
+- Row filter: only rows whose ``Callup Decision`` is ``Yes`` (strict but
+  case-insensitive) are stored; anything else — ``No``, blank, ``Y``, free
+  text — is skipped and counted. ``Callup Decision`` and ``Reason`` are
+  read but never stored.
+- Storage: ``Remarks`` (first ``Remarks`` column only) →
+  ``personnel.remarks``; ``ORNS``/``ORNS Yrs`` → ``extra_fields.orns`` and
+  ``HK ICT`` → ``extra_fields.hk_ict`` (int years / int).
 """
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from datetime import date
 
-# Per-index column map: (csv_index, raw_name, canonical_name_or_None, store_in_extra_fields?)
-# canonical_name=None means "no core mapping, extra_fields only".
-CANONICAL_MAP: list[tuple[int, str, str | None, bool]] = [
-    (0, "", "unit", False),
-    (1, "Sub Unit 1", "sub_unit_1", False),
-    (2, "Sub Unit 2", "sub_unit_2", False),
-    (3, "Sub Unit 3", "sub_unit_3", False),
-    (4, "Rank", "rank", False),
-    (5, "Full Name", "full_name", False),
-    (6, "Rank-Name", None, False),  # redundant composite, dropped
-    (7, "Pers", "pers_no", False),  # external personnel number — canonical person identifier
-    (8, "Callup Decision", None, True),
-    (9, "Reason", None, True),
-    (10, "Remarks", None, True),   # first Remarks column
-    (11, "ORNS Yrs", None, True),
-    (12, "HK ICT", None, True),
-    (13, "NPI", None, True),
-    (14, "SAR-21 Qual Date", None, True),
-    (15, "Cbt Shoot History", None, True),
-    (16, "Detail", None, True),
-    (17, "Remarks", None, True),   # duplicate header; disambiguated below
-]
+# (field, accepted header names, required?) — resolution order is the
+# storage/contract order. First accepted name is the canonical spelling
+# used in error messages.
+_HEADER_SPEC: tuple[tuple[str, tuple[str, ...], bool], ...] = (
+    ("unit", ("Unit",), True),
+    ("sub_unit_1", ("Sub Unit 1",), True),
+    ("sub_unit_2", ("Sub Unit 2",), True),
+    ("sub_unit_3", ("Sub Unit 3",), True),
+    ("rank", ("Rank",), True),
+    ("full_name", ("Full Name",), True),
+    ("pers_no", ("Pers",), False),
+    ("callup_decision", ("Callup Decision",), True),
+    ("reason", ("Reason",), True),
+    ("remarks", ("Remarks",), True),
+    ("orns", ("ORNS Yrs", "ORNS"), True),
+    ("hk_ict", ("HK ICT",), True),
+    ("age_yr", ("Age(Yr)",), False),
+)
 
-# Keys for the two duplicate ``Remarks`` columns in extra_fields.
-EXTRA_KEY_FOR_INDEX: dict[int, str] = {10: "remarks", 17: "remarks_2"}
-
-# Core personnel columns mapped from canonical_name -> Personnel model attr.
+# Core personnel columns: canonical field -> Personnel model attr.
 CORE_ATTRS: dict[str, str] = {
     "unit": "unit",
     "sub_unit_1": "sub_unit_1",
@@ -52,7 +61,20 @@ CORE_ATTRS: dict[str, str] = {
     "pers_no": "pers_no",
 }
 
-# Inferred data types per column — used to populate ColumnMetadata.inferred_type.
+# Fields stored in Personnel.extra_fields (as ints; blank cell → None,
+# absent column → key omitted entirely).
+EXTRA_INT_FIELDS: frozenset[str] = frozenset({"orns", "hk_ict", "age_yr"})
+
+# Fields that are required and read but never stored anywhere.
+READ_ONLY_FIELDS: frozenset[str] = frozenset({"callup_decision", "reason"})
+
+# Canonical fields the contract requires (drives ColumnMetadata.is_required).
+REQUIRED_FIELDS: frozenset[str] = frozenset(
+    field_name for field_name, _, required in _HEADER_SPEC if required
+)
+
+# Inferred data types per canonical field — used to populate
+# ColumnMetadata.inferred_type; unmapped (extra) columns default to string.
 INFERRED_TYPES: dict[str, str] = {
     "unit": "string",
     "sub_unit_1": "string",
@@ -60,23 +82,81 @@ INFERRED_TYPES: dict[str, str] = {
     "sub_unit_3": "string",
     "rank": "string",
     "full_name": "string",
-    "Pers": "string",
-    "Rank-Name": "string",
-    "Callup Decision": "string",
-    "Reason": "string",
-    "Remarks": "string",
-    "ORNS Yrs": "integer",
-    "HK ICT": "integer",
-    "NPI": "string",
-    "SAR-21 Qual Date": "date",
-    "Cbt Shoot History": "integer",
-    "Detail": "string",
+    "pers_no": "string",
+    "callup_decision": "string",
+    "reason": "string",
+    "remarks": "string",
+    "orns": "integer",
+    "hk_ict": "integer",
+    "age_yr": "integer",
 }
 
 
-def snake(key: str) -> str:
-    """Normalize a raw CSV header to a snake_case extra_fields key."""
-    return re.sub(r"[^a-z0-9]+", "_", key.strip().lower()).strip("_")
+class MissingColumnsError(ValueError):
+    """A required CSV header is absent (or blank, e.g. the pre-fix export's
+    missing ``Unit`` header). ``missing`` carries the display names."""
+
+    def __init__(self, missing: list[str]) -> None:
+        self.missing = missing
+        names = ", ".join(repr(n) for n in missing)
+        super().__init__(f"CSV is missing required column(s): {names}")
+
+
+@dataclass
+class ResolvedColumns:
+    """Result of matching a CSV header row against the v2 contract.
+
+    ``field_index`` maps canonical field → CSV column index for every
+    matched field (required fields always present; optional fields only
+    when the file carries the column). ``canonical_for_index`` maps CSV
+    column index → canonical field for *stored* columns only (Callup
+    Decision / Reason are read-only; unmatched extras are ignored).
+    """
+
+    field_index: dict[str, int] = field(default_factory=dict)
+    canonical_for_index: dict[int, str] = field(default_factory=dict)
+
+    def has(self, field: str) -> bool:
+        return field in self.field_index
+
+
+def resolve_columns(header: list[str]) -> ResolvedColumns:
+    """Match ``header`` against the v2 contract by name.
+
+    Raises:
+        MissingColumnsError: naming every required column that is absent
+            (a blank header matches nothing, so the pre-fix export's empty
+            ``Unit`` header surfaces as a missing ``Unit`` column).
+    """
+    normalized = [name.strip() for name in header]
+    resolved = ResolvedColumns()
+    missing: list[str] = []
+
+    for field_name, accepted, required in _HEADER_SPEC:
+        index = next(
+            (i for i, name in enumerate(normalized) if name in accepted),
+            None,
+        )
+        if index is None:
+            if required:
+                display = accepted[0]
+                if len(accepted) > 1:
+                    display = " / ".join(accepted)
+                missing.append(display)
+            continue
+        resolved.field_index[field_name] = index
+        if field_name not in READ_ONLY_FIELDS:
+            resolved.canonical_for_index[index] = field_name
+
+    if missing:
+        raise MissingColumnsError(missing)
+    return resolved
+
+
+def is_callup_yes(value: str) -> bool:
+    """Strict-but-case-insensitive row filter: only an exact ``yes``
+    (casefolded) decision stores the row; blank / ``Y`` / free text skip."""
+    return value.strip().casefold() == "yes"
 
 
 def parse_caa_date(filename: str) -> date:
@@ -101,8 +181,3 @@ def coerce_int(value: str) -> int | None:
         return int(v)
     except ValueError:
         return None
-
-
-def is_integer_column(raw_name: str) -> bool:
-    """Whether ``raw_name`` should be coerced to int when stored in extra_fields."""
-    return raw_name in {"ORNS Yrs", "HK ICT", "Cbt Shoot History"}

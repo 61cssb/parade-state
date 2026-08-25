@@ -30,13 +30,15 @@ from parade_state.models.schemas import (
 )
 from parade_state.utils import ranks, utc_dt
 from parade_state.utils.csv_constants import (
-    CANONICAL_MAP,
-    EXTRA_KEY_FOR_INDEX,
+    EXTRA_INT_FIELDS,
     INFERRED_TYPES,
+    MissingColumnsError,
+    REQUIRED_FIELDS,
+    ResolvedColumns,
     coerce_int,
-    is_integer_column,
+    is_callup_yes,
     parse_caa_date,
-    snake,
+    resolve_columns,
 )
 from parade_state.api.tagging import _load_nr_tagging, copy_entries_by_pers_no
 
@@ -44,48 +46,6 @@ router = APIRouter()
 
 # Maximum upload size: 10 MB
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024
-
-# Interim CSV shim (issue 32 → #34): the legacy CSV "Callup Decision"
-# column is remapped onto the inpro lifecycle here so old-format uploads
-# keep working until the new CSV format contract lands (#34). Both real
-# fixtures carry Yes/No decisions, so those map directly; the retired
-# callup-decision vocabulary is honoured for older files.
-_LEGACY_YES = frozenset({"yes", "called up"})
-_LEGACY_NO = frozenset({"no", "deferred"})
-
-
-def _resolve_inpro_status(raw_decision: str | int | None) -> tuple[str, str | None]:
-    """Map the raw CSV Callup Decision onto the inpro_status enum.
-
-    Returns ``(inpro_status, remark_note)`` (case-insensitive, issue 32
-    fixture-profiling delta 2026-08-24):
-
-    - ``Yes`` / blank / ``Called Up`` → ``("yet_to_inpro", None)`` (model
-      default);
-    - ``No`` / ``Deferred`` → ``("deferred", None)`` — ``No`` approximates
-      #34's future skip: the row is kept off the interim non-deferred
-      roster;
-    - anything else (legacy ``Disrupted`` / ``MR`` / ``Age Limit`` /
-      ``Other`` or an unknown value) → ``("yet_to_inpro", "Previously: <value>")``
-      — the note is appended to ``personnel.remarks`` so the legacy decision
-      survives (the raw value also stays in ``extra_fields`` for audit).
-    """
-    if not raw_decision:
-        return "yet_to_inpro", None
-    folded = str(raw_decision).casefold()
-    if folded in _LEGACY_YES:
-        return "yet_to_inpro", None
-    if folded in _LEGACY_NO:
-        return "deferred", None
-    return "yet_to_inpro", f"Previously: {raw_decision}"
-
-
-def _join_personnel_remarks(
-    reason: str | int | None, remarks: str | int | None
-) -> str | None:
-    """Join the CSV Reason and first Remarks column into one remarks string."""
-    joined = "; ".join(str(part) for part in (reason, remarks) if part)
-    return joined or None
 
 
 def _parse_csv_columns(raw_bytes: bytes) -> tuple[list[str], int]:
@@ -358,6 +318,12 @@ def _parse_csv_rows(raw_bytes: bytes) -> tuple[list[str], list[list[str]]]:
     return all_rows[0], all_rows[1:]
 
 
+def _cell(row: list[str], resolved: ResolvedColumns, field: str) -> str:
+    """Striped cell value for a resolved field; short rows read as blank."""
+    index = resolved.field_index[field]
+    return row[index].strip() if index < len(row) else ""
+
+
 @router.post(
     "/{upload_id}/process",
     response_model=CsvUploadProcessResponse,
@@ -375,6 +341,13 @@ async def process_csv_upload(
     filename, and inserts a NominalRoll + Personnel + ColumnMetadata +
     auto-created empty Tagging. Links the upload to the new NR via
     ``CsvUpload.nominal_roll_id``.
+
+    CSV contract v2 (issue 34): columns are matched by header name; a
+    missing required column (including a blank Unit header) rejects the
+    upload with an error naming the column. Only rows whose Callup
+    Decision is exactly ``Yes`` (case-insensitive) are stored; Callup
+    Decision and Reason are read but never stored, and the first Remarks
+    column is the only one stored (as ``personnel.remarks``).
 
     When ``source_nominal_roll_id`` is provided, copies the source NR's
     tagging entries into the new NR's tagging by ``pers_no`` matching.
@@ -447,17 +420,17 @@ async def _process_upload_into_nr(
             detail=f"Nominal roll with CAA {caa_date.isoformat()} already exists.",
         )
 
-    # Parse CSV rows.
+    # Parse CSV rows and validate the header against the v2 contract
+    # (issue 34): name-based matching; a missing required column —
+    # including a blank Unit header — rejects the upload by name.
     header, data_rows = _parse_csv_rows(upload.raw_content)
-    if len(header) != len(CANONICAL_MAP):
+    try:
+        resolved = resolve_columns(header)
+    except MissingColumnsError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"CSV header has {len(header)} columns; expected "
-                f"{len(CANONICAL_MAP)} per the canonical mapping."
-            ),
-        )
-
+            detail=str(exc),
+        ) from exc
 
     # Create the NominalRoll (personnel_count set after Personnel insert).
     nominal_roll = NominalRoll(
@@ -470,42 +443,42 @@ async def _process_upload_into_nr(
     db.add(nominal_roll)
     await db.flush()
 
-    # Per-roll column metadata.
-    for idx, raw_name, canonical, _ in CANONICAL_MAP:
-        original_label = raw_name if raw_name else "(empty header)"
-        if raw_name == "Remarks":
-            original_label = f"Remarks (column {idx + 1})"
+    # Per-roll column metadata (one row per original column; duplicate
+    # header names are disambiguated with their 1-based column position).
+    name_counts: dict[str, int] = {}
+    for name in header:
+        stripped = name.strip()
+        if stripped:
+            name_counts[stripped] = name_counts.get(stripped, 0) + 1
+    for idx, raw_name in enumerate(header):
+        stripped = raw_name.strip()
+        original_label = raw_name if stripped else "(empty header)"
+        if stripped and name_counts[stripped] > 1:
+            original_label = f"{stripped} (column {idx + 1})"
+        canonical = resolved.canonical_for_index.get(idx)
         db.add(
             ColumnMetadata(
                 nominal_roll_id=nominal_roll.id,
                 csv_upload_id=upload.id,
                 original_name=original_label,
                 canonical_name=canonical,
-                inferred_type=INFERRED_TYPES.get(raw_name, "string"),
-                is_required=canonical in {"rank", "full_name", "unit"},
+                inferred_type=INFERRED_TYPES.get(canonical or "", "string"),
+                is_required=canonical in REQUIRED_FIELDS,
             )
         )
 
-    # Personnel rows.
+    # Personnel rows: strict Yes-only filter (issue 34) — every non-Yes
+    # decision (No, blank, free text) skips the row and is counted.
     inserted_personnel = 0
+    decision_skipped = 0
     skipped_rows: list[dict[str, str | int]] = []
     for row_num, row in enumerate(data_rows, start=2):
-        if len(row) < len(CANONICAL_MAP):
-            continue  # malformed row (too few columns)
-        core_values: dict[str, str] = {}
-        extra_fields: dict[str, str | int | None] = {}
-        for idx, raw_name, canonical, goes_to_extra in CANONICAL_MAP:
-            value = row[idx].strip()
-            if canonical and not goes_to_extra:
-                core_values[canonical] = value
-            elif goes_to_extra:
-                key = EXTRA_KEY_FOR_INDEX.get(idx, snake(raw_name))
-                if is_integer_column(raw_name):
-                    extra_fields[key] = coerce_int(value)
-                else:
-                    extra_fields[key] = value or None
+        decision = _cell(row, resolved, "callup_decision")
+        if not is_callup_yes(decision):
+            decision_skipped += 1
+            continue
 
-        rank_value = core_values.get("rank") or ""
+        rank_value = _cell(row, resolved, "rank")
         try:
             category = ranks.category_for_rank(rank_value)
         except ValueError:
@@ -513,36 +486,40 @@ async def _process_upload_into_nr(
                 {
                     "row": row_num,
                     "rank": rank_value,
-                    "full_name": core_values.get("full_name") or "",
+                    "full_name": _cell(row, resolved, "full_name"),
                 }
             )
             continue
 
-        inpro_status, legacy_note = _resolve_inpro_status(
-            extra_fields.get("callup_decision")
+        # Optional int columns land in extra_fields only when the file
+        # carries the column (blank cell → None; absent column → no key).
+        extra_fields: dict[str, int | None] = {}
+        for field_name in EXTRA_INT_FIELDS:
+            if resolved.has(field_name):
+                extra_fields[field_name] = coerce_int(
+                    _cell(row, resolved, field_name)
+                )
+
+        pers_no = (
+            _cell(row, resolved, "pers_no") or None
+            if resolved.has("pers_no")
+            else None
         )
-        remarks = _join_personnel_remarks(
-            extra_fields.get("reason"),
-            extra_fields.get("remarks"),
-        )
-        if legacy_note:
-            remarks = f"{remarks}; {legacy_note}" if remarks else legacy_note
 
         db.add(
             Personnel(
                 nominal_roll_id=nominal_roll.id,
-                pers_no=core_values.get("pers_no") or None,
+                pers_no=pers_no,
                 rank=rank_value,
                 category=category,
-                full_name=core_values.get("full_name") or "",
-                unit=core_values.get("unit") or "",
-                sub_unit_1=core_values.get("sub_unit_1") or None,
-                sub_unit_2=core_values.get("sub_unit_2") or None,
-                sub_unit_3=core_values.get("sub_unit_3") or None,
+                full_name=_cell(row, resolved, "full_name"),
+                unit=_cell(row, resolved, "unit"),
+                sub_unit_1=_cell(row, resolved, "sub_unit_1") or None,
+                sub_unit_2=_cell(row, resolved, "sub_unit_2") or None,
+                sub_unit_3=_cell(row, resolved, "sub_unit_3") or None,
                 extra_fields=extra_fields,
                 status="active",
-                inpro_status=inpro_status,
-                remarks=remarks,
+                remarks=_cell(row, resolved, "remarks") or None,
                 created_by=created_by,
             )
         )
@@ -611,7 +588,8 @@ async def _process_upload_into_nr(
         description=(
             f"Processed CSV upload {upload.original_filename!r} into nominal "
             f"roll CAA {caa_date.isoformat()}: {inserted_personnel} personnel "
-            f"inserted, {len(skipped_rows)} skipped, "
+            f"inserted, {decision_skipped} skipped (callup decision not Yes), "
+            f"{len(skipped_rows)} skipped (unrecognized rank), "
             f"{matched_count} tagging entries imported."
         ),
     )
@@ -629,7 +607,10 @@ async def _process_upload_into_nr(
     return CsvUploadProcessResponse(
         nominal_roll_id=nominal_roll.id,
         personnel_inserted=inserted_personnel,
-        rows_skipped=len(skipped_rows),
+        # rows_skipped totals every non-stored data row (non-Yes decisions
+        # + unrecognized ranks); decision_skipped breaks out the former.
+        rows_skipped=decision_skipped + len(skipped_rows),
+        decision_skipped=decision_skipped,
         tagging_entries_imported=matched_count,
         unmatched=unmatched,
     )

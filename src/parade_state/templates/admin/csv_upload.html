@@ -8,6 +8,21 @@
 <p style="color: #6b7280; margin-bottom: 1.5rem;">Upload &rarr; (automatic processing into a Nominal Roll) &rarr; Use. Step 2 below is only needed for previously uploaded files, after an automatic-processing failure, or to import taggings during processing.</p>
 
 <div class="card">
+    <h3>Required CSV format</h3>
+    <p style="color: #6b7280; font-size: 0.85rem; margin-top: 0.5rem;">
+        Columns are matched by header name (extras are ignored). Required headers:
+        <strong>Unit, Sub Unit 1, Sub Unit 2, Sub Unit 3, Rank, Full Name,
+        Callup Decision, Reason, Remarks, ORNS</strong> (or <strong>ORNS Yrs</strong>)
+        and <strong>HK ICT</strong>; the Unit header must not be blank. Optional:
+        <strong>Pers</strong> (personnel number) and <strong>Age(Yr)</strong>.
+        Only rows with Callup Decision <strong>Yes</strong> are stored — all other
+        rows (No, blank, anything else) are skipped and reported. Callup Decision
+        and Reason are used for filtering only and are never stored; the filename
+        must contain a <code>caaYYMMDD</code> date token.
+    </p>
+</div>
+
+<div class="card">
     <h3>Step 1: Upload CSV File</h3>
     <div style="margin-top: 1rem;">
         <input type="file" accept=".csv" id="csvFile" style="margin-bottom: 1rem;">
@@ -128,7 +143,7 @@
                     statusDiv.innerHTML = '<p style="color: #f59e0b; font-weight: bold;">Duplicate file detected! This CSV was already uploaded.</p>';
                 } else if (data.process_result) {
                     const pr = data.process_result;
-                    statusDiv.innerHTML = '<p style="color: #10b981; font-weight: bold;">Upload successful — automatically processed into a Nominal Roll (' + pr.personnel_inserted + ' personnel inserted, ' + pr.rows_skipped + ' skipped). Empty tagging created; import taggings later from the Taggings page if needed.</p>';
+                    statusDiv.innerHTML = '<p style="color: #10b981; font-weight: bold;">Upload successful — automatically processed into a Nominal Roll (' + pr.personnel_inserted + ' personnel inserted, ' + pr.decision_skipped + ' skipped: callup decision not Yes, ' + (pr.rows_skipped - pr.decision_skipped) + ' skipped: unrecognized rank). Empty tagging created; import taggings later from the Taggings page if needed.</p>';
                 } else if (data.process_error) {
                     statusDiv.innerHTML = '<p style="color: #f59e0b; font-weight: bold;">Uploaded, but automatic processing failed: ' + data.process_error + '</p><p style="color: #6b7280;">Reload the page to pick this upload in Step 2 below.</p>';
                 } else {
@@ -199,7 +214,7 @@
                     '<table style="width: 100%; font-size: 0.85rem;">' +
                     '<tr><td style="font-weight: bold; padding: 0.25rem;">Nominal Roll ID:</td><td style="padding: 0.25rem; font-family: monospace;">' + data.nominal_roll_id + '</td></tr>' +
                     '<tr><td style="font-weight: bold; padding: 0.25rem;">Personnel inserted:</td><td style="padding: 0.25rem;">' + data.personnel_inserted + '</td></tr>' +
-                    '<tr><td style="font-weight: bold; padding: 0.25rem;">Rows skipped:</td><td style="padding: 0.25rem;">' + data.rows_skipped + '</td></tr>' +
+                    '<tr><td style="font-weight: bold; padding: 0.25rem;">Rows skipped:</td><td style="padding: 0.25rem;">' + data.rows_skipped + ' (' + data.decision_skipped + ' callup decision not Yes, ' + (data.rows_skipped - data.decision_skipped) + ' unrecognized rank)</td></tr>' +
                     '<tr><td style="font-weight: bold; padding: 0.25rem;">Tagging entries imported:</td><td style="padding: 0.25rem;">' + data.tagging_entries_imported + '</td></tr>' +
                     '</table>';
                 if (data.unmatched && data.unmatched.length > 0) {

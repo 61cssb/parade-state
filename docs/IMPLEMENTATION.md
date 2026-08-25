@@ -96,6 +96,11 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 - `tests/integration/test_api.py` - Authentication, user management, role management (18 tests)
 - `tests/integration/test_attendance_api.py` - Attendance management, snapshots, constraints, CSV export scoping
 - `tests/integration/test_csv_upload_api.py` - CSV upload pipeline, hash dedup, mapping (9 tests)
+- `tests/integration/test_csv_process_api.py` - CSV → NR processing under
+  contract v2 (issue 34): required-column errors, strict Yes-only filter +
+  skip counts, storage map (Pers/Age optional, ORNS alias, first Remarks,
+  Reason non-storage, extras ignored, quoted commas, old-format
+  convergence), canonical-fixture acceptance (397/163), tagging import
 - `tests/integration/test_deferments_api.py` - Deferment CRUD, inpro_status transitions (issue 32), super_admin auth
 - `tests/integration/test_feature_flags.py` - Flag-off hides Deferments/Grouping entirely (nav, pages, API) for every role incl. super-admin; flag-on restore; env-var defaults (8 tests)
 - `tests/integration/test_environment_banner.py` - ENVIRONMENT_BANNER renders the top strip pre-auth (login) and post-auth, escapes its text, and emits no markup when unset (5 tests)
@@ -108,7 +113,7 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 - `tests/integration/test_audit_api.py` - Audit log filtering and pagination (10 tests)
 - `tests/integration/test_core_feature_kill_switches.py` - FEATURE_NOMINALROLL/FEATURE_ATTENDANCE default-on kill switches: unset = fully available; explicit false hides page+API+nav for every role incl. super-admin; independent gating (9 tests)
 
-**Total:** 516 collected (512 passing, 4 skipped) ✅ UPDATED
+**Total:** 647 collected (643 passing, 4 skipped) ✅ UPDATED
 **Coverage:** Comprehensive integration test coverage across all major features
 **Performance:** ~23 seconds for full integration test suite
 
@@ -432,11 +437,10 @@ async def test_example(client, sample_users, sample_grouping):
   collapses to Called Up and the appended remarks stay).
 - Per-person `Personnel.remarks` text column (distinct from roll-level
   `NominalRoll.remarks`).
-- CSV ingest (interim shim until the #34 format lands): legacy `Callup
-  Decision` remapped — Yes / blank / Called Up → `yet_to_inpro`; No /
-  Deferred → `deferred` (the real fixtures carry Yes/No; No approximates
-  #34's future skip); anything else → `yet_to_inpro` + `Previously:
-  <value>` remark (raw kept in `extra_fields`) — and joins `Reason` +
+- CSV ingest (interim shim, superseded 2026-08-25 by the issue 34
+  contract v2 below): legacy `Callup Decision` remapped — Yes / blank /
+  Called Up → `yet_to_inpro`; No / Deferred → `deferred`; anything else →
+  `yet_to_inpro` + `Previously: <value>` remark — and joins `Reason` +
   first `Remarks` → `remarks`.
 - Attendance roster/view/dashboard filter to `inpro_status != 'deferred'`
   (interim rule until #33); hiding is non-destructive — existing attendance
@@ -452,6 +456,30 @@ async def test_example(client, sample_users, sample_grouping):
   vocabulary + 403), CSV shim mapping, attendance hiding + record
   preservation, NR view wiring + filter, migration mapping
   (test_migration_inpro_status.py runs the real alembic chain)
+
+**CSV Ingestion (✅ contract v2 — issue 34)**
+- Header-name matching replaces the index-based 18-column map
+  (`parade_state.utils.csv_constants`: `_HEADER_SPEC` +
+  `resolve_columns`); first occurrence of a name wins, extras tolerated
+  and ignored. Shared by the app process endpoint and the demo ingester.
+- Required columns (missing → 400 naming the column, blank Unit header
+  included): Unit, Sub Unit 1-3, Rank, Full Name, Callup Decision,
+  Reason, Remarks, HK ICT, ORNS (alias `ORNS Yrs`).
+- Strict Yes-only row filter: only an exact case-insensitive `Yes` stores
+  a row; everything else (No, blank, Y, free text) is skipped and counted
+  (`decision_skipped` breakdown in the process response/report).
+- Storage: core columns; optional Pers → `pers_no` (blank/absent → NULL);
+  first Remarks column only → `personnel.remarks`; ORNS/ORNS Yrs →
+  `extra_fields.orns`, HK ICT → `extra_fields.hk_ict`, optional Age(Yr) →
+  `extra_fields.age_yr` (ints); Callup Decision and Reason are read but
+  never stored. New personnel default `inpro_status = yet_to_inpro`
+  (the issue-32 interim shim is removed).
+- The pre-v2 16-column WY2627 export (ORNS, Age(Yr), no Pers) also
+  ingests cleanly — the formats converge under name matching.
+- Canonical fixture acceptance (in tests): 397 stored / 163 skipped /
+  2 NULL pers_no. Demo ingester (`experiments/csv_to_nr/ingest.py`) and
+  demo DB regenerated on the new contract.
+- **Tests:** `tests/integration/test_csv_process_api.py` (reworked).
 
 **Add Serviceman: manual creation (✅ issue 26)**
 - New nullable `Personnel.source` provenance column (NULL = CSV row,
@@ -506,8 +534,9 @@ async def test_example(client, sample_users, sample_grouping):
   already-present personnel are skipped (no clobber); unmatched source
   personnel are surfaced in the response.
 - `POST /api/v1/csv/{upload_id}/process` turns a stored CSV upload into a
-  full NR pipeline (NR + Personnel + ColumnMetadata + auto-tagging), with an
-  optional "import taggings from another NR" source.
+  full NR pipeline (NR + Personnel + ColumnMetadata + auto-tagging) under
+  the ingestion contract v2 (issue 34 — see the CSV Ingestion section),
+  with an optional "import taggings from another NR" source.
 - The public NR browser (`/nominal-roll`) overlays effective unit/subunit
   values with a yellow row background (`.changed-row`) for tagged personnel.
 - Personnel must belong to the parent tagging's NR (400 on cross-NR
