@@ -30,6 +30,7 @@ from parade_state.models import (
     Personnel,
     Tagging,
     TaggingEntry,
+    User,
     UserSubunitAssignment,
 )
 from parade_state.utils import utc_dt
