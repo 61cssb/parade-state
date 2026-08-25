@@ -11,6 +11,7 @@ from .attendance import (
     ATTENDANCE_STATUSES,
     PRESENT_LIKE_STATUSES,
     Attendance,
+    AttendanceFreeze,
 )
 from .audit import AuditLog
 from .auth_session import UserSession
@@ -47,6 +48,7 @@ __all__ = [
     "INPRO_STATUSES",
     "INPRO_STATUS_LABELS",
     "Attendance",
+    "AttendanceFreeze",
     "AuditLog",
     "UserSession",
     "ColumnMapping",

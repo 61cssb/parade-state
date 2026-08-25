@@ -44,6 +44,7 @@ class AuditLog(Base):
             "close",
             "finalize",
             "restore",
+            "attendance_freeze",
             name="audit_action",
         ),
     )

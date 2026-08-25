@@ -22,13 +22,23 @@ from parade_state.api.subunit_access import (
     in_scope_pids,
 )
 from parade_state.api.tagging import _load_nr_tagging
-from parade_state.auth.dependencies import require_admin_user
+from parade_state.auth.dependencies import require_admin_user, require_super_admin_user
 from parade_state.db import get_db_session
-from parade_state.models import Attendance, NominalRoll, Personnel, TaggingEntry, User
+from parade_state.models import (
+    Attendance,
+    AttendanceFreeze,
+    AuditLog,
+    NominalRoll,
+    Personnel,
+    TaggingEntry,
+    User,
+)
 from parade_state.models.attendance import PRESENT_LIKE_STATUSES
 from parade_state.models.personnel import INPRO_STATUS_LABELS
 from parade_state.models.schemas import (
     AttendanceBulkUpsert,
+    AttendanceFreezeRequest,
+    AttendanceFreezeResponse,
     AttendanceResponse,
     AttendanceUpsert,
     CopyRemarksResponse,
@@ -97,6 +107,40 @@ async def get_roster_for_scope(
         )
     )
     return list(result.scalars().all())
+
+
+async def assert_dates_writable(
+    db: AsyncSession,
+    user: User,
+    nominal_roll_id: str,
+    dates: set[utc_dt.date],
+) -> None:
+    """Freeze write guard (issue 35): 403 for admins on frozen dates.
+
+    Super-admins edit frozen days freely (retro-edit provenance still
+    applies); any other role touching a frozen (NR, date) gets a 403
+    naming the freeze. Reads, exports, and scope filtering are never
+    blocked.
+    """
+    if user.role == "super_admin" or not dates:
+        return
+    frozen = {
+        row.date
+        for row in (
+            await db.execute(
+                select(AttendanceFreeze).where(
+                    AttendanceFreeze.nominal_roll_id == nominal_roll_id,
+                    AttendanceFreeze.date.in_(dates),
+                )
+            )
+        ).scalars()
+    }
+    if frozen:
+        hit = ", ".join(d.isoformat() for d in sorted(frozen))
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Attendance for {hit} is frozen; super-admin required",
+        )
 
 
 # ============================================================================
@@ -168,13 +212,18 @@ async def bulk_upsert_attendance(
     Caller identity is session-derived (issue 31). Enforces that the NR is
     the one currently active for attendance AND that the caller's scope
     covers each target personnel's effective (unit, sub_unit_1) (403
-    otherwise; super_admin bypasses). Each entry is keyed on
-    (personnel_id, date); existing rows are updated, new rows are created
-    with snapshot data from Personnel.
+    otherwise; super_admin bypasses). Frozen (NR, date)s are writable by
+    super-admins only (issue 35; 403 naming the freeze otherwise). Each
+    entry is keyed on (personnel_id, date); existing rows are updated,
+    new rows are created with snapshot data from Personnel.
     """
     user_id = str(user.id)
     nr = await require_attendance_active(payload.nominal_roll_id, db)
     tagging_id = await applied_tagging_id(db, nr)
+
+    # Freeze guard (issue 35): admins cannot write a frozen day.
+    dates = {r.date for r in payload.records}
+    await assert_dates_writable(db, user, payload.nominal_roll_id, dates)
 
     # Scope enforcement (issues #4 and #28): effective (unit, sub_unit_1)
     # must be covered by a grant; super_admin bypasses.
@@ -189,7 +238,6 @@ async def bulk_upsert_attendance(
     )
 
     # Index existing rows for this NR + date set.
-    dates = {r.date for r in payload.records}
     existing_result = await db.execute(
         select(Attendance).where(
             and_(
@@ -303,10 +351,12 @@ async def copy_remarks(
     attendance roster (all NR personnel — issue 33), optionally narrowed
     to an effective sub_unit_1 (the page's view filter), intersected with
     the caller's (unit, sub_unit_1) write scope (super_admin bypasses;
-    deny-by-default: no grants → 403). Rows with an empty source remark
-    are skipped (the destination keeps its remark); missing destination
-    rows are created (status defaults to absent). Source and destination
-    dates must differ.
+    deny-by-default: no grants → 403). A frozen destination date is
+    writable by super-admins only (issue 35; the source may be frozen —
+    it is only read). Rows with an empty source remark are skipped (the
+    destination keeps its remark); missing destination rows are created
+    (status defaults to absent). Source and destination dates must
+    differ.
     """
     user_id = str(user.id)
     if source_date == dest_date:
@@ -317,6 +367,9 @@ async def copy_remarks(
 
     nr = await require_attendance_active(nominal_roll_id, db)
     tagging_id = await applied_tagging_id(db, nr)
+
+    # Freeze guard (issue 35): the destination is the written date.
+    await assert_dates_writable(db, user, nominal_roll_id, {dest_date})
 
     roster = await get_roster_for_scope(nominal_roll_id, db)
 
@@ -408,6 +461,139 @@ async def copy_remarks(
         dest_date=dest_date,
         updated=updated,
         skipped=skipped,
+    )
+
+
+# ============================================================================
+# Freeze endpoints (issue 35)
+# ============================================================================
+#
+# Day-level lock on the (NR, date): super-admins toggle it; admins get
+# read-only cells and 403s on writes touching a frozen day (the guards
+# in upsert / copy-remarks above). Presence of a row = frozen.
+
+
+@router.put("/freeze", response_model=AttendanceFreezeResponse)
+async def freeze_attendance(
+    payload: AttendanceFreezeRequest,
+    user: User = Depends(require_super_admin_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Freeze attendance for an (NR, date) — super-admin only.
+
+    Caller identity is session-derived (issue 31). An NR-lifecycle-grade
+    operation (matching the CSV upload/process precedent): only the NR
+    currently active for attendance can be frozen. Freezing an already
+    frozen (NR, date) → 409. Frozen days stay editable by super-admins
+    (retro-edit provenance still applies) and read-only for admins.
+    """
+    user_id = str(user.id)
+    nr = await require_attendance_active(payload.nominal_roll_id, db)
+
+    existing = (
+        await db.execute(
+            select(AttendanceFreeze).where(
+                AttendanceFreeze.nominal_roll_id == str(nr.id),
+                AttendanceFreeze.date == payload.date,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Attendance for {payload.date.isoformat()} is already frozen",
+        )
+
+    freeze = AttendanceFreeze(
+        nominal_roll_id=str(nr.id),
+        date=payload.date,
+        created_by=user_id,
+    )
+    db.add(freeze)
+    db.add(
+        AuditLog(
+            user_id=user_id,
+            entity_type="nominal_roll",
+            entity_id=str(nr.id),
+            action="attendance_freeze",
+            description=(
+                f"Froze attendance for {payload.date.isoformat()} on "
+                f"nominal roll CAA {nr.caa.isoformat()}."
+            ),
+        )
+    )
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Attendance for {payload.date.isoformat()} is already frozen"
+            ),
+        ) from None
+    await db.refresh(freeze)
+
+    return AttendanceFreezeResponse(
+        nominal_roll_id=str(nr.id),
+        date=payload.date,
+        frozen=True,
+        frozen_at=freeze.created_at,
+    )
+
+
+@router.delete("/freeze", response_model=AttendanceFreezeResponse)
+async def unfreeze_attendance(
+    nominal_roll_id: str = Query(..., description="NR to unfreeze attendance for"),
+    date: utc_dt.date = Query(..., description="Attendance date to unfreeze"),
+    user: User = Depends(require_super_admin_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Unfreeze attendance for an (NR, date) — super-admin only.
+
+    Same key as the freeze call, passed as query parameters (DELETE
+    bodies are unreliable across clients — the copy-remarks precedent
+    uses Query the same way). Unfreezing a day that is not frozen →
+    404. Unfreezing restores admin editability for that day immediately.
+    """
+    user_id = str(user.id)
+    nr = await require_attendance_active(nominal_roll_id, db)
+
+    freeze = (
+        await db.execute(
+            select(AttendanceFreeze).where(
+                AttendanceFreeze.nominal_roll_id == str(nr.id),
+                AttendanceFreeze.date == date,
+            )
+        )
+    ).scalar_one_or_none()
+    if freeze is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Attendance for {date.isoformat()} is not frozen",
+        )
+
+    await db.delete(freeze)
+    db.add(
+        AuditLog(
+            user_id=user_id,
+            entity_type="nominal_roll",
+            entity_id=str(nr.id),
+            action="attendance_freeze",
+            description=(
+                f"Unfroze attendance for {date.isoformat()} on "
+                f"nominal roll CAA {nr.caa.isoformat()}."
+            ),
+        )
+    )
+    await db.commit()
+
+    return AttendanceFreezeResponse(
+        nominal_roll_id=str(nr.id),
+        date=date,
+        frozen=False,
+        frozen_at=None,
     )
 
 

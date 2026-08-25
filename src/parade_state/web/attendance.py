@@ -18,10 +18,12 @@ from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
 from parade_state.models import (
     Attendance,
+    AttendanceFreeze,
     NominalRoll,
     Personnel,
     TaggingEntry,
 )
+from parade_state.models.attendance import ATTENDANCE_REASON_LABELS
 from parade_state.models.personnel import INPRO_STATUS_LABELS, INPRO_STATUSES
 from parade_state.utils import utc_dt
 
@@ -84,6 +86,24 @@ async def attendance_view(
 
         selected_nr_id = str(selected.id) if selected else None
         attendance_active = bool(selected and selected.attendance_active)
+
+        # Freeze state for the selected (NR, date) — issue 35. Row
+        # presence = frozen; the banner renders for every role and the
+        # grid goes read-only for non-super-admins.
+        frozen = False
+        frozen_at = None
+        if selected_nr_id:
+            freeze_row = (
+                await db.execute(
+                    select(AttendanceFreeze).where(
+                        AttendanceFreeze.nominal_roll_id == selected_nr_id,
+                        AttendanceFreeze.date == target_date,
+                    )
+                )
+            ).scalar_one_or_none()
+            if freeze_row is not None:
+                frozen = True
+                frozen_at = freeze_row.created_at
 
         # Build roster + attendance rows.
         attendance_rows = []
@@ -243,6 +263,9 @@ async def attendance_view(
         counts=counts,
         nr_caa=selected.caa.isoformat() if (selected and selected.caa) else "",
         no_assignments=no_assignments,
+        frozen=frozen,
+        frozen_at=frozen_at,
+        reason_labels=ATTENDANCE_REASON_LABELS,
     )
 
     return HTMLResponse(content=html_content)
