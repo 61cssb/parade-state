@@ -340,6 +340,28 @@
 
 {% block scripts %}
 <script>
+    // Default the date from the browser's local datetime on first visit
+    // (URL without a date param), as the strength report does: the server
+    // cannot know the viewer's timezone, and its UTC default lags local
+    // mornings until 08:00 SGT. Best effort — an explicit ?date= and
+    // no-JS clients keep the server default. Reloads once at most; the
+    // other filters are form fields, so the resubmit carries them.
+    (function () {
+        var params = new URLSearchParams(window.location.search);
+        if (params.has('date')) return;
+        var dateInput = document.getElementById('date');
+        if (!dateInput) return;
+        var now = new Date();
+        var localDate = now.getFullYear() + '-' +
+            String(now.getMonth() + 1).padStart(2, '0') + '-' +
+            String(now.getDate()).padStart(2, '0');
+        if (dateInput.value !== localDate) {
+            dateInput.value = localDate;
+            dateInput.form.submit();
+        }
+    })();
+</script>
+<script>
     const NOMINAL_ROLL_ID = "{{ selected_nominal_roll_id }}";
     const TARGET_DATE = "{{ target_date.strftime('%Y-%m-%d') }}";
     const NR_CAA = "{{ nr_caa }}";
