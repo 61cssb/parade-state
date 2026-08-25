@@ -909,3 +909,235 @@ async def test_export_csv_scopes_to_assigned_subunits(
     assert filtered.status_code == 200
     rows = list(csv.reader(io.StringIO(filtered.text)))
     assert rows[1:] == []  # outside the admin's assigned scope
+
+
+# ============================================================================
+# Freeze (issue 35): day-level lock, super-admin writable / admin read-only
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_freeze_requires_super_admin(
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+    sample_attendance_scope,
+):
+    """Freeze/unfreeze are NR-lifecycle-grade ops: non-super-admins 403."""
+    body = {
+        "nominal_roll_id": str(sample_nominal_roll.id),
+        "date": date.today().isoformat(),
+    }
+    for role in ("admin", "user"):
+        client = await client_as(role)
+        assert client.put("/api/v1/attendance/freeze", json=body).status_code == 403
+        assert (
+            client.delete("/api/v1/attendance/freeze", params=body).status_code == 403
+        )
+
+
+@pytest.mark.asyncio
+async def test_freeze_unfreeze_roundtrip_with_audit(
+    client: TestClient,
+    client_as,
+    db_session,
+    sample_nominal_roll,
+    sample_attendance_scope,
+):
+    """Super-admin roundtrip: freeze 200 (frozen + frozen_at), double-freeze
+    409, unfreeze 200, unfreeze-again 404 — both directions audit-logged."""
+    from sqlalchemy import select
+
+    from parade_state.models import AuditLog
+
+    client = await client_as("super_admin")
+    body = {
+        "nominal_roll_id": str(sample_nominal_roll.id),
+        "date": date.today().isoformat(),
+    }
+
+    frozen = client.put("/api/v1/attendance/freeze", json=body)
+    assert frozen.status_code == 200
+    assert frozen.json()["frozen"] is True
+    assert frozen.json()["frozen_at"] is not None
+
+    duplicate = client.put("/api/v1/attendance/freeze", json=body)
+    assert duplicate.status_code == 409
+    assert "already frozen" in duplicate.json()["detail"]
+
+    thawed = client.delete("/api/v1/attendance/freeze", params=body)
+    assert thawed.status_code == 200
+    assert thawed.json()["frozen"] is False
+    assert thawed.json()["frozen_at"] is None
+
+    missing = client.delete("/api/v1/attendance/freeze", params=body)
+    assert missing.status_code == 404
+    assert "not frozen" in missing.json()["detail"]
+
+    logs = (
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.entity_type == "nominal_roll",
+                    AuditLog.entity_id == str(sample_nominal_roll.id),
+                    AuditLog.action == "attendance_freeze",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    descriptions = " | ".join(log.description for log in logs)
+    assert "Froze attendance" in descriptions
+    assert "Unfroze attendance" in descriptions
+
+
+@pytest.mark.asyncio
+async def test_freeze_requires_attendance_active_nr(
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+):
+    """Freezing a day on a non-active NR → 400 (require_attendance_active)."""
+    client = await client_as("super_admin")
+    response = client.put(
+        "/api/v1/attendance/freeze",
+        json={
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "date": date.today().isoformat(),
+        },
+    )
+    assert response.status_code == 400
+    assert "not active" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_frozen_day_upsert_role_split(
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_attendance_scope,
+    admin_subunit_assignment,
+):
+    """Frozen day: admin upsert 403s naming the freeze, super-admin upsert
+    succeeds; other dates stay admin-writable; unfreezing restores writes."""
+    nr_id = str(sample_nominal_roll.id)
+    pid = str(sample_personnel[0].id)
+    today = date.today().isoformat()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    freeze_body = {"nominal_roll_id": nr_id, "date": today}
+
+    def _upsert(when: str) -> dict:
+        return {
+            "nominal_roll_id": nr_id,
+            "records": [{"personnel_id": pid, "date": when, "status": "present"}],
+        }
+
+    super_admin = await client_as("super_admin")
+    assert (
+        super_admin.put("/api/v1/attendance/freeze", json=freeze_body).status_code
+        == 200
+    )
+
+    admin = await client_as("admin")
+    blocked = admin.put("/api/v1/attendance/upsert", json=_upsert(today))
+    assert blocked.status_code == 403
+    assert "frozen" in blocked.json()["detail"].lower()
+
+    # Freeze is per (NR, date): another day stays admin-writable.
+    assert admin.put("/api/v1/attendance/upsert", json=_upsert(tomorrow)).status_code == 200
+
+    # Super-admins keep editing the frozen day.
+    super_admin = await client_as("super_admin")
+    sa_edit = super_admin.put("/api/v1/attendance/upsert", json=_upsert(today))
+    assert sa_edit.status_code == 200
+    assert sa_edit.json()[0]["status"] == "present"
+
+    # Unfreezing restores admin editability.
+    assert (
+        super_admin.delete("/api/v1/attendance/freeze", params=freeze_body).status_code
+        == 200
+    )
+    admin = await client_as("admin")
+    assert admin.put("/api/v1/attendance/upsert", json=_upsert(today)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_copy_remarks_respects_freeze(
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_attendance_scope,
+    sample_attendance,
+    admin_subunit_assignment,
+):
+    """Copy-remarks into a frozen destination 403s for admins; a frozen
+    source is fine (it is only read)."""
+    nr_id = str(sample_nominal_roll.id)
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    today = date.today().isoformat()
+
+    def _copy(dest: str) -> dict:
+        return {
+            "nominal_roll_id": nr_id,
+            "source_date": yesterday,
+            "dest_date": dest,
+        }
+
+    super_admin = await client_as("super_admin")
+    assert (
+        super_admin.put(
+            "/api/v1/attendance/freeze",
+            json={"nominal_roll_id": nr_id, "date": today},
+        ).status_code
+        == 200
+    )
+
+    admin = await client_as("admin")
+    blocked = admin.post("/api/v1/attendance/copy-remarks", params=_copy(today))
+    assert blocked.status_code == 403
+    assert "frozen" in blocked.json()["detail"].lower()
+
+    # Freeze the source too, thaw the destination: copy reads frozen
+    # sources without complaint.
+    super_admin = await client_as("super_admin")
+    super_admin.put(
+        "/api/v1/attendance/freeze", json={"nominal_roll_id": nr_id, "date": yesterday}
+    )
+    super_admin.delete(
+        "/api/v1/attendance/freeze", params={"nominal_roll_id": nr_id, "date": today}
+    )
+
+    admin = await client_as("admin")
+    allowed = admin.post("/api/v1/attendance/copy-remarks", params=_copy(today))
+    assert allowed.status_code == 200
+    assert allowed.json()["updated"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_export_unaffected_by_freeze(
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+    sample_attendance_scope,
+    sample_attendance,
+):
+    """Freeze never blocks reads: export on a frozen day returns 200 CSV."""
+    client = await client_as("super_admin")
+    today = date.today().isoformat()
+    assert (
+        client.put(
+            "/api/v1/attendance/freeze",
+            json={"nominal_roll_id": str(sample_nominal_roll.id), "date": today},
+        ).status_code
+        == 200
+    )
+
+    response = client.get(
+        "/api/v1/attendance/export",
+        params={"nominal_roll_id": str(sample_nominal_roll.id), "date": today},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")

@@ -439,3 +439,85 @@ async def test_attendance_inpro_filter_hides_deferred(
     await db_session.refresh(record)
     assert record.status == "present"
     assert record.remarks == "marked earlier"
+
+
+@pytest.mark.asyncio
+async def test_frozen_day_banner_and_readonly_grid(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_attendance_scope,
+    sample_users,
+    db_session,
+    monkeypatch,
+):
+    """Issue 35: on a frozen day every role sees the banner (with the
+    freeze timestamp); admins get a read-only grid (no inputs, no toggle),
+    super-admins keep the editable grid and the freeze toggle."""
+    from parade_state.web import attendance as web_attendance
+    from parade_state.models import AttendanceFreeze, User, UserSubunitAssignment
+    from parade_state.db import get_session_maker
+    from parade_state.utils import utc_dt
+
+    admin = sample_users["admin"]
+    admin_id = str(admin.id)
+    nr_id = str(sample_nominal_roll.id)
+
+    # Grant an assignment so the roster renders, and freeze today.
+    sm = get_session_maker()
+    async with sm() as db:
+        db.add(
+            UserSubunitAssignment(
+                user_id=admin_id,
+                nominal_roll_id=nr_id,
+                sub_unit_1="Platoon 1",
+                created_by=admin_id,
+            )
+        )
+        db.add(
+            AttendanceFreeze(
+                nominal_roll_id=nr_id,
+                date=utc_dt.utcnow().date(),
+                created_by=admin_id,
+            )
+        )
+        await db.commit()
+
+    async def _fake_current_user(_request):
+        return admin
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
+
+    response = client.get("/attendance", params={"nominal_roll_id": nr_id})
+    assert response.status_code == 200
+    assert "Attendance for this day is frozen" in response.text
+    assert "frozen at" in response.text  # banner names the freeze timestamp
+    assert "read-only" in response.text
+    # Admin grid is read-only: no inputs at all (so no autosave edges).
+    # (The selectors below match element markup, not the autosave JS.)
+    assert '<select class="status-select"' not in response.text
+    assert '<select class="reason-select"' not in response.text
+    assert 'onblur="onRemarksBlur(this)"' not in response.text
+    # The toggle is super-admin-only.
+    assert 'id="freeze-toggle"' not in response.text
+
+    super_admin = User(
+        email="super-freeze@example.com",
+        name="Super Admin",
+        role="super_admin",
+        status="active",
+    )
+    db_session.add(super_admin)
+    await db_session.commit()
+
+    async def _fake_super_admin(_request):
+        return super_admin
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_super_admin)
+
+    response = client.get("/attendance", params={"nominal_roll_id": nr_id})
+    assert response.status_code == 200
+    assert "Attendance for this day is frozen" in response.text
+    assert '<select class="status-select"' in response.text  # still editable
+    assert 'id="freeze-toggle"' in response.text
+    assert "Unfreeze day" in response.text
