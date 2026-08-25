@@ -1,4 +1,4 @@
-"""Unit Strength report (issue 25).
+"""Unit Strength report (issues 25 and 36).
 
 The report aggregates the attendance-active NR's parade state into the
 strength reporting format: Officer/WOSE/Total column groups of
@@ -6,6 +6,11 @@ In/Out/Current/%, grouped by effective sub_unit_1 (shown once) and
 sub_unit_2 with SUBTOTALs and a unit TOTAL. In counts non-deferred
 personnel, Current the present marks (single daily session, issue 33 —
 reason never participates), Out everyone else (unmarked = absent).
+
+Reporting basis (issue 36): tagged (default, every role) groups under
+the tagging-applied effective subunits; untagged (super-admin only)
+groups under the original NR allocations from the canonical Personnel
+columns.
 """
 
 import re
@@ -67,8 +72,11 @@ def _text(response) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", response.text))
 
 
-def _get(client: TestClient):
-    return client.get("/admin", params={"date": TODAY.isoformat()})
+def _get(client: TestClient, basis: str | None = None):
+    params = {"date": TODAY.isoformat()}
+    if basis is not None:
+        params["basis"] = basis
+    return client.get("/admin", params=params)
 
 
 # --- Auth / shell ---
@@ -300,6 +308,140 @@ async def test_null_subunits_reported_in_none_bucket(
     # Unmarked → out: In 1, Out 1, Current 0.
     assert "(none) 0 0 0 0% 1 1 0 0% 1 1 0 0%" in body
     assert "TOTAL 1 1 0 0% 3 2 1 33% 4 3 1 25%" in body
+
+
+# --- Reporting basis (issue 36) ---
+
+
+async def _remap_officer_into_platoon_1(
+    db_session: AsyncSession, sample_users, sample_personnel
+) -> None:
+    """Tag the Officer (Platoon 2 / Section 1) into Platoon 1 / Section 3."""
+    admin_id = str(sample_users["admin"].id)
+    nr_id = str(sample_personnel[0].nominal_roll_id)
+    tagging = Tagging(label="Exercise", nominal_roll_id=nr_id, created_by=admin_id)
+    db_session.add(tagging)
+    await db_session.flush()
+    db_session.add(
+        TaggingEntry(
+            tagging_id=str(tagging.id),
+            personnel_id=str(sample_personnel[2].id),
+            from_unit="Coy A",
+            from_sub_unit_1="Platoon 2",
+            from_sub_unit_2="Section 1",
+            to_unit="Coy A",
+            to_sub_unit_1="Platoon 1",
+            to_sub_unit_2="Section 3",
+        )
+    )
+    await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_untagged_basis_groups_by_original_allocations(
+    client: TestClient,
+    db_session: AsyncSession,
+    sample_users,
+    sample_personnel,
+    sample_attendance_scope,
+    sample_attendance,
+):
+    """Untagged (super-admin only) ignores the tagging overlay: the
+    remapped Officer reports under his original Platoon 2 / Section 1,
+    Section 3 never appears, and the unit TOTAL is allocation-independent
+    (identical to the tagged report)."""
+    await _remap_officer_into_platoon_1(db_session, sample_users, sample_personnel)
+
+    sa = await _make_super_admin(db_session)
+    await _sign_in(client, db_session, sa)
+
+    response = _get(client, basis="untagged")
+    assert response.status_code == 200
+    raw = _raw(response)
+    assert "Untagged (original NR)" in raw  # heading names the basis
+    assert "original nominal-roll" in raw  # legend explains the basis
+    assert 'value="untagged" selected' in raw  # toggle reflects it
+    body = _text(response)
+
+    assert "Section 1 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body  # Officer, home subunit
+    assert "Section 3" not in body  # the remap target is not consulted
+    assert "SUBTOTAL 0 0 0 0% 2 1 1 50% 2 1 1 50%" in body  # Platoon 1 WOSE only
+    assert "SUBTOTAL 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body  # Platoon 2 subtotal
+    # Same grand total as the tagged report (test_tagging_overlay_regroups_rows).
+    assert "TOTAL 1 1 0 0% 2 1 1 50% 3 2 1 33%" in body
+
+
+@pytest.mark.asyncio
+async def test_tagged_basis_selected_by_default_and_on_explicit_param(
+    client: TestClient,
+    db_session: AsyncSession,
+    sample_users,
+    sample_personnel,
+    sample_attendance_scope,
+    sample_attendance,
+):
+    """Default (no param) and explicit basis=tagged both apply the overlay:
+    the Officer groups under his remap target, and the toggle renders
+    Tagged as selected."""
+    await _remap_officer_into_platoon_1(db_session, sample_users, sample_personnel)
+
+    sa = await _make_super_admin(db_session)
+    await _sign_in(client, db_session, sa)
+
+    for params in ({}, {"basis": "tagged"}, {"basis": "banana"}):
+        response = client.get(
+            "/admin", params={"date": TODAY.isoformat(), **params}
+        )
+        assert response.status_code == 200
+        raw = _raw(response)
+        assert "· Tagged" in raw
+        assert 'value="tagged" selected' in raw
+        body = _text(response)
+        assert "Section 3 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body
+        assert "Platoon 2" not in body
+
+
+@pytest.mark.asyncio
+async def test_untagged_basis_denied_to_admins(
+    client: TestClient,
+    db_session: AsyncSession,
+    sample_users,
+    sample_personnel,
+    sample_attendance_scope,
+    sample_attendance,
+):
+    """A regular admin (scoped in, so the tagged report renders fine for
+    them) explicitly requesting the untagged basis gets the 403 no-access
+    page; their default report is unchanged tagged."""
+    await _remap_officer_into_platoon_1(db_session, sample_users, sample_personnel)
+    admin_id = str(sample_users["admin"].id)
+    db_session.add(
+        UserSubunitAssignment(
+            user_id=admin_id,
+            nominal_roll_id=str(sample_personnel[0].nominal_roll_id),
+            sub_unit_1="Platoon 1",
+            created_by=admin_id,
+        )
+    )
+    await db_session.commit()
+    await _sign_in(client, db_session, sample_users["admin"])
+
+    response = _get(client, basis="untagged")
+    assert response.status_code == 403
+    assert "You do not have access to this page" in response.text
+    assert "restricted to super administrators" in response.text
+
+    # Default report: no toggle rendered, tagged basis labeled. Scoping is
+    # tagging-aware: the remapped Officer now sits inside the admin's
+    # Platoon 1 grant, so he reports under his (tagged) Section 3 — admin
+    # reporting always follows the tagged basis.
+    response = _get(client)
+    assert response.status_code == 200
+    assert 'name="basis"' not in _raw(response)
+    assert "· Tagged" in _raw(response)
+    body = _text(response)
+    assert "Section 3 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body
+    assert "Platoon 2" not in body
 
 
 # --- Access scoping ---
