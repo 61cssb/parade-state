@@ -5,7 +5,9 @@ refreshes via localStorage) and applies them with one PATCH
 /api/v1/personnel/{id} per person (the redirect-to-tagging behaviour is
 covered in test_personnel_api.py); these tests pin the view wiring —
 editable cells, the embedded suggestion lists, and the staged-edit
-Apply/Discard bar for super-admins, plain read-only cells for everyone else.
+Apply/Discard bar for super-admins (all four levels) and admins
+(sub-units 2/3 only, issue 38), plain read-only top-level cells for
+admins.
 
 Note: the auth helper is called directly inside the handler (not via
 Depends()), so we monkeypatch the module-level reference to inject a user.
@@ -122,7 +124,7 @@ async def test_nominal_roll_staged_edits_wiring(
 
 
 @pytest.mark.asyncio
-async def test_nominal_roll_read_only_for_non_super_admins(
+async def test_nominal_roll_admin_sub23_cells_only(
     client: TestClient,
     sample_nominal_roll,
     sample_personnel,
@@ -131,7 +133,9 @@ async def test_nominal_roll_read_only_for_non_super_admins(
     admin_subunit_assignment,
     monkeypatch,
 ):
-    """Non-super-admins get a plain read-only table — no editor markup."""
+    """Issue 38: admins get the cell editor for sub-units 2/3 only.
+    Unit / sub-unit 1 render read-only and their suggestion lists are
+    not shipped at all."""
     from parade_state.web import nominal_roll as web_nominal_roll
 
     async def _fake_current_user(_request):
@@ -144,12 +148,21 @@ async def test_nominal_roll_read_only_for_non_super_admins(
     )
     assert response.status_code == 200
     assert "John Doe" in response.text  # roster still renders
-    assert "data-field=" not in response.text
-    assert "EDIT_OPTIONS" not in response.text
-    # No staged-edit machinery either — nothing to stage without the editor.
-    # (The inert CSS ships for everyone; the JS wiring is what matters.)
-    assert "stageCellEdit" not in response.text
-    assert "ps:nr-edits" not in response.text
+    # Sub 2/3 cells carry the editor; the top two levels stay plain text.
+    assert 'data-field="sub_unit_2"' in response.text
+    assert 'data-field="sub_unit_3"' in response.text
+    assert 'data-field="unit"' not in response.text
+    assert 'data-field="sub_unit_1"' not in response.text
+    # The staged-edit machinery ships for admins too (sub 2/3 edits are
+    # staged and applied exactly like super-admin edits).
+    assert "stageCellEdit" in response.text
+    assert "ps:nr-edits:" in response.text
+    # Only the sub 2/3 suggestion lists are embedded — admins cannot use
+    # the unit / sub-unit 1 lists, so they are neither rendered nor shipped.
+    assert "EDIT_OPTIONS" in response.text
+    assert "sub_unit_2:" in response.text
+    assert "unit: [" not in response.text
+    assert "sub_unit_1: [" not in response.text
 
 
 @pytest.mark.asyncio

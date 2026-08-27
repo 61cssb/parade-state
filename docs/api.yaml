@@ -157,7 +157,11 @@ tags:
   - name: taggings
     description: >
       Tagging overlays — super-admin only; person→subunit remappings on a
-      Nominal Roll (1:1 with the NR). Kill-switched with the NR stack:
+      Nominal Roll (1:1 with the NR). Issue 38: admins' only mutation
+      path is PATCH /api/v1/personnel/{id} carrying sub_unit_2/sub_unit_3
+      (in-scope only, recorded on the overlay); unit/sub_unit_1 in that
+      PATCH → 403 for non-super-admins with nothing applied.
+      Kill-switched with the NR stack:
       every /api/v1/taggings/* route returns 404 for all roles
       (super-admins included) when FEATURE_NOMINALROLL=false
       (default on; unset = available).

@@ -426,7 +426,7 @@ async def test_example(client, sample_users, sample_grouping):
   (see the Grouping Management notes above). The orphaned
   `/admin/sessions` redirect route was removed.
 
-**Remap Editing (✅ comboboxes, ✅ staged edits)**
+**Remap Editing (✅ comboboxes, ✅ staged edits, ✅ admin sub 2/3 — issue 38)**
 - Public NR browser: super-admins click a unit / sub-unit cell to remap it —
   the cell becomes an input with a custom suggestion panel anchored under
   the cell (the native datalist popup was replaced because its placement is
@@ -434,6 +434,13 @@ async def test_example(client, sample_users, sample_grouping):
   **stages** the edit (darker-yellow pending cell; no API call). Sub-unit
   2/3 panels offer a "leave blank" pick that clears the value. Regular
   users see the read-only table.
+- Issue 38: in-scope admins get the same editor on **sub-unit 2/3 cells
+  only** — unit / sub-unit 1 render read-only and their suggestion lists
+  are not shipped. Enforced at the API seam, not the UI: `PATCH
+  /api/v1/personnel/{id}` rejects `unit`/`sub_unit_1` for non-super-admins
+  with 403 (whole payload, nothing applied, checked before the scope
+  gate); sub 2/3 remaps stay scope-gated only. Closes the pre-38 hole
+  where any in-scope admin could PATCH the top two levels.
 - Staged edits are held per roll in `localStorage` (`ps:nr-edits:{roll_id}`,
   refresh-safe) until the floating bottom bar's **Apply** sends one
   `PATCH /api/v1/personnel/{id}` per person (recorded on the tagging

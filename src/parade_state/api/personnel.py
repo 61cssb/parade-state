@@ -616,6 +616,12 @@ async def update_personnel(
     Issue #28 write scoping: the personnel's effective (unit, sub_unit_1)
     must be inside the caller's scope before anything is applied (403
     otherwise; super_admin bypasses).
+
+    Issue #38 field-level roles: ``unit`` / ``sub_unit_1`` remaps are
+    super-admin-only (403 for admins, before the scope gate and any
+    mutation); in-scope admins may remap ``sub_unit_2`` / ``sub_unit_3``
+    only. Those levels never affect scope membership — grants match the
+    effective (unit, sub_unit_1).
     """
     user_id = str(user.id)
 
@@ -639,6 +645,25 @@ async def update_personnel(
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Only super-admins can change personnel numbers",
+        )
+
+    # Issue #38: unit / sub_unit_1 reallocation is super-admin-only.
+    # Admins may reallocate sub_unit_2 / sub_unit_3 (the redirect below
+    # records it on the tagging overlay); the top two levels decide scope
+    # membership itself, so they never move via a regular admin. A payload
+    # mixing allowed and forbidden levels is rejected whole — nothing is
+    # applied. Checked before the scope gate and any mutation.
+    admin_forbidden_remaps = {"unit", "sub_unit_1"} & update_data.keys()
+    if admin_forbidden_remaps and user.role != "super_admin":
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Only super-admins can change unit or sub-unit 1 "
+                "allocations; admins may reallocate sub-unit 2/3 only "
+                "(forbidden fields: "
+                + ", ".join(sorted(admin_forbidden_remaps))
+                + ")"
+            ),
         )
 
     # Partition the remaining update into remap (-> tagging) vs direct

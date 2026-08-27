@@ -9,6 +9,7 @@ from sqlalchemy import select
 from parade_state.models.csv_ingestion import NominalRoll
 from parade_state.models.personnel import Personnel
 from parade_state.models.audit import AuditLog
+from parade_state.models.tagging import TaggingEntry
 from tests.test_utils import (
     assert_404_response,
     assert_pagination_works,
@@ -240,27 +241,28 @@ async def test_update_personnel_as_admin(
     db_session,
     sample_personnel,
 ):
-    """Unit/subunit edits are redirected to a TaggingEntry overlay; the
-    personnel row stays read-only. Response returns effective values."""
-    original_unit = sample_personnel[0].unit
-    update_data = {
-        "unit": "Remapped Unit",
-    }
+    """Issue #38: in-scope admins may reallocate sub-units 2/3 only. The
+    edit is redirected to a TaggingEntry overlay; the personnel row stays
+    read-only and the response returns effective values."""
+    p = sample_personnel[0]
 
     response = client.patch(
-        f"/api/v1/personnel/{sample_personnel[0].id}",
+        f"/api/v1/personnel/{p.id}",
         headers=admin_token_headers,
-        json=update_data,
+        json={"sub_unit_2": "Remapped S2"},
     )
 
     assert response.status_code == 200
     data = response.json()
-    assert data["id"] == str(sample_personnel[0].id)
-    # Effective unit reflects the remap; canonical personnel row unchanged.
-    assert data["unit"] == "Remapped Unit"
+    assert data["id"] == str(p.id)
+    # Effective sub-unit 2 reflects the remap; other levels keep theirs.
+    assert data["sub_unit_2"] == "Remapped S2"
+    assert data["unit"] == "Coy A"
+    assert data["sub_unit_1"] == "Platoon 1"
     # The personnel row itself was not mutated.
-    await db_session.refresh(sample_personnel[0])
-    assert sample_personnel[0].unit == original_unit
+    await db_session.refresh(p)
+    assert p.sub_unit_2 == "Section 1"
+    assert p.unit == "Coy A"
 
 
 @pytest.mark.asyncio
@@ -297,6 +299,192 @@ async def test_update_personnel_remap_upserts_tagging_entry(
     # Both edits preserved on the single entry.
     assert body["sub_unit_1"] == "New S1"
     assert body["sub_unit_2"] == "New S2"
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_super_admin_all_four_levels(
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
+    db_session,
+    sample_personnel,
+):
+    """Issue #38 leaves super-admin behaviour unchanged: all four levels
+    may be remapped in a single PATCH, landing on one tagging entry."""
+    p = sample_personnel[0]
+    payload = {
+        "unit": "Coy B",
+        "sub_unit_1": "Platoon 9",
+        "sub_unit_2": "New S2",
+        "sub_unit_3": "New S3",
+    }
+
+    response = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=super_admin_token_headers,
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["unit"] == "Coy B"
+    assert body["sub_unit_1"] == "Platoon 9"
+    assert body["sub_unit_2"] == "New S2"
+    assert body["sub_unit_3"] == "New S3"
+
+    entry = (
+        await db_session.execute(
+            select(TaggingEntry).where(TaggingEntry.personnel_id == str(p.id))
+        )
+    ).scalar_one()
+    assert entry.to_unit == "Coy B"
+    assert entry.to_sub_unit_1 == "Platoon 9"
+    assert entry.to_sub_unit_2 == "New S2"
+    assert entry.to_sub_unit_3 == "New S3"
+
+    # Canonical personnel row untouched.
+    await db_session.refresh(p)
+    assert p.unit == "Coy A"
+    assert p.sub_unit_1 == "Platoon 1"
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_admin_unit_and_sub1_forbidden(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    db_session,
+    sample_personnel,
+):
+    """Issue #38: unit / sub_unit_1 remaps are super-admin-only — admins
+    get 403 and no tagging entry is written. The field gate fires before
+    the scope gate (this admin holds no grants at all, yet the forbidden
+    field is named), while an allowed field still hits the scope gate."""
+
+    for payload in ({"unit": "Coy B"}, {"sub_unit_1": "Platoon 9"}):
+        response = client.patch(
+            f"/api/v1/personnel/{sample_personnel[0].id}",
+            headers=admin_token_headers,
+            json=payload,
+        )
+        assert response.status_code == 403, payload
+        detail = response.json()["detail"]
+        assert "Only super-admins can change unit or sub-unit 1" in detail
+        assert "sub-unit 2/3" in detail
+
+    # Allowed fields remain scope-gated for a grantless admin (issue #28).
+    scoped = client.patch(
+        f"/api/v1/personnel/{sample_personnel[0].id}",
+        headers=admin_token_headers,
+        json={"sub_unit_2": "Sneaky S2"},
+    )
+    assert scoped.status_code == 403
+    assert "No assignment for" in scoped.json()["detail"]
+
+    # Nothing applied anywhere: no overlay entry, canonical row unchanged.
+    entries = (
+        await db_session.execute(
+            select(TaggingEntry).where(
+                TaggingEntry.personnel_id == str(sample_personnel[0].id)
+            )
+        )
+    ).scalars().all()
+    assert entries == []
+    await db_session.refresh(sample_personnel[0])
+    assert sample_personnel[0].unit == "Coy A"
+    assert sample_personnel[0].sub_unit_1 == "Platoon 1"
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_admin_mixed_levels_rejected_whole(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    admin_subunit_assignment,
+    db_session,
+    sample_personnel,
+):
+    """Issue #38: a payload mixing allowed (sub 2/3) and forbidden
+    (unit / sub 1) levels is rejected whole — the allowed part is not
+    applied either."""
+    p = sample_personnel[0]  # Coy A / Platoon 1 — inside the admin's grants
+
+    response = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        json={"sub_unit_2": "Would-Be S2", "unit": "Coy B"},
+    )
+
+    assert response.status_code == 403
+    assert "Only super-admins can change unit or sub-unit 1" in response.json()["detail"]
+
+    entries = (
+        await db_session.execute(
+            select(TaggingEntry).where(TaggingEntry.personnel_id == str(p.id))
+        )
+    ).scalars().all()
+    assert entries == []
+    await db_session.refresh(p)
+    assert p.sub_unit_2 == "Section 1"
+    assert p.unit == "Coy A"
+
+
+@pytest.mark.asyncio
+async def test_update_personnel_admin_sub23_merge_preserves_top_levels(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    admin_subunit_assignment,
+    db_session,
+    sample_personnel,
+):
+    """Issue #38: sequential admin sub 2/3 remaps merge into ONE entry
+    whose to_unit / to_sub_unit_1 keep the person's canonical values (an
+    admin's first remap seeds them; admins can never change them). An
+    explicit null clears a sub 2/3 level, matching the UI's leave-blank
+    pick."""
+    p = sample_personnel[0]
+
+    r1 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        json={"sub_unit_2": "New S2"},
+    )
+    assert r1.status_code == 200
+
+    r2 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        json={"sub_unit_3": "New S3"},
+    )
+    assert r2.status_code == 200
+    body = r2.json()
+    assert body["sub_unit_2"] == "New S2"
+    assert body["sub_unit_3"] == "New S3"
+    # Untouched levels keep the canonical values on the merged entry.
+    assert body["unit"] == "Coy A"
+    assert body["sub_unit_1"] == "Platoon 1"
+
+    entry = (
+        await db_session.execute(
+            select(TaggingEntry).where(TaggingEntry.personnel_id == str(p.id))
+        )
+    ).scalar_one()
+    assert entry.to_unit == "Coy A"
+    assert entry.to_sub_unit_1 == "Platoon 1"
+    assert entry.to_sub_unit_2 == "New S2"
+    assert entry.to_sub_unit_3 == "New S3"
+
+    # Clearing a sub 2/3 level (the UI's "leave blank" pick) still works.
+    r3 = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        json={"sub_unit_3": None},
+    )
+    assert r3.status_code == 200
+    assert r3.json()["sub_unit_3"] is None
+    await db_session.refresh(entry)
+    assert entry.to_sub_unit_3 is None
+    assert entry.to_sub_unit_2 == "New S2"
 
 
 @pytest.mark.asyncio
@@ -534,12 +722,14 @@ async def test_update_personnel_invalid_id(
     sample_users,
     admin_subunit_assignment,
 ):
-    """Updating an unknown personnel id returns 404 (uses a remap field so
-    the identity-field 409 path doesn't short-circuit first)."""
+    """Updating an unknown personnel id returns 404 (uses a remap field
+    admins may send — issue 38 gates unit/sub_unit_1 for admins before
+    the lookup — so neither the identity-field 409 nor the role 403
+    short-circuits first)."""
     response = client.patch(
         "/api/v1/personnel/invalid-personnel-id",
         headers=admin_token_headers,
-        json={"unit": "Some Unit"},
+        json={"sub_unit_2": "Some Section"},
     )
 
     assert response.status_code == 404

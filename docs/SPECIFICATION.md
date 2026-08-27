@@ -580,13 +580,20 @@ The NR personnel row is immutable for unit/subunit fields:
 - `PATCH /api/v1/personnel/{id}` with `unit`/`sub_unit_1/2/3` upserts a
   TaggingEntry on the personnel's NR tagging (existing entry values are
   merged — unmentioned fields preserved). The personnel row is not mutated.
+- Field-level roles (issue 38): `unit`/`sub_unit_1` remaps are
+  super-admin-only. A non-super-admin PATCH carrying either field — alone
+  or mixed with allowed fields — → 403 with nothing applied (checked
+  before the scope gate and before any mutation). In-scope admins may
+  remap `sub_unit_2`/`sub_unit_3` only; scope grants match the effective
+  `(unit, sub_unit_1)`, so sub 2/3 remaps never move a person in or out
+  of any admin's scope.
 - `PATCH` with identity fields (`rank`, `name`) → 409 (NR is read-only).
 - `PATCH` with `status` alone → still mutates the personnel row.
 - The response returns **effective** values (`to_*` if tagged, else canonical).
 - The public NR browser (`/nominal-roll`) shows effective values with a
   yellow row background (`.changed-row`) for tagged personnel.
 
-#### 3.4.5 Staged Cell Edits (super-admin NR browser)
+#### 3.4.5 Staged Cell Edits (NR browser)
 
 Cell edits in the NR browser are **not** saved instantly — they are staged
 client-side and applied in a batch, so a misclick costs nothing:
@@ -608,7 +615,10 @@ client-side and applied in a batch, so a misclick costs nothing:
   server's effective value (applied elsewhere) are silently dropped;
   personnel filtered out of the current view keep their staged edits.
   Known limitation: concurrent tabs are last-writer-wins.
-- Non-super-admins get no editor and no staging machinery at all.
+- Non-super-admins with the page get the editor for **sub-unit 2/3 cells
+  only** (issue 38): unit / sub-unit 1 render read-only, their suggestion
+  lists are not shipped, and the API 403s those fields anyway. Everything
+  else (staging, Apply/Discard, persistence) behaves identically.
 
 ### 3.5 Attendance Tracking
 
