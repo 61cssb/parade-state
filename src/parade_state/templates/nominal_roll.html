@@ -139,7 +139,8 @@
     }
 </style>
 
-{# Super-admin click-to-edit cell for unit/subunit values. Edits are staged
+{# Click-to-edit cell for unit/subunit values (issue 38: all four levels
+   for super-admins; sub-unit 2/3 only for admins). Edits are staged
    client-side (cell turns darker yellow) and sent as one PATCH
    /api/v1/personnel/{id} per person on Apply, which records them as a tagging
    overlay — the NR itself stays read-only and the row turns yellow once
@@ -301,6 +302,16 @@
         clears the value. Edits are recorded on the tagging, never on the
         nominal roll.
     </p>
+    {% elif user.role == 'admin' %}
+    <p style="margin: 0.5rem 0 0; font-size: 0.8rem; color: #6b7280;">
+        Yellow rows carry a tagging overlay. You can click a Sub Unit 2/3
+        cell to reallocate a person — the cell keeps its current text and
+        cursor so you can edit it directly, or pick from the suggestion
+        list (picking saves immediately; Enter saves typed text, Esc
+        cancels); a "leave blank" option clears the value. Unit and Sub
+        Unit 1 stay read-only — ask a super-admin to change those. Edits
+        are recorded on the tagging, never on the nominal roll.
+    </p>
     {% endif %}
 
     {% if no_assignments %}
@@ -332,10 +343,13 @@
                 {% for p in personnel %}
                 <tr class="{% if p.is_changed %}changed-row{% endif %}" style="border-bottom: 1px solid #e5e7eb;">
                     <td style="padding: 0.5rem; color: #9ca3af; font-variant-numeric: tabular-nums;">{{ loop.index }}</td>
+                    {# Issue 38: unit / sub-unit 1 remaps are super-admin-only;
+                       admins may reallocate sub-units 2/3 (recorded on the
+                       tagging overlay, same as every location edit). #}
                     <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'unit', p.unit) if user.role == 'super_admin' else (p.unit or '—') }}</td>
                     <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_1', p.sub_unit_1) if user.role == 'super_admin' else (p.sub_unit_1 or '—') }}</td>
-                    <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_2', p.sub_unit_2) if user.role == 'super_admin' else (p.sub_unit_2 or '—') }}</td>
-                    <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_3', p.sub_unit_3) if user.role == 'super_admin' else (p.sub_unit_3 or '—') }}</td>
+                    <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_2', p.sub_unit_2) if user.role in ('admin', 'super_admin') else (p.sub_unit_2 or '—') }}</td>
+                    <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_3', p.sub_unit_3) if user.role in ('admin', 'super_admin') else (p.sub_unit_3 or '—') }}</td>
                     <td style="padding: 0.5rem; white-space: nowrap;">{{ p.category }}</td>
                     <td style="padding: 0.5rem; white-space: nowrap;">{{ p.rank }}</td>
                     <td style="padding: 0.5rem;">{{ p.full_name }}{% if p.source == 'manual' %} <span class="manual-badge" title="Added manually — not from the CSV">manual</span>{% endif %}</td>
@@ -903,17 +917,21 @@
     }
 </script>
 {% endif %}
-{% if user.role == 'super_admin' and selected_nominal_roll %}
+{% if user.role in ('admin', 'super_admin') and selected_nominal_roll %}
 <script>
     // Staged (unapplied) cell edits persist per roll, so they survive a page
     // refresh. Cleared only by Apply (per person) or Discard (all).
     const STAGE_KEY = 'ps:nr-edits:' + "{{ selected_nominal_roll.id }}";
 
-    // Suggestion lists for the cell editor (unscoped NR values; typed
-    // values outside these lists are accepted too).
+    // Suggestion lists for the cell editor (typed values outside these
+    // lists are accepted too). Issue 38: admins only get the sub-unit 2/3
+    // lists — their cells are the only editable ones, so the unit /
+    // sub-unit 1 lists are neither rendered nor shipped.
     const EDIT_OPTIONS = {
+        {% if user.role == 'super_admin' %}
         unit: {{ edit_unit_options | tojson }},
         sub_unit_1: {{ edit_sub1_options | tojson }},
+        {% endif %}
         sub_unit_2: {{ edit_sub2_options | tojson }},
         sub_unit_3: {{ edit_sub3_options | tojson }},
     };
