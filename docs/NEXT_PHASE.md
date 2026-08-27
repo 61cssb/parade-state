@@ -69,7 +69,9 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   fill-in-later inline; per-roll, not propagated to future CSV rolls)
 - Tagging overlay, 1:1 per NR: unit/subunit edits land on the overlay;
   reads serve effective (`to_*`-overlaid) values; CSV-sourced NR data
-  itself is read-only
+  itself is read-only; sub-unit 2/3 reallocation is an in-scope-admin
+  capability (issue 38) while unit/sub-unit 1 stays super-admin-only,
+  enforced at the personnel-PATCH seam (403 for admins, whole payload)
 - One system-wide **active-for-attendance** Nominal Roll (super-admin
   switch); `Attendance` rows per (personnel, date) with single-session
   status (present/absent) + optional reason enum + remarks (issue 33);
@@ -213,6 +215,14 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-27:** Admin sub-unit 2/3 reallocation (Issue 38): NR browser
+  sub-unit 2/3 cells editable for in-scope admins (same staged-edit
+  flow; unit/sub-unit 1 read-only, their suggestion lists unshipped);
+  `PATCH /api/v1/personnel/{id}` 403s `unit`/`sub_unit_1` for
+  non-super-admins before the scope gate and any mutation (mixed
+  payloads rejected whole, no tagging entry written) — closes the
+  pre-38 API hole where the UI was the only gate; taggings CRUD stays
+  super-admin-only
 - **2026-08-27:** Feature-access matrix (Issue 37): `feature_access`
   table (migration `y6f7a8b9c0d1` + widened `audit_entity_type`);
   super-admin "Feature access (admins)" card in Settings →
