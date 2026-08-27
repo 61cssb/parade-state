@@ -30,7 +30,12 @@ USAGE
 
     # Just get an authenticated local server to poke at (Ctrl-C to stop):
     uv run scripts/visual_check.py --serve-only --db local/dev.db --port 8931
-    #   then set cookie session_token=visual-check-token in your browser
+    #   then set cookie session_token=<token> in your browser — the token
+    #   picks the identity, so swapping it previews each role's view:
+    #     visual-check-token        super-admin (everything)
+    #     visual-check-admin-token  admin (Coy A / Platoon 1, Upload NR
+    #                               hidden as on the dev trial)
+    #     visual-check-user-token   plain user (no grants)
 
     # Prepare a local db without serving:
     uv run scripts/visual_check.py --db local/dev.db --fresh --no-serve
@@ -63,10 +68,17 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import uvicorn
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from parade_state.models import User
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SESSION_TOKEN = "visual-check-token"
 SEED_EMAIL = "visual-check@example.com"
+ADMIN_TOKEN = "visual-check-admin-token"
+ADMIN_EMAIL = "visual-check-admin@example.com"
+USER_TOKEN = "visual-check-user-token"
+USER_EMAIL = "visual-check-user@example.com"
 CHROME_CANDIDATES = (
     "/usr/bin/google-chrome-stable",
     "/usr/bin/google-chrome",
@@ -100,76 +112,180 @@ def migrate(db_path: Path) -> None:
 
 
 async def seed(db_path: Path) -> None:
-    """Seed the check database (no-op if the seed user already exists).
+    """Seed the check database (idempotent per identity and per roll).
+
+    Creates three identities so swapping the session cookie previews each
+    role's view — auth resolves the live User row from the session, so the
+    token alone decides who you are:
+
+    - super-admin (SESSION_TOKEN): everything
+    - admin (ADMIN_TOKEN): scoped to Coy A / Platoon 1 via a subunit grant
+      (3 of the 5 seed personnel, odd indices)
+    - plain user (USER_TOKEN): authenticated, no grants
+
+    Also seeds the admin-trial feature-access row (upload_nr -> admin ->
+    off, issue 37) so the admin preview matches the dev deployment; the
+    matrix is fail-open, so an empty table would show admins Upload NR.
 
     Must be called with DATABASE_URL already set in the environment —
     parade_state reads it at import/startup time.
     """
-    from sqlalchemy import select
+    from sqlalchemy import func, select
 
     from parade_state.db import get_session_maker, init_database
-    from parade_state.models import NominalRoll, Personnel, User
-    from parade_state.models.auth_session import UserSession
+    from parade_state.models import (
+        FeatureAccess,
+        NominalRoll,
+        Personnel,
+        User,
+        UserSubunitAssignment,
+    )
     from parade_state.utils import utc_dt
 
     init_database(database_url(db_path))
     maker = get_session_maker()
     assert maker is not None  # init_database just set it
     async with maker() as db:
-        existing = await db.execute(select(User).where(User.email == SEED_EMAIL))
-        if existing.scalar_one_or_none():
-            print(f"seed: {db_path} already seeded ({SEED_EMAIL} exists)")
-            return
+        # Roll + personnel (idempotent via the seed csv_hash).
+        roll = (
+            await db.execute(
+                select(NominalRoll).where(NominalRoll.csv_hash == "visual-check")
+            )
+        ).scalar_one_or_none()
+        if roll is None:
+            super_admin = await ensure_user(
+                db, SEED_EMAIL, "Visual Check", "super_admin", SESSION_TOKEN
+            )
+            roll = NominalRoll(
+                caa=utc_dt.date(2026, 9, 10),
+                csv_hash="visual-check",
+                personnel_count=5,
+                uploaded_by=str(super_admin.id),
+                label="Visual Check Roll",
+                remarks="Keep dry.",
+            )
+            db.add(roll)
+            await db.flush()
 
-        user = User(
-            email=SEED_EMAIL,
-            name="Visual Check",
-            role="super_admin",
-            status="active",
+            ranks = ["PTE", "CPL", "LCP", "3SG", "ME4"]
+            for index, rank in enumerate(ranks):
+                db.add(
+                    Personnel(
+                        nominal_roll_id=str(roll.id),
+                        pers_no=f"1000000{index + 1}",
+                        rank=rank,
+                        category="WOSE" if rank != "ME4" else "Officer",
+                        full_name=f"Test Person {index + 1}",
+                        unit="Coy A",
+                        sub_unit_1=f"Platoon {index % 2 + 1}",
+                        created_by=str(super_admin.id),
+                    )
+                )
+            print(f"seed: roll CAA {roll.caa}, 5 personnel (Coy A, Platoon 1/2)")
+        else:
+            personnel_count = (
+                await db.execute(
+                    select(func.count())
+                    .select_from(Personnel)
+                    .where(Personnel.nominal_roll_id == str(roll.id))
+                )
+            ).scalar_one()
+            print(
+                f"seed: roll CAA {roll.caa} already present "
+                f"({personnel_count} personnel)"
+            )
+
+        # Identities (idempotent per email; re-runs only add what's missing).
+        super_admin = await ensure_user(
+            db, SEED_EMAIL, "Visual Check", "super_admin", SESSION_TOKEN
         )
-        db.add(user)
-        await db.flush()
+        await ensure_user(db, ADMIN_EMAIL, "Visual Check Admin", "admin", ADMIN_TOKEN)
+        await ensure_user(db, USER_EMAIL, "Visual Check User", "user", USER_TOKEN)
 
-        db.add(
-            UserSession(
-                token=SESSION_TOKEN,
-                user_id=str(user.id),
-                email=user.email,
-                name=user.name,
-                role=user.role,
-                expires_at=utc_dt.ensure_naive(
-                    utc_dt.utcnow() + utc_dt.timedelta(days=365)
-                ),
+        # Scope grant for the admin: exactly Coy A / Platoon 1. The grant is
+        # added with the admin, so presence of the admin implies the grant.
+        admin = (
+            await db.execute(select(User).where(User.email == ADMIN_EMAIL))
+        ).scalar_one()
+        grant = await db.execute(
+            select(UserSubunitAssignment).where(
+                UserSubunitAssignment.user_id == str(admin.id)
             )
         )
-
-        roll = NominalRoll(
-            caa=utc_dt.date(2026, 9, 10),
-            csv_hash="visual-check",
-            personnel_count=5,
-            uploaded_by=str(user.id),
-            label="Visual Check Roll",
-            remarks="Keep dry.",
-        )
-        db.add(roll)
-        await db.flush()
-
-        ranks = ["PTE", "CPL", "LCP", "3SG", "ME4"]
-        for index, rank in enumerate(ranks):
+        if grant.scalar_one_or_none() is None:
             db.add(
-                Personnel(
+                UserSubunitAssignment(
+                    user_id=str(admin.id),
                     nominal_roll_id=str(roll.id),
-                    pers_no=f"1000000{index + 1}",
-                    rank=rank,
-                    category="WOSE" if rank != "ME4" else "Officer",
-                    full_name=f"Test Person {index + 1}",
                     unit="Coy A",
-                    sub_unit_1=f"Platoon {index % 2 + 1}",
-                    created_by=str(user.id),
+                    sub_unit_1="Platoon 1",
+                    created_by=str(super_admin.id),
                 )
             )
+            print("seed: admin grant Coy A / Platoon 1")
+
+        # Feature-access matrix: the admin trial hides Upload NR from
+        # plain admins (issue 37). The matrix fails open, so without this
+        # row the local admin preview would show Upload NR.
+        matrix_row = await db.execute(
+            select(FeatureAccess).where(
+                FeatureAccess.feature_key == "upload_nr",
+                FeatureAccess.role == "admin",
+            )
+        )
+        if matrix_row.scalar_one_or_none() is None:
+            db.add(
+                FeatureAccess(
+                    feature_key="upload_nr",
+                    role="admin",
+                    enabled=False,
+                )
+            )
+            print("seed: feature_access upload_nr -> admin -> off (trial)")
+
         await db.commit()
-        print(f"seed: super-admin {SEED_EMAIL}, roll CAA {roll.caa}, 5 personnel")
+        print(
+            f"seed: super-admin {SEED_EMAIL} ({SESSION_TOKEN}), "
+            f"admin {ADMIN_EMAIL} ({ADMIN_TOKEN}, Coy A/Platoon 1, "
+            f"no Upload NR), "
+            f"user {USER_EMAIL} ({USER_TOKEN})"
+        )
+
+
+async def ensure_user(
+    db: AsyncSession,
+    email: str,
+    name: str,
+    role: str,
+    token: str,
+) -> User:
+    """Create the user + a 365-day session if missing; return the user row."""
+    from sqlalchemy import select
+
+    from parade_state.models import User, UserSession
+    from parade_state.utils import utc_dt
+
+    existing = await db.execute(select(User).where(User.email == email))
+    user = existing.scalar_one_or_none()
+    if user is not None:
+        return user
+
+    user = User(email=email, name=name, role=role, status="active")
+    db.add(user)
+    await db.flush()
+    db.add(
+        UserSession(
+            token=token,
+            user_id=str(user.id),
+            email=user.email,
+            name=user.name,
+            role=user.role,
+            expires_at=utc_dt.ensure_naive(
+                utc_dt.utcnow() + utc_dt.timedelta(days=365)
+            ),
+        )
+    )
+    return user
 
 
 def prepare_database(db_path: Path, fresh: bool) -> None:
@@ -182,7 +298,7 @@ def prepare_database(db_path: Path, fresh: bool) -> None:
     asyncio.run(seed(db_path))
 
 
-def start_server(port: int) -> "uvicorn.Server":
+def start_server(port: int) -> uvicorn.Server:
     """Start uvicorn in a daemon thread; returns the uvicorn.Server."""
     import uvicorn
 
@@ -338,7 +454,10 @@ def main() -> int:
         port = args.port or free_port()
         server = start_server(port)
         base_url = f"http://127.0.0.1:{port}"
-        print(f"serving: {base_url} (cookie session_token={SESSION_TOKEN})")
+        print(f"serving: {base_url}")
+        print(f"  super-admin: session_token={SESSION_TOKEN}")
+        print(f"  admin:       session_token={ADMIN_TOKEN} (Coy A / Platoon 1)")
+        print(f"  user:        session_token={USER_TOKEN}")
 
         if args.serve_only:
             print("Ctrl-C to stop")
