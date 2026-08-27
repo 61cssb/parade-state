@@ -622,6 +622,10 @@ async def update_personnel(
     mutation); in-scope admins may remap ``sub_unit_2`` / ``sub_unit_3``
     only. Those levels never affect scope membership — grants match the
     effective (unit, sub_unit_1).
+
+    Issue #39: ``inpro_status`` is super-admin-only too — it drives who
+    appears on the attendance roster, so it is super-admin-controlled
+    for the admin trial. Admins keep ``status`` / ``remarks`` / sub 2/3.
     """
     user_id = str(user.id)
 
@@ -639,12 +643,23 @@ async def update_personnel(
         )
 
     # pers_no is the fill-in-later flow for manual adds: super-admin only.
-    # Admins keep every other PATCH field (status / inpro_status / remarks).
+    # Admins keep the other PATCH fields (status / remarks / sub 2/3).
     pers_no_update_present = "pers_no" in update_data
     if pers_no_update_present and user.role != "super_admin":
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Only super-admins can change personnel numbers",
+        )
+
+    # Issue #39: inpro status drives the attendance roster, so it is
+    # super-admin-controlled for the admin trial. All-or-nothing like
+    # #38's mixing rule: a payload pairing inpro_status with
+    # still-allowed fields is rejected whole, before the scope gate and
+    # any mutation.
+    if "inpro_status" in update_data and user.role != "super_admin":
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Only super-admins can change inpro status",
         )
 
     # Issue #38: unit / sub_unit_1 reallocation is super-admin-only.
