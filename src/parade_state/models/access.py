@@ -99,6 +99,40 @@ class User(Base):
         return f"<User(email={self.email!r}, status={self.status!r})>"
 
 
+class FeatureAccess(Base):
+    """Role-level feature visibility matrix (issue 37).
+
+    One row per (feature, role) the super-admin has explicitly configured
+    in Settings. Absent row = enabled (fail-open): an empty table behaves
+    exactly like the pre-matrix deployment. The matrix is a visibility
+    tweak layered on top of the ``FEATURE_*`` env kill switches, not a
+    security boundary — role checks at each page/API edge remain the
+    actual gates. ``super_admin`` is never configurable (always enabled).
+    """
+
+    __tablename__ = "feature_access"
+
+    feature_key: Mapped[str] = mapped_column(String(50), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
+    updated_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
+
+    __table_args__ = (
+        UniqueConstraint("feature_key", "role", name="uq_feature_access_key_role"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<FeatureAccess(feature_key={self.feature_key!r}, "
+            f"role={self.role!r}, enabled={self.enabled!r})>"
+        )
+
+
 class UserSubunitAssignment(Base):
     """A scope grant: one (unit, sub_unit_1) pair on one Nominal Roll.
 

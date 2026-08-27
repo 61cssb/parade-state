@@ -30,6 +30,7 @@ class AuditLog(Base):
             "column_mapping",
             "database",
             "discussion_post",
+            "feature_access",
             name="audit_entity_type",
         ),
         index=True,
