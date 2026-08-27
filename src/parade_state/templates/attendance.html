@@ -135,6 +135,28 @@
                 {% endfor %}
             </select>
         </div>
+        {# Status / Reason view filters — same non-destructive contract as
+           the Inpro filter. Status matches the grid's effective value
+           (unmarked rows display as absent). #}
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <label for="status" style="font-weight: bold;">Status:</label>
+            <select name="status" id="status" onchange="this.form.submit()"
+                    style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                <option value="">All</option>
+                <option value="present" {% if status_filter == 'present' %}selected{% endif %}>Present</option>
+                <option value="absent" {% if status_filter == 'absent' %}selected{% endif %}>Absent</option>
+            </select>
+        </div>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <label for="reason" style="font-weight: bold;">Reason:</label>
+            <select name="reason" id="reason" onchange="this.form.submit()"
+                    style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                <option value="">All</option>
+                {% for value, label in reason_labels.items() %}
+                <option value="{{ value }}" {% if reason_filter == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
         {% endif %}
     </form>
 </div>
