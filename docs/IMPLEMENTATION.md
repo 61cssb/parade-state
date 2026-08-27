@@ -334,13 +334,14 @@ async def test_example(client, sample_users, sample_grouping):
 **Attendance UI (✅ Active-NR model, single session — issue 33)**
 - The separate super-admin `/admin/attendance` page is **removed** — it
   duplicated `/attendance`. All marking happens on `/attendance`: NR + date +
-  effective sub-unit-1 + Inpro Status filters, roster editor with status +
-  reason + remarks.
+  effective sub-unit-1 + Inpro Status + Status + Reason view filters, roster
+  editor with status + reason + remarks.
 - User-facing `/attendance`: defaults to the active NR; the roster is **all
   NR personnel** (deferred included — issue 33), filtered to the caller's
   assigned subunits (tagging-aware effective sub_unit_1; super_admin sees
   all) with a read-only Inpro Status column just before the status column
-  and an Inpro Status filter (e.g. hide Deferred). With no active NR it
+  and an Inpro Status filter (e.g. hide Deferred), plus Status / Reason
+  view filters (non-destructive, same contract). With no active NR it
   shows an inactive message instead of the marking table. The viewed day
   defaults server-side to UTC today; a first-visit script re-defaults it
   to the browser's local day (best effort — mirrors the strength report;

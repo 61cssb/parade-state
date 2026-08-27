@@ -25,7 +25,11 @@ from parade_state.models import (
     Personnel,
     TaggingEntry,
 )
-from parade_state.models.attendance import ATTENDANCE_REASON_LABELS
+from parade_state.models.attendance import (
+    ATTENDANCE_REASON_LABELS,
+    ATTENDANCE_REASONS,
+    ATTENDANCE_STATUSES,
+)
 from parade_state.models.personnel import INPRO_STATUS_LABELS, INPRO_STATUSES
 from parade_state.utils import utc_dt
 
@@ -39,6 +43,8 @@ async def attendance_view(
     date: utc_dt.date | None = None,
     sub_unit_1: str | None = None,
     inpro_status: str | None = None,
+    status: str | None = None,
+    reason: str | None = None,
 ):
     """Render the attendance marking page.
 
@@ -235,6 +241,19 @@ async def attendance_view(
                     r for r in attendance_rows
                     if r["inpro_status"] == inpro_status
                 ]
+            # Status / Reason view filters — same non-destructive contract
+            # as the Inpro filter: rows are hidden, records untouched.
+            # Status matches the grid's effective value (unmarked rows
+            # display as absent); a Reason filter excludes unmarked rows
+            # (they carry no reason).
+            if status and status in ATTENDANCE_STATUSES:
+                attendance_rows = [
+                    r for r in attendance_rows if r["status"] == status
+                ]
+            if reason and reason in ATTENDANCE_REASONS:
+                attendance_rows = [
+                    r for r in attendance_rows if r["reason"] == reason
+                ]
 
         counts = (
             await attendance_counts_for_date(selected_nr_id, target_date, db)
@@ -268,6 +287,8 @@ async def attendance_view(
             inpro_status if inpro_status in INPRO_STATUSES else ""
         ),
         inpro_labels=INPRO_STATUS_LABELS,
+        status_filter=(status if status in ATTENDANCE_STATUSES else ""),
+        reason_filter=(reason if reason in ATTENDANCE_REASONS else ""),
         attendance_rows=attendance_rows,
         counts=counts,
         nr_caa=selected.caa.isoformat() if (selected and selected.caa) else "",

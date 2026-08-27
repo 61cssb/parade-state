@@ -199,8 +199,11 @@ Attendance (one row per personnel/day)
   free text in Remarks, not a status or reason
 - The marking roster is **everyone** on the active NR (deferred included);
   the page's Inpro Status column (read-only, rendered just before the
-  status) and its filter (e.g. hide Deferred) are view concerns only —
-  filtering hides rows but never deletes or alters their records.
+  status) and its filter (e.g. hide Deferred), plus the Status / Reason
+  view filters, are view concerns only — filtering hides rows but never
+  deletes or alters their records. Status filters on the grid's effective
+  value (unmarked rows display as absent); a Reason filter excludes rows
+  without a reason.
   Early-outpro'd servicemen keep appearing daily; marking them is user
   responsibility
 - Attendance writes (upsert / copy-remarks) are refused (400) unless the
@@ -667,7 +670,8 @@ default is UTC today (no-JS fallback). A first-visit script (URL without
 a date param) re-defaults it to the browser's local day — best effort,
 since the server cannot know the viewer's timezone and UTC lags SGT
 mornings until 08:00 — resubmitting the filter form so the NR/sub-unit/
-inpro filters survive the reload. An explicit `?date=` always wins.
+inpro/status/reason filters survive the reload. An explicit `?date=`
+always wins.
 
 #### 3.5.2 Unit Strength Report
 
