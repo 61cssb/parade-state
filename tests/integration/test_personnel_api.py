@@ -1057,20 +1057,19 @@ async def test_list_personnel_with_filters_and_sorting(
 )
 async def test_update_personnel_inpro_status_all_values(
     client: TestClient,
-    admin_token_headers: dict[str, str],
-    sample_users,
-    admin_subunit_assignment,
+    super_admin_token_headers: dict[str, str],
     db_session,
     sample_personnel,
     inpro_status: str,
 ):
-    """Admins can set any of the three inpro statuses; the row and response
-    reflect the change immediately."""
+    """Super-admins can set any of the three inpro statuses (issue 39 made
+    the field super-admin-only); the row and response reflect the change
+    immediately."""
     p = sample_personnel[0]
 
     response = client.patch(
         f"/api/v1/personnel/{p.id}",
-        headers=admin_token_headers,
+        headers=super_admin_token_headers,
         json={"inpro_status": inpro_status},
     )
 
@@ -1495,6 +1494,50 @@ async def test_update_personnel_pers_no_as_user_forbidden(
         json={"pers_no": "12345678"},
     )
     assert response.status_code == 403
+
+
+# PATCH inpro_status: super-admin only (issue 39 — admin trial rule).
+@pytest.mark.asyncio
+async def test_update_personnel_inpro_status_as_admin_forbidden(
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_users,
+    admin_subunit_assignment,
+    db_session,
+    sample_personnel,
+):
+    """Issue #39: inpro status drives the attendance roster, so admins
+    cannot change it — 403 alone and mixed (all-or-nothing, like #38),
+    row untouched. Still-allowed fields keep working for the same admin."""
+    p = sample_personnel[0]  # Coy A / Platoon 1 — inside the admin's grants
+
+    blocked = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        json={"inpro_status": "deferred"},
+    )
+    assert blocked.status_code == 403
+    assert "inpro status" in blocked.json()["detail"].lower()
+
+    # Mixed payload is rejected whole — the remarks part is not applied.
+    mixed = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        json={"inpro_status": "inproed", "remarks": "must not land"},
+    )
+    assert mixed.status_code == 403
+    await db_session.refresh(p)
+    assert p.inpro_status == "yet_to_inpro"
+    assert p.remarks is None
+
+    # status / remarks remain admin-editable.
+    allowed = client.patch(
+        f"/api/v1/personnel/{p.id}",
+        headers=admin_token_headers,
+        json={"status": "active", "remarks": "admins keep this"},
+    )
+    assert allowed.status_code == 200
+    assert allowed.json()["remarks"] == "admins keep this"
 
 
 @pytest.mark.asyncio
