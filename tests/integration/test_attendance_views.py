@@ -442,6 +442,92 @@ async def test_attendance_inpro_filter_hides_deferred(
 
 
 @pytest.mark.asyncio
+async def test_attendance_status_and_reason_filters(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_attendance_scope,
+    sample_personnel,
+    sample_users,
+    db_session,
+    monkeypatch,
+):
+    """The Status / Reason view filters narrow the roster like the Inpro
+    filter: unmarked rows count as absent, a Reason filter excludes rows
+    without a reason, and filtering is non-destructive."""
+    from parade_state.web import attendance as web_attendance
+    from parade_state.models import Attendance, User
+    from parade_state.utils import utc_dt
+
+    today = utc_dt.utcnow().date()
+    # John → present + MC, Jane → absent + Off, Bob → unmarked.
+    records = []
+    for person, status, reason in (
+        (sample_personnel[0], "present", "mc"),
+        (sample_personnel[1], "absent", "off"),
+    ):
+        record = Attendance(
+            personnel_id=str(person.id),
+            nominal_roll_id=str(sample_nominal_roll.id),
+            date=today,
+            status=status,
+            reason=reason,
+            created_by=str(sample_users["admin"].id),
+            updated_by=str(sample_users["admin"].id),
+        )
+        records.append(record)
+        db_session.add(record)
+
+    super_admin = User(
+        email="super-srfilter@example.com",
+        name="Super Admin",
+        role="super_admin",
+        status="active",
+    )
+    db_session.add(super_admin)
+    await db_session.commit()
+
+    async def _fake_current_user(_request):
+        return super_admin
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
+
+    base = {"nominal_roll_id": str(sample_nominal_roll.id)}
+
+    # Status=present: only John.
+    response = client.get("/attendance", params={**base, "status": "present"})
+    assert response.status_code == 200
+    assert "John Doe" in response.text
+    assert "Jane Smith" not in response.text
+    assert "Bob Johnson" not in response.text
+
+    # Status=absent: Jane + unmarked Bob (the grid's effective value).
+    response = client.get("/attendance", params={**base, "status": "absent"})
+    assert response.status_code == 200
+    assert "Jane Smith" in response.text
+    assert "Bob Johnson" in response.text
+    assert "John Doe" not in response.text
+
+    # Reason=mc: only John; unmarked and other reasons drop out.
+    response = client.get("/attendance", params={**base, "reason": "mc"})
+    assert response.status_code == 200
+    assert "John Doe" in response.text
+    assert "Jane Smith" not in response.text
+    assert "Bob Johnson" not in response.text
+
+    # Unknown values are ignored (filter falls back to "all").
+    response = client.get("/attendance", params={**base, "reason": "nonsense"})
+    assert response.status_code == 200
+    assert "John Doe" in response.text
+    assert "Jane Smith" in response.text
+    assert "Bob Johnson" in response.text
+
+    # Filtering is non-destructive: records survive untouched.
+    for record in records:
+        await db_session.refresh(record)
+        assert record.remarks is None
+
+
+@pytest.mark.asyncio
 async def test_frozen_day_banner_and_readonly_grid(
     client: TestClient,
     sample_nominal_roll,
