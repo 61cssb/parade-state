@@ -71,7 +71,10 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   reads serve effective (`to_*`-overlaid) values; CSV-sourced NR data
   itself is read-only; sub-unit 2/3 reallocation is an in-scope-admin
   capability (issue 38) while unit/sub-unit 1 stays super-admin-only,
-  enforced at the personnel-PATCH seam (403 for admins, whole payload)
+  enforced at the personnel-PATCH seam (403 for admins, whole payload);
+  `inpro_status` edits are likewise super-admin-only for the admin
+  trial (issue 39 — drives the attendance roster; same all-or-nothing
+  PATCH gate, NR-browser select super-admin-rendered, reads unchanged)
 - One system-wide **active-for-attendance** Nominal Roll (super-admin
   switch); `Attendance` rows per (personnel, date) with single-session
   status (present/absent) + optional reason enum + remarks (issue 33);
@@ -215,6 +218,13 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-27:** Inpro status super-admin-only (Issue 39, admin trial
+  rule): `PATCH /api/v1/personnel/{id}` 403s `inpro_status` for
+  non-super-admins (alone or mixed, nothing applied, before the scope
+  gate — same shape as `pers_no` / #38); NR browser per-row select is
+  super-admin-rendered (admins see the label; handler unshipped);
+  column + filter stay visible to every role; admins keep
+  `status`/`remarks`/sub 2/3
 - **2026-08-27:** Admin sub-unit 2/3 reallocation (Issue 38): NR browser
   sub-unit 2/3 cells editable for in-scope admins (same staged-edit
   flow; unit/sub-unit 1 read-only, their suggestion lists unshipped);

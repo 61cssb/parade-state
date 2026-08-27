@@ -425,10 +425,13 @@ Personnel
   `deferred` never deletes or alters existing attendance records — it
   only hides the person from the attendance view, with no distinct rendering
   of hidden rows anywhere.
-- Admins (admin + super_admin) can edit `inpro_status` and `remarks` inline
-  in the NR management table (PATCH `/personnel/{id}`; enum-invalid values
-  are rejected with 422). The NR browser table also offers a user-side
-  filter by Inpro status (e.g. hide Deferred).
+- Inline editing in the NR management table (PATCH `/personnel/{id}`;
+  enum-invalid values are rejected with 422): super-admins can edit
+  `inpro_status` and admins (admin + super_admin) can edit `remarks`;
+  `inpro_status` is super-admin-only for the admin trial (issue 39 — it
+  drives the attendance roster; 403 for admins, alone or mixed, nothing
+  applied). The NR browser table also offers a user-side filter by Inpro
+  status (e.g. hide Deferred) for every role.
 
 **Manual creation & pers_no fill-in-later (issue 26):**
 - `POST /api/v1/personnel` (super-admin only) creates a row on an existing
@@ -587,6 +590,13 @@ The NR personnel row is immutable for unit/subunit fields:
   remap `sub_unit_2`/`sub_unit_3` only; scope grants match the effective
   `(unit, sub_unit_1)`, so sub 2/3 remaps never move a person in or out
   of any admin's scope.
+- Field-level roles (issue 39): `inpro_status` is super-admin-only for
+  the admin trial — it drives who appears on the attendance roster.
+  Same all-or-nothing rule as #38: a non-super-admin PATCH carrying
+  `inpro_status` alone or mixed with still-allowed fields → 403,
+  nothing applied. Admins keep `status` / `remarks` / sub 2/3. Read
+  paths are unchanged (the NR column and Inpro filter stay visible to
+  admins; only the per-row select is super-admin-rendered).
 - `PATCH` with identity fields (`rank`, `name`) → 409 (NR is read-only).
 - `PATCH` with `status` alone → still mutates the personnel row.
 - The response returns **effective** values (`to_*` if tagged, else canonical).

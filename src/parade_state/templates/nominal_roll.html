@@ -361,7 +361,11 @@
                         {% endif %}
                     </td>
                     <td style="padding: 0.5rem; white-space: nowrap;">
-                        {% if user.role == 'admin' or user.role == 'super_admin' %}
+                        {# Issue 39: inpro status drives the attendance
+                           roster, so the select is super-admin-only for the
+                           admin trial — admins see the plain label (read
+                           paths, including the filter, are unchanged). #}
+                        {% if user.role == 'super_admin' %}
                         <select data-pid="{{ p.id }}" data-prev="{{ p.inpro_status }}" onchange="onInproChange(this)" style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem; background: #fff; color: #111827;" title="Inpro status">
                             {% for value, label in inpro_labels.items() %}
                             <option value="{{ value }}"{% if value == p.inpro_status %} selected{% endif %}>{{ label }}</option>
@@ -840,7 +844,8 @@
         display.style.display = '';
     }
 
-    // --- Per-person inpro status & remarks (admin / super_admin) ---
+    // --- Per-person remarks (admin / super_admin); inpro & pers_no are
+    // super-admin-only (issues 39 / 26) ---
     // Immediate PATCH on change, like the roll-management saves above.
     // The staged-edits flow below is super_admin-only unit/subunit remapping.
     {% if user.role == 'admin' or user.role == 'super_admin' %}
@@ -862,6 +867,9 @@
         }
     }
 
+    // Inpro status select (super-admin only; issue 39 — the select and
+    // this handler are not rendered/shipped for anyone else).
+    {% if user.role == 'super_admin' %}
     async function onInproChange(sel) {
         const pid = sel.getAttribute('data-pid');
         const prev = sel.getAttribute('data-prev');
@@ -875,6 +883,7 @@
         sel.setAttribute('data-prev', value);
         showPageStatus('Inpro status updated.', 'success');
     }
+    {% endif %}
 
     async function onPersonnelRemarksChange(input) {
         const pid = input.getAttribute('data-pid');

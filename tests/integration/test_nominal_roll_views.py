@@ -390,6 +390,39 @@ async def test_nominal_roll_add_serviceman_hidden_for_admins(
 
 
 @pytest.mark.asyncio
+async def test_nominal_roll_inpro_read_only_for_admins(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_users,
+    admin_subunit_assignment,
+    monkeypatch,
+):
+    """Issue 39: the per-row Inpro select is super-admin-only — admins
+    get the plain label; neither the select nor its handler ships. Read
+    paths are unchanged (column + filter still there)."""
+    from parade_state.web import nominal_roll as web_nominal_roll
+
+    async def _fake_current_user(_request):
+        return sample_users["admin"]
+
+    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+
+    response = client.get(
+        "/nominal-roll", params={"nominal_roll_id": str(sample_nominal_roll.id)}
+    )
+    assert response.status_code == 200
+    assert "John Doe" in response.text  # roster still renders
+    # Stored label renders as plain text (yet_to_inpro is the default).
+    assert "Yet to Inpro" in response.text
+    # No inline inpro editor: neither the select wiring nor the handler
+    # ships for admins (same shape as the pers_no editor).
+    assert "onInproChange" not in response.text
+    # Read paths unchanged: the Inpro filter still offers every value.
+    assert '<option value="yet_to_inpro"' in response.text
+
+
+@pytest.mark.asyncio
 async def test_roll_management_panel_placement(
     client: TestClient,
     sample_nominal_roll,
