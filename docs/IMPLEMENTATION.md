@@ -268,6 +268,27 @@ async def test_example(client, sample_users, sample_grouping):
   (super-admins), a frozen banner naming the freeze timestamp (every
   role), and a plain-text read-only grid for admins on frozen days.
 
+**Feature-Access Matrix (✅ issue 37)**
+- `feature_access` table (migration `y6f7a8b9c0d1`; `(feature_key, role)`
+  unique; `audit_entity_type` widened with `feature_access`) — per-role
+  feature visibility, fail-open (absent row = enabled), `super_admin`
+  never configurable. Effective visibility = `FEATURE_*` env flag AND
+  matrix entry; env off (404, everyone) outranks matrix off (403, the
+  configured role only).
+- Seam module `src/parade_state/feature_access.py` —
+  `FeatureAccessMiddleware` (one tiny SELECT per page request, stashed on
+  `request.state.feature_access` for the sidebar; fails open),
+  `feature_allowed` (page-route gate → styled 403 shell), and
+  `require_feature_access(key)` (router-level API dependency; wired in
+  `main.py` onto personnel + nominal-rolls → `nominal_roll`, attendance →
+  `attendance`, groupings → `grouping`).
+- Settings: super-admin-only page gate (matching Restore Backup) hosting
+  the "Feature access (admins)" card → `POST /api/v1/admin/feature-access`
+  (full-matrix upsert, value changes audit-logged under
+  entity `feature_access`, action `update`). Sidebar Admin section:
+  Users/Settings/Restore Backup render for super-admins only; Audit Log
+  stays admin-viewable (2026-08-27 decision).
+
 **Scope Access (✅ issue #4 PR 2; ✅ extended by issue #28)**
 - `UserSubunitAssignment(user_id, nominal_roll_id, unit, sub_unit_1)` — a
   grant is a (unit, sub_unit_1) pair on one NR with the explicit `*`

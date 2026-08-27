@@ -326,6 +326,31 @@ only and reads are open to every authenticated role; row-level write
 access elsewhere is scoped per nominal roll by `UserSubunitAssignment`
 (see §2.3 and §3.5.2).
 
+#### 3.1.4 FeatureAccess (role-level feature matrix, issue 37)
+
+**Per-role feature visibility configured by super-admins in Settings.**
+
+```
+FeatureAccess
+├── id: UUID (PK)
+├── feature_key: str (max 50)  ← one of the seven matrix keys
+│   (upload_nr, nominal_roll, attendance, strength, grouping,
+│    deferments, discussions — see §4.8)
+├── role: str (max 20)         ← 'admin' (the only configurable role)
+├── enabled: bool              ← row value; absence of a row = enabled
+├── created_at: datetime
+└── updated_at: datetime
+```
+
+**Constraints:**
+- `UNIQUE(feature_key, role)` — one row per configured pair
+- Fail-open: an absent row means *enabled*; an empty table behaves
+  exactly like the pre-matrix deployment
+- `super_admin` is never configurable — always sees everything
+- The matrix is a visibility tweak layered under the `FEATURE_*` env
+  kill switches, **not a security boundary**; role checks at each
+  page/API edge remain the actual gates (see §4.8 for semantics)
+
 ### 3.2 Personnel & CSV Ingestion
 
 #### 3.2.1 Personnel
@@ -992,6 +1017,34 @@ emergency use case is a data-corrupting bug appearing mid-window:
 Both vars are set to `true` in both Railway environments, so toggling is
 an env-var change plus restart with no other action.
 
+**Role-level feature-access matrix (issue 37):** a second, per-role
+layer sits beneath the env kill switches — effective visibility =
+`FEATURE_*` env flag **AND** matrix entry (`feature_access` table, §3.1.4).
+Super-admins edit it in Settings (`POST /api/v1/admin/feature-access`);
+changes apply immediately with no restart.
+
+- Env flag off stays off for **everyone** regardless of matrix state
+  (404); matrix-off 403s only the configured role (plain admins).
+- **Fail-open:** absent row = enabled. The admin trial needs one seeded
+  row (`upload_nr → off`); a fresh deployment behaves exactly as before.
+- Seven matrix keys: the six flag-gated features plus a distinct
+  `upload_nr` key (Upload NR lives under `FEATURE_NOMINALROLL` for the
+  env switch, but the matrix can hide Upload NR from admins while
+  keeping the NR browser visible).
+- Enforcement spans three layers off one helper
+  (`parade_state.feature_access`): sidebar rendering
+  (`FeatureAccessMiddleware` stashes the matrix on
+  `request.state.feature_access` per page request), page routes
+  (`feature_allowed` gate → styled 403 shell), and API edges with
+  admin-reachable endpoints (`require_feature_access` router dependency:
+  personnel + nominal-rolls → `nominal_roll`, attendance → `attendance`,
+  groupings → `grouping`). UI hiding alone is insufficient — a disabled
+  feature must 403 at its API edge for admins.
+- Hard-gated (never matrix entries): Settings itself and Restore Backup
+  are super-admin-only (page gates + hidden sidebar entries; Users is
+  also hidden from the admin sidebar). The Audit Log page and API stay
+  admin-accessible (view-only, 2026-08-27 decision).
+
 ### 4.9 Key Constraints Summary
 
 | Table | Unique | Index | Purpose |
@@ -1009,6 +1062,7 @@ an env-var change plus restart with no other action.
 | UserSubunitAssignment | (user_id, nominal_roll_id, unit, sub_unit_1) + CHECK not both `*` | (user_id), (nominal_roll_id) | One grant per user/NR/(unit, sub_unit_1); wildcard pair forbidden |
 | Personnel | — | (inpro_status) | Inpro status filter |
 | Deferment | — | (personnel_id), (status), (updated_at) | Deferment lookup |
+| FeatureAccess | (feature_key, role) | (id) | One matrix row per configured (feature, role) |
 
 ---
 
@@ -1028,6 +1082,11 @@ an env-var change plus restart with no other action.
   attendance view/export, the strength report, and the NR browser page are
   server-side constrained; out-of-scope records are absent or answered with
   403, regardless of client-supplied filters.
+- **Feature visibility (issue 37)**: which workflow features an admin can
+  see/use is configured per deployment by super-admins in Settings (the
+  feature-access matrix, §4.8) — e.g. Upload NR hidden during the admin
+  trial. Settings, Users, and Restore Backup are hard-gated super-admin
+  surfaces (never admin-visible).
 - Access to audit log
 - Structural operations are super-admin only: NR lifecycle (CSV upload and
   processing, manual personnel create, NR delete, attendance

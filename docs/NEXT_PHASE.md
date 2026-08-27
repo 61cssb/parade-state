@@ -16,7 +16,7 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ## Current Snapshot
 
-- **Tests:** 652 SQLite passing (flags-on posture; flags-off gating has
+- **Tests:** 670 SQLite passing (flags-on posture; flags-off gating has
   dedicated tests). The suite runs against
   Postgres by setting `TEST_DATABASE_URL` (per-test databases).
 - **Access model:** `super_admin` + `admin` only. Unknown Google
@@ -46,6 +46,14 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   available) and hide their feature entirely only on an explicit `false`
   — the emergency path for taking a shipped core feature offline
   mid-window without a deploy. Both are `true` in dev and prod.
+  **Feature-access matrix (issue 37):** a per-role visibility layer
+  beneath the env flags — super-admins toggle, per feature, whether the
+  `admin` role can see/use it (Settings › Feature access; fail-open:
+  absent row = enabled; env flag off outranks the matrix; super-admins
+  never restricted). Enforcement spans sidebar + page routes + API
+  edges (personnel/nominal-rolls/attendance/groupings). Settings, Users,
+  and Restore Backup are hard-gated super-admin surfaces; Audit Log
+  stays admin-viewable.
   **Environment banner:** dev sets `ENVIRONMENT_BANNER` so a thin amber
   strip at the top of every page (login included) names the environment;
   prod leaves it unset (zero markup, zero layout impact).
@@ -205,6 +213,16 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-27:** Feature-access matrix (Issue 37): `feature_access`
+  table (migration `y6f7a8b9c0d1` + widened `audit_entity_type`);
+  super-admin "Feature access (admins)" card in Settings →
+  `POST /api/v1/admin/feature-access` (full-matrix upsert, audit-logged);
+  effective visibility = env flag AND matrix, fail-open, super-admins
+  bypass; enforced at sidebar (per-request middleware snapshot), page
+  routes (styled 403), and admin-reachable API edges
+  (personnel/nominal-rolls/attendance/groupings → 403); Settings itself
+  now super-admin-only; Users/Settings/Restore Backup sidebar entries
+  hidden from plain admins (Audit Log stays viewable)
 - **2026-08-26:** Sidebar reorder (direct to dev): Unit Strength moved
   after Attendance — reporting follows marking
 - **2026-08-26:** Attendance local-day default: `/attendance` server

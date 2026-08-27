@@ -255,6 +255,64 @@ paths:
           description: Caller is not a super admin
 
   # ---------------------------------------------------------------------------
+  # ADMIN — feature-access matrix (issue 37)
+  # ---------------------------------------------------------------------------
+
+  /admin/feature-access:
+    post:
+      tags: [feature-access]
+      summary: Upsert the admin feature-access matrix
+      description: |
+        Super-admin only (403 otherwise). Configures, per feature, whether
+        the `admin` role can see and use it. The Settings card submits the
+        full matrix (one item per key: upload_nr, nominal_roll, attendance,
+        strength, grouping, deferments, discussions); each `feature_access`
+        row is created or updated to the posted value, and value changes
+        are audit-logged (entity_type=feature_access, action=update, the
+        changes JSON naming from/to per key). Effective visibility =
+        FEATURE_* env flag AND matrix entry: the env kill switch outranks
+        the matrix (flag off = 404 for everyone), an absent row means
+        enabled (fail-open — an empty matrix matches the pre-matrix
+        deployment), and super-admins are never restricted. Applies
+        immediately, no restart; the sidebar, page routes, and API edges
+        all re-read the matrix per request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required: [feature_key, enabled]
+                    properties:
+                      feature_key: { type: string }
+                      enabled: { type: boolean }
+            example:
+              items:
+                - { feature_key: upload_nr, enabled: false }
+                - { feature_key: attendance, enabled: true }
+      responses:
+        "200":
+          description: The effective matrix for the admin role after the save
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role: { type: string, example: admin }
+                  features:
+                    type: object
+                    additionalProperties: { type: boolean }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422":
+          description: Unknown feature_key in items
+
+  # ---------------------------------------------------------------------------
   # NOMINAL ROLLS — attendance activation
   # ---------------------------------------------------------------------------
 
