@@ -114,6 +114,110 @@
 </div>
 {% endif %}
 
+{% if user.role == "super_admin" %}
+<div class="card">
+    <h3>Feature access (admins)</h3>
+    <p style="color: #6b7280;">
+        Choose which features the <strong>admin</strong> role can see and
+        use. Changes apply immediately (no restart); the sidebar, pages,
+        and APIs all respect the matrix. Deployment-wide
+        <code>FEATURE_*</code> kill switches sit above this — a feature
+        disabled there stays off for everyone regardless of this matrix.
+        Super-admins are never restricted.
+    </p>
+
+    <table style="border-collapse: collapse; width: 100%; max-width: 40rem;">
+        <thead>
+            <tr style="border-bottom: 1px solid #e5e7eb;">
+                <th style="text-align: left; padding: 0.4rem 0.6rem;">Feature</th>
+                <th style="text-align: left; padding: 0.4rem 0.6rem;">Deployment flag</th>
+                <th style="text-align: left; padding: 0.4rem 0.6rem;">Visible to admins</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for feature in matrix_features %}
+            {% set env_on = request.app.state.settings[feature.env_flag] %}
+            {% set matrix_on = admin_matrix.get(feature.key, true) %}
+            <tr style="border-bottom: 1px solid #f3f4f6;" data-feature-key="{{ feature.key }}">
+                <td style="padding: 0.4rem 0.6rem;">
+                    {{ feature.label }}
+                    {% if feature.note %}
+                    <div style="color: #9ca3af; font-size: 0.8125rem;">{{ feature.note }}</div>
+                    {% endif %}
+                </td>
+                <td style="padding: 0.4rem 0.6rem;">
+                    {% if env_on %}
+                    <span style="color: #10b981;">on</span>
+                    {% else %}
+                    <span style="color: #dc2626;">off — feature hidden for everyone</span>
+                    {% endif %}
+                </td>
+                <td style="padding: 0.4rem 0.6rem;">
+                    <label style="display: inline-flex; align-items: center; gap: 0.4rem;">
+                        <input type="checkbox" class="feature-toggle"
+                               data-feature-key="{{ feature.key }}"
+                               {% if matrix_on %}checked{% endif %}
+                               {% if not env_on %}disabled title="Disabled on this deployment (env flag off)"{% endif %}>
+                        <span class="toggle-state">{{ "on" if matrix_on else "off" }}</span>
+                    </label>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <button type="button" id="featureAccessSave" class="btn" style="margin-top: 1rem;">
+        Save feature access
+    </button>
+    <span id="featureAccessStatus" style="margin-left: 0.75rem;"></span>
+
+    <script>
+        const saveBtn = document.getElementById('featureAccessSave');
+        const statusSpan = document.getElementById('featureAccessStatus');
+
+        document.querySelectorAll('.feature-toggle').forEach((toggle) => {
+            toggle.addEventListener('change', () => {
+                toggle.parentElement.querySelector('.toggle-state').textContent =
+                    toggle.checked ? 'on' : 'off';
+            });
+        });
+
+        saveBtn.addEventListener('click', async () => {
+            saveBtn.disabled = true;
+            statusSpan.innerHTML = '<span style="color:#6b7280;">Saving…</span>';
+
+            const items = Array.from(document.querySelectorAll('.feature-toggle')).map((toggle) => ({
+                feature_key: toggle.dataset.featureKey,
+                enabled: toggle.checked,
+            }));
+
+            try {
+                const response = await fetch('/api/v1/admin/feature-access', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ items }),
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    statusSpan.innerHTML =
+                        '<span style="color:#10b981; font-weight:bold;">Saved.</span>';
+                } else {
+                    statusSpan.innerHTML =
+                        '<span style="color:#dc2626; font-weight:bold;">'
+                        + (data.detail || 'Save failed') + '</span>';
+                }
+            } catch (err) {
+                statusSpan.innerHTML =
+                    '<span style="color:#dc2626; font-weight:bold;">Request failed: ' + err + '</span>';
+            } finally {
+                saveBtn.disabled = false;
+            }
+        });
+    </script>
+</div>
+{% endif %}
+
 <div class="card">
     <h3>Access Levels</h3>
     <p style="color: #6b7280;">Access level configuration coming soon...</p>

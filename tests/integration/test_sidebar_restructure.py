@@ -49,8 +49,15 @@ async def test_sidebar_lists_workflow_pages_then_admin_section(
 ):
     """The sidebar lists the workflow pages flat (Dashboard through Grouping,
     in order), then an Admin section with Users, Settings, Audit Log, and
-    the relabelled Restore Backup entry."""
-    await _sign_in(client, db_session, sample_users["admin"])
+    the relabelled Restore Backup entry.
+
+    Asserted as super-admin: since issue 37 the Admin section's
+    configuration entries (Users, Settings, Restore Backup) render for
+    super-admins only — plain admins see just Audit Log (covered in
+    tests/integration/test_feature_access.py).
+    """
+    sa = await _make_super_admin(db_session)
+    await _sign_in(client, db_session, sa)
 
     response = client.get("/admin")
 

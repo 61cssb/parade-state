@@ -2,6 +2,7 @@
 
 from .access import (
     AccessLevel,
+    FeatureAccess,
     User,
     UserSubunitAssignment,
 )
@@ -39,6 +40,7 @@ from .tagging import Tagging, TaggingEntry
 
 __all__ = [
     "AccessLevel",
+    "FeatureAccess",
     "User",
     "UserSubunitAssignment",
     "ATTENDANCE_STATUSES",
