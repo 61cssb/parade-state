@@ -10,6 +10,7 @@ from parade_state.api.subunit_access import get_scope_grants, grant_matches
 from parade_state.api.tagging import _load_nr_tagging
 from parade_state.auth.admin_dependencies import get_current_admin_user_optional
 from parade_state.db import get_session_maker
+from parade_state.feature_access import MATRIX_FEATURES, feature_allowed
 from parade_state.features import require_feature
 from parade_state.models import (
     AccessLevel,
@@ -89,7 +90,7 @@ def get_templates(request: Request) -> Environment:
     return _jinja_env
 
 
-def _no_permission_response(
+def no_permission_response(
     request: Request, current_admin, page_name: str, active_page: str
 ) -> HTMLResponse:
     """Render the in-page no-access message for super-admin-only pages.
@@ -182,11 +183,18 @@ async def admin_unit_strength(
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
 
+    # Matrix gate (issue 37): strength hidden from admins when toggled
+    # off in Settings; super-admins bypass.
+    if not feature_allowed(request, current_admin.role, "strength"):
+        return no_permission_response(
+            request, current_admin, "Unit Strength", "strength"
+        )
+
     # Absent/unknown basis values fall back to the tagged default.
     if basis not in ("tagged", "untagged"):
         basis = "tagged"
     if basis == "untagged" and current_admin.role != "super_admin":
-        return _no_permission_response(
+        return no_permission_response(
             request, current_admin, "Unit Strength", "strength"
         )
 
@@ -476,6 +484,14 @@ async def admin_csv_upload(
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
 
+    # Matrix gate (issue 37): the trial hides Upload NR from plain
+    # admins. The POST APIs are already super-admin-only; this page gate
+    # stops admins from reaching a page that 403s on submit.
+    if not feature_allowed(request, current_admin.role, "upload_nr"):
+        return no_permission_response(
+            request, current_admin, "Upload NR", "csv-upload"
+        )
+
     # Fetch recent uploads for the table
     session_maker = get_session_maker()
     async with session_maker() as db:
@@ -589,7 +605,7 @@ async def admin_deferments(
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
     if current_admin.role != "super_admin":
-        return _no_permission_response(request, current_admin, "Deferments", "deferments")
+        return no_permission_response(request, current_admin, "Deferments", "deferments")
 
     session_maker = get_session_maker()
     async with session_maker() as db:
@@ -886,7 +902,7 @@ async def admin_taggings(
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
     if current_admin.role != "super_admin":
-        return _no_permission_response(request, current_admin, "Taggings", "taggings")
+        return no_permission_response(request, current_admin, "Taggings", "taggings")
 
     session_maker = get_session_maker()
     async with session_maker() as db:
@@ -1008,12 +1024,26 @@ async def admin_taggings(
 async def admin_settings(
     request: Request,
 ):
-    """Render the settings page."""
+    """Render the settings page (super admin only, issue 37).
+
+    Settings hosts the feature-access matrix — the admin-role
+    configuration surface — so the page itself is hard-gated, matching
+    Restore Backup. Plain admins never see the sidebar entry.
+    """
     current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
 
+    if current_admin.role != "super_admin":
+        return no_permission_response(
+            request, current_admin, "Settings", "settings"
+        )
+
     from parade_state.config import get_settings
+
+    # The middleware already loaded the matrix for this request; reuse
+    # it instead of a second read.
+    matrix = getattr(request.state, "feature_access", None) or {}
 
     env = get_templates(request)
     template = env.get_template("admin/settings.html")
@@ -1028,6 +1058,8 @@ async def admin_settings(
         },
         active_page="settings",
         purge_enabled=get_settings().PURGE_ENABLED,
+        matrix_features=MATRIX_FEATURES,
+        admin_matrix=matrix.get("admin", {}),
     )
 
     return HTMLResponse(content=html_content)
@@ -1124,7 +1156,7 @@ async def admin_database_restore(request: Request):
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
     if current_admin.role != "super_admin":
-        return _no_permission_response(
+        return no_permission_response(
             request, current_admin, "Restore Backup", "database-restore"
         )
 

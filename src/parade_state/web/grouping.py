@@ -13,8 +13,10 @@ from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from parade_state.admin_routes import no_permission_response
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
+from parade_state.feature_access import feature_allowed
 from parade_state.models import (
     Grouping,
     GroupingMemberState,
@@ -36,6 +38,13 @@ async def grouping_view(
     current_user = await get_current_user_optional(request)
     if not current_user:
         return RedirectResponse(url="/auth/login", status_code=302)
+
+    # Matrix gate (issue 37): grouping hidden from admins when toggled
+    # off in Settings; super-admins bypass.
+    if not feature_allowed(request, current_user.role, "grouping"):
+        return no_permission_response(
+            request, current_user, "Grouping", "grouping"
+        )
 
     session_maker = get_session_maker()
     async with session_maker() as db:

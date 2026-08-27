@@ -18,8 +18,10 @@ from parade_state.api.subunit_access import (
     get_scope_grants,
     in_scope_pids,
 )
+from parade_state.admin_routes import no_permission_response
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
+from parade_state.feature_access import feature_allowed
 from parade_state.models import (
     INPRO_STATUS_LABELS,
     NominalRoll,
@@ -152,6 +154,13 @@ async def nominal_roll_view(
     # surface on admin role until it exists.
     if current_user.role not in ("admin", "super_admin"):
         return RedirectResponse(url="/auth/no-access", status_code=302)
+
+    # Matrix gate (issue 37): the NR browser hidden from admins when
+    # toggled off in Settings; super-admins bypass.
+    if not feature_allowed(request, current_user.role, "nominal_roll"):
+        return no_permission_response(
+            request, current_user, "Nominal Roll", "nominal-roll"
+        )
 
     session_maker = get_session_maker()
     async with session_maker() as db:

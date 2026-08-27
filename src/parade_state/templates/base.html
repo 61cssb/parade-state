@@ -580,19 +580,33 @@
         </a>
         <nav class="sidebar-nav">
             {% if user %}
-            {# Workflow pages. Per-item gating is enforced in-page:
+            {# Workflow pages. Two gating layers (issue 37):
+               1. FEATURE_* env flags — deployment-wide kill switches
+                  (404 in-page). The core-feature flags (Nominal Roll,
+                  Attendance) are default-on; the rest default off.
+               2. Feature-access matrix — per-role visibility configured
+                  by super-admins in Settings (fa, stashed per-request by
+                  FeatureAccessMiddleware; absent row = enabled;
+                  super-admins bypass). Each page route and its API edges
+               enforce the same matrix key, so hiding is not just cosmetic.
+               Per-item gating is otherwise enforced in-page:
                super-admin-only surfaces (Taggings) render a no-access
-               message for plain admins, while flag-gated features
-               (Deferments, Grouping, Discussions) are hidden entirely
-               when their FEATURE_* env flag is off. The core-feature
-               flags (Nominal Roll, Attendance) are default-on kill
-               switches: they hide their entries only on an explicit
-               "false". #}
-            {% if request.app.state.settings.FEATURE_NOMINALROLL %}
+               message for plain admins. #}
+            {% set fa = request.state.feature_access | default({}) %}
+            {% set vis_upload_nr = request.app.state.settings.FEATURE_NOMINALROLL and (user.role == 'super_admin' or fa.get(user.role, {}).get('upload_nr', true)) %}
+            {% set vis_nominal_roll = request.app.state.settings.FEATURE_NOMINALROLL and (user.role == 'super_admin' or fa.get(user.role, {}).get('nominal_roll', true)) %}
+            {% set vis_deferments = request.app.state.settings.FEATURE_DEFERMENTS and (user.role == 'super_admin' or fa.get(user.role, {}).get('deferments', true)) %}
+            {% set vis_attendance = request.app.state.settings.FEATURE_ATTENDANCE and (user.role == 'super_admin' or fa.get(user.role, {}).get('attendance', true)) %}
+            {% set vis_strength = request.app.state.settings.FEATURE_STRENGTH and (user.role == 'super_admin' or fa.get(user.role, {}).get('strength', true)) %}
+            {% set vis_grouping = request.app.state.settings.FEATURE_GROUPING and (user.role == 'super_admin' or fa.get(user.role, {}).get('grouping', true)) %}
+            {% set vis_discussions = request.app.state.settings.FEATURE_DISCUSSIONS and (user.role == 'super_admin' or fa.get(user.role, {}).get('discussions', true)) %}
+            {% if vis_upload_nr %}
             <a href="/admin/csv-upload" title="Upload NR"
                class="{% if active_page == 'csv-upload' %}active{% endif %}">
                 <span class="icon">📤</span><span>Upload NR</span>
             </a>
+            {% endif %}
+            {% if vis_nominal_roll %}
             <a href="/nominal-roll" title="Nominal Roll Browser"
                class="{% if active_page == 'nominal-roll' %}active{% endif %}">
                 <span class="icon">👥</span><span>Nominal Roll</span>
@@ -602,36 +616,40 @@
                 <span class="icon">🏷️</span><span>Taggings</span>
             </a>
             {% endif %}
-            {% if request.app.state.settings.FEATURE_DEFERMENTS %}
+            {% if vis_deferments %}
             <a href="/admin/deferments" title="Deferments"
                class="{% if active_page == 'deferments' %}active{% endif %}">
                 <span class="icon">🕓</span><span>Deferments</span>
             </a>
             {% endif %}
-            {% if request.app.state.settings.FEATURE_ATTENDANCE %}
+            {% if vis_attendance %}
             <a href="/attendance" title="Attendance"
                class="{% if active_page == 'attendance' %}active{% endif %}">
                 <span class="icon">✅</span><span>Attendance</span>
             </a>
             {% endif %}
-            {% if request.app.state.settings.FEATURE_STRENGTH %}
+            {% if vis_strength %}
             <a href="/admin" title="Unit Strength"
                class="{% if active_page == 'strength' %}active{% endif %}">
                 <span class="icon">🪖</span><span>Unit Strength</span>
             </a>
             {% endif %}
-            {% if request.app.state.settings.FEATURE_GROUPING %}
+            {% if vis_grouping %}
             <a href="/grouping" title="Grouping"
                class="{% if active_page == 'grouping' %}active{% endif %}">
                 <span class="icon">📊</span><span>Grouping</span>
             </a>
             {% endif %}
-            {% if request.app.state.settings.FEATURE_DISCUSSIONS %}
+            {% if vis_discussions %}
             <a href="/admin/discussions" title="Discussions"
                class="{% if active_page == 'discussions' %}active{% endif %}">
                 <span class="icon">💬</span><span>Discussions</span>
             </a>
             {% endif %}
+            {# Admin section. Configuration surfaces (Users, Settings,
+               Restore Backup) are super-admin-only (issue 37); Audit Log
+               stays visible to plain admins (view-only). #}
+            {% if user.role == 'super_admin' %}
             <div class="nav-section-label">Admin</div>
             <a href="/admin/users" title="Users"
                class="{% if active_page == 'users' %}active{% endif %}">
@@ -649,6 +667,13 @@
                class="{% if active_page == 'database-restore' %}active{% endif %}">
                 <span class="icon">🗄️</span><span>Restore Backup</span>
             </a>
+            {% else %}
+            <div class="nav-section-label">Admin</div>
+            <a href="/admin/audit" title="Audit Log"
+               class="{% if active_page == 'audit' %}active{% endif %}">
+                <span class="icon">📜</span><span>Audit Log</span>
+            </a>
+            {% endif %}
             {% endif %}
         </nav>
     </aside>
