@@ -501,11 +501,15 @@ async def test_example(client, sample_users, sample_grouping):
   records are never deleted or altered and hidden rows render with no
   special treatment.
 - `PATCH /api/v1/personnel/{id}` accepts `inpro_status` (422 on invalid) and
-  `remarks` (empty/null clears); admin + super_admin.
-- NR browser table shows Inpro Status + Remarks columns with inline editing
-  (select / text input, immediate PATCH) for admins and above, plus a
-  user-side filter by Inpro status (e.g. hide Deferred) carried into the
-  CSV export.
+  `remarks` (empty/null clears); **issue 39 (admin trial):** `inpro_status`
+  is super-admin-only — 403 for admins alone or mixed with allowed fields,
+  nothing applied, checked before the scope gate (same shape as `pers_no`
+  and #38's unit/sub-unit 1); `remarks` stays admin + super_admin.
+- NR browser table shows Inpro Status + Remarks columns; remarks keep
+  inline editing (text input, immediate PATCH) for admins and above, the
+  Inpro select is super-admin-rendered (issue 39 — admins get the plain
+  label; the handler is not shipped), plus a user-side filter by Inpro
+  status (e.g. hide Deferred) carried into the CSV export.
 - **Tests:** personnel PATCH (parametrised enum + 422 on the retired
   vocabulary + 403), CSV shim mapping, attendance hiding + record
   preservation, NR view wiring + filter, migration mapping
@@ -552,7 +556,8 @@ async def test_example(client, sample_users, sample_grouping):
 - `PATCH /api/v1/personnel/{id}` gains `pers_no` (fill-in-later):
   super-admin only (403 otherwise), membership semantics like `remarks`
   (explicit null / blank clears), per-roll uniqueness pre-check excluding
-  self → 409. Admins retain status/inpro/remarks.
+  self → 409. Admins retain status/remarks (inpro left this list at
+  issue 39; sub 2/3 arrived with #38).
 - NR browser: "Add Serviceman" button below the personnel table (a roster
   action — kept out of Roll management, which acts on the roll entity;
   shown even when filters match nothing, since that's the add flow) opens a

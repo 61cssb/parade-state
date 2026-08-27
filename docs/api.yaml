@@ -25,6 +25,16 @@ info:
 
     Admin and super_admin roles bypass both dimensions and see all rows and columns.
 
+    ## Field-level roles on the personnel PATCH
+    Within `PATCH /api/v1/personnel/{id}`: `unit` / `sub_unit_1` remaps
+    (issue 38) and `inpro_status` (issue 39 — drives the attendance
+    roster) are super-admin-only; a non-super-admin payload carrying
+    either, alone or mixed with allowed fields, → 403 with nothing
+    applied (checked before the scope gate). In-scope admins may send
+    `sub_unit_2` / `sub_unit_3` (recorded on the tagging overlay),
+    `status`, and `remarks`; `pers_no` (issue 26) is likewise
+    super-admin-only.
+
     ## Column manifest pattern (Option C)
     Endpoints returning personnel data include a `columns` array alongside `rows`.
     `columns` lists only the fields the requesting user may see, in display order.
