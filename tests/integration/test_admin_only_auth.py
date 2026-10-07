@@ -187,8 +187,11 @@ async def test_promoted_unrecognised_user_can_sign_in(
     db_session.add(super_admin)
     await db_session.commit()
     sa_session = await create_user_session(
-        db_session, user_id=str(super_admin.id), email=super_admin.email,
-        name=super_admin.name, role=super_admin.role,
+        db_session,
+        user_id=str(super_admin.id),
+        email=super_admin.email,
+        name=super_admin.name,
+        role=super_admin.role,
     )
     await db_session.commit()
 
@@ -219,8 +222,11 @@ async def test_viewer_routes_redirect_non_admins_to_no_access(
     db_session.add(regular)
     await db_session.commit()
     session = await create_user_session(
-        db_session, user_id=str(regular.id), email=regular.email,
-        name=regular.name, role=regular.role,
+        db_session,
+        user_id=str(regular.id),
+        email=regular.email,
+        name=regular.name,
+        role=regular.role,
     )
     await db_session.commit()
 
@@ -259,8 +265,11 @@ async def test_admin_session_reaches_grouping_and_login_redirects_to_admin(
     db_session.add(admin)
     await db_session.commit()
     session = await create_user_session(
-        db_session, user_id=str(admin.id), email=admin.email,
-        name=admin.name, role=admin.role,
+        db_session,
+        user_id=str(admin.id),
+        email=admin.email,
+        name=admin.name,
+        role=admin.role,
     )
     await db_session.commit()
 

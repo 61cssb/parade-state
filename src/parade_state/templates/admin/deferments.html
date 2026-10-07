@@ -6,7 +6,7 @@
 
 {% block content %}
 <p style="color: #6b7280; margin-bottom: 1.5rem;">
-    Personnel deferments. Each deferment is linked to a single nominal roll personnel record. Approving a deferment flips the personnel's <strong>Callup Status</strong> to <strong>Deferred</strong>.
+    Personnel deferments. Each deferment is linked to a single nominal roll personnel record. Approving a deferment offers to set the personnel's <strong>Inpro Status</strong> to <strong>Deferred</strong>; cancelling or deleting an approved deferment resets it to <strong>Yet to Inpro</strong>.
 </p>
 
 <div class="card">
@@ -185,8 +185,6 @@
 
 {% block scripts %}
 <script>
-    const ADMIN_USER_ID = "{{ user.id }}";
-    const ADMIN_USER_ROLE = "{{ user.role }}";
     const ACTIVE_NOMINAL_ROLL_ID = "{{ nominal_roll_filter }}";
     let editId = null;
 
@@ -195,6 +193,7 @@
         {% for d in deferments %}
         {{ d | tojson }}: {
             id: {{ d.id | tojson }},
+            personnel_id: {{ d.personnel_id | tojson }},
             rank_name: {{ d.rank_name | tojson }},
             sub_unit: {{ d.sub_unit | tojson }},
             reason: {{ d.reason | tojson }},
@@ -247,8 +246,6 @@
 
         const params = new URLSearchParams({
             nominal_roll_id: ACTIVE_NOMINAL_ROLL_ID,
-            user_id: ADMIN_USER_ID,
-            user_role: ADMIN_USER_ROLE,
             limit: '500',
         });
         if (search) params.set('search', search);
@@ -299,7 +296,7 @@
 
         try {
             const res = await fetch(
-                '/api/v1/deferments?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/deferments',
                 { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) }
             );
             if (res.ok) {
@@ -338,18 +335,31 @@
 
     async function submitEdit() {
         if (!editId) return;
+        const d = DEFERMENTS[editId];
+        const newStatus = document.getElementById('edit-status').value;
         const payload = {
-            status: document.getElementById('edit-status').value,
+            status: newStatus,
             reason: document.getElementById('edit-reason').value,
             remarks: document.getElementById('edit-remarks').value,
             oc_updates: document.getElementById('edit-oc').value,
         };
         try {
             const res = await fetch(
-                '/api/v1/deferments/' + editId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/deferments/' + editId,
                 { method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) }
             );
             if (res.ok) {
+                // Issue 32: approving never auto-sets Inpro status — offer
+                // it as an explicit step (declining leaves it unchanged).
+                if (newStatus === 'Approved' && d && d.status !== 'Approved') {
+                    if (confirm('Set Inpro status to Deferred for "' + d.rank_name + '"?')) {
+                        const err = await patchPersonnelInpro(d.personnel_id, 'deferred');
+                        if (err) {
+                            showMsg('edit-status-msg', 'Deferment saved, but setting Inpro status failed: ' + err, 'error');
+                            return;
+                        }
+                    }
+                }
                 showMsg('edit-status-msg', 'Saved.', 'success');
                 setTimeout(function() { location.reload(); }, 700);
             } else {
@@ -361,11 +371,25 @@
         }
     }
 
+    async function patchPersonnelInpro(personnelId, inproStatus) {
+        try {
+            const res = await fetch(
+                '/api/v1/personnel/' + personnelId,
+                { method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ inpro_status: inproStatus }) }
+            );
+            if (res.ok) return null;
+            const data = await res.json().catch(function() { return {}; });
+            return data.detail || ('HTTP ' + res.status);
+        } catch (err) {
+            return 'Network error: ' + err.message;
+        }
+    }
+
     async function deleteDeferment(id, rankName) {
         if (!confirm('Delete deferment for "' + rankName + '"? This cannot be undone.')) return;
         try {
             const res = await fetch(
-                '/api/v1/deferments/' + id + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/deferments/' + id,
                 { method: 'DELETE' }
             );
             if (res.ok) {

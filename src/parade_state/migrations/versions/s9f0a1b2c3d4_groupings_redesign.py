@@ -57,9 +57,7 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(["created_by"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
-            "nominal_roll_id", "label", name="uq_groupings_nr_label"
-        ),
+        sa.UniqueConstraint("nominal_roll_id", "label", name="uq_groupings_nr_label"),
     )
     op.create_index("ix_groupings_id", "groupings", ["id"], unique=False)
     op.create_index("ix_groupings_label", "groupings", ["label"], unique=False)
@@ -73,15 +71,16 @@ def upgrade() -> None:
         sa.Column("grouping_id", sa.String(length=36), nullable=False),
         sa.Column("label", sa.String(length=100), nullable=False),
         sa.Column("position", sa.Integer(), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["grouping_id"], ["groupings.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["grouping_id"], ["groupings.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("grouping_id", "label", name="uq_grouping_group_label"),
     )
     op.create_index("ix_grouping_groups_id", "grouping_groups", ["id"], unique=False)
     op.create_index(
-        "ix_grouping_groups_grouping_id", "grouping_groups", ["grouping_id"], unique=False
+        "ix_grouping_groups_grouping_id",
+        "grouping_groups",
+        ["grouping_id"],
+        unique=False,
     )
 
     op.create_table(
@@ -90,15 +89,11 @@ def upgrade() -> None:
         sa.Column("grouping_id", sa.String(length=36), nullable=False),
         sa.Column("group_id", sa.String(length=36), nullable=False),
         sa.Column("personnel_id", sa.String(length=36), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["grouping_id"], ["groupings.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["grouping_id"], ["groupings.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
             ["group_id"], ["grouping_groups.id"], ondelete="CASCADE"
         ),
-        sa.ForeignKeyConstraint(
-            ["personnel_id"], ["personnel.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["personnel_id"], ["personnel.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "grouping_id",
@@ -138,12 +133,8 @@ def upgrade() -> None:
         sa.Column("remarks", sa.Text(), nullable=True),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.Column("updated_by", sa.String(length=36), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["grouping_id"], ["groupings.id"], ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["personnel_id"], ["personnel.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["grouping_id"], ["groupings.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["personnel_id"], ["personnel.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["updated_by"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(

@@ -7,18 +7,21 @@ from pydantic import BaseModel, Field, field_validator
 
 from parade_state.utils import utc_dt
 
-from .personnel import CALLUP_STATUSES
+from .personnel import INPRO_STATUSES
 
 AttendanceStatus = Literal[
     "present",
     "absent",
-    "time_off",
+]
+
+# Optional reason classifying an attendance row's remarks — never feeds
+# present/absent aggregation (issue 33).
+AttendanceReason = Literal[
     "mc",
-    "yet_to_inpro",
-    "outpro",
-    "reporting_sick",
-    "late",
-    "att_out",
+    "off",
+    "early_outpro",
+    "other",
+    "awol",
 ]
 
 # ============================================================================
@@ -37,9 +40,7 @@ def _validate_label(value: str) -> str:
     if not stripped:
         raise ValueError("label must not be empty or whitespace-only")
     if _LABEL_FORBIDDEN.search(stripped):
-        raise ValueError(
-            "label must not contain angle brackets or control characters"
-        )
+        raise ValueError("label must not contain angle brackets or control characters")
     return stripped
 
 
@@ -220,20 +221,20 @@ class SessionListParams(BaseModel):
 # Attendance Schemas
 # ============================================================================
 #
-# Attendance is NR/Tagging-scoped with hardcoded AM/PM slots. One record per
-# (personnel, date) carries status + remarks for both AM and PM.
+# Attendance is NR/Tagging-scoped and taken once daily (single session,
+# issue 33). One record per (personnel, date) carries status + optional
+# reason + remarks.
 # Sessions are no longer user-managed (see /api/v1/sessions 410 stub).
 
 
 class AttendanceUpsert(BaseModel):
-    """Schema for a single per-person AM/PM attendance entry in a bulk upsert."""
+    """Schema for a single per-person attendance entry in a bulk upsert."""
 
     personnel_id: str
     date: utc_dt.date
-    status_am: AttendanceStatus = "absent"
-    remarks_am: str | None = None
-    status_pm: AttendanceStatus = "absent"
-    remarks_pm: str | None = None
+    status: AttendanceStatus = "absent"
+    reason: AttendanceReason | None = None
+    remarks: str | None = None
 
 
 class AttendanceResponse(BaseModel):
@@ -243,10 +244,9 @@ class AttendanceResponse(BaseModel):
     personnel_id: str
     nominal_roll_id: str
     date: utc_dt.date
-    status_am: str
-    remarks_am: str | None
-    status_pm: str
-    remarks_pm: str | None
+    status: str
+    reason: str | None
+    remarks: str | None
     notes_snapshot: str | None
     unit_snapshot: str | None
     sub_unit_1_snapshot: str | None
@@ -272,15 +272,29 @@ class AttendanceBulkUpsert(BaseModel):
 
 
 class CopyRemarksResponse(BaseModel):
-    """Schema for the copy-remarks endpoint result (explicit source/dest)."""
+    """Schema for the copy-remarks endpoint result (date-to-date copy)."""
 
     nominal_roll_id: str
     source_date: utc_dt.date
-    source_slot: Literal["am", "pm"]
     dest_date: utc_dt.date
-    dest_slot: Literal["am", "pm"]
     updated: int
     skipped: int
+
+
+class AttendanceFreezeRequest(BaseModel):
+    """Schema for freeze/unfreeze: the (NR, date) being toggled."""
+
+    nominal_roll_id: str
+    date: utc_dt.date
+
+
+class AttendanceFreezeResponse(BaseModel):
+    """Schema for the freeze state after a freeze/unfreeze call."""
+
+    nominal_roll_id: str
+    date: utc_dt.date
+    frozen: bool
+    frozen_at: utc_dt.datetime | None = None
 
 
 # ============================================================================
@@ -309,7 +323,7 @@ class PersonnelResponse(PersonnelBase):
     id: str
     nominal_roll_id: str
     status: str
-    callup_status: str
+    inpro_status: str
     remarks: str | None
     source: str | None = None
     created_at: utc_dt.datetime
@@ -339,9 +353,9 @@ class PersonnelCreate(BaseModel):
     sub_unit_1: str | None = Field(None, max_length=255, description="Sub-unit level 1")
     sub_unit_2: str | None = Field(None, max_length=255, description="Sub-unit level 2")
     sub_unit_3: str | None = Field(None, max_length=255, description="Sub-unit level 3")
-    callup_status: str | None = Field(
-        "Called Up",
-        description=f"Callup decision status (one of: {', '.join(CALLUP_STATUSES)})",
+    inpro_status: str | None = Field(
+        "yet_to_inpro",
+        description=f"Inpro lifecycle status (one of: {', '.join(INPRO_STATUSES)})",
     )
     remarks: str | None = Field(
         None, max_length=2000, description="Per-person remarks (empty clears)"
@@ -361,12 +375,12 @@ class PersonnelCreate(BaseModel):
             return v.strip() or None
         return v
 
-    @field_validator("callup_status")
+    @field_validator("inpro_status")
     @classmethod
-    def _callup_status_must_be_known(cls, v: str | None) -> str | None:
-        if v is not None and v not in CALLUP_STATUSES:
+    def _inpro_status_must_be_known(cls, v: str | None) -> str | None:
+        if v is not None and v not in INPRO_STATUSES:
             raise ValueError(
-                f"callup_status must be one of: {', '.join(CALLUP_STATUSES)}"
+                f"inpro_status must be one of: {', '.join(INPRO_STATUSES)}"
             )
         return v
 
@@ -399,9 +413,9 @@ class PersonnelUpdate(BaseModel):
         pattern="^(active|archived)$",
         description="Personnel status (active or archived)",
     )
-    callup_status: str | None = Field(
+    inpro_status: str | None = Field(
         None,
-        description=f"Callup decision status (one of: {', '.join(CALLUP_STATUSES)})",
+        description=f"Inpro lifecycle status (one of: {', '.join(INPRO_STATUSES)})",
     )
     remarks: str | None = Field(
         None, max_length=2000, description="Per-person remarks (empty clears)"
@@ -412,12 +426,12 @@ class PersonnelUpdate(BaseModel):
         description="Personnel number (super-admin only; explicit null clears)",
     )
 
-    @field_validator("callup_status")
+    @field_validator("inpro_status")
     @classmethod
-    def _callup_status_must_be_known(cls, v: str | None) -> str | None:
-        if v is not None and v not in CALLUP_STATUSES:
+    def _inpro_status_must_be_known(cls, v: str | None) -> str | None:
+        if v is not None and v not in INPRO_STATUSES:
             raise ValueError(
-                f"callup_status must be one of: {', '.join(CALLUP_STATUSES)}"
+                f"inpro_status must be one of: {', '.join(INPRO_STATUSES)}"
             )
         return v
 
@@ -459,10 +473,9 @@ class PersonnelAttendanceHistoryItem(BaseModel):
     id: str
     nominal_roll_id: str
     date: utc_dt.date
-    status_am: str
-    remarks_am: str | None
-    status_pm: str
-    remarks_pm: str | None
+    status: str
+    reason: str | None
+    remarks: str | None
     created_at: utc_dt.datetime
     updated_at: utc_dt.datetime
 
@@ -471,16 +484,12 @@ class PersonnelAttendanceHistoryItem(BaseModel):
 
 
 class PersonnelAttendanceHistoryStats(BaseModel):
-    """Schema for attendance history statistics.
+    """Schema for attendance history statistics (one session per day)."""
 
-    AM and PM slots are counted independently toward totals (so one day with
-    both slots present contributes 2 to ``total_slots``).
-    """
-
-    total_slots: int
-    present_count: int
-    absent_count: int
-    attendance_rate: float  # Percentage of present-like slots vs total
+    total_days: int
+    present_days: int
+    absent_days: int
+    attendance_rate: float  # Percentage of present days vs total
 
 
 class PersonnelAttendanceHistoryResponse(BaseModel):
@@ -501,8 +510,14 @@ class PersonnelAttendanceHistoryResponse(BaseModel):
 
 
 class UserSubunitAssignmentCreate(BaseModel):
-    """Schema for granting a user attendance rights on one NR sub_unit_1."""
+    """Schema for granting a user scope on one NR.
 
+    ``unit``/``sub_unit_1`` use the explicit ``*`` sentinel for wildcard
+    matching (issue #28); at least one must be concrete and both must be
+    values present on the NR's roster when concrete.
+    """
+
+    unit: str = Field("*", min_length=1)
     sub_unit_1: str = Field(..., min_length=1)
 
 
@@ -512,10 +527,12 @@ class UserSubunitAssignmentResponse(BaseModel):
     id: str
     user_id: str
     nominal_roll_id: str
+    unit: str
     sub_unit_1: str
     created_at: utc_dt.datetime
     created_by: str
     updated_at: utc_dt.datetime
+    nominal_roll_label: str | None = None
 
     class Config:
         from_attributes = True
@@ -577,7 +594,6 @@ class CsvUploadProcessRequest(BaseModel):
     """
 
     source_nominal_roll_id: str | None = Field(None, min_length=1)
-    created_by: str = Field(..., min_length=1)
 
 
 class CsvUploadProcessUnmatchedItem(BaseModel):
@@ -588,11 +604,17 @@ class CsvUploadProcessUnmatchedItem(BaseModel):
 
 
 class CsvUploadProcessResponse(BaseModel):
-    """Schema for the process response — created NR plus ingestion diagnostics."""
+    """Schema for the process response — created NR plus ingestion diagnostics.
+
+    ``rows_skipped`` totals every non-stored data row: rows whose Callup
+    Decision was not Yes (``decision_skipped``, issue 34 strict filter)
+    plus rows skipped for unrecognized ranks.
+    """
 
     nominal_roll_id: str
     personnel_inserted: int
     rows_skipped: int
+    decision_skipped: int = 0
     tagging_entries_imported: int = 0
     unmatched: list[CsvUploadProcessUnmatchedItem] = []
 
@@ -886,3 +908,92 @@ class TaggingCloneResponse(BaseModel):
     source_count: int
     matched_count: int
     unmatched: list[TaggingCloneUnmatchedItem]
+
+
+# ============================================================================
+# Discussion Schemas (issue 24)
+# ============================================================================
+
+DiscussionCategory = Literal["requests", "bugs"]
+DiscussionStatus = Literal["Open", "Duplicate", "Accepted", "Implemented", "Closed"]
+
+
+class DiscussionPostCreate(BaseModel):
+    """Schema for creating a board post.
+
+    ``category`` is required and limited to ``requests`` / ``bugs``;
+    every post starts its lifecycle in the ``Open`` triage status.
+    """
+
+    title: str = Field(..., min_length=1, max_length=200)
+    body: str = Field(..., min_length=1)
+    category: DiscussionCategory
+
+
+class DiscussionPostUpdate(BaseModel):
+    """Schema for an author's edit of a board post.
+
+    Title and body only — category and status changes are super-admin
+    triage (see :class:`DiscussionPostTriage`) and cannot ride along.
+    """
+
+    title: str | None = Field(None, min_length=1, max_length=200)
+    body: str | None = Field(None, min_length=1)
+
+
+class DiscussionPostTriage(BaseModel):
+    """Schema for a super-admin's triage of a board post."""
+
+    category: DiscussionCategory | None = None
+    status: DiscussionStatus | None = None
+
+
+class DiscussionPostResponse(BaseModel):
+    """Schema for board post API responses."""
+
+    id: str
+    title: str
+    body: str
+    author_id: str
+    author_name: str | None = None
+    category: str
+    status: str
+    comment_count: int = 0
+    created_at: utc_dt.datetime
+    edited_at: utc_dt.datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class DiscussionCommentCreate(BaseModel):
+    """Schema for commenting on a board post."""
+
+    body: str = Field(..., min_length=1)
+
+
+class DiscussionCommentUpdate(BaseModel):
+    """Schema for an author's edit of a comment (body only)."""
+
+    body: str = Field(..., min_length=1)
+
+
+class DiscussionCommentResponse(BaseModel):
+    """Schema for board comment API responses."""
+
+    id: str
+    post_id: str
+    author_id: str
+    author_name: str | None = None
+    body: str
+    created_at: utc_dt.datetime
+    edited_at: utc_dt.datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class DiscussionPostDetailResponse(DiscussionPostResponse):
+    """A board post with its comments (detail view)."""
+
+    comments: list[DiscussionCommentResponse] = []

@@ -77,3 +77,10 @@ Current version: 0.1.0
 """
 
 __version__ = "0.1.0"
+
+# Load .env before any submodule import: config, feature flags, and the
+# alembic env read environment variables at import time. load_dotenv
+# never overrides variables that are already set in the environment.
+from dotenv import load_dotenv
+
+load_dotenv()

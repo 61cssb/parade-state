@@ -118,9 +118,7 @@ class _ConnectionInfo:
     def async_url(self, database: str) -> str:
         """SQLAlchemy async URL for a database on this server."""
         auth = f"{self.user}:{self.password}"
-        return (
-            f"postgresql+asyncpg://{auth}@{self.host}:{self.port}/{database}"
-        )
+        return f"postgresql+asyncpg://{auth}@{self.host}:{self.port}/{database}"
 
     def subprocess_env(self) -> dict[str, str]:
         """Environment for pg_restore/pg_dump subprocesses (no argv secrets)."""
@@ -172,13 +170,9 @@ def _major(version_string: str) -> int:
 async def _parse_dump_header(dump: bytes) -> dict:
     """Validate the archive and extract header facts via pg_restore --list."""
     if shutil.which("pg_restore") is None:
-        raise RestoreError(
-            "pg_restore is not available on the server", status_code=500
-        )
+        raise RestoreError("pg_restore is not available on the server", status_code=500)
 
-    code, stdout, _ = await _run_subprocess(
-        ["pg_restore", "--list"], stdin_bytes=dump
-    )
+    code, stdout, _ = await _run_subprocess(["pg_restore", "--list"], stdin_bytes=dump)
     if code != 0:
         raise RestoreError(
             "File is not a valid pg_dump custom-format archive", status_code=400
@@ -254,17 +248,14 @@ async def _verify(info: _ConnectionInfo, name: str) -> dict:
             tables = {
                 row[0]
                 for row in await conn.execute(
-                    text(
-                        "SELECT tablename FROM pg_tables WHERE schemaname='public'"
-                    )
+                    text("SELECT tablename FROM pg_tables WHERE schemaname='public'")
                 )
             }
 
             missing = [t for t in CORE_TABLES if t not in tables]
             if missing:
                 raise RestoreError(
-                    "Restored database is missing core tables: "
-                    + ", ".join(missing),
+                    "Restored database is missing core tables: " + ", ".join(missing),
                     status_code=400,
                 )
 
@@ -312,9 +303,7 @@ async def _verify(info: _ConnectionInfo, name: str) -> dict:
         await engine.dispose()
 
 
-async def _swap_databases(
-    admin_engine, info: _ConnectionInfo, timestamp: str
-) -> str:
+async def _swap_databases(admin_engine, info: _ConnectionInfo, timestamp: str) -> str:
     """Move the current database aside and the restored one into place.
 
     Returns the displaced database's name (the rollback target).
@@ -347,8 +336,10 @@ async def _swap_databases(
 
         try:
             await conn.execute(
-                text(f'ALTER DATABASE "parade_state_restore_{timestamp}" '
-                     f'RENAME TO "{info.database}"')
+                text(
+                    f'ALTER DATABASE "parade_state_restore_{timestamp}" '
+                    f'RENAME TO "{info.database}"'
+                )
             )
         except Exception:
             # Roll the first rename back so the app reconnects to the
@@ -401,10 +392,8 @@ async def _migrate_restored(database_url: str) -> None:
     try:
         await asyncio.to_thread(_run_upgrade, database_url)
     except Exception as exc:
-        logging.getLogger(__name__).exception(
-            "post-restore alembic upgrade failed"
-        )
-        raise RestoreError(f"alembic upgrade failed after swap: {exc}", 500)
+        logging.getLogger(__name__).exception("post-restore alembic upgrade failed")
+        raise RestoreError(f"alembic upgrade failed after swap: {exc}", 500) from exc
 
 
 async def restore_from_dump(dump: bytes, *, operator_id: str) -> dict:
@@ -438,7 +427,9 @@ async def restore_from_dump(dump: bytes, *, operator_id: str) -> dict:
         try:
             await _create_database(admin_engine, temp_db)
         except Exception as exc:
-            raise RestoreError(f"Could not create restore database: {exc}", 500)
+            raise RestoreError(
+                f"Could not create restore database: {exc}", 500
+            ) from exc
 
         try:
             await _restore_into(info, temp_db, dump)
@@ -472,7 +463,7 @@ async def restore_from_dump(dump: bytes, *, operator_id: str) -> dict:
                 logging.getLogger(__name__).warning(
                     "could not drop leftover restore database %s", temp_db
                 )
-            raise RestoreError(f"Database swap failed: {exc}", 500)
+            raise RestoreError(f"Database swap failed: {exc}", 500) from exc
 
         db.init_database(engine_url_string, poolclass=db._poolclass)
 
@@ -501,9 +492,7 @@ async def restore_from_dump(dump: bytes, *, operator_id: str) -> dict:
         await admin_engine.dispose()
 
 
-async def _write_audit_log(
-    operator_id: str, database: str, summary: dict
-) -> bool:
+async def _write_audit_log(operator_id: str, database: str, summary: dict) -> bool:
     """Append the restore record using the (re-initialized) app sessions.
 
     Best-effort: the restore has already succeeded at this point, and a

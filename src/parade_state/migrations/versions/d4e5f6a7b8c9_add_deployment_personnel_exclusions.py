@@ -31,11 +31,10 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["deployment_id"], ["deployments.id"], ondelete="CASCADE"
         ),
+        sa.ForeignKeyConstraint(["personnel_id"], ["personnel.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
-            ["personnel_id"], ["personnel.id"], ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["excluded_by"], ["users.id"],
+            ["excluded_by"],
+            ["users.id"],
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(

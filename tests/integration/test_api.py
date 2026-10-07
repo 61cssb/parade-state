@@ -1,15 +1,12 @@
 """Tests for API endpoints."""
 
 import uuid
-from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.auth.session import create_user_session
 from parade_state.models import User
-from tests.test_utils import assert_404_response, assert_permission_denied
 
 
 async def create_test_user_and_session(
@@ -85,9 +82,7 @@ async def test_logout_with_valid_token(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_list_users_as_admin(client: TestClient, test_db):
     """Test listing users as admin."""
-    _, admin_session = await create_test_user_and_session(
-        test_db, role="admin"
-    )
+    _, admin_session = await create_test_user_and_session(test_db, role="admin")
 
     # Create some test users
     await create_test_user_and_session(test_db, role="user")
@@ -117,9 +112,7 @@ async def test_list_users_as_regular_user(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_get_user_as_admin(client: TestClient, test_db):
     """Test getting a specific user as admin."""
-    _, admin_session = await create_test_user_and_session(
-        test_db, role="admin"
-    )
+    _, admin_session = await create_test_user_and_session(test_db, role="admin")
     user, _ = await create_test_user_and_session(test_db, role="user")
 
     headers = {"Authorization": f"Bearer {admin_session.token}"}
@@ -159,9 +152,7 @@ async def test_get_other_user_as_regular_user(client: TestClient, test_db):
 @pytest.mark.asyncio
 async def test_update_user_as_admin(client: TestClient, test_db):
     """Test updating user as admin."""
-    _, admin_session = await create_test_user_and_session(
-        test_db, role="admin"
-    )
+    _, admin_session = await create_test_user_and_session(test_db, role="admin")
     user, _ = await create_test_user_and_session(test_db, role="user")
 
     headers = {"Authorization": f"Bearer {admin_session.token}"}
@@ -206,6 +197,45 @@ async def test_update_user_role_as_regular_admin(client: TestClient, test_db):
     )
 
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_modify_super_admin(client: TestClient, test_db):
+    """A plain admin gets 403 for any edit of a super-admin account."""
+    _, admin_session = await create_test_user_and_session(test_db, role="admin")
+    super_admin, _ = await create_test_user_and_session(test_db, role="super_admin")
+
+    headers = {"Authorization": f"Bearer {admin_session.token}"}
+    # Demotion, suspension, and even a plain name edit are all 403.
+    response = client.patch(
+        f"/api/v1/users/{super_admin.id}", json={"role": "admin"}, headers=headers
+    )
+    assert response.status_code == 403
+    response = client.patch(
+        f"/api/v1/users/{super_admin.id}",
+        json={"status": "suspended"},
+        headers=headers,
+    )
+    assert response.status_code == 403
+    response = client.patch(
+        f"/api/v1/users/{super_admin.id}", json={"name": "X"}, headers=headers
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_super_admin_may_demote_super_admin(client: TestClient, test_db):
+    """Super-admins may demote other super-admins (spec §5.2 rule 5)."""
+    _, super_session = await create_test_user_and_session(test_db, role="super_admin")
+    other_super, _ = await create_test_user_and_session(test_db, role="super_admin")
+
+    headers = {"Authorization": f"Bearer {super_session.token}"}
+    response = client.patch(
+        f"/api/v1/users/{other_super.id}", json={"role": "admin"}, headers=headers
+    )
+
+    assert response.status_code == 200
+    assert response.json()["role"] == "admin"
 
 
 @pytest.mark.asyncio

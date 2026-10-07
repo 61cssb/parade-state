@@ -1,0 +1,28 @@
+# Weekly dependency vulnerability audit.
+#
+# Audits the production dependency set (what `uv sync --no-dev` installs
+# into the image) rather than per-push, so advisory churn breaks builds
+# at most once a week and gets its own signal. Run a manual dispatch to
+# check a newly disclosed advisory immediately.
+name: pip-audit
+
+on:
+  schedule:
+    # Mondays 03:00 UTC
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Export production requirements
+        run: uv export --frozen --no-dev --no-emit-project -o requirements.txt
+
+      - name: Audit dependencies
+        run: uvx pip-audit -r requirements.txt

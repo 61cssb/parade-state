@@ -10,9 +10,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from parade_state.api.tagging import _load_nr_tagging, copy_entries_by_pers_no
+from parade_state.auth.dependencies import require_admin_user, require_super_admin_user
 from parade_state.db import get_db_session
 from parade_state.models import (
-    CALLUP_STATUSES,
     AuditLog,
     ColumnMetadata,
     CsvUpload,
@@ -30,43 +31,21 @@ from parade_state.models.schemas import (
 )
 from parade_state.utils import ranks, utc_dt
 from parade_state.utils.csv_constants import (
-    CANONICAL_MAP,
-    EXTRA_KEY_FOR_INDEX,
+    EXTRA_INT_FIELDS,
     INFERRED_TYPES,
+    REQUIRED_FIELDS,
+    MissingColumnsError,
+    ResolvedColumns,
     coerce_int,
-    is_integer_column,
+    is_callup_yes,
     parse_caa_date,
-    snake,
+    resolve_columns,
 )
-from parade_state.api.tagging import _load_nr_tagging, copy_entries_by_pers_no
 
 router = APIRouter()
 
 # Maximum upload size: 10 MB
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024
-
-# Case-insensitive lookup for the CSV "Callup Decision" column.
-_CALLUP_BY_CASEFOLD: dict[str, str] = {s.casefold(): s for s in CALLUP_STATUSES}
-
-
-def _resolve_callup_status(raw_decision: str | int | None) -> str:
-    """Map the raw CSV Callup Decision onto the callup_status enum.
-
-    Blank → "Called Up" (model default); an exact (case-insensitive) match
-    passes through; any other non-blank value → "Other" (the raw value is
-    preserved in ``extra_fields`` for audit).
-    """
-    if not raw_decision:
-        return "Called Up"
-    return _CALLUP_BY_CASEFOLD.get(str(raw_decision).casefold(), "Other")
-
-
-def _join_personnel_remarks(
-    reason: str | int | None, remarks: str | int | None
-) -> str | None:
-    """Join the CSV Reason and first Remarks column into one remarks string."""
-    joined = "; ".join(str(part) for part in (reason, remarks) if part)
-    return joined or None
 
 
 def _parse_csv_columns(raw_bytes: bytes) -> tuple[list[str], int]:
@@ -103,8 +82,7 @@ def _parse_csv_columns(raw_bytes: bytes) -> tuple[list[str], int]:
 @router.post("/upload", response_model=CsvUploadResponse)
 async def upload_csv(
     file: UploadFile,
-    user_id: str = Query(..., description="User ID uploading the file"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     auto_process: bool = Query(
         False,
         description=(
@@ -128,20 +106,12 @@ async def upload_csv(
     validation passes; any processing failure is reported via
     ``process_error`` without failing the upload itself.
 
-    Requires admin or super_admin role.
+    Caller identity is session-derived (issue 31). Super-admin only
+    (issue #28 tightening): ingesting a CSV creates a whole new NR — an
+    NR-lifecycle operation like create/delete/activate, not a scoped
+    write, so regular admins no longer perform it.
     """
-    if user_role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can upload CSV files",
-        )
-
-    user_result = await db.execute(select(User).where(User.id == user_id))
-    if not user_result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
+    user_id = str(user.id)
 
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(
@@ -245,7 +215,10 @@ async def upload_csv(
     if auto_process:
         try:
             process_result = await _process_upload_into_nr(
-                db, upload, CsvUploadProcessRequest(created_by=user_id)
+                db,
+                upload,
+                CsvUploadProcessRequest(source_nominal_roll_id=None),
+                created_by=user_id,
             )
         except HTTPException as exc:
             # The upload is stored and committed; only the processing
@@ -273,21 +246,14 @@ async def upload_csv(
 async def list_csv_uploads(
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> list[CsvUploadListItem]:
     """List recent CSV uploads (metadata only, no raw_content).
 
-    Returns a paginated list ordered by uploaded_at desc.
-
-    Requires admin or super_admin role.
+    Returns a paginated list ordered by uploaded_at desc. Caller identity
+    is session-derived (issue 31); requires admin or super_admin.
     """
-    if user_role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can view CSV uploads",
-        )
 
     query = (
         select(
@@ -353,6 +319,12 @@ def _parse_csv_rows(raw_bytes: bytes) -> tuple[list[str], list[list[str]]]:
     return all_rows[0], all_rows[1:]
 
 
+def _cell(row: list[str], resolved: ResolvedColumns, field: str) -> str:
+    """Striped cell value for a resolved field; short rows read as blank."""
+    index = resolved.field_index[field]
+    return row[index].strip() if index < len(row) else ""
+
+
 @router.post(
     "/{upload_id}/process",
     response_model=CsvUploadProcessResponse,
@@ -361,7 +333,7 @@ def _parse_csv_rows(raw_bytes: bytes) -> tuple[list[str], list[list[str]]]:
 async def process_csv_upload(
     upload_id: str,
     payload: CsvUploadProcessRequest,
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> CsvUploadProcessResponse:
     """Process a stored CsvUpload into a full NominalRoll pipeline.
@@ -371,18 +343,24 @@ async def process_csv_upload(
     auto-created empty Tagging. Links the upload to the new NR via
     ``CsvUpload.nominal_roll_id``.
 
+    CSV contract v2 (issue 34): columns are matched by header name; a
+    missing required column (including a blank Unit header) rejects the
+    upload with an error naming the column. Only rows whose Callup
+    Decision is exactly ``Yes`` (case-insensitive) are stored; Callup
+    Decision and Reason are read but never stored, and the first Remarks
+    column is the only one stored (as ``personnel.remarks``).
+
     When ``source_nominal_roll_id`` is provided, copies the source NR's
     tagging entries into the new NR's tagging by ``pers_no`` matching.
     Personnel in the source tagging with no pers_no match in the new NR
     are surfaced in the response.
 
-    Requires admin or super_admin role.
+    Caller identity is session-derived (issue 31); provenance
+    (``created_by``) is stamped from the session, never the body.
+    Super-admin only (issue #28 tightening): processing mints a whole new
+    NR — an NR-lifecycle operation, not a scoped write.
     """
-    if user_role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can process CSV uploads",
-        )
+    user_id = str(user.id)
 
     # Load the upload.
     upload = (
@@ -394,11 +372,14 @@ async def process_csv_upload(
             detail=f"CSV upload not found: {upload_id}",
         )
 
-    return await _process_upload_into_nr(db, upload, payload)
+    return await _process_upload_into_nr(db, upload, payload, created_by=user_id)
 
 
 async def _process_upload_into_nr(
-    db: AsyncSession, upload: CsvUpload, payload: CsvUploadProcessRequest
+    db: AsyncSession,
+    upload: CsvUpload,
+    payload: CsvUploadProcessRequest,
+    created_by: str,
 ) -> CsvUploadProcessResponse:
     """Core CSV → NominalRoll pipeline, shared by the process endpoint
     and the upload endpoint's auto-processing.
@@ -443,18 +424,17 @@ async def _process_upload_into_nr(
             detail=f"Nominal roll with CAA {caa_date.isoformat()} already exists.",
         )
 
-    # Parse CSV rows.
+    # Parse CSV rows and validate the header against the v2 contract
+    # (issue 34): name-based matching; a missing required column —
+    # including a blank Unit header — rejects the upload by name.
     header, data_rows = _parse_csv_rows(upload.raw_content)
-    if len(header) != len(CANONICAL_MAP):
+    try:
+        resolved = resolve_columns(header)
+    except MissingColumnsError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"CSV header has {len(header)} columns; expected "
-                f"{len(CANONICAL_MAP)} per the canonical mapping."
-            ),
-        )
-
-    created_by = payload.created_by
+            detail=str(exc),
+        ) from exc
 
     # Create the NominalRoll (personnel_count set after Personnel insert).
     nominal_roll = NominalRoll(
@@ -467,42 +447,42 @@ async def _process_upload_into_nr(
     db.add(nominal_roll)
     await db.flush()
 
-    # Per-roll column metadata.
-    for idx, raw_name, canonical, _ in CANONICAL_MAP:
-        original_label = raw_name if raw_name else "(empty header)"
-        if raw_name == "Remarks":
-            original_label = f"Remarks (column {idx + 1})"
+    # Per-roll column metadata (one row per original column; duplicate
+    # header names are disambiguated with their 1-based column position).
+    name_counts: dict[str, int] = {}
+    for name in header:
+        stripped = name.strip()
+        if stripped:
+            name_counts[stripped] = name_counts.get(stripped, 0) + 1
+    for idx, raw_name in enumerate(header):
+        stripped = raw_name.strip()
+        original_label = raw_name if stripped else "(empty header)"
+        if stripped and name_counts[stripped] > 1:
+            original_label = f"{stripped} (column {idx + 1})"
+        canonical = resolved.canonical_for_index.get(idx)
         db.add(
             ColumnMetadata(
                 nominal_roll_id=nominal_roll.id,
                 csv_upload_id=upload.id,
                 original_name=original_label,
                 canonical_name=canonical,
-                inferred_type=INFERRED_TYPES.get(raw_name, "string"),
-                is_required=canonical in {"rank", "full_name", "unit"},
+                inferred_type=INFERRED_TYPES.get(canonical or "", "string"),
+                is_required=canonical in REQUIRED_FIELDS,
             )
         )
 
-    # Personnel rows.
+    # Personnel rows: strict Yes-only filter (issue 34) — every non-Yes
+    # decision (No, blank, free text) skips the row and is counted.
     inserted_personnel = 0
+    decision_skipped = 0
     skipped_rows: list[dict[str, str | int]] = []
     for row_num, row in enumerate(data_rows, start=2):
-        if len(row) < len(CANONICAL_MAP):
-            continue  # malformed row (too few columns)
-        core_values: dict[str, str] = {}
-        extra_fields: dict[str, str | int | None] = {}
-        for idx, raw_name, canonical, goes_to_extra in CANONICAL_MAP:
-            value = row[idx].strip()
-            if canonical and not goes_to_extra:
-                core_values[canonical] = value
-            elif goes_to_extra:
-                key = EXTRA_KEY_FOR_INDEX.get(idx, snake(raw_name))
-                if is_integer_column(raw_name):
-                    extra_fields[key] = coerce_int(value)
-                else:
-                    extra_fields[key] = value or None
+        decision = _cell(row, resolved, "callup_decision")
+        if not is_callup_yes(decision):
+            decision_skipped += 1
+            continue
 
-        rank_value = core_values.get("rank") or ""
+        rank_value = _cell(row, resolved, "rank")
         try:
             category = ranks.category_for_rank(rank_value)
         except ValueError:
@@ -510,31 +490,36 @@ async def _process_upload_into_nr(
                 {
                     "row": row_num,
                     "rank": rank_value,
-                    "full_name": core_values.get("full_name") or "",
+                    "full_name": _cell(row, resolved, "full_name"),
                 }
             )
             continue
 
+        # Optional int columns land in extra_fields only when the file
+        # carries the column (blank cell → None; absent column → no key).
+        extra_fields: dict[str, int | None] = {}
+        for field_name in EXTRA_INT_FIELDS:
+            if resolved.has(field_name):
+                extra_fields[field_name] = coerce_int(_cell(row, resolved, field_name))
+
+        pers_no = (
+            _cell(row, resolved, "pers_no") or None if resolved.has("pers_no") else None
+        )
+
         db.add(
             Personnel(
                 nominal_roll_id=nominal_roll.id,
-                pers_no=core_values.get("pers_no") or None,
+                pers_no=pers_no,
                 rank=rank_value,
                 category=category,
-                full_name=core_values.get("full_name") or "",
-                unit=core_values.get("unit") or "",
-                sub_unit_1=core_values.get("sub_unit_1") or None,
-                sub_unit_2=core_values.get("sub_unit_2") or None,
-                sub_unit_3=core_values.get("sub_unit_3") or None,
+                full_name=_cell(row, resolved, "full_name"),
+                unit=_cell(row, resolved, "unit"),
+                sub_unit_1=_cell(row, resolved, "sub_unit_1") or None,
+                sub_unit_2=_cell(row, resolved, "sub_unit_2") or None,
+                sub_unit_3=_cell(row, resolved, "sub_unit_3") or None,
                 extra_fields=extra_fields,
                 status="active",
-                callup_status=_resolve_callup_status(
-                    extra_fields.get("callup_decision")
-                ),
-                remarks=_join_personnel_remarks(
-                    extra_fields.get("reason"),
-                    extra_fields.get("remarks"),
-                ),
+                remarks=_cell(row, resolved, "remarks") or None,
                 created_by=created_by,
             )
         )
@@ -603,7 +588,8 @@ async def _process_upload_into_nr(
         description=(
             f"Processed CSV upload {upload.original_filename!r} into nominal "
             f"roll CAA {caa_date.isoformat()}: {inserted_personnel} personnel "
-            f"inserted, {len(skipped_rows)} skipped, "
+            f"inserted, {decision_skipped} skipped (callup decision not Yes), "
+            f"{len(skipped_rows)} skipped (unrecognized rank), "
             f"{matched_count} tagging entries imported."
         ),
     )
@@ -621,7 +607,10 @@ async def _process_upload_into_nr(
     return CsvUploadProcessResponse(
         nominal_roll_id=nominal_roll.id,
         personnel_inserted=inserted_personnel,
-        rows_skipped=len(skipped_rows),
+        # rows_skipped totals every non-stored data row (non-Yes decisions
+        # + unrecognized ranks); decision_skipped breaks out the former.
+        rows_skipped=decision_skipped + len(skipped_rows),
+        decision_skipped=decision_skipped,
         tagging_entries_imported=matched_count,
         unmatched=unmatched,
     )

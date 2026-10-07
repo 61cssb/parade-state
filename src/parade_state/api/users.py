@@ -270,6 +270,15 @@ async def update_user(
             detail="User not found",
         )
 
+    # Structural operations on a super_admin account are super-admin
+    # only — a plain admin must not edit, suspend, or demote a super
+    # admin. Super admins may demote other super admins.
+    if user.role == "super_admin" and current_user.role != "super_admin":
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Only super admins can modify a super admin account",
+        )
+
     # Track changes for audit log
     changes = []
 
@@ -328,7 +337,9 @@ async def update_user(
                     detail="Access level not found",
                 )
 
-            changes.append(f"access_level_id: '{user.access_level_id}' -> '{update_data.access_level_id}'")
+            changes.append(
+                f"access_level_id: '{user.access_level_id}' -> '{update_data.access_level_id}'"
+            )
             user.access_level_id = update_data.access_level_id
         except ValueError:
             raise HTTPException(

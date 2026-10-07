@@ -32,7 +32,9 @@ def upgrade() -> None:
     bind = op.get_bind()
 
     # 1. Add short_id nullable so existing rows can be backfilled.
-    op.add_column("personnel", sa.Column("short_id", sa.String(length=8), nullable=True))
+    op.add_column(
+        "personnel", sa.Column("short_id", sa.String(length=8), nullable=True)
+    )
 
     # 2. Backfill each existing row with a unique short_id.
     personnel = sa.table(

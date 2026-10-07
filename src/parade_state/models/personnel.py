@@ -9,16 +9,21 @@ from parade_state.utils import utc_dt
 
 from ..db import Base
 
-# Callup decision statuses. Only "Called Up" personnel appear in attendance;
-# every other status is hidden from the attendance view (non-destructively).
-CALLUP_STATUSES: tuple[str, ...] = (
-    "Called Up",
-    "Deferred",
-    "Disrupted",
-    "MR",
-    "Age Limit",
-    "Other",
+# In-processing lifecycle statuses (issue 32). Stored vocabulary is
+# snake_case (attendance convention); UI labels live in
+# INPRO_STATUS_LABELS. Everyone on the NR appears on the attendance
+# roster (issue 33); "deferred" only excludes a person from Unit
+# Strength's In count.
+INPRO_STATUSES: tuple[str, ...] = (
+    "inproed",
+    "yet_to_inpro",
+    "deferred",
 )
+INPRO_STATUS_LABELS: dict[str, str] = {
+    "inproed": "Inpro'ed",
+    "yet_to_inpro": "Yet to Inpro",
+    "deferred": "Deferred",
+}
 
 # Provenance marker for UI-added personnel rows. NULL means the row came from
 # CSV ingestion; "manual" marks a super-admin "Add Serviceman" creation.
@@ -65,17 +70,21 @@ class Personnel(Base):
         default="active",
         index=True,
     )
-    callup_status: Mapped[str] = mapped_column(
-        Enum(*CALLUP_STATUSES, name="personnel_callup_status"),
-        default="Called Up",
+    inpro_status: Mapped[str] = mapped_column(
+        Enum(*INPRO_STATUSES, name="personnel_inpro_status"),
+        default="yet_to_inpro",
         index=True,
     )
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Provenance: NULL = CSV row, "manual" = UI-added (see SOURCE_MANUAL).
     source: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    created_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
-    updated_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True, index=True)
+    updated_at: Mapped[utc_dt.datetime | None] = mapped_column(
+        nullable=True, index=True
+    )
     updated_by: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True
     )
@@ -90,7 +99,9 @@ class Personnel(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("nominal_roll_id", "pers_no", name="uq_personnel_nominal_roll_pers_no"),
+        UniqueConstraint(
+            "nominal_roll_id", "pers_no", name="uq_personnel_nominal_roll_pers_no"
+        ),
         {"schema": None},  # Default schema
     )
 

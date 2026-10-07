@@ -1,7 +1,10 @@
 """Deferment API endpoints.
 
-Super-admin-only CRUD for personnel deferments. Creating/approving a deferment
-drives the linked personnel's ``callup_status`` field.
+Super-admin-only CRUD for personnel deferments. Deferment status changes
+drive the linked personnel's ``inpro_status`` field (issue 32): approving
+prompts in the UI (the API leaves inpro_status untouched), while moving an
+approved deferment to any other status — or deleting it — always reverts
+the person to ``yet_to_inpro``.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,8 +12,9 @@ from fastapi import status as http_status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from parade_state.auth.dependencies import require_super_admin_user
 from parade_state.db import get_db_session
-from parade_state.models import Deferment, Personnel
+from parade_state.models import Deferment, Personnel, User
 from parade_state.models.schemas import (
     DefermentCreate,
     DefermentResponse,
@@ -25,41 +29,32 @@ router = APIRouter()
 # Constants & helpers
 # ============================================================================
 
-# Deferment statuses that belong to a later workflow phase. Setting a deferment
-# to either of these does NOT update personnel.callup_status.
-_DEFERMENT_STATUSES_NEUTRAL = {"Not called up", "Do not call up"}
+# Deferment statuses that belong to a later workflow phase ("Not called
+# up" / "Do not call up"). They no longer gate the inpro transition: an
+# approved deferment reverting to these still resets inpro_status.
 
 
-def _require_super_admin(user_role: str) -> None:
-    """Authorize super_admin only."""
-    if user_role != "super_admin":
-        raise HTTPException(
-            status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="Only super admins can manage deferments",
-        )
-
-
-def _apply_callup_transition(
+def _apply_inpro_transition(
     personnel: Personnel,
     old_status: str | None,
     new_status: str | None,
 ) -> None:
-    """Transition personnel.callup_status based on deferment status change.
+    """Transition personnel.inpro_status based on a deferment status change.
 
     Called on PATCH (``old_status`` → ``new_status``) and DELETE
     (``new_status`` passed as ``None``).
-    """
-    # Neutral statuses are a separate workflow phase — never touch callup_status.
-    if new_status in _DEFERMENT_STATUSES_NEUTRAL:
-        return
 
-    if new_status == "Approved":
-        personnel.callup_status = "Deferred"
-    elif old_status == "Approved":
-        # Moving away from Approved (to a non-neutral status, or via delete)
-        # → revert to Called Up.
-        personnel.callup_status = "Called Up"
-    # else: no Approved involvement → callup_status unchanged
+    Issue 32 semantics:
+
+    - Approving (``new_status == "Approved"``) does NOT touch inpro_status —
+      the admin UI prompts "set Inpro status to Deferred?" and PATCHes the
+      personnel separately if confirmed, so declining leaves it unchanged.
+    - Moving away from Approved (to any other status, or via delete) ALWAYS
+      reverts to ``yet_to_inpro`` — even if the person was manually marked
+      ``inproed`` in the meantime.
+    """
+    if old_status == "Approved" and new_status != "Approved":
+        personnel.inpro_status = "yet_to_inpro"
 
 
 def _snapshot_sub_unit(personnel: Personnel) -> str | None:
@@ -98,8 +93,7 @@ def _to_response(
 
 @router.get("", response_model=list[DefermentResponse])
 async def list_deferments(
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     personnel_id: str | None = Query(None),
     nominal_roll_id: str | None = Query(None),
     status_filter: str | None = Query(None, alias="status"),
@@ -113,7 +107,6 @@ async def list_deferments(
     Requires super_admin role. ``nominal_roll_id`` filters via the deferment's
     linked personnel record.
     """
-    _require_super_admin(user_role)
 
     query = (
         select(Deferment, Personnel.nominal_roll_id)
@@ -135,20 +128,21 @@ async def list_deferments(
     return [_to_response(d, nominal_roll_id=eid) for d, eid in rows]
 
 
-@router.post("", response_model=DefermentResponse, status_code=http_status.HTTP_201_CREATED)
+@router.post(
+    "", response_model=DefermentResponse, status_code=http_status.HTTP_201_CREATED
+)
 async def create_deferment(
     payload: DefermentCreate,
-    user_id: str = Query(..., description="User ID creating the deferment"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> DefermentResponse:
     """Create a new deferment.
 
     Snapshots ``rank_name`` (``{rank} {full_name}``) and ``sub_unit`` from the
     linked personnel at creation time. New deferments start with
-    ``status="Pending action"`` so callup_status is not affected.
+    ``status="Pending action"`` so inpro_status is not affected.
     """
-    _require_super_admin(user_role)
+    user_id = str(user.id)
 
     result = await db.execute(
         select(Personnel).where(Personnel.id == payload.personnel_id)
@@ -188,12 +182,10 @@ async def create_deferment(
 @router.get("/{deferment_id}", response_model=DefermentResponse)
 async def get_deferment(
     deferment_id: str,
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> DefermentResponse:
     """Fetch a single deferment by id."""
-    _require_super_admin(user_role)
 
     row = (
         await db.execute(
@@ -215,20 +207,18 @@ async def get_deferment(
 async def update_deferment(
     deferment_id: str,
     payload: DefermentUpdate,
-    user_id: str = Query(..., description="User ID making the update"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> DefermentResponse:
     """Update a deferment.
 
-    Status changes drive the linked personnel's ``callup_status`` via
-    ``_apply_callup_transition``.
+    Status changes drive the linked personnel's ``inpro_status`` via
+    ``_apply_inpro_transition`` (approval leaves it to the UI prompt;
+    leaving Approved reverts to ``yet_to_inpro``).
     """
-    _require_super_admin(user_role)
+    user_id = str(user.id)
 
-    result = await db.execute(
-        select(Deferment).where(Deferment.id == deferment_id)
-    )
+    result = await db.execute(select(Deferment).where(Deferment.id == deferment_id))
     deferment = result.scalar_one_or_none()
     if deferment is None:
         raise HTTPException(
@@ -249,14 +239,14 @@ async def update_deferment(
 
     new_status = deferment.status
 
-    # Drive callup_status on the linked personnel if anything could change.
+    # Drive inpro_status on the linked personnel if anything could change.
     if payload.status is not None:
         personnel_result = await db.execute(
             select(Personnel).where(Personnel.id == deferment.personnel_id)
         )
         personnel = personnel_result.scalar_one_or_none()
         if personnel is not None:
-            _apply_callup_transition(personnel, old_status, new_status)
+            _apply_inpro_transition(personnel, old_status, new_status)
 
     deferment.updated_at = utc_dt.ensure_naive(utc_dt.utcnow())
     deferment.updated_by = user_id
@@ -279,20 +269,16 @@ async def update_deferment(
 @router.delete("/{deferment_id}")
 async def delete_deferment(
     deferment_id: str,
-    user_id: str = Query(..., description="User ID making the request"),
-    user_role: str = Query(..., description="User role for authorization"),
+    user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Delete a deferment.
 
     If the deferment was Approved, revert the linked personnel's
-    ``callup_status`` to ``Called Up``.
+    ``inpro_status`` to ``yet_to_inpro``.
     """
-    _require_super_admin(user_role)
 
-    result = await db.execute(
-        select(Deferment).where(Deferment.id == deferment_id)
-    )
+    result = await db.execute(select(Deferment).where(Deferment.id == deferment_id))
     deferment = result.scalar_one_or_none()
     if deferment is None:
         raise HTTPException(
@@ -300,15 +286,15 @@ async def delete_deferment(
             detail=f"Deferment not found: {deferment_id}",
         )
 
-    # Revert callup_status if this deferment was Approved (treat delete as
-    # transitioning to None — Approved → None reverts to Called Up).
+    # Revert inpro_status if this deferment was Approved (treat delete as
+    # transitioning to None — Approved → anything reverts to yet_to_inpro).
     if deferment.status == "Approved":
         personnel_result = await db.execute(
             select(Personnel).where(Personnel.id == deferment.personnel_id)
         )
         personnel = personnel_result.scalar_one_or_none()
         if personnel is not None:
-            _apply_callup_transition(personnel, deferment.status, None)
+            _apply_inpro_transition(personnel, deferment.status, None)
 
     await db.delete(deferment)
     await db.commit()

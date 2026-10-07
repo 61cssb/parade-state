@@ -24,9 +24,8 @@ which this change deletes) so the migration keeps working independently of
 later util refactors.
 """
 
-from typing import Sequence, Union
-
 import secrets
+from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
@@ -42,15 +41,15 @@ _BASE62_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 def upgrade() -> None:
     """Add nullable pers_no (unique per roll); drop short_id."""
-    op.add_column("personnel", sa.Column("pers_no", sa.String(length=20), nullable=True))
+    op.add_column(
+        "personnel", sa.Column("pers_no", sa.String(length=20), nullable=True)
+    )
 
     op.drop_index("ix_personnel_short_id", table_name="personnel")
     # Batch mode for SQLite compatibility (constraint swap + column drop need
     # a table rebuild).
     with op.batch_alter_table("personnel", schema=None) as batch_op:
-        batch_op.drop_constraint(
-            "uq_personnel_nominal_roll_short_id", type_="unique"
-        )
+        batch_op.drop_constraint("uq_personnel_nominal_roll_short_id", type_="unique")
         batch_op.drop_column("short_id")
         batch_op.create_unique_constraint(
             "uq_personnel_nominal_roll_pers_no", ["nominal_roll_id", "pers_no"]
@@ -68,7 +67,9 @@ def downgrade() -> None:
     # (same ordering as c3d4e5f6a7b8's upgrade).
     op.drop_index("ix_personnel_pers_no", table_name="personnel")
 
-    op.add_column("personnel", sa.Column("short_id", sa.String(length=8), nullable=True))
+    op.add_column(
+        "personnel", sa.Column("short_id", sa.String(length=8), nullable=True)
+    )
 
     personnel = sa.table(
         "personnel",
@@ -80,18 +81,16 @@ def downgrade() -> None:
     for (row_id,) in rows:
         candidate = "".join(secrets.choice(_BASE62_ALPHABET) for _ in range(8))
         while candidate in seen:
-            candidate = "".join(
-                secrets.choice(_BASE62_ALPHABET) for _ in range(8)
-            )
+            candidate = "".join(secrets.choice(_BASE62_ALPHABET) for _ in range(8))
         seen.add(candidate)
         bind.execute(
-            personnel.update().where(personnel.c.id == row_id).values(short_id=candidate)
+            personnel.update()
+            .where(personnel.c.id == row_id)
+            .values(short_id=candidate)
         )
 
     with op.batch_alter_table("personnel", schema=None) as batch_op:
-        batch_op.drop_constraint(
-            "uq_personnel_nominal_roll_pers_no", type_="unique"
-        )
+        batch_op.drop_constraint("uq_personnel_nominal_roll_pers_no", type_="unique")
         batch_op.alter_column("short_id", nullable=False)
         batch_op.create_unique_constraint(
             "uq_personnel_nominal_roll_short_id", ["nominal_roll_id", "short_id"]

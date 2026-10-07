@@ -1,6 +1,6 @@
 # Roadmap & Open Work
 
-**Last Updated:** 2026-08-20
+**Last Updated:** 2026-08-25
 **Status:** In production on Railway (admin-only access), with a separate
 hosted development environment (Issue 15) where test users try changes
 first. Test users (admins) coming on the weekend of 2026-08-22; annual
@@ -16,7 +16,7 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ## Current Snapshot
 
-- **Tests:** 503 SQLite passing (flags-on posture; flags-off gating has
+- **Tests:** 670 SQLite passing (flags-on posture; flags-off gating has
   dedicated tests). The suite runs against
   Postgres by setting `TEST_DATABASE_URL` (per-test databases).
 - **Access model:** `super_admin` + `admin` only. Unknown Google
@@ -46,6 +46,14 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   available) and hide their feature entirely only on an explicit `false`
   — the emergency path for taking a shipped core feature offline
   mid-window without a deploy. Both are `true` in dev and prod.
+  **Feature-access matrix (issue 37):** a per-role visibility layer
+  beneath the env flags — super-admins toggle, per feature, whether the
+  `admin` role can see/use it (Settings › Feature access; fail-open:
+  absent row = enabled; env flag off outranks the matrix; super-admins
+  never restricted). Enforcement spans sidebar + page routes + API
+  edges (personnel/nominal-rolls/attendance/groupings). Settings, Users,
+  and Restore Backup are hard-gated super-admin surfaces; Audit Log
+  stays admin-viewable.
   **Environment banner:** dev sets `ENVIRONMENT_BANNER` so a thin amber
   strip at the top of every page (login included) names the environment;
   prod leaves it unset (zero markup, zero layout impact).
@@ -54,25 +62,51 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 - Google OAuth sign-in (host-independent), admin-only auth, audit log
 - CSV upload → process into Nominal Roll + Personnel + auto-tagging
-  (fixed canonical column map from the WY2627 fixture — see CSV Step 2);
-  taggings importable across NRs by `pers_no`; super-admins can also add a
+  (**ingestion contract v2** — header-name matching, strict Yes-only row
+  filter, optional Pers/Age(Yr); see SPECIFICATION §4.5); taggings
+  importable across NRs by `pers_no`; super-admins can also add a
   missing serviceman manually from the NR view (`source='manual'`, pers_no
   fill-in-later inline; per-roll, not propagated to future CSV rolls)
 - Tagging overlay, 1:1 per NR: unit/subunit edits land on the overlay;
   reads serve effective (`to_*`-overlaid) values; CSV-sourced NR data
-  itself is read-only
+  itself is read-only; sub-unit 2/3 reallocation is an in-scope-admin
+  capability (issue 38) while unit/sub-unit 1 stays super-admin-only,
+  enforced at the personnel-PATCH seam (403 for admins, whole payload);
+  `inpro_status` edits are likewise super-admin-only for the admin
+  trial (issue 39 — drives the attendance roster; same all-or-nothing
+  PATCH gate, NR-browser select super-admin-rendered, reads unchanged)
 - One system-wide **active-for-attendance** Nominal Roll (super-admin
-  switch); `Attendance` rows per (personnel, date) with AM/PM
-  status + remarks; writes gated to the active NR; roster shows only
-  `callup_status = 'Called Up'` personnel (hiding is non-destructive —
-  existing attendance records are preserved)
-- Attendance access control by effective sub-unit 1
-  (`UserSubunitAssignment`; deny-by-default; super_admin bypasses)
+  switch); `Attendance` rows per (personnel, date) with single-session
+  status (present/absent) + optional reason enum + remarks (issue 33);
+  writes gated to the active NR; the marking roster is **all** NR personnel
+  (deferred included) with a read-only Inpro Status column + filter —
+  filtering hides rows non-destructively, existing attendance records are
+  preserved; super-admins can **freeze** a day (issue 35) — frozen days
+  turn read-only for admins (403 on writes) while super-admins keep
+  editing, banner + freeze timestamp visible to every role
+- **Admin scoped access (issue #28)**: scope grants are
+  (unit, sub_unit_1) pairs per NR on `UserSubunitAssignment` with the
+  explicit `*` wildcard sentinel; matching follows the tagging-overlay
+  effective location; deny-by-default on every read/write personnel
+  surface (personnel list/detail/history/PATCH, attendance list/upsert/
+  copy/export, NR list/detail/PATCH/export, strength report, NR browser
+  page — client filters only narrow); out-of-scope answers 403 naming
+  the missing assignment; grants managed from the /admin/users Scope
+  panel (roster-validated) via the access-control API; CSV upload/process
+  tightened to super-admin. The board stays org-wide for admins (posts
+  carry no NR linkage — recorded decision). Caller identity is
+  session-derived on every `/api/v1` endpoint (issue 31 ✅): the shared
+  dependencies in `auth/dependencies.py` resolve the session user, the
+  spoofable query params are gone, and
+  `tests/integration/test_no_client_identity.py` enforces it structurally
+  + behaviorally
 - **Unit Strength** report at `/admin` (replaced the dashboard): the
   parade state rolled up by effective sub-unit 1/2 into the Officer/WOSE/
-  Total × In/Out/Current/% strength format (In = Called Up, Current =
-  present/late, Out = rest); date + AM/PM slot; regular admins scoped to
-  their assigned sub-units; on via `FEATURE_STRENGTH` in dev and prod
+  Total × In/Out/Current/% strength format (In = not deferred, Current =
+  present — single session, reason never participates, Out = rest); date
+  param; super-admin basis toggle tagged/untagged (issue 36 — untagged =
+  original NR allocations); regular admins scoped to their assigned
+  sub-units; on via `FEATURE_STRENGTH` in dev and prod
 - Groupings (issue 26 redesign, implemented on this branch): a labelled
   set of groups on the attendance-active NR with memberships, per-person
   checkbox/remarks, clone, copy-from-previous-NR, slim CSV export —
@@ -80,13 +114,26 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   the old lifecycle/overrides/exclusions/notes/access-scoping design and
   the `/grouping/{id}/personnel` page are gone; **feature-flagged**
   (`FEATURE_GROUPING`, default off)
-- Deferments (super-admin CRUD; `Personnel.callup_status`);
+- Export CSV on all three working views — Grouping (issue 26), and the
+  Nominal Roll browser + Attendance marking table (issue 27): each streams
+  its displayed table (filters honoured, tagging overlay applied; the NR
+  export has no row cap; the attendance export follows the Subunit-1 read
+  scoping and labels statuses like the page)
+- Deferments (super-admin CRUD; drives `Personnel.inpro_status` — issue 32:
+  approve prompts, cancel/delete revert to yet_to_inpro);
   **feature-flagged** (`FEATURE_DEFERMENTS`, dev-only until ready)
-- Sidebar: workflow pages flat (Unit Strength, Upload NR, Nominal Roll,
-  Taggings, Deferments, Attendance, Grouping) + **Admin** section
+- Discussions board (issue 24): admins/super-admins post `requests` /
+  `bugs` items and comment in sanitized markdown; super-admins triage
+  (status, category — the only audit-logged board action) and delete;
+  author-only edits enforced server-side from the session identity;
+  **feature-flagged** (`FEATURE_DISCUSSIONS`, default off)
+- Sidebar: workflow pages flat (Upload NR, Nominal Roll, Taggings,
+  Deferments, Attendance, Unit Strength, Grouping, Discussions — Unit
+  Strength moved after Attendance 2026-08-26) + **Admin** section
   (Users, Settings, Audit Log, Restore Backup); SA-only pages show an
   in-page no-access message for plain admins; flag-gated entries
-  (Deferments, Grouping, Unit Strength) render only when their flag is on
+  (Deferments, Grouping, Discussions, Unit Strength) render only when
+  their flag is on
 - Admin UI: Unit Strength, users, audit log, taggings, deferments,
   Upload NR (CSV upload), DB restore, Settings purge (testing-only);
   NR management lives in an expander on its view, grouping management on
@@ -133,10 +180,11 @@ carry-over.
 
 ### 5. CSV Step 2: column mapping — after the season (2026)
 
-The process endpoint uses the fixed canonical map from the WY2627 ICT
-fixture (`parade_state.utils.csv_constants`). Only one NR format is in
-play this season, so generalizing to arbitrary fixtures waits until
-post-season.
+The process endpoint uses the fixed header-name contract v2 (issue 34,
+`parade_state.utils.csv_constants`): required/optional columns matched by
+exact header name with a strict Yes-only row filter. Only this one export
+format is in play this season, so generalizing to admin-configurable
+mappings waits until post-season.
 
 ### 6. Performance & scalability (Phase 8) — as data grows
 
@@ -170,6 +218,95 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-08-27:** Inpro status super-admin-only (Issue 39, admin trial
+  rule): `PATCH /api/v1/personnel/{id}` 403s `inpro_status` for
+  non-super-admins (alone or mixed, nothing applied, before the scope
+  gate — same shape as `pers_no` / #38); NR browser per-row select is
+  super-admin-rendered (admins see the label; handler unshipped);
+  column + filter stay visible to every role; admins keep
+  `status`/`remarks`/sub 2/3
+- **2026-08-27:** Admin sub-unit 2/3 reallocation (Issue 38): NR browser
+  sub-unit 2/3 cells editable for in-scope admins (same staged-edit
+  flow; unit/sub-unit 1 read-only, their suggestion lists unshipped);
+  `PATCH /api/v1/personnel/{id}` 403s `unit`/`sub_unit_1` for
+  non-super-admins before the scope gate and any mutation (mixed
+  payloads rejected whole, no tagging entry written) — closes the
+  pre-38 API hole where the UI was the only gate; taggings CRUD stays
+  super-admin-only
+- **2026-08-27:** Feature-access matrix (Issue 37): `feature_access`
+  table (migration `y6f7a8b9c0d1` + widened `audit_entity_type`);
+  super-admin "Feature access (admins)" card in Settings →
+  `POST /api/v1/admin/feature-access` (full-matrix upsert, audit-logged);
+  effective visibility = env flag AND matrix, fail-open, super-admins
+  bypass; enforced at sidebar (per-request middleware snapshot), page
+  routes (styled 403), and admin-reachable API edges
+  (personnel/nominal-rolls/attendance/groupings → 403); Settings itself
+  now super-admin-only; Users/Settings/Restore Backup sidebar entries
+  hidden from plain admins (Audit Log stays viewable)
+- **2026-08-26:** Sidebar reorder (direct to dev): Unit Strength moved
+  after Attendance — reporting follows marking
+- **2026-08-26:** Attendance local-day default: `/attendance` server
+  default for the viewed day is UTC today; a first-visit script (no
+  `?date=` in the URL) re-defaults to the browser's local day and
+  resubmits the filter form (filters preserved) — UTC was showing
+  yesterday until 08:00 SGT; explicit `?date=` and no-JS clients keep
+  the server default. Same pattern as the strength report's date picker
+- **2026-08-25:** Unit Strength basis toggle (Issue 36): `?basis=tagged|
+  untagged` on `/admin` (default tagged, unknown → tagged); untagged
+  groups under the original NR allocations (canonical Personnel columns,
+  overlay not applied, `from_*` never consulted) — super-admin-only
+  (segmented Tagged/Untagged control rendered for them alone; other
+  roles requesting it get
+  the 403 no-access page); heading names the basis; unit TOTAL identical
+  on both bases; no schema/API changes
+- **2026-08-25:** Attendance day freeze (Issue 35): `attendance_freezes`
+  table (one row per frozen NR/day, migration `x5e6f7a8b9c0` + widened
+  `audit_action`); super-admin-only `PUT/DELETE /api/v1/attendance/freeze`
+  (active-NR gated; 409 double-freeze / 404 unfreeze-miss; audit-logged
+  action `attendance_freeze`); upsert + copy-remarks 403 naming the
+  freeze when non-super-admins write a frozen day (super-admins keep
+  editing, retro rules unchanged); page: Freeze/Unfreeze toggle
+  (super-admins), frozen banner with timestamp (all roles), read-only
+  plain-text grid for admins — reads/exports/scope never blocked
+- **2026-08-25:** Two deploy-day hotfixes after the r20260825 switch:
+  (1) the Docker image's Python 3.12 eagerly evaluates annotations, so
+  issue 31's `user: User` signature without the import crash-looped the
+  app at startup (local 3.14's lazy annotations hid it) — import added;
+  pre-deploy guard: `uv run -p 3.12` app import. (2) The issue-31
+  template sweep corrupted five fetch calls (missing comma turned the
+  staged-remap Apply into a 404ing GET; four unterminated strings killed
+  the Taggings/Deferments page JS) — all repaired; template JS has no
+  automated coverage (a node --check sweep over script blocks catches
+  the syntax class).
+- **2026-08-25:** CSV ingestion contract v2 (Issue 34): header-name
+  matching replaces the index-based 18-column map — required columns
+  (Unit incl. non-blank header, Sub Unit 1-3, Rank, Full Name, Callup
+  Decision, Reason, Remarks, ORNS/ORNS-Yrs alias, HK ICT) validated with
+  named-column 400s; optional Pers (→ pers_no, blank/absent → NULL) and
+  Age(Yr) (→ extra_fields.age_yr); strict Yes-only row filter with
+  decision-skip counts (`decision_skipped`) in the process report; Reason
+  + Callup Decision read but never stored (issue-32 interim shim removed);
+  first Remarks column only; extra columns tolerated and ignored
+  (extra_fields carries just orns/hk_ict/age_yr); pre-v2 16-column export
+  ingests cleanly under the converged contract; canonical fixture =
+  397 stored / 163 skipped; demo ingester + demo DB regenerated
+- **2026-08-25:** Attendance single-session rework (Issue 33): the 9-value
+  AM/PM vocabulary collapsed to one daily session — `status`
+  (present/absent, default absent) + nullable `reason` enum
+  (mc/off/early_outpro/other/awol, classifies remarks, never feeds
+  reporting) + single `remarks` (migration `w4d5e6f7a8b9`; PM mapping wins
+  when its slot was marked, remarks joined `"; "`, "Late" appended); the
+  issue-32 interim roster gate is gone — the marking page lists **all** NR
+  personnel with a read-only Inpro Status column + filter, and the export
+  mirrors it (…, Inpro Status, Status, Reason, Remarks); Copy Remarks
+  became date→date; Unit Strength Current = present only (slot selector
+  removed); attendance-history stats count days
+- **2026-08-21:** Discussions board (issue 24): admins post `requests`/
+  `bugs` items, comment in sanitized markdown (raw HTML escaped, unsafe
+  link schemes scrubbed); super-admin triage (category/status, the only
+  audit-logged action) + deletions; author-only edits enforced
+  server-side from the session identity; `FEATURE_DISCUSSIONS`-gated,
+  default off
 - **2026-08-20:** Add Serviceman (Issue 26): super-admin manual personnel
   creation from the NR view — `Personnel.source` provenance ('manual'
   badge), `POST /api/v1/personnel`, pers_no nullable + super-admin
@@ -191,7 +328,19 @@ Defer until CSV Step 3 (diff confirmation) forces it.
   from the funnel model): `callup_status` widened to six values + per-person
   `remarks`; CSV `Callup Decision`/`Reason`/`Remarks` mapped on ingest;
   attendance view shows only Called Up (non-destructive); inline admin
-  editing in the NR browser
+  editing in the NR browser — superseded 2026-08-24 by the issue 32 inpro
+  rework directly below
+- **2026-08-24:** Inpro status rework (Issue 32): `callup_status` renamed to
+  `inpro_status` with the 3-value lifecycle `inproed` / `yet_to_inpro`
+  (default) / `deferred` (migration `v3c4d5e6f7a8`; Disrupted/MR/Age
+  Limit/Other → yet_to_inpro + `Previously:` remark); attendance roster,
+  export and Unit Strength now gate on `!= 'deferred'` until #33; NR
+  browser column renamed "Inpro Status" with a user-side filter; deferment
+  approval prompts instead of auto-deferring, cancel/delete revert to
+  yet_to_inpro; interim CSV shim keeps old-format uploads working until
+  #34's new format (fixture profiling: the real Callup Decision columns
+  carry Yes/No — Yes → yet_to_inpro, No → deferred; the retired enum
+  vocabulary is still honoured for older files)
 - **2026-08-20:** Groupings redesigned (issue 26): the old
   modes/lifecycle/overrides/exclusions/notes/access-scoping design was
   replaced wholesale with a labelled set of groups per nominal roll —

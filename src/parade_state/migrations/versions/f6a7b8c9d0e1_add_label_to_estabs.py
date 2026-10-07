@@ -27,9 +27,7 @@ def upgrade() -> None:
         "estabs",
         sa.Column("label", sa.String(length=100), nullable=True),
     )
-    op.create_index(
-        "ix_estabs_label", "estabs", ["label"], unique=True
-    )
+    op.create_index("ix_estabs_label", "estabs", ["label"], unique=True)
 
 
 def downgrade() -> None:

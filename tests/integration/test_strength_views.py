@@ -1,11 +1,16 @@
-"""Unit Strength report (issue 25).
+"""Unit Strength report (issues 25 and 36).
 
 The report aggregates the attendance-active NR's parade state into the
 strength reporting format: Officer/WOSE/Total column groups of
 In/Out/Current/%, grouped by effective sub_unit_1 (shown once) and
-sub_unit_2 with SUBTOTALs and a unit TOTAL. In counts Called Up
-personnel, Current the present/late marks for the selected slot, Out
-everyone else (unmarked = absent).
+sub_unit_2 with SUBTOTALs and a unit TOTAL. In counts non-deferred
+personnel, Current the present marks (single daily session, issue 33 —
+reason never participates), Out everyone else (unmarked = absent).
+
+Reporting basis (issue 36): tagged (default, every role) groups under
+the tagging-applied effective subunits; untagged (super-admin only)
+groups under the original NR allocations from the canonical Personnel
+columns.
 """
 
 import re
@@ -31,9 +36,7 @@ from parade_state.utils.cookies import AUTH_COOKIE_NAME
 TODAY = date.today()
 
 
-async def _sign_in(
-    client: TestClient, db_session: AsyncSession, user: User
-) -> None:
+async def _sign_in(client: TestClient, db_session: AsyncSession, user: User) -> None:
     """Create a session for ``user`` and set the auth cookie on ``client``."""
     session = await create_user_session(
         db_session,
@@ -67,8 +70,17 @@ def _text(response) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", response.text))
 
 
-def _get(client: TestClient, slot: str = "am"):
-    return client.get("/admin", params={"date": TODAY.isoformat(), "slot": slot})
+def _segment_checked(raw: str, value: str) -> bool:
+    """Whether the basis segmented control marks ``value`` as the active
+    (checked) segment — layout-tolerant over attribute order/whitespace."""
+    return re.search(rf'value="{value}"[^>]*\bchecked\b', raw) is not None
+
+
+def _get(client: TestClient, basis: str | None = None):
+    params = {"date": TODAY.isoformat()}
+    if basis is not None:
+        params["basis"] = basis
+    return client.get("/admin", params=params)
 
 
 # --- Auth / shell ---
@@ -108,58 +120,38 @@ async def test_super_admin_sees_full_report(
     sample_attendance_scope,
     sample_attendance,
 ):
-    """Full-unit AM report: grouped rows, SUBTOTALs, TOTAL, and the
-    date/slot controls. Sample roster: 2 WOSE in Platoon 1 (both AM
-    present), 1 Officer in Platoon 2 (unmarked = absent)."""
+    """Full-unit report: grouped rows, SUBTOTALs, TOTAL, and the date
+    control (no slot toggle — single session, issue 33). Sample roster:
+    2 WOSE in Platoon 1 (John absent-with-mc, Jane present), 1 Officer in
+    Platoon 2 (unmarked = absent)."""
     sa = await _make_super_admin(db_session)
     await _sign_in(client, db_session, sa)
 
     response = _get(client)
     assert response.status_code == 200
     raw = _raw(response)
-    assert 'name="date"' in raw and 'name="slot"' in raw
-    assert 'value="am" checked' in raw
+    assert 'name="date"' in raw
+    assert 'name="slot"' not in raw  # AM/PM toggle is gone
     body = _text(response)
 
     # Sections in order, sub_unit_1 shown once per section.
     assert body.index("Platoon 1") < body.index("Platoon 2")
 
-    # Row: Platoon 1 / Section 1 — WOSE present (current), no Officer.
-    assert "Section 1 0 0 0 0% 1 0 1 100% 1 0 1 100%" in body
-    # Row: Platoon 1 / Section 2 — WOSE present.
+    # Row: Platoon 1 / Section 1 — WOSE absent (mc) → out, no Officer.
+    assert "Section 1 0 0 0 0% 1 1 0 0% 1 1 0 0%" in body
+    # Row: Platoon 1 / Section 2 — WOSE present → current.
     assert "Section 2 0 0 0 0% 1 0 1 100% 1 0 1 100%" in body
-    # Platoon 1 SUBTOTAL: WOSE 2 current.
-    assert "SUBTOTAL 0 0 0 0% 2 0 2 100% 2 0 2 100%" in body
+    # Platoon 1 SUBTOTAL: WOSE 2 in, 1 current.
+    assert "SUBTOTAL 0 0 0 0% 2 1 1 50% 2 1 1 50%" in body
     # Row: Platoon 2 / Section 1 — Officer unmarked → out.
     assert "Section 1 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body
     assert "SUBTOTAL 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body
-    # Unit TOTAL: Officer 1 out, WOSE 2 current, 2 of 3 = 67%.
-    assert "TOTAL 1 1 0 0% 2 0 2 100% 3 1 2 67%" in body
-
-
-@pytest.mark.asyncio
-async def test_pm_slot_uses_pm_statuses(
-    client: TestClient,
-    db_session: AsyncSession,
-    sample_users,
-    sample_personnel,
-    sample_attendance_scope,
-    sample_attendance,
-):
-    """slot=pm reads the PM column: p0 absent, p1 present, Officer
-    unmarked."""
-    sa = await _make_super_admin(db_session)
-    await _sign_in(client, db_session, sa)
-
-    body = _text(_get(client, slot="pm"))
-
-    assert "Section 1 0 0 0 0% 1 1 0 0% 1 1 0 0%" in body  # p0 PM absent
-    assert "Section 2 0 0 0 0% 1 0 1 100% 1 0 1 100%" in body  # p1 PM present
+    # Unit TOTAL: Officer 1 out, WOSE 1 of 2, 1 of 3 = 33%.
     assert "TOTAL 1 1 0 0% 2 1 1 50% 3 2 1 33%" in body
 
 
 @pytest.mark.asyncio
-async def test_late_counts_as_current(
+async def test_reason_never_affects_buckets(
     client: TestClient,
     db_session: AsyncSession,
     sample_users,
@@ -167,15 +159,16 @@ async def test_late_counts_as_current(
     sample_attendance_scope,
     sample_attendance,
 ):
-    """Late is present-like: an Officer marked late AM is Current, not Out."""
+    """Reason classifies remarks but never feeds reporting: absent rows —
+    with or without a reason — are Out; only present is Current."""
     admin_id = str(sample_users["admin"].id)
     db_session.add(
         Attendance(
             personnel_id=str(sample_personnel[2].id),
             nominal_roll_id=str(sample_personnel[2].nominal_roll_id),
             date=TODAY,
-            status_am="late",
-            status_pm="mc",
+            status="absent",
+            reason="awol",
             created_by=admin_id,
             updated_by=admin_id,
         )
@@ -187,12 +180,15 @@ async def test_late_counts_as_current(
 
     body = _text(_get(client))
 
-    assert "Section 1 1 0 1 100% 0 0 0 0% 1 0 1 100%" in body
-    assert "TOTAL 1 0 1 100% 2 0 2 100% 3 0 3 100%" in body
+    # Officer absent (awol) → Out; John absent (mc, from the fixture) → Out;
+    # only Jane's present counts Current.
+    assert "Section 1 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body  # Officer
+    assert "Section 1 0 0 0 0% 1 1 0 0% 1 1 0 0%" in body  # John
+    assert "TOTAL 1 1 0 0% 2 1 1 50% 3 2 1 33%" in body
 
 
 @pytest.mark.asyncio
-async def test_non_called_up_and_archived_excluded(
+async def test_deferred_and_archived_excluded_from_in(
     client: TestClient,
     db_session: AsyncSession,
     sample_users,
@@ -200,7 +196,7 @@ async def test_non_called_up_and_archived_excluded(
     sample_attendance_scope,
     sample_attendance,
 ):
-    """In counts only active Called Up personnel: a Deferred and an
+    """In counts only active non-deferred personnel: a deferred and an
     archived person (same subunits, some marked present) must not move
     any number."""
     admin_id = str(sample_users["admin"].id)
@@ -216,7 +212,7 @@ async def test_non_called_up_and_archived_excluded(
                 unit="Coy A",
                 sub_unit_1="Platoon 1",
                 sub_unit_2="Section 1",
-                callup_status="Deferred",
+                inpro_status="deferred",
                 created_by=admin_id,
             ),
             Personnel(
@@ -240,8 +236,8 @@ async def test_non_called_up_and_archived_excluded(
 
     body = _text(_get(client))
 
-    assert "Section 1 0 0 0 0% 1 0 1 100% 1 0 1 100%" in body
-    assert "TOTAL 1 1 0 0% 2 0 2 100% 3 1 2 67%" in body
+    assert "Section 1 0 0 0 0% 1 1 0 0% 1 1 0 0%" in body
+    assert "TOTAL 1 1 0 0% 2 1 1 50% 3 2 1 33%" in body
 
 
 @pytest.mark.asyncio
@@ -281,7 +277,7 @@ async def test_tagging_overlay_regroups_rows(
 
     assert "Section 3 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body
     assert "Platoon 2" not in body
-    assert "SUBTOTAL 1 1 0 0% 2 0 2 100% 3 1 2 67%" in body  # Platoon 1
+    assert "SUBTOTAL 1 1 0 0% 2 1 1 50% 3 2 1 33%" in body  # Platoon 1
 
 
 @pytest.mark.asyncio
@@ -315,7 +311,141 @@ async def test_null_subunits_reported_in_none_bucket(
 
     # Unmarked → out: In 1, Out 1, Current 0.
     assert "(none) 0 0 0 0% 1 1 0 0% 1 1 0 0%" in body
-    assert "TOTAL 1 1 0 0% 3 1 2 67% 4 2 2 50%" in body
+    assert "TOTAL 1 1 0 0% 3 2 1 33% 4 3 1 25%" in body
+
+
+# --- Reporting basis (issue 36) ---
+
+
+async def _remap_officer_into_platoon_1(
+    db_session: AsyncSession, sample_users, sample_personnel
+) -> None:
+    """Tag the Officer (Platoon 2 / Section 1) into Platoon 1 / Section 3."""
+    admin_id = str(sample_users["admin"].id)
+    nr_id = str(sample_personnel[0].nominal_roll_id)
+    tagging = Tagging(label="Exercise", nominal_roll_id=nr_id, created_by=admin_id)
+    db_session.add(tagging)
+    await db_session.flush()
+    db_session.add(
+        TaggingEntry(
+            tagging_id=str(tagging.id),
+            personnel_id=str(sample_personnel[2].id),
+            from_unit="Coy A",
+            from_sub_unit_1="Platoon 2",
+            from_sub_unit_2="Section 1",
+            to_unit="Coy A",
+            to_sub_unit_1="Platoon 1",
+            to_sub_unit_2="Section 3",
+        )
+    )
+    await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_untagged_basis_groups_by_original_allocations(
+    client: TestClient,
+    db_session: AsyncSession,
+    sample_users,
+    sample_personnel,
+    sample_attendance_scope,
+    sample_attendance,
+):
+    """Untagged (super-admin only) ignores the tagging overlay: the
+    remapped Officer reports under his original Platoon 2 / Section 1,
+    Section 3 never appears, and the unit TOTAL is allocation-independent
+    (identical to the tagged report)."""
+    await _remap_officer_into_platoon_1(db_session, sample_users, sample_personnel)
+
+    sa = await _make_super_admin(db_session)
+    await _sign_in(client, db_session, sa)
+
+    response = _get(client, basis="untagged")
+    assert response.status_code == 200
+    raw = _raw(response)
+    assert "Untagged (original NR)" in raw  # heading names the basis
+    assert "original nominal-roll" in raw  # legend explains the basis
+    assert _segment_checked(raw, "untagged")  # active segment
+    assert not _segment_checked(raw, "tagged")
+    body = _text(response)
+
+    assert "Section 1 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body  # Officer, home subunit
+    assert "Section 3" not in body  # the remap target is not consulted
+    assert "SUBTOTAL 0 0 0 0% 2 1 1 50% 2 1 1 50%" in body  # Platoon 1 WOSE only
+    assert "SUBTOTAL 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body  # Platoon 2 subtotal
+    # Same grand total as the tagged report (test_tagging_overlay_regroups_rows).
+    assert "TOTAL 1 1 0 0% 2 1 1 50% 3 2 1 33%" in body
+
+
+@pytest.mark.asyncio
+async def test_tagged_basis_selected_by_default_and_on_explicit_param(
+    client: TestClient,
+    db_session: AsyncSession,
+    sample_users,
+    sample_personnel,
+    sample_attendance_scope,
+    sample_attendance,
+):
+    """Default (no param) and explicit basis=tagged both apply the overlay:
+    the Officer groups under his remap target, and the toggle renders
+    Tagged as selected."""
+    await _remap_officer_into_platoon_1(db_session, sample_users, sample_personnel)
+
+    sa = await _make_super_admin(db_session)
+    await _sign_in(client, db_session, sa)
+
+    for params in ({}, {"basis": "tagged"}, {"basis": "banana"}):
+        response = client.get("/admin", params={"date": TODAY.isoformat(), **params})
+        assert response.status_code == 200
+        raw = _raw(response)
+        assert "· Tagged" in raw
+        assert _segment_checked(raw, "tagged")
+        assert not _segment_checked(raw, "untagged")
+        body = _text(response)
+        assert "Section 3 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body
+        assert "Platoon 2" not in body
+
+
+@pytest.mark.asyncio
+async def test_untagged_basis_denied_to_admins(
+    client: TestClient,
+    db_session: AsyncSession,
+    sample_users,
+    sample_personnel,
+    sample_attendance_scope,
+    sample_attendance,
+):
+    """A regular admin (scoped in, so the tagged report renders fine for
+    them) explicitly requesting the untagged basis gets the 403 no-access
+    page; their default report is unchanged tagged."""
+    await _remap_officer_into_platoon_1(db_session, sample_users, sample_personnel)
+    admin_id = str(sample_users["admin"].id)
+    db_session.add(
+        UserSubunitAssignment(
+            user_id=admin_id,
+            nominal_roll_id=str(sample_personnel[0].nominal_roll_id),
+            sub_unit_1="Platoon 1",
+            created_by=admin_id,
+        )
+    )
+    await db_session.commit()
+    await _sign_in(client, db_session, sample_users["admin"])
+
+    response = _get(client, basis="untagged")
+    assert response.status_code == 403
+    assert "You do not have access to this page" in response.text
+    assert "restricted to super administrators" in response.text
+
+    # Default report: no toggle rendered, tagged basis labeled. Scoping is
+    # tagging-aware: the remapped Officer now sits inside the admin's
+    # Platoon 1 grant, so he reports under his (tagged) Section 3 — admin
+    # reporting always follows the tagged basis.
+    response = _get(client)
+    assert response.status_code == 200
+    assert 'name="basis"' not in _raw(response)
+    assert "· Tagged" in _raw(response)
+    body = _text(response)
+    assert "Section 3 1 1 0 0% 0 0 0 0% 1 1 0 0%" in body
+    assert "Platoon 2" not in body
 
 
 # --- Access scoping ---
@@ -351,7 +481,7 @@ async def test_admin_scoped_to_assigned_subunits(
     assert "Platoon 1" in body
     assert "Platoon 2" not in body
     # Officer (Platoon 2) invisible: TOTAL has no Officer In.
-    assert "TOTAL 0 0 0 0% 2 0 2 100% 2 0 2 100%" in body
+    assert "TOTAL 0 0 0 0% 2 1 1 50% 2 1 1 50%" in body
 
 
 @pytest.mark.asyncio

@@ -11,20 +11,26 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import and_, select
 
+from parade_state.admin_routes import no_permission_response
 from parade_state.api.attendance import attendance_counts_for_date
-from parade_state.api.subunit_access import (
-    get_assigned_subunit_1s,
-    resolve_effective_subunit_1_map,
-)
+from parade_state.api.subunit_access import get_scope_grants, in_scope_pids
 from parade_state.api.tagging import _load_nr_tagging
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
+from parade_state.feature_access import feature_allowed
 from parade_state.models import (
     Attendance,
+    AttendanceFreeze,
     NominalRoll,
     Personnel,
     TaggingEntry,
 )
+from parade_state.models.attendance import (
+    ATTENDANCE_REASON_LABELS,
+    ATTENDANCE_REASONS,
+    ATTENDANCE_STATUSES,
+)
+from parade_state.models.personnel import INPRO_STATUS_LABELS, INPRO_STATUSES
 from parade_state.utils import utc_dt
 
 router = APIRouter()
@@ -36,15 +42,19 @@ async def attendance_view(
     nominal_roll_id: str | None = None,
     date: utc_dt.date | None = None,
     sub_unit_1: str | None = None,
+    inpro_status: str | None = None,
+    status: str | None = None,
+    reason: str | None = None,
 ):
     """Render the attendance marking page.
 
     Defaults to the NR currently active for attendance (if any). Lists the
-    roster with the NR's 1:1 tagging overlay applied, joined to the selected
-    day's attendance rows (AM/PM columns). Editing is enabled only when the
-    selected NR is the active one. Non-super-admins only see personnel whose
-    effective sub_unit_1 matches one of their UserSubunitAssignment rows on
-    the NR.
+    whole roster (deferred included — issue 33) with the NR's 1:1 tagging
+    overlay applied, joined to the selected day's attendance rows, with an
+    optional Inpro Status view filter (e.g. hide Deferred). Editing is
+    enabled only when the selected NR is the active one. Non-super-admins
+    only see personnel whose effective (unit, sub_unit_1) falls inside one
+    of their scope grants on the NR.
     """
     current_user = await get_current_user_optional(request)
     if not current_user:
@@ -55,6 +65,11 @@ async def attendance_view(
     if current_user.role not in ("admin", "super_admin"):
         return RedirectResponse(url="/auth/no-access", status_code=302)
 
+    # Matrix gate (issue 37): attendance hidden from admins when toggled
+    # off in Settings; super-admins bypass.
+    if not feature_allowed(request, current_user.role, "attendance"):
+        return no_permission_response(request, current_user, "Attendance", "attendance")
+
     target_date = date or utc_dt.utcnow().date()
 
     session_maker = get_session_maker()
@@ -62,11 +77,7 @@ async def attendance_view(
         # All NRs for the selector. Attendance is NR-scoped — groupings
         # play no part in choosing or accessing the roster.
         all_rolls = (
-            (
-                await db.execute(
-                    select(NominalRoll).order_by(NominalRoll.caa.desc())
-                )
-            )
+            (await db.execute(select(NominalRoll).order_by(NominalRoll.caa.desc())))
             .scalars()
             .all()
         )
@@ -85,6 +96,24 @@ async def attendance_view(
         selected_nr_id = str(selected.id) if selected else None
         attendance_active = bool(selected and selected.attendance_active)
 
+        # Freeze state for the selected (NR, date) — issue 35. Row
+        # presence = frozen; the banner renders for every role and the
+        # grid goes read-only for non-super-admins.
+        frozen = False
+        frozen_at = None
+        if selected_nr_id:
+            freeze_row = (
+                await db.execute(
+                    select(AttendanceFreeze).where(
+                        AttendanceFreeze.nominal_roll_id == selected_nr_id,
+                        AttendanceFreeze.date == target_date,
+                    )
+                )
+            ).scalar_one_or_none()
+            if freeze_row is not None:
+                frozen = True
+                frozen_at = freeze_row.created_at
+
         # Build roster + attendance rows.
         attendance_rows = []
         subunit_options: list[str] = []
@@ -94,17 +123,17 @@ async def attendance_view(
             tagging = await _load_nr_tagging(db, selected_nr_id, with_entries=False)
             applied_tagging_id = str(tagging.id) if tagging else None
 
+            # Issue 33: everyone on the NR attends — deferred included.
+            # The Inpro Status filter below is a view concern; existing
+            # attendance records for filtered-out personnel are preserved
+            # untouched.
             roster_result = await db.execute(
-                select(Personnel).where(
-                    and_(
-                        Personnel.nominal_roll_id == selected_nr_id,
-                        Personnel.status == "active",
-                        # Only Called Up personnel attend; other callup
-                        # statuses (Deferred, MR, ...) are hidden — existing
-                        # attendance records for them are preserved untouched.
-                        Personnel.callup_status == "Called Up",
-                    )
-                ).order_by(
+                select(Personnel)
+                .where(
+                    Personnel.nominal_roll_id == selected_nr_id,
+                    Personnel.status == "active",
+                )
+                .order_by(
                     Personnel.unit,
                     Personnel.sub_unit_1,
                     Personnel.sub_unit_2,
@@ -120,31 +149,34 @@ async def attendance_view(
             entry_by_person: dict[str, TaggingEntry] = {}
             if applied_tagging_id:
                 entries = (
-                    await db.execute(
-                        select(TaggingEntry).where(
-                            TaggingEntry.tagging_id == applied_tagging_id
+                    (
+                        await db.execute(
+                            select(TaggingEntry).where(
+                                TaggingEntry.tagging_id == applied_tagging_id
+                            )
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 entry_by_person = {str(e.personnel_id): e for e in entries}
 
-            # Filter roster to the user's assigned subunits (tagging-aware).
+            # Filter roster to the user's scope (tagging-aware).
             # super_admin sees the whole roster.
             accessible_pids: set[str] | None = None
             if current_user.role != "super_admin":
-                all_pids = [str(p.id) for p in roster]
-                eff_map = await resolve_effective_subunit_1_map(
+                accessible_pids = await in_scope_pids(
                     db,
-                    all_pids,
+                    str(current_user.id),
+                    str(current_user.role),
+                    selected_nr_id,
                     applied_tagging_id,
+                    [str(p.id) for p in roster],
                 )
-                allowed = await get_assigned_subunit_1s(
+                grants = await get_scope_grants(
                     db, str(current_user.id), selected_nr_id
                 )
-                accessible_pids = {
-                    pid for pid, sub in eff_map.items() if sub in allowed
-                }
-                no_assignments = not allowed
+                no_assignments = not grants
 
             att_result = await db.execute(
                 select(Attendance).where(
@@ -154,12 +186,13 @@ async def attendance_view(
                     )
                 )
             )
-            att_by_person = {
-                a.personnel_id: a for a in att_result.scalars().all()
-            }
+            att_by_person = {a.personnel_id: a for a in att_result.scalars().all()}
 
             for person in roster:
-                if accessible_pids is not None and str(person.id) not in accessible_pids:
+                if (
+                    accessible_pids is not None
+                    and str(person.id) not in accessible_pids
+                ):
                     continue
                 record = att_by_person.get(str(person.id))
                 entry = entry_by_person.get(str(person.id))
@@ -179,32 +212,45 @@ async def attendance_view(
                         "sub_unit_3": (
                             entry.to_sub_unit_3 if entry else person.sub_unit_3
                         ),
-                        "status_am": record.status_am if record else "absent",
-                        "remarks_am": record.remarks_am if record else "",
-                        "status_pm": record.status_pm if record else "absent",
-                        "remarks_pm": record.remarks_pm if record else "",
+                        "status": record.status if record else "absent",
+                        "reason": record.reason if record else None,
+                        "remarks": record.remarks if record else "",
+                        "inpro_status": person.inpro_status,
+                        "inpro_label": INPRO_STATUS_LABELS.get(
+                            person.inpro_status, person.inpro_status
+                        ),
                     }
                 )
 
             # Filter dropdown options: distinct effective sub_unit_1 across
-            # the user's whole visible roster (before the filter is applied).
+            # the user's whole visible roster (before the filters apply).
             subunit_options = sorted(
-                {
-                    r["sub_unit_1"]
-                    for r in attendance_rows
-                    if r["sub_unit_1"]
-                }
+                {r["sub_unit_1"] for r in attendance_rows if r["sub_unit_1"]}
             )
             if sub_unit_1:
                 attendance_rows = [
                     r for r in attendance_rows if r["sub_unit_1"] == sub_unit_1
                 ]
+            # Inpro Status view filter (issue 33) — e.g. hide Deferred.
+            # Unknown values are ignored (filter falls back to "all").
+            if inpro_status and inpro_status in INPRO_STATUSES:
+                attendance_rows = [
+                    r for r in attendance_rows if r["inpro_status"] == inpro_status
+                ]
+            # Status / Reason view filters — same non-destructive contract
+            # as the Inpro filter: rows are hidden, records untouched.
+            # Status matches the grid's effective value (unmarked rows
+            # display as absent); a Reason filter excludes unmarked rows
+            # (they carry no reason).
+            if status and status in ATTENDANCE_STATUSES:
+                attendance_rows = [r for r in attendance_rows if r["status"] == status]
+            if reason and reason in ATTENDANCE_REASONS:
+                attendance_rows = [r for r in attendance_rows if r["reason"] == reason]
 
         counts = (
             await attendance_counts_for_date(selected_nr_id, target_date, db)
             if selected_nr_id
-            else {"am": {"present": 0, "absent": 0, "total": 0},
-                  "pm": {"present": 0, "absent": 0, "total": 0}}
+            else {"present": 0, "absent": 0, "total": 0}
         )
 
     env = _get_templates(request)
@@ -229,10 +275,17 @@ async def attendance_view(
         target_date=target_date,
         sub_unit_1_filter=sub_unit_1 or "",
         subunit_options=subunit_options,
+        inpro_filter=(inpro_status if inpro_status in INPRO_STATUSES else ""),
+        inpro_labels=INPRO_STATUS_LABELS,
+        status_filter=(status if status in ATTENDANCE_STATUSES else ""),
+        reason_filter=(reason if reason in ATTENDANCE_REASONS else ""),
         attendance_rows=attendance_rows,
         counts=counts,
         nr_caa=selected.caa.isoformat() if (selected and selected.caa) else "",
         no_assignments=no_assignments,
+        frozen=frozen,
+        frozen_at=frozen_at,
+        reason_labels=ATTENDANCE_REASON_LABELS,
     )
 
     return HTMLResponse(content=html_content)

@@ -44,9 +44,7 @@ def upgrade() -> None:
             server_default="Called Up",
         ),
     )
-    op.create_index(
-        "ix_personnel_callup_status", "personnel", ["callup_status"]
-    )
+    op.create_index("ix_personnel_callup_status", "personnel", ["callup_status"])
 
     # --- Deferments table ---
     op.create_table(
@@ -96,22 +94,16 @@ def upgrade() -> None:
         sa.Column("created_by", sa.String(length=36), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=True),
         sa.Column("updated_by", sa.String(length=36), nullable=True),
-        sa.ForeignKeyConstraint(
-            ["personnel_id"], ["personnel.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["personnel_id"], ["personnel.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["created_by"], ["users.id"]),
         sa.ForeignKeyConstraint(["updated_by"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        "ix_deferments_id", "deferments", ["id"], unique=False
-    )
+    op.create_index("ix_deferments_id", "deferments", ["id"], unique=False)
     op.create_index(
         "ix_deferments_personnel_id", "deferments", ["personnel_id"], unique=False
     )
-    op.create_index(
-        "ix_deferments_status", "deferments", ["status"], unique=False
-    )
+    op.create_index("ix_deferments_status", "deferments", ["status"], unique=False)
     op.create_index(
         "ix_deferments_updated_at", "deferments", ["updated_at"], unique=False
     )

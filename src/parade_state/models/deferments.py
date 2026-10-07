@@ -67,7 +67,9 @@ class Deferment(Base):
         default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
     )
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
-    updated_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True, index=True)
+    updated_at: Mapped[utc_dt.datetime | None] = mapped_column(
+        nullable=True, index=True
+    )
     updated_by: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True
     )

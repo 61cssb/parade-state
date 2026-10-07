@@ -19,8 +19,6 @@ from parade_state.utils import env
 
 RESTORE_URL = "/api/v1/admin/database/restore"
 
-SUPER_ADMIN_PARAMS = {"user_id": "super-admin-test-id", "user_role": "super_admin"}
-ADMIN_PARAMS = {"user_id": "admin-user-id", "user_role": "admin"}
 
 DUMMY_FILE = {"file": ("backup.dump", b"x", "application/octet-stream")}
 
@@ -91,7 +89,7 @@ async def test_restore_forbidden_for_plain_admin(
     response = client.post(
         RESTORE_URL,
         headers=admin_token_headers,
-        params={**ADMIN_PARAMS, "confirmation": "anything"},
+        params={"confirmation": "anything"},
         files=DUMMY_FILE,
     )
     assert response.status_code == 403
@@ -112,7 +110,7 @@ async def test_restore_disabled_by_kill_switch(
     response = client.post(
         RESTORE_URL,
         headers=super_admin_token_headers,
-        params={**SUPER_ADMIN_PARAMS, "confirmation": "anything"},
+        params={"confirmation": "anything"},
         files=DUMMY_FILE,
     )
     assert response.status_code == 400
@@ -130,7 +128,7 @@ async def test_restore_requires_postgres_on_sqlite(
     response = client.post(
         RESTORE_URL,
         headers=super_admin_token_headers,
-        params={**SUPER_ADMIN_PARAMS, "confirmation": "anything"},
+        params={"confirmation": "anything"},
         files=DUMMY_FILE,
     )
     assert response.status_code == 400
@@ -162,8 +160,10 @@ async def test_restore_happy_path_swaps_and_reinitializes(
     # stamp the current head so the restored dump looks like production.
     head = _app_head_revision()
     await db_session.execute(
-        sa_text("CREATE TABLE IF NOT EXISTS alembic_version "
-                "(version_num VARCHAR(32) PRIMARY KEY)")
+        sa_text(
+            "CREATE TABLE IF NOT EXISTS alembic_version "
+            "(version_num VARCHAR(32) PRIMARY KEY)"
+        )
     )
     await db_session.execute(sa_text("DELETE FROM alembic_version"))
     await db_session.execute(
@@ -178,7 +178,7 @@ async def test_restore_happy_path_swaps_and_reinitializes(
     response = client.post(
         RESTORE_URL,
         headers=super_admin_token_headers,
-        params={**SUPER_ADMIN_PARAMS, "confirmation": current_db},
+        params={"confirmation": current_db},
         files={"file": ("backup.dump", dump, "application/octet-stream")},
     )
 
@@ -228,8 +228,10 @@ async def test_restore_older_dump_runs_post_restore_migration(
     assert isinstance(parent, str)  # head is never the base revision
 
     await db_session.execute(
-        sa_text("CREATE TABLE IF NOT EXISTS alembic_version "
-                "(version_num VARCHAR(32) PRIMARY KEY)")
+        sa_text(
+            "CREATE TABLE IF NOT EXISTS alembic_version "
+            "(version_num VARCHAR(32) PRIMARY KEY)"
+        )
     )
     await db_session.execute(sa_text("DELETE FROM alembic_version"))
     await db_session.execute(
@@ -244,7 +246,7 @@ async def test_restore_older_dump_runs_post_restore_migration(
     response = client.post(
         RESTORE_URL,
         headers=super_admin_token_headers,
-        params={**SUPER_ADMIN_PARAMS, "confirmation": current_db},
+        params={"confirmation": current_db},
         files={"file": ("backup.dump", dump, "application/octet-stream")},
     )
 
@@ -279,7 +281,7 @@ async def test_restore_rejects_wrong_confirmation(
     response = client.post(
         RESTORE_URL,
         headers=super_admin_token_headers,
-        params={**SUPER_ADMIN_PARAMS, "confirmation": "wrong-name"},
+        params={"confirmation": "wrong-name"},
         files=DUMMY_FILE,
     )
     assert response.status_code == 400
@@ -302,7 +304,7 @@ async def test_restore_rejects_garbage_file(
     response = client.post(
         RESTORE_URL,
         headers=super_admin_token_headers,
-        params={**SUPER_ADMIN_PARAMS, "confirmation": current_db},
+        params={"confirmation": current_db},
         files={
             "file": (
                 "backup.dump",

@@ -2,13 +2,17 @@
 
 from .access import (
     AccessLevel,
+    FeatureAccess,
     User,
     UserSubunitAssignment,
 )
 from .attendance import (
+    ATTENDANCE_REASON_LABELS,
+    ATTENDANCE_REASONS,
     ATTENDANCE_STATUSES,
     PRESENT_LIKE_STATUSES,
     Attendance,
+    AttendanceFreeze,
 )
 from .audit import AuditLog
 from .auth_session import UserSession
@@ -19,23 +23,34 @@ from .csv_ingestion import (
     NominalRoll,
 )
 from .deferments import Deferment
+from .discussions import DiscussionComment, DiscussionPost
 from .grouping import (
     Grouping,
     GroupingGroup,
-    GroupingMemberState,
     GroupingMembership,
+    GroupingMemberState,
 )
-from .personnel import CALLUP_STATUSES, SOURCE_MANUAL, Personnel
+from .personnel import (
+    INPRO_STATUS_LABELS,
+    INPRO_STATUSES,
+    SOURCE_MANUAL,
+    Personnel,
+)
 from .tagging import Tagging, TaggingEntry
 
 __all__ = [
     "AccessLevel",
+    "FeatureAccess",
     "User",
     "UserSubunitAssignment",
     "ATTENDANCE_STATUSES",
+    "ATTENDANCE_REASONS",
+    "ATTENDANCE_REASON_LABELS",
     "PRESENT_LIKE_STATUSES",
-    "CALLUP_STATUSES",
+    "INPRO_STATUSES",
+    "INPRO_STATUS_LABELS",
     "Attendance",
+    "AttendanceFreeze",
     "AuditLog",
     "UserSession",
     "ColumnMapping",
@@ -43,11 +58,14 @@ __all__ = [
     "CsvUpload",
     "NominalRoll",
     "Deferment",
+    "DiscussionComment",
+    "DiscussionPost",
     "Grouping",
     "GroupingGroup",
     "GroupingMemberState",
     "GroupingMembership",
     "Personnel",
+    "SOURCE_MANUAL",
     "Tagging",
     "TaggingEntry",
 ]

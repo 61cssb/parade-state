@@ -38,12 +38,12 @@ def test_normalizes_whitespace_and_case() -> None:
 @pytest.mark.parametrize(
     "rank",
     [
-        "",          # empty
-        "   ",       # whitespace only
-        "SGT",       # common but not a SAF rank in our lists
-        "GENERAL",   # not in the SAF system here
-        "ME0",       # below the ME tier floor
-        "MEME",      # looks like ME prefix but malformed
+        "",  # empty
+        "   ",  # whitespace only
+        "SGT",  # common but not a SAF rank in our lists
+        "GENERAL",  # not in the SAF system here
+        "ME0",  # below the ME tier floor
+        "MEME",  # looks like ME prefix but malformed
     ],
 )
 def test_unrecognized_rank_raises_value_error(rank: str) -> None:

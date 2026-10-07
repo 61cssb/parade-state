@@ -94,21 +94,26 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 
 **Current Test Suite:**
 - `tests/integration/test_api.py` - Authentication, user management, role management (18 tests)
-- `tests/integration/test_attendance_api.py` - Attendance management, snapshots, constraints (40 tests)
+- `tests/integration/test_attendance_api.py` - Attendance management, snapshots, constraints, CSV export scoping
 - `tests/integration/test_csv_upload_api.py` - CSV upload pipeline, hash dedup, mapping (9 tests)
-- `tests/integration/test_deferments_api.py` - Deferment CRUD, callup_status transitions, super_admin auth (15 tests)
+- `tests/integration/test_csv_process_api.py` - CSV → NR processing under
+  contract v2 (issue 34): required-column errors, strict Yes-only filter +
+  skip counts, storage map (Pers/Age optional, ORNS alias, first Remarks,
+  Reason non-storage, extras ignored, quoted commas, old-format
+  convergence), canonical-fixture acceptance (397/163), tagging import
+- `tests/integration/test_deferments_api.py` - Deferment CRUD, inpro_status transitions (issue 32), super_admin auth
 - `tests/integration/test_feature_flags.py` - Flag-off hides Deferments/Grouping entirely (nav, pages, API) for every role incl. super-admin; flag-on restore; env-var defaults (8 tests)
 - `tests/integration/test_environment_banner.py` - ENVIRONMENT_BANNER renders the top strip pre-auth (login) and post-auth, escapes its text, and emits no markup when unset (5 tests)
 - `tests/integration/test_groupings_api.py` - Groupings (issue 26 redesign): CRUD, group-enum set replacement, memberships, member state, clone, copy-from-previous-NR, CSV export, super-admin-only mutations, flag gating
-- `tests/integration/test_nominal_rolls_api.py` - Nominal Roll lifecycle (attendance activation auto-switch/deactivate, delete, label updates)
+- `tests/integration/test_nominal_rolls_api.py` - Nominal Roll lifecycle (attendance activation auto-switch/deactivate, delete, label updates, CSV export)
 - `tests/integration/test_personnel_api.py` - Personnel management, search, filtering (12 tests)
-- `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (NR/Tagging-scoped, AM/PM slots)
+- `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (NR/Tagging-scoped, single session)
 - `tests/integration/test_sessions_410.py` - Sessions endpoints return 410 Gone (sessions removed in issue #4)
 - `tests/integration/test_users_api.py` - User CRUD, role/status transitions (3 tests)
 - `tests/integration/test_audit_api.py` - Audit log filtering and pagination (10 tests)
 - `tests/integration/test_core_feature_kill_switches.py` - FEATURE_NOMINALROLL/FEATURE_ATTENDANCE default-on kill switches: unset = fully available; explicit false hides page+API+nav for every role incl. super-admin; independent gating (9 tests)
 
-**Total:** 516 collected (512 passing, 4 skipped) ✅ UPDATED
+**Total:** 647 collected (643 passing, 4 skipped) ✅ UPDATED
 **Coverage:** Comprehensive integration test coverage across all major features
 **Performance:** ~23 seconds for full integration test suite
 
@@ -209,18 +214,22 @@ async def test_example(client, sample_users, sample_grouping):
 - **Endpoints:** 9 grouping endpoints (CRUD, membership set, member
   state, clone, copy-from-previous, export)
 
-**Attendance Session Management (🗑 Removed in issue #4)**
+**Attendance Session Management (🗑 Removed in issue #4; slots removed in #33)**
 - The user-managed `Session` model (open/closed/finalized) has been removed.
-- AM and PM are now hardcoded slots on a single `Attendance` row per person/day.
+- The AM/PM split was later removed too (issue 33): one session per day on a
+  single `Attendance` row per person/day.
 - `/api/v1/sessions/*` routes return 410 Gone as signposts.
 - Historical reporting views that depended on sessions are broken (see issue #4
   "Out of scope") and need separate consideration.
 
-**Attendance Management (✅ Active-NR model)**
-- Attendance is taken against the one Nominal Roll currently **active for
-  attendance** (`NominalRoll.attendance_active`), with its 1:1 tagging
-  applied: one `Attendance` row per `(personnel, date)` carrying
-  `status_am`/`remarks_am` and `status_pm`/`remarks_pm`.
+**Attendance Management (✅ Active-NR model, single session — issue 33)**
+- Attendance is taken once daily against the one Nominal Roll currently
+  **active for attendance** (`NominalRoll.attendance_active`), with its 1:1
+  tagging applied: one `Attendance` row per `(personnel, date)` carrying
+  `status` (present/absent), an optional `reason` enum, and `remarks`.
+- The marking roster is **everyone** on the NR (deferred included) — the
+  page's Inpro Status column + filter are view concerns (issue 33; the
+  issue-32 interim `!= 'deferred'` roster filter is gone).
 - The per-NR `AttendanceScope` table and the NR confirm/unconfirm workflow
   are **removed** (migration `n4c5d6e7f8a9`): super-admins toggle
   "Use for Attendance" / "Deactivate Attendance" on the admin Nominal Rolls
@@ -229,50 +238,130 @@ async def test_example(client, sample_users, sample_grouping):
   active NR the user view shows an inactive message and writes are refused.
 - Bulk upsert endpoint (`PUT /api/v1/attendance/upsert`) with snapshot capture;
   the same endpoint serves the per-row autosave payloads (single-record PUT).
-- "Copy Remarks" endpoint (`POST /api/v1/attendance/copy-remarks`, issue 20):
-  explicit source (date + slot) and destination (date + slot) — same
-  source/destination is rejected (400); an optional `sub_unit_1` param narrows
+- "Copy Remarks" endpoint (`POST /api/v1/attendance/copy-remarks`, issue 20;
+  single-session rework in #33): explicit source date and destination date —
+  same date is rejected (400); an optional `sub_unit_1` param narrows
   the copy to the attendance page's view filter (effective-value aware).
   Blank source remarks are skipped; missing destination rows are created.
+- CSV export (`GET /api/v1/attendance/export`, issue 27): streams the marking
+  table for an NR + date — columns mirror the page (…, Name, Inpro Status,
+  Status, Reason, Remarks), statuses/reasons as display labels, personnel
+  without a row export as Absent (the page's default). Honours the page's
+  `sub_unit_1` filter and the Subunit-1 read-scoping rule (super_admin all;
+  deny-by-default 403 otherwise), so an export never leaks outside the
+  caller's view.
 - Tagging delete guarded (409) when its NR has attendance rows.
-- Attendance status enum: present, absent, time_off, mc, yet_to_inpro, outpro,
-  reporting_sick, late, att_out (default: absent).
+- Attendance status enum (issue 33): present, absent (default: absent).
+  Reason enum (nullable, never feeds reporting): mc, off, early_outpro,
+  other, awol. Migration `w4d5e6f7a8b9` collapses the legacy 9-value AM/PM
+  vocabulary per the issue-33 mapping table (PM wins when its slot was
+  marked; remarks joined with `"; "`; "Late" appended).
+- Day freeze (issue 35): `attendance_freezes` table (migration
+  `x5e6f7a8b9c0`; one row per frozen NR/day, cascades with the NR).
+  `PUT /api/v1/attendance/freeze` (JSON body) / `DELETE` (query params)
+  toggle it — super-admin only, active-NR gated, 409 on double-freeze /
+  404 on unfreezing a non-frozen day, audit-logged under action
+  `attendance_freeze` (entity `nominal_roll`). Upsert (any touched date)
+  and copy-remarks (destination date) 403 for non-super-admins when a
+  frozen (NR, date) is written; super-admins keep editing (retro-edit
+  rules unchanged). The attendance page shows a Freeze/Unfreeze toggle
+  (super-admins), a frozen banner naming the freeze timestamp (every
+  role), and a plain-text read-only grid for admins on frozen days.
 
-**Subunit-1 Attendance Access (✅ Reworked in issue #4 PR 2)**
-- New `UserSubunitAssignment(user_id, nominal_roll_id, sub_unit_1)` model —
-  grants a user attendance-update rights for one sub_unit_1 on one NR.
-- Server-enforced 403 on `PUT /api/v1/attendance/upsert` and
-  `POST /api/v1/attendance/copy-remarks` when the caller lacks an assignment
-  for a target personnel's effective sub_unit_1. Effective sub_unit_1 follows
-  the NR's tagging overlay's `to_sub_unit_1` (tagging-aware), falling back
-  to the personnel's canonical `sub_unit_1`.
-- `super_admin` bypasses entirely; **deny-by-default** (no assignments = 403).
-- Super-admin CRUD API:
-  `POST /api/v1/access-control/nominal-rolls/{nr_id}/users/{user_id}/subunit-assignments`,
-  `DELETE .../subunit-assignments/{assignment_id}`,
-  `GET .../nominal-rolls/{nr_id}/subunit-assignments`,
-  `GET .../users/{user_id}/subunit-assignments`.
-- Migration `k1f2a3b4c5d6`. 332 tests passing.
+**Feature-Access Matrix (✅ issue 37)**
+- `feature_access` table (migration `y6f7a8b9c0d1`; `(feature_key, role)`
+  unique; `audit_entity_type` widened with `feature_access`) — per-role
+  feature visibility, fail-open (absent row = enabled), `super_admin`
+  never configurable. Effective visibility = `FEATURE_*` env flag AND
+  matrix entry; env off (404, everyone) outranks matrix off (403, the
+  configured role only).
+- Seam module `src/parade_state/feature_access.py` —
+  `FeatureAccessMiddleware` (one tiny SELECT per page request, stashed on
+  `request.state.feature_access` for the sidebar; fails open),
+  `feature_allowed` (page-route gate → styled 403 shell), and
+  `require_feature_access(key)` (router-level API dependency; wired in
+  `main.py` onto personnel + nominal-rolls → `nominal_roll`, attendance →
+  `attendance`, groupings → `grouping`).
+- Settings: super-admin-only page gate (matching Restore Backup) hosting
+  the "Feature access (admins)" card → `POST /api/v1/admin/feature-access`
+  (full-matrix upsert, value changes audit-logged under
+  entity `feature_access`, action `update`). Sidebar Admin section:
+  Users/Settings/Restore Backup render for super-admins only; Audit Log
+  stays admin-viewable (2026-08-27 decision).
 
-**Attendance UI (✅ Active-NR model)**
+**Scope Access (✅ issue #4 PR 2; ✅ extended by issue #28)**
+- `UserSubunitAssignment(user_id, nominal_roll_id, unit, sub_unit_1)` — a
+  grant is a (unit, sub_unit_1) pair on one NR with the explicit `*`
+  wildcard sentinel per column; `(*, *)` is forbidden by CHECK constraint;
+  unique per (user, NR, unit, sub_unit_1). Migration `k1f2a3b4c5d6` (issue
+  #4) + `u2b3c4d5e6f7` (issue #28 unit dimension; validated on the
+  repro-pg roundtrip).
+- Shared enforcement module `api/subunit_access.py` (issue #31 ✅ landed:
+  callers pass the session-derived `user.id`/`user.role` from the
+  `auth/dependencies.py` dependencies): `get_scope_grants`, `grant_matches`,
+  `resolve_effective_locations` (tagging overlay applied verbatim, else
+  canonical), `assert_nr_accessible` / `assert_locations_in_scope` (write
+  403s naming the missing "unit/sub-unit"), `in_scope_pids` (non-raising
+  read filter), `accessible_nr_ids`.
+- Enforced surfaces (regular admins; super_admin bypasses; all
+  deny-by-default; client filters only narrow):
+  `GET /personnel` (single-NR 403 without grants; cross-NR restricted to
+  granted NRs; pagination applied after overlay-aware filtering),
+  `GET/PATCH /personnel/{id}`, `GET /personnel/{id}/attendance-history`,
+  `GET /attendance/`, `PUT /attendance/upsert`,
+  `POST /attendance/copy-remarks`, `GET /attendance/export`,
+  `GET /nominal-rolls` (granted NRs only), `GET/PATCH /nominal-rolls/{id}`,
+  `GET /nominal-rolls/{id}/export`, the strength report, and the NR
+  browser + attendance pages (scoped roster, dropdown options derived
+  from visible rows, no-assignments banner).
+- CSV upload/process tightened to super-admin only (NR lifecycle op).
+- Super-admin grant API under `/api/v1/access-control`: grant/revoke/list
+  (list responses carry the NR display label) +
+  `GET /nominal-rolls/{nr_id}/scope-options` (roster units and
+  unit→sub-unit values for the form). Grant values validated against the
+  roster (case-sensitive); `''` never means wildcard.
+- UI: the Scope panel on `/admin/users` (issue 28) — per-user grants
+  grouped by NR, cascading NR → unit → sub-unit grant form with
+  "All units"/"All sub-units" wildcard options, revoke buttons; auto-save
+  via fetch like the discussions triage pattern.
+- Discussions board stays org-wide for all admins (posts carry no
+  NR/personnel linkage; recorded decision for the issue 24 flag rollout).
+- Tests: `tests/integration/test_admin_scoped_access.py` (vocabulary,
+  deny-by-default across surfaces, overlay in/out boundaries, cosmetic
+  filter non-bypass, pagination under overlay, grant CRUD validation,
+  check constraint).
+
+**Attendance UI (✅ Active-NR model, single session — issue 33)**
 - The separate super-admin `/admin/attendance` page is **removed** — it
   duplicated `/attendance`. All marking happens on `/attendance`: NR + date +
-  effective sub-unit-1 filters, roster editor with AM/PM status + remarks.
-- User-facing `/attendance`: defaults to the active NR; roster is filtered to
-  the caller's assigned subunits (tagging-aware effective sub_unit_1;
-  super_admin sees all) and shows the tagging overlay (yellow rows). With no
-  active NR it shows an inactive message instead of the marking table.
-- **Copy Remarks** lives on `/attendance` behind a modal (issue 20): explicit
-  source/destination day + AM/PM pickers (clamped to the NR's CAA → the
-  viewed day; prefilled with the old time-of-day pair), same source and
-  destination blocked, an earlier destination warns and needs a second
-  click, and the confirmation names the scope ("for N personnel in current
-  view. Existing destination remarks will be overwritten."). Open to all
-  admins — write perms are enforced server-side (sub-unit assignments, 403).
-- **Autosave (issue 19):** no Save button — each row PUTs itself on status
-  change or remarks blur (a "Saving…/Saved" indicator near the table; a
-  failed save red-edges the row and retries on the next edit). Tagged rows
-  are no longer highlighted here; yellow stays an NR-view-only signal.
+  effective sub-unit-1 + Inpro Status + Status + Reason view filters, roster
+  editor with status + reason + remarks.
+- User-facing `/attendance`: defaults to the active NR; the roster is **all
+  NR personnel** (deferred included — issue 33), filtered to the caller's
+  assigned subunits (tagging-aware effective sub_unit_1; super_admin sees
+  all) with a read-only Inpro Status column just before the status column
+  and an Inpro Status filter (e.g. hide Deferred), plus Status / Reason
+  view filters (non-destructive, same contract). With no active NR it
+  shows an inactive message instead of the marking table. The viewed day
+  defaults server-side to UTC today; a first-visit script re-defaults it
+  to the browser's local day (best effort — mirrors the strength report;
+  UTC lagged SGT mornings until 08:00).
+- **Copy Remarks** lives on `/attendance` behind a modal (issue 20;
+  single-session rework in #33): explicit source/destination date pickers
+  (clamped to the NR's CAA → the viewed day; prefilled with the previous
+  day), same source and destination blocked, an earlier destination warns
+  and needs a second click, and the confirmation names the scope ("for N
+  personnel in current view. Existing destination remarks will be
+  overwritten."). Open to all admins — write perms are enforced server-side
+  (sub-unit assignments, 403).
+- **Autosave (issue 19):** no Save button — each row PUTs itself on
+  status/reason change or remarks blur (a "Saving…/Saved" indicator near the
+  table; a failed save red-edges the row and retries on the next edit).
+  Tagged rows are no longer highlighted here; yellow stays an NR-view-only
+  signal.
+- **Export CSV (issue 27):** link in the table header (beside the
+  present/marked counts) streams the displayed table for the selected NR +
+  date + sub-unit filter — same contract as the Grouping page's export.
 - Nominal Roll management lives on `/nominal-roll` in the collapsed-by-default
   "Roll management" expander directly below the roll selector dropdown inside
   the selector card (the Grouping page's pattern; issue 22 — it acts on the
@@ -282,20 +371,37 @@ async def test_example(client, sample_users, sample_grouping):
   / Delete for super-admins, with the same confirm dialogs as before. The
   admin page's metadata columns (source file, uploaded at, CSV hash) were
   dropped — upload provenance stays on the Upload NR page's Recent Uploads.
+- **Export CSV (issue 27):** link on the roll-selector row (the Grouping
+  page's placement) streams the filtered roster table — tagging overlay
+  applied, the view's search/unit/sub-unit/category/rank filters honoured,
+  and no 1000-row cap (`GET /api/v1/nominal-rolls/{id}/export`).
 
 **Unit Strength Report (✅ Complete — feature-flagged, issue #25)**
 - `/admin` now serves the **Unit Strength** report and the old admin
   dashboard (stat cards + recent audit activity) is removed; the post-login
   redirect to `/admin` is unchanged.
-- Aggregates the attendance-active NR's Called Up personnel by effective
+- Aggregates the attendance-active NR's non-deferred personnel by effective
   (tagging-aware) sub_unit_1/sub_unit_2 into the strength reporting format:
-  Officer/WOSE/Total column groups of In/Out/Current/% (In = Called Up,
-  Current = present/late for the selected slot, Out = everything else
+  Officer/WOSE/Total column groups of In/Out/Current/% (In = not deferred,
+  Current = present — single daily session, issue 33; reason never
+  participates, Out = everything else
   including unmarked-as-absent, % = Current ÷ In), with SUBTOTAL per
   sub_unit_1 (shown once per section), a unit TOTAL, and a `(none)` bucket
   for personnel without subunits. `unit` and `sub_unit_3` are ignored.
-- Date picker + AM/PM slot selector (URL params; server defaults today/AM,
-  re-defaulted from the browser's local datetime on first visit).
+- Date picker (URL param; server default today, re-defaulted from the
+  browser's local datetime on first visit). The AM/PM slot selector was
+  removed with the single-session rework (issue 33).
+- Reporting basis (✅ issue #36): `?basis=tagged|untagged` (default
+  `tagged`, unknown values fall back). Tagged groups under the effective
+  (tagging-applied) subunits; **untagged** groups under the original NR
+  allocations — the canonical `Personnel` columns, tagging overlay not
+  applied (`from_*` snapshots never consulted). Untagged is
+  super-admin-only: the segmented Tagged/Untagged control (radio-based,
+  active segment highlighted) renders for super-admins alone and
+  any other role explicitly requesting it gets the 403 no-access page.
+  The heading names the active basis so rendered output is
+  self-describing; the unit-wide TOTAL is allocation-independent and
+  identical on both bases.
 - Super-admins see the whole unit; regular admins see only their assigned
   sub_unit_1 sections (same deny-by-default UserSubunitAssignment machinery
   as attendance marking) with TOTAL summing visible rows.
@@ -303,10 +409,11 @@ async def test_example(client, sample_users, sample_grouping):
   roles including super-admins) unless `FEATURE_STRENGTH=true`.
 
 **Sidebar Restructure (✅ workflow pages + Admin section)**
-- The sidebar lists the workflow pages flat in order — Unit Strength (at
-  `/admin`, flag-gated; formerly the Dashboard), Upload NR
+- The sidebar lists the workflow pages flat in order — Upload NR
   (relabelled from "CSV Upload"; route unchanged), Nominal Roll, Taggings,
-  Deferments, Attendance, Grouping — followed by an **Admin** section:
+  Deferments, Attendance, Unit Strength (at
+  `/admin`, flag-gated; formerly the Dashboard — moved after Attendance
+  2026-08-26 so reporting follows marking), Grouping — followed by an **Admin** section:
   Users, Settings, Audit Log, Restore Backup (relabelled from "DB
   Restore"). All entries are visible to every signed-in admin; role-based
   section visibility is deferred until distinct roles exist.
@@ -320,7 +427,7 @@ async def test_example(client, sample_users, sample_grouping):
   (see the Grouping Management notes above). The orphaned
   `/admin/sessions` redirect route was removed.
 
-**Remap Editing (✅ comboboxes, ✅ staged edits)**
+**Remap Editing (✅ comboboxes, ✅ staged edits, ✅ admin sub 2/3 — issue 38)**
 - Public NR browser: super-admins click a unit / sub-unit cell to remap it —
   the cell becomes an input with a custom suggestion panel anchored under
   the cell (the native datalist popup was replaced because its placement is
@@ -328,6 +435,13 @@ async def test_example(client, sample_users, sample_grouping):
   **stages** the edit (darker-yellow pending cell; no API call). Sub-unit
   2/3 panels offer a "leave blank" pick that clears the value. Regular
   users see the read-only table.
+- Issue 38: in-scope admins get the same editor on **sub-unit 2/3 cells
+  only** — unit / sub-unit 1 render read-only and their suggestion lists
+  are not shipped. Enforced at the API seam, not the UI: `PATCH
+  /api/v1/personnel/{id}` rejects `unit`/`sub_unit_1` for non-super-admins
+  with 403 (whole payload, nothing applied, checked before the scope
+  gate); sub 2/3 remaps stay scope-gated only. Closes the pre-38 hole
+  where any in-scope admin could PATCH the top two levels.
 - Staged edits are held per roll in `localStorage` (`ps:nr-edits:{roll_id}`,
   refresh-safe) until the floating bottom bar's **Apply** sends one
   `PATCH /api/v1/personnel/{id}` per person (recorded on the tagging
@@ -354,37 +468,77 @@ async def test_example(client, sample_users, sample_grouping):
 - Personnel deferment CRUD linked to a single nominal roll personnel record
 - `rank_name` and `sub_unit` snapshotted at creation from the linked personnel
 - Reason enum (12 values) and status enum (8 values)
-- Personnel `callup_status` field (`Called Up` / `Deferred` / `Disrupted` /
-  `MR` / `Age Limit` / `Other`; the original three-value enum was widened and
-  per-person `remarks` added — issue 06):
-  - Approved deferment → `Deferred`
-  - Reverting from Approved to a non-neutral status → `Called Up`
-  - `Not called up` / `Do not call up` deferment statuses are neutral (no callup change)
-  - Deleting an Approved deferment reverts to `Called Up`
+- Personnel `inpro_status` transitions (issue 32):
+  - Approving a deferment never auto-sets inpro_status — the admin UI
+    prompts "set Inpro status to Deferred?" and PATCHes the personnel
+    separately when confirmed (declining leaves it unchanged)
+  - Moving an Approved deferment to any other status (neutral statuses
+    included) → unconditional revert to `yet_to_inpro`
+  - Deleting an Approved deferment reverts to `yet_to_inpro`
 - Super-admin-only: API and admin UI enforce `role == "super_admin"`
 - Admin UI under `/admin/deferments` (nav link gated by super_admin role)
 - **Feature flag:** hidden entirely (nav, page, `/api/v1/deferments/*`) unless `FEATURE_DEFERMENTS=true` — 404 for all roles including super-admins
 - **Endpoints:** 5 deferment endpoints under `/api/v1/deferments`
-- **Tests:** 15 behavioral tests + flag gating (test_feature_flags.py)
+- **Tests:** behavioral transition tests + flag gating (test_feature_flags.py)
 
-**Callup status & remarks columns (✅ issue 06)**
-- `callup_status` widened to six values (`Called Up` default, `Deferred`,
-  `Disrupted`, `MR`, `Age Limit`, `Other`); legacy `Not Called Up` rows
-  migrated to `Other` (migration `q7d8e9f0a1b2`).
-- New per-person `Personnel.remarks` text column (distinct from roll-level
+**Inpro status & remarks columns (✅ issue 06; reworked by issue 32)**
+- `callup_status` (six-value callup-decision enum, issue 06) replaced by
+  `inpro_status` — the 3-value in-processing lifecycle `inproed` /
+  `yet_to_inpro` (default) / `deferred` — via migration `v3c4d5e6f7a8`
+  (PostgreSQL native-enum rebuild + SQLite batch rebuild). Mapping:
+  Called Up → yet_to_inpro; Deferred → deferred; Disrupted/MR/Age
+  Limit/Other → yet_to_inpro with `Previously: <value>` appended to
+  `remarks` (per-value remap counts logged; downgrade is lossy — inproed
+  collapses to Called Up and the appended remarks stay).
+- Per-person `Personnel.remarks` text column (distinct from roll-level
   `NominalRoll.remarks`).
-- CSV ingest maps `Callup Decision` → `callup_status` (case-insensitive
-  exact match; blank → `Called Up`; unrecognised → `Other`, raw kept in
-  `extra_fields`) and joins `Reason` + first `Remarks` → `remarks`.
-- Attendance roster/view filters to `callup_status = 'Called Up'`; hiding is
-  non-destructive — existing attendance records are never deleted or altered
-  and hidden rows render with no special treatment.
-- `PATCH /api/v1/personnel/{id}` accepts `callup_status` (422 on invalid) and
-  `remarks` (empty/null clears); admin + super_admin.
-- NR browser table shows Callup + Remarks columns with inline editing
-  (select / text input, immediate PATCH) for admins and above.
-- **Tests:** personnel PATCH (parametrised enum + 403), CSV mapping,
-  attendance hiding + record preservation, NR view wiring
+- CSV ingest (interim shim, superseded 2026-08-25 by the issue 34
+  contract v2 below): legacy `Callup Decision` remapped — Yes / blank /
+  Called Up → `yet_to_inpro`; No / Deferred → `deferred`; anything else →
+  `yet_to_inpro` + `Previously: <value>` remark — and joins `Reason` +
+  first `Remarks` → `remarks`.
+- Attendance roster/view/dashboard filter to `inpro_status != 'deferred'`
+  (interim rule until #33); hiding is non-destructive — existing attendance
+  records are never deleted or altered and hidden rows render with no
+  special treatment.
+- `PATCH /api/v1/personnel/{id}` accepts `inpro_status` (422 on invalid) and
+  `remarks` (empty/null clears); **issue 39 (admin trial):** `inpro_status`
+  is super-admin-only — 403 for admins alone or mixed with allowed fields,
+  nothing applied, checked before the scope gate (same shape as `pers_no`
+  and #38's unit/sub-unit 1); `remarks` stays admin + super_admin.
+- NR browser table shows Inpro Status + Remarks columns; remarks keep
+  inline editing (text input, immediate PATCH) for admins and above, the
+  Inpro select is super-admin-rendered (issue 39 — admins get the plain
+  label; the handler is not shipped), plus a user-side filter by Inpro
+  status (e.g. hide Deferred) carried into the CSV export.
+- **Tests:** personnel PATCH (parametrised enum + 422 on the retired
+  vocabulary + 403), CSV shim mapping, attendance hiding + record
+  preservation, NR view wiring + filter, migration mapping
+  (test_migration_inpro_status.py runs the real alembic chain)
+
+**CSV Ingestion (✅ contract v2 — issue 34)**
+- Header-name matching replaces the index-based 18-column map
+  (`parade_state.utils.csv_constants`: `_HEADER_SPEC` +
+  `resolve_columns`); first occurrence of a name wins, extras tolerated
+  and ignored. Shared by the app process endpoint and the demo ingester.
+- Required columns (missing → 400 naming the column, blank Unit header
+  included): Unit, Sub Unit 1-3, Rank, Full Name, Callup Decision,
+  Reason, Remarks, HK ICT, ORNS (alias `ORNS Yrs`).
+- Strict Yes-only row filter: only an exact case-insensitive `Yes` stores
+  a row; everything else (No, blank, Y, free text) is skipped and counted
+  (`decision_skipped` breakdown in the process response/report).
+- Storage: core columns; optional Pers → `pers_no` (blank/absent → NULL);
+  first Remarks column only → `personnel.remarks`; ORNS/ORNS Yrs →
+  `extra_fields.orns`, HK ICT → `extra_fields.hk_ict`, optional Age(Yr) →
+  `extra_fields.age_yr` (ints); Callup Decision and Reason are read but
+  never stored. New personnel default `inpro_status = yet_to_inpro`
+  (the issue-32 interim shim is removed).
+- The pre-v2 16-column WY2627 export (ORNS, Age(Yr), no Pers) also
+  ingests cleanly — the formats converge under name matching.
+- Canonical fixture acceptance (in tests): 397 stored / 163 skipped /
+  2 NULL pers_no. Demo ingester (`experiments/csv_to_nr/ingest.py`) and
+  demo DB regenerated on the new contract.
+- **Tests:** `tests/integration/test_csv_process_api.py` (reworked).
 
 **Add Serviceman: manual creation (✅ issue 26)**
 - New nullable `Personnel.source` provenance column (NULL = CSV row,
@@ -392,7 +546,7 @@ async def test_example(client, sample_users, sample_grouping):
   on `q7d8e9f0a1b2`), exposed in Personnel responses.
 - `POST /api/v1/personnel` (super-admin only; 403 otherwise): creates a row
   on an existing NR with `source='manual'`, `status='active'`,
-  `callup_status` default `Called Up`, category inferred via
+  `inpro_status` default `yet_to_inpro`, category inferred via
   `ranks.category_for_rank` (invalid rank → 400 listing valid ranks;
   unknown NR → 404; duplicate pers_no within the roll → 409 with
   IntegrityError fallback; same pers_no on a different roll allowed).
@@ -403,14 +557,15 @@ async def test_example(client, sample_users, sample_grouping):
 - `PATCH /api/v1/personnel/{id}` gains `pers_no` (fill-in-later):
   super-admin only (403 otherwise), membership semantics like `remarks`
   (explicit null / blank clears), per-roll uniqueness pre-check excluding
-  self → 409. Admins retain status/callup/remarks.
+  self → 409. Admins retain status/remarks (inpro left this list at
+  issue 39; sub 2/3 arrived with #38).
 - NR browser: "Add Serviceman" button below the personnel table (a roster
   action — kept out of Roll management, which acts on the roll entity;
   shown even when filters match nothing, since that's the add flow) opens a
   modal (backdrop, Esc, inline status errors,
   reload on success). Rank is a select with Officer/WOSE/Military Expert
   optgroups (closed set — the native datalist popup mispositions and
-  mismatched the Callup Status select); open-vocab unit/sub-units keep
+  mismatched the Inpro Status select); open-vocab unit/sub-units keep
   datalist suggestions; "manual" badge beside the full name for
   `source='manual'` rows; inline-editable pers_no cell (onchange → PATCH,
   blank clears, revert on error) for super-admins, static text for others.
@@ -439,8 +594,9 @@ async def test_example(client, sample_users, sample_grouping):
   already-present personnel are skipped (no clobber); unmatched source
   personnel are surfaced in the response.
 - `POST /api/v1/csv/{upload_id}/process` turns a stored CSV upload into a
-  full NR pipeline (NR + Personnel + ColumnMetadata + auto-tagging), with an
-  optional "import taggings from another NR" source.
+  full NR pipeline (NR + Personnel + ColumnMetadata + auto-tagging) under
+  the ingestion contract v2 (issue 34 — see the CSV Ingestion section),
+  with an optional "import taggings from another NR" source.
 - The public NR browser (`/nominal-roll`) overlays effective unit/subunit
   values with a yellow row background (`.changed-row`) for tagged personnel.
 - Personnel must belong to the parent tagging's NR (400 on cross-NR
@@ -463,7 +619,7 @@ issue 26 groupings redesign removed that surface wholesale: personnel
 endpoints take no grouping parameters, responses carry no grouping
 fields, and access is nominal-roll-scoped via UserSubunitAssignment.
 The attendance-history endpoint (added later) is NR/Tagging-scoped with
-AM/PM slots.
+single-session per-day rows and stats (issue 33).
 
 ```python
 # ✅ Current personnel endpoints (no grouping parameters)
@@ -624,7 +780,7 @@ parade-state/
 │   │   ├── csv_ingestion.py     # Nominal Roll, CsvUpload, ColumnMapping, ColumnMetadata
 │   │   ├── deferments.py        # Deferment
 │   │   ├── grouping.py        # Grouping, GroupingGroup, GroupingMembership, GroupingMemberState
-│   │   ├── personnel.py         # Personnel (with callup_status)
+│   │   ├── personnel.py         # Personnel (with inpro_status)
 │   │   └── schemas.py           # Pydantic request/response schemas
 │   ├── utils/                   # Shared utilities (see CODE_STYLE.md)
 │   │   ├── __init__.py

@@ -607,8 +607,8 @@ UserSubunitScope — were removed in the issue 26 redesign.)
 ```
 Nominal Roll (the one active for attendance; 1:1 Tagging overlay applied)
  │
- └── AttendanceRecord (per-personnel per-day)
-      ├── status_am / remarks_am, status_pm / remarks_pm
+ └── AttendanceRecord (per-personnel per-day, single session — issue 33)
+      ├── status (present/absent) / reason (nullable enum) / remarks
       └── unit_snapshot / sub_unit_*_snapshot (frozen at write time)
 ```
 
@@ -808,14 +808,19 @@ class User(Base):
 
 **Row-level security:**
 ```python
-# User writes personnel/attendance rows within their assigned subunits
-async def get_writable_personnel(user_id: str, nominal_roll_id: str):
-    # Get user's UserSubunitAssignment grants for this roll
-    subunits = await get_assigned_subunit_1s(user_id, nominal_roll_id)
+# User reads/writes personnel/attendance rows within their scope grants
+# (issue #28: api/subunit_access.py is the single enforcement seam)
+async def get_writable_personnel(user_id: str, user_role: str, nominal_roll_id: str):
+    # (unit, sub_unit_1) grants for this roll; '*' = wildcard column
+    grants = await get_scope_grants(db, user_id, nominal_roll_id)
 
-    # Query personnel whose effective sub_unit_1 matches a grant
-    personnel = await query_personnel_in_subunits(nominal_roll_id, subunits)
-    return personnel
+    # Personnel whose effective (unit, sub_unit_1) — tagging overlay
+    # applied — matches any grant; super_admin bypasses
+    locations = await resolve_effective_locations(db, pids, tagging_id)
+    return [
+        p for p in personnel
+        if grant_matches(grants, *locations[p.id])
+    ]
 ```
 
 **Column-level security:**

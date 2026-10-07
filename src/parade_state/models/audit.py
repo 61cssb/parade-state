@@ -13,7 +13,9 @@ class AuditLog(Base):
 
     __tablename__ = "audit_logs"
 
-    timestamp: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()), index=True)
+    timestamp: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()), index=True
+    )
     user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True
     )
@@ -29,6 +31,8 @@ class AuditLog(Base):
             "access_level",
             "column_mapping",
             "database",
+            "discussion_post",
+            "feature_access",
             name="audit_entity_type",
         ),
         index=True,
@@ -43,6 +47,7 @@ class AuditLog(Base):
             "close",
             "finalize",
             "restore",
+            "attendance_freeze",
             name="audit_action",
         ),
     )

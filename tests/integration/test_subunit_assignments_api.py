@@ -1,22 +1,18 @@
-"""Behavioral tests for Subunit-1 attendance access (issue #4 PR 2).
+"""Behavioral tests for scope-grant access (issues #4 and #28).
 
 Covers: deny-by-default enforcement on attendance upsert and copy-remarks,
-tagging-aware effective sub_unit_1, super_admin bypass, and the super-admin
-assignment CRUD endpoints.
+tagging-aware effective (unit, sub_unit_1), super_admin bypass, and the
+super-admin grant CRUD endpoints (roster-validated, '*' wildcards).
 """
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from parade_state.models import UserSubunitAssignment
-
-SUPER_ADMIN = {"user_id": "super-admin-test-id", "user_role": "super_admin"}
-# CRUD endpoints use role-specific param names for the actor.
-GRANT_SA = {"granted_by": "super-admin-test-id", "user_role": "super_admin"}
-REVOKE_SA = {"revoked_by": "super-admin-test-id", "user_role": "super_admin"}
+SUPER_ADMIN_SESSION = "super_admin"  # client_as shorthand for grant CRUD
+ADMIN_SESSION = "admin"
 
 
 # ============================================================================
@@ -26,39 +22,41 @@ REVOKE_SA = {"revoked_by": "super-admin-test-id", "user_role": "super_admin"}
 
 @pytest.mark.asyncio
 async def test_grant_requires_super_admin(
-    client: TestClient, sample_nominal_roll, sample_users, admin_id
+    client: TestClient, client_as, sample_nominal_roll, sample_users
 ):
     """Non-super-admins cannot grant assignments (403)."""
+    client = await client_as("admin")
     response = client.post(
         f"/api/v1/access-control/nominal-rolls/{sample_nominal_roll.id}"
         f"/users/{sample_users['user'].id}/subunit-assignments",
-        params={"granted_by": admin_id, "user_role": "admin"},
         json={"sub_unit_1": "Platoon 1"},
     )
     assert response.status_code == 403
+    assert response.json()["detail"] == "Super admin access required"
 
 
 @pytest.mark.asyncio
 async def test_grant_then_list_assignment(
-    client: TestClient, sample_nominal_roll, sample_users
+    client: TestClient, client_as, sample_nominal_roll, sample_users, sample_personnel
 ):
     """Super-admin can grant an assignment and list it back."""
+    client = await client_as("super_admin")
     user_id = str(sample_users["user"].id)
     nr_id = str(sample_nominal_roll.id)
 
     response = client.post(
         f"/api/v1/access-control/nominal-rolls/{nr_id}/users/{user_id}/subunit-assignments",
-        params=GRANT_SA,
         json={"sub_unit_1": "Platoon 1"},
     )
     assert response.status_code == 201
     created = response.json()
     assert created["sub_unit_1"] == "Platoon 1"
+    assert created["unit"] == "*"
 
     # List for NR (super-admin sees all).
+    client = await client_as("super_admin")
     response = client.get(
         f"/api/v1/access-control/nominal-rolls/{nr_id}/subunit-assignments",
-        params={"requesting_user_id": "super-admin-test-id", "requesting_user_role": "super_admin"},
     )
     assert response.status_code == 200
     assert any(a["sub_unit_1"] == "Platoon 1" for a in response.json())
@@ -66,80 +64,80 @@ async def test_grant_then_list_assignment(
 
 @pytest.mark.asyncio
 async def test_grant_duplicate_409(
-    client: TestClient, sample_nominal_roll, sample_users
+    client: TestClient, client_as, sample_nominal_roll, sample_users, sample_personnel
 ):
     """Granting the same (user, NR, sub_unit_1) twice returns 409."""
+    client = await client_as("super_admin")
     user_id = str(sample_users["user"].id)
     nr_id = str(sample_nominal_roll.id)
     payload = {"sub_unit_1": "Platoon 1"}
 
     first = client.post(
         f"/api/v1/access-control/nominal-rolls/{nr_id}/users/{user_id}/subunit-assignments",
-        params=GRANT_SA, json=payload,
+        json=payload,
     )
     assert first.status_code == 201
 
     second = client.post(
         f"/api/v1/access-control/nominal-rolls/{nr_id}/users/{user_id}/subunit-assignments",
-        params=GRANT_SA, json=payload,
+        json=payload,
     )
     assert second.status_code == 409
 
 
 @pytest.mark.asyncio
 async def test_revoke_assignment(
-    client: TestClient, sample_nominal_roll, sample_users
+    client: TestClient, client_as, sample_nominal_roll, sample_users, sample_personnel
 ):
     """Super-admin can revoke an assignment."""
+    client = await client_as("super_admin")
     user_id = str(sample_users["user"].id)
     nr_id = str(sample_nominal_roll.id)
 
     created = client.post(
         f"/api/v1/access-control/nominal-rolls/{nr_id}/users/{user_id}/subunit-assignments",
-        params=GRANT_SA, json={"sub_unit_1": "Platoon 1"},
+        json={"sub_unit_1": "Platoon 1"},
     ).json()
 
     response = client.delete(
         f"/api/v1/access-control/nominal-rolls/{nr_id}/users/{user_id}"
         f"/subunit-assignments/{created['id']}",
-        params=REVOKE_SA,
     )
     assert response.status_code == 200
 
     # List confirms it's gone.
+    client = await client_as("super_admin")
     remaining = client.get(
         f"/api/v1/access-control/nominal-rolls/{nr_id}/subunit-assignments",
-        params={"requesting_user_id": "super-admin-test-id", "requesting_user_role": "super_admin"},
     ).json()
     assert all(a["id"] != created["id"] for a in remaining)
 
 
 @pytest.mark.asyncio
 async def test_list_for_user_self_only(
-    client: TestClient, sample_nominal_roll, sample_users
+    client: TestClient, client_as, sample_nominal_roll, sample_users, sample_personnel
 ):
-    """A regular user can list their own assignments but not another user's."""
+    """A user can list their own assignments but not another user's."""
     user_id = str(sample_users["user"].id)
-    admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
 
-    client.post(
+    sa_client = await client_as("super_admin")
+    sa_client.post(
         f"/api/v1/access-control/nominal-rolls/{nr_id}/users/{user_id}/subunit-assignments",
-        params=GRANT_SA, json={"sub_unit_1": "Platoon 1"},
+        json={"sub_unit_1": "Platoon 1"},
     )
 
     # Self: OK.
+    client = await client_as(sample_users["user"])
     response = client.get(
         f"/api/v1/access-control/users/{user_id}/subunit-assignments",
-        params={"requesting_user_id": user_id, "requesting_user_role": "user"},
     )
     assert response.status_code == 200
     assert len(response.json()) == 1
 
     # Other user: 403.
     response = client.get(
-        f"/api/v1/access-control/users/{admin_id}/subunit-assignments",
-        params={"requesting_user_id": user_id, "requesting_user_role": "user"},
+        f"/api/v1/access-control/users/{str(sample_users['admin'].id)}/subunit-assignments",
     )
     assert response.status_code == 403
 
@@ -152,26 +150,25 @@ async def test_list_for_user_self_only(
 @pytest.mark.asyncio
 async def test_upsert_denied_without_assignment(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
     sample_users,
 ):
     """An admin with no assignment on the NR gets 403 on upsert."""
-    regular_id = str(sample_users["user"].id)
+    client = await client_as(sample_users["admin"])
     today = date.today().isoformat()
 
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": regular_id, "user_role": "user"},
         json={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "records": [
                 {
                     "personnel_id": str(sample_personnel[0].id),
                     "date": today,
-                    "status_am": "present",
-                    "status_pm": "absent",
+                    "status": "present",
                 }
             ],
         },
@@ -183,6 +180,7 @@ async def test_upsert_denied_without_assignment(
 @pytest.mark.asyncio
 async def test_upsert_allowed_with_matching_assignment(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
@@ -193,24 +191,24 @@ async def test_upsert_allowed_with_matching_assignment(
     nr_id = str(sample_nominal_roll.id)
     today = date.today().isoformat()
 
-    # Grant Platoon 1 only.
-    client.post(
+    # Grant Platoon 1 only (super-admin mints the grant).
+    sa_client = await client_as("super_admin")
+    sa_client.post(
         f"/api/v1/access-control/nominal-rolls/{nr_id}/users/{admin_id}/subunit-assignments",
-        params=GRANT_SA, json={"sub_unit_1": "Platoon 1"},
+        json={"sub_unit_1": "Platoon 1"},
     )
+    client = await client_as(sample_users["admin"])
 
     # Upsert for a Platoon 1 person → OK.
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={
             "nominal_roll_id": nr_id,
             "records": [
                 {
                     "personnel_id": str(sample_personnel[0].id),  # Platoon 1
                     "date": today,
-                    "status_am": "present",
-                    "status_pm": "present",
+                    "status": "present",
                 }
             ],
         },
@@ -221,6 +219,7 @@ async def test_upsert_allowed_with_matching_assignment(
 @pytest.mark.asyncio
 async def test_upsert_denied_for_unassigned_subunit(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
@@ -231,23 +230,23 @@ async def test_upsert_denied_for_unassigned_subunit(
     nr_id = str(sample_nominal_roll.id)
     today = date.today().isoformat()
 
-    client.post(
+    sa_client = await client_as("super_admin")
+    sa_client.post(
         f"/api/v1/access-control/nominal-rolls/{nr_id}/users/{admin_id}/subunit-assignments",
-        params=GRANT_SA, json={"sub_unit_1": "Platoon 1"},
+        json={"sub_unit_1": "Platoon 1"},
     )
+    client = await client_as(sample_users["admin"])
 
     # personnel[2] is in Platoon 2 → 403.
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={
             "nominal_roll_id": nr_id,
             "records": [
                 {
                     "personnel_id": str(sample_personnel[2].id),
                     "date": today,
-                    "status_am": "present",
-                    "status_pm": "present",
+                    "status": "present",
                 }
             ],
         },
@@ -259,23 +258,23 @@ async def test_upsert_denied_for_unassigned_subunit(
 @pytest.mark.asyncio
 async def test_upsert_super_admin_bypasses(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
 ):
     """Super-admin can upsert for any subunit without assignments."""
+    client = await client_as("super_admin")
     today = date.today().isoformat()
     response = client.put(
         "/api/v1/attendance/upsert",
-        params=SUPER_ADMIN,
         json={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "records": [
                 {
                     "personnel_id": str(sample_personnel[2].id),  # Platoon 2
                     "date": today,
-                    "status_am": "present",
-                    "status_pm": "present",
+                    "status": "present",
                 }
             ],
         },
@@ -286,6 +285,7 @@ async def test_upsert_super_admin_bypasses(
 @pytest.mark.asyncio
 async def test_upsert_tagging_aware_effective_subunit(
     client: TestClient,
+    client_as,
     db_session: AsyncSession,
     sample_nominal_roll,
     sample_personnel,
@@ -329,23 +329,23 @@ async def test_upsert_tagging_aware_effective_subunit(
     await db_session.refresh(tagging)
 
     # Grant admin only Platoon 1.
-    client.post(
+    sa_client = await client_as("super_admin")
+    sa_client.post(
         f"/api/v1/access-control/nominal-rolls/{nr_id}/users/{admin_id}/subunit-assignments",
-        params=GRANT_SA, json={"sub_unit_1": "Platoon 1"},
+        json={"sub_unit_1": "Platoon 1"},
     )
 
     # Upsert for personnel[2] (canonical Platoon 2, effective Platoon 1) → OK.
+    client = await client_as(sample_users["admin"])
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={
             "nominal_roll_id": nr_id,
             "records": [
                 {
                     "personnel_id": str(sample_personnel[2].id),
                     "date": today,
-                    "status_am": "present",
-                    "status_pm": "present",
+                    "status": "present",
                 }
             ],
         },
@@ -361,25 +361,23 @@ async def test_upsert_tagging_aware_effective_subunit(
 @pytest.mark.asyncio
 async def test_copy_remarks_denied_without_assignment(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_attendance_scope,
     sample_attendance,
     sample_users,
 ):
     """copy-remarks returns 403 when the caller has no assignment on the NR."""
-    regular_id = str(sample_users["user"].id)
+    client = await client_as(sample_users["admin"])
     today = date.today().isoformat()
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
 
     response = client.post(
         "/api/v1/attendance/copy-remarks",
         params={
             "nominal_roll_id": str(sample_nominal_roll.id),
-            "source_date": today,
-            "source_slot": "am",
+            "source_date": yesterday,
             "dest_date": today,
-            "dest_slot": "pm",
-            "user_id": regular_id,
-            "user_role": "user",
         },
     )
     assert response.status_code == 403

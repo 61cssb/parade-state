@@ -20,16 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from parade_state.models import (
     Grouping,
     GroupingGroup,
-    GroupingMemberState,
     GroupingMembership,
+    GroupingMemberState,
     NominalRoll,
     Personnel,
 )
 from parade_state.utils import utc_dt
-
-SA = {"user_id": "super-admin-test-id", "user_role": "super_admin"}
-ADMIN = {"user_id": "admin-id", "user_role": "admin"}
-USER = {"user_id": "user-id", "user_role": "user"}
 
 BASE = "/api/v1/groupings"
 
@@ -45,11 +41,11 @@ def _groups_by_label(response_body: dict) -> dict[str, dict]:
 
 @pytest.mark.asyncio
 async def test_create_grouping_on_active_nr(
-    client: TestClient, sample_attendance_scope
+    client: TestClient, client_as, sample_attendance_scope
 ):
+    client = await client_as("super_admin")
     response = client.post(
         f"{BASE}/",
-        params=SA,
         json={
             "label": "Duty Groups",
             "groups": [{"label": "Grp 10"}, {"label": "Grp 2"}],
@@ -70,11 +66,11 @@ async def test_create_grouping_on_active_nr(
 
 @pytest.mark.asyncio
 async def test_create_grouping_requires_active_nr(
-    client: TestClient, sample_nominal_roll
+    client: TestClient, client_as, sample_nominal_roll
 ):
+    client = await client_as("super_admin")
     response = client.post(
         f"{BASE}/",
-        params=SA,
         json={"label": "No Roll", "groups": []},
     )
     assert response.status_code == 400
@@ -83,21 +79,22 @@ async def test_create_grouping_requires_active_nr(
 
 @pytest.mark.asyncio
 async def test_create_grouping_duplicate_label(
-    client: TestClient, sample_attendance_scope
+    client: TestClient, client_as, sample_attendance_scope
 ):
-    first = client.post(f"{BASE}/", params=SA, json={"label": "Same"})
+    client = await client_as("super_admin")
+    first = client.post(f"{BASE}/", json={"label": "Same"})
     assert first.status_code == 201
-    second = client.post(f"{BASE}/", params=SA, json={"label": "Same"})
+    second = client.post(f"{BASE}/", json={"label": "Same"})
     assert second.status_code == 409
 
 
 @pytest.mark.asyncio
 async def test_create_grouping_duplicate_group_labels(
-    client: TestClient, sample_attendance_scope
+    client: TestClient, client_as, sample_attendance_scope
 ):
+    client = await client_as("super_admin")
     response = client.post(
         f"{BASE}/",
-        params=SA,
         json={
             "label": "Dupes",
             "groups": [{"label": "A"}, {"label": "A"}],
@@ -109,11 +106,11 @@ async def test_create_grouping_duplicate_group_labels(
 
 @pytest.mark.asyncio
 async def test_create_grouping_rejects_bad_charset(
-    client: TestClient, sample_attendance_scope
+    client: TestClient, client_as, sample_attendance_scope
 ):
+    client = await client_as("super_admin")
     response = client.post(
         f"{BASE}/",
-        params=SA,
         json={"label": "Bad <script>", "groups": []},
     )
     assert response.status_code == 422
@@ -121,10 +118,11 @@ async def test_create_grouping_rejects_bad_charset(
 
 @pytest.mark.asyncio
 async def test_create_grouping_non_super_admin_forbidden(
-    client: TestClient, sample_attendance_scope
+    client: TestClient, client_as, sample_attendance_scope
 ):
-    for params in (ADMIN, USER):
-        response = client.post(f"{BASE}/", params=params, json={"label": "X"})
+    for role in ("admin", "user"):
+        client = await client_as(role)
+        response = client.post(f"{BASE}/", json={"label": "X"})
         assert response.status_code == 403
 
 
@@ -135,9 +133,14 @@ async def test_create_grouping_non_super_admin_forbidden(
 
 @pytest.mark.asyncio
 async def test_list_scopes_to_active_nr(
-    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
-    sample_grouping, sample_users,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_attendance_scope,
+    sample_grouping,
+    sample_users,
 ):
+    client = await client_as("admin")
     # A grouping on a different (non-active) roll must not be listed.
     other_roll = NominalRoll(
         caa=date(2024, 2, 1),
@@ -156,7 +159,7 @@ async def test_list_scopes_to_active_nr(
     )
     await db_session.commit()
 
-    response = client.get(f"{BASE}/", params=USER)
+    response = client.get(f"{BASE}/")
     assert response.status_code == 200
     labels = [g["label"] for g in response.json()]
     assert labels == ["Test Grouping"]
@@ -164,19 +167,24 @@ async def test_list_scopes_to_active_nr(
 
 @pytest.mark.asyncio
 async def test_list_empty_without_active_nr(
-    client: TestClient, sample_nominal_roll
+    client: TestClient, client_as, sample_nominal_roll
 ):
-    response = client.get(f"{BASE}/", params=USER)
+    client = await client_as("admin")
+    response = client.get(f"{BASE}/")
     assert response.status_code == 200
     assert response.json() == []
 
 
 @pytest.mark.asyncio
 async def test_get_grouping_includes_member_counts(
-    client: TestClient, sample_attendance_scope, sample_grouping,
+    client: TestClient,
+    client_as,
+    sample_attendance_scope,
+    sample_grouping,
     sample_grouping_memberships,
 ):
-    response = client.get(f"{BASE}/{sample_grouping.id}", params=USER)
+    client = await client_as("admin")
+    response = client.get(f"{BASE}/{sample_grouping.id}")
     assert response.status_code == 200
     groups = _groups_by_label(response.json())
     assert groups["Grp 1"]["member_count"] == 1
@@ -185,11 +193,40 @@ async def test_get_grouping_includes_member_counts(
 
 @pytest.mark.asyncio
 async def test_get_grouping_on_non_active_nr_404(
-    client: TestClient, sample_grouping, sample_nominal_roll,
+    client: TestClient,
+    client_as,
+    sample_grouping,
+    sample_nominal_roll,
 ):
+    client = await client_as("admin")
     # sample_grouping's roll is not active for attendance.
-    response = client.get(f"{BASE}/{sample_grouping.id}", params=SA)
+    response = client.get(f"{BASE}/{sample_grouping.id}")
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_reads_open_to_every_authenticated_role(
+    client: TestClient,
+    client_as,
+    sample_grouping,
+    sample_attendance_scope,
+):
+    # A regular user-role session can read list/detail/export — the
+    # grouping page renders for every role, so its API reads must too.
+    client = await client_as("user")
+    assert client.get(f"{BASE}/").status_code == 200
+    assert client.get(f"{BASE}/{sample_grouping.id}").status_code == 200
+    assert client.get(f"{BASE}/{sample_grouping.id}/export").status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_reads_require_authentication(
+    client: TestClient,
+    sample_grouping,
+    sample_attendance_scope,
+):
+    assert client.get(f"{BASE}/").status_code == 401
+    assert client.get(f"{BASE}/{sample_grouping.id}").status_code == 401
 
 
 # ============================================================================
@@ -199,56 +236,56 @@ async def test_get_grouping_on_non_active_nr_404(
 
 @pytest.mark.asyncio
 async def test_patch_renames_label(
-    client: TestClient, sample_attendance_scope, sample_grouping
+    client: TestClient, client_as, sample_attendance_scope, sample_grouping
 ):
-    response = client.patch(
-        f"{BASE}/{sample_grouping.id}", params=SA, json={"label": "Renamed"}
-    )
+    client = await client_as("super_admin")
+    response = client.patch(f"{BASE}/{sample_grouping.id}", json={"label": "Renamed"})
     assert response.status_code == 200
     assert response.json()["label"] == "Renamed"
 
 
 @pytest.mark.asyncio
 async def test_patch_label_conflict(
-    client: TestClient, sample_attendance_scope, sample_grouping
+    client: TestClient, client_as, sample_attendance_scope, sample_grouping
 ):
-    client.post(f"{BASE}/", params=SA, json={"label": "Taken"})
-    response = client.patch(
-        f"{BASE}/{sample_grouping.id}", params=SA, json={"label": "Taken"}
-    )
+    client = await client_as("super_admin")
+    client.post(f"{BASE}/", json={"label": "Taken"})
+    response = client.patch(f"{BASE}/{sample_grouping.id}", json={"label": "Taken"})
     assert response.status_code == 409
 
 
 @pytest.mark.asyncio
 async def test_patch_flags_immutable(
-    client: TestClient, sample_attendance_scope, sample_grouping
+    client: TestClient, client_as, sample_attendance_scope, sample_grouping
 ):
+    client = await client_as("super_admin")
     for payload in (
         {"multiple_membership": True},
         {"allow_ungrouped": False},
     ):
-        response = client.patch(
-            f"{BASE}/{sample_grouping.id}", params=SA, json=payload
-        )
+        response = client.patch(f"{BASE}/{sample_grouping.id}", json=payload)
         assert response.status_code == 400
         assert "cannot be changed after creation" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
 async def test_patch_group_set_rename_reorder_add(
-    client: TestClient, sample_attendance_scope, sample_grouping
+    client: TestClient, client_as, sample_attendance_scope, sample_grouping
 ):
-    detail = client.get(f"{BASE}/{sample_grouping.id}", params=SA).json()
+    client = await client_as("super_admin")
+    detail = client.get(f"{BASE}/{sample_grouping.id}").json()
     existing = _groups_by_label(detail)
 
     response = client.patch(
         f"{BASE}/{sample_grouping.id}",
-        params=SA,
         json={
             "groups": [
-                {"id": existing["Grp 2"]["id"], "label": "Second"},   # rename + move up
-                {"id": existing["Grp 1"]["id"], "label": "Grp 1"},    # unchanged, moved down
-                {"label": "Brand New"},                               # addition
+                {"id": existing["Grp 2"]["id"], "label": "Second"},  # rename + move up
+                {
+                    "id": existing["Grp 1"]["id"],
+                    "label": "Grp 1",
+                },  # unchanged, moved down
+                {"label": "Brand New"},  # addition
             ]
         },
     )
@@ -263,18 +300,24 @@ async def test_patch_group_set_rename_reorder_add(
 
 @pytest.mark.asyncio
 async def test_patch_rename_propagates_to_memberships(
-    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
-    sample_grouping, sample_grouping_memberships,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_attendance_scope,
+    sample_grouping,
+    sample_grouping_memberships,
 ):
-    detail = client.get(f"{BASE}/{sample_grouping.id}", params=SA).json()
+    client = await client_as("super_admin")
+    detail = client.get(f"{BASE}/{sample_grouping.id}").json()
     existing = _groups_by_label(detail)
     response = client.patch(
         f"{BASE}/{sample_grouping.id}",
-        params=SA,
-        json={"groups": [
-            {"id": existing["Grp 1"]["id"], "label": "Renamed 1"},
-            {"id": existing["Grp 2"]["id"], "label": "Grp 2"},
-        ]},
+        json={
+            "groups": [
+                {"id": existing["Grp 1"]["id"], "label": "Renamed 1"},
+                {"id": existing["Grp 2"]["id"], "label": "Grp 2"},
+            ]
+        },
     )
     assert response.status_code == 200
     grouping_id = str(sample_grouping.id)
@@ -282,9 +325,16 @@ async def test_patch_rename_propagates_to_memberships(
 
     # The membership still points at the renamed group row.
     memberships = (
-        (await db_session.execute(select(GroupingMembership).where(
-            GroupingMembership.grouping_id == grouping_id)))
-    ).scalars().all()
+        (
+            await db_session.execute(
+                select(GroupingMembership).where(
+                    GroupingMembership.grouping_id == grouping_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(memberships) == 2
     labels = {
         str(g.id): g.label
@@ -295,22 +345,33 @@ async def test_patch_rename_propagates_to_memberships(
 
 @pytest.mark.asyncio
 async def test_patch_group_removal_cascades_memberships(
-    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
-    sample_grouping, sample_grouping_memberships,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_attendance_scope,
+    sample_grouping,
+    sample_grouping_memberships,
 ):
-    detail = client.get(f"{BASE}/{sample_grouping.id}", params=SA).json()
+    client = await client_as("super_admin")
+    detail = client.get(f"{BASE}/{sample_grouping.id}").json()
     existing = _groups_by_label(detail)
     response = client.patch(
         f"{BASE}/{sample_grouping.id}",
-        params=SA,
         json={"groups": [{"id": existing["Grp 2"]["id"], "label": "Grp 2"}]},
     )
     assert response.status_code == 200
 
     memberships = (
-        (await db_session.execute(select(GroupingMembership).where(
-            GroupingMembership.grouping_id == sample_grouping.id)))
-    ).scalars().all()
+        (
+            await db_session.execute(
+                select(GroupingMembership).where(
+                    GroupingMembership.grouping_id == sample_grouping.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     # Grp 1's member became ungrouped; only Grp 2's member remains.
     assert len(memberships) == 1
     assert memberships[0].group_id == existing["Grp 2"]["id"]
@@ -318,9 +379,14 @@ async def test_patch_group_removal_cascades_memberships(
 
 @pytest.mark.asyncio
 async def test_patch_group_removal_blocked_when_ungrouped_not_allowed(
-    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
-    sample_users, sample_personnel,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_attendance_scope,
+    sample_users,
+    sample_personnel,
 ):
+    client = await client_as("super_admin")
     strict = Grouping(
         label="Strict",
         nominal_roll_id=str(sample_attendance_scope.id),
@@ -341,20 +407,18 @@ async def test_patch_group_removal_blocked_when_ungrouped_not_allowed(
     )
     await db_session.commit()
 
-    response = client.patch(
-        f"{BASE}/{strict.id}", params=SA, json={"groups": []}
-    )
+    response = client.patch(f"{BASE}/{strict.id}", json={"groups": []})
     assert response.status_code == 400
     assert "would be left" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
 async def test_patch_unknown_group_id_rejected(
-    client: TestClient, sample_attendance_scope, sample_grouping
+    client: TestClient, client_as, sample_attendance_scope, sample_grouping
 ):
+    client = await client_as("super_admin")
     response = client.patch(
         f"{BASE}/{sample_grouping.id}",
-        params=SA,
         json={"groups": [{"id": "not-a-known-id", "label": "X"}]},
     )
     assert response.status_code == 400
@@ -367,9 +431,15 @@ async def test_patch_unknown_group_id_rejected(
 
 @pytest.mark.asyncio
 async def test_delete_grouping_cascades(
-    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
-    sample_grouping, sample_grouping_memberships, sample_personnel,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_attendance_scope,
+    sample_grouping,
+    sample_grouping_memberships,
+    sample_personnel,
 ):
+    client = await client_as("super_admin")
     db_session.add(
         GroupingMemberState(
             grouping_id=sample_grouping.id,
@@ -381,7 +451,7 @@ async def test_delete_grouping_cascades(
     )
     await db_session.commit()
 
-    response = client.delete(f"{BASE}/{sample_grouping.id}", params=SA)
+    response = client.delete(f"{BASE}/{sample_grouping.id}")
     assert response.status_code == 204
 
     for model in (Grouping, GroupingGroup, GroupingMembership, GroupingMemberState):
@@ -391,10 +461,11 @@ async def test_delete_grouping_cascades(
 
 @pytest.mark.asyncio
 async def test_delete_grouping_non_super_admin_forbidden(
-    client: TestClient, sample_attendance_scope, sample_grouping
+    client: TestClient, client_as, sample_attendance_scope, sample_grouping
 ):
-    for params in (ADMIN, USER):
-        response = client.delete(f"{BASE}/{sample_grouping.id}", params=params)
+    for role in ("admin", "user"):
+        client = await client_as(role)
+        response = client.delete(f"{BASE}/{sample_grouping.id}")
         assert response.status_code == 403
 
 
@@ -405,15 +476,18 @@ async def test_delete_grouping_non_super_admin_forbidden(
 
 @pytest.mark.asyncio
 async def test_set_personnel_groups_round_trip(
-    client: TestClient, sample_attendance_scope, sample_grouping,
+    client: TestClient,
+    client_as,
+    sample_attendance_scope,
+    sample_grouping,
     sample_personnel,
 ):
-    groups = _groups_by_label(client.get(f"{BASE}/{sample_grouping.id}", params=SA).json())
+    client = await client_as("super_admin")
+    groups = _groups_by_label(client.get(f"{BASE}/{sample_grouping.id}").json())
     pid = str(sample_personnel[0].id)
 
     response = client.put(
         f"{BASE}/{sample_grouping.id}/personnel/{pid}/groups",
-        params=SA,
         json={"group_ids": [groups["Grp 2"]["id"]]},
     )
     assert response.status_code == 200
@@ -422,7 +496,6 @@ async def test_set_personnel_groups_round_trip(
     # Moving to another group is a set replace.
     response = client.put(
         f"{BASE}/{sample_grouping.id}/personnel/{pid}/groups",
-        params=SA,
         json={"group_ids": [groups["Grp 1"]["id"]]},
     )
     assert response.status_code == 200
@@ -433,13 +506,16 @@ async def test_set_personnel_groups_round_trip(
 
 @pytest.mark.asyncio
 async def test_second_group_rejected_without_multiple_membership(
-    client: TestClient, sample_attendance_scope, sample_grouping,
+    client: TestClient,
+    client_as,
+    sample_attendance_scope,
+    sample_grouping,
     sample_personnel,
 ):
-    groups = _groups_by_label(client.get(f"{BASE}/{sample_grouping.id}", params=SA).json())
+    client = await client_as("super_admin")
+    groups = _groups_by_label(client.get(f"{BASE}/{sample_grouping.id}").json())
     response = client.put(
         f"{BASE}/{sample_grouping.id}/personnel/{sample_personnel[0].id}/groups",
-        params=SA,
         json={"group_ids": [groups["Grp 1"]["id"], groups["Grp 2"]["id"]]},
     )
     assert response.status_code == 400
@@ -448,9 +524,14 @@ async def test_second_group_rejected_without_multiple_membership(
 
 @pytest.mark.asyncio
 async def test_multiple_groups_allowed_when_enabled(
-    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
-    sample_users, sample_personnel,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_attendance_scope,
+    sample_users,
+    sample_personnel,
 ):
+    client = await client_as("super_admin")
     multi = Grouping(
         label="Multi",
         nominal_roll_id=str(sample_attendance_scope.id),
@@ -466,7 +547,6 @@ async def test_multiple_groups_allowed_when_enabled(
     ids = [str(g.id) for g in multi.groups]
     response = client.put(
         f"{BASE}/{multi.id}/personnel/{sample_personnel[0].id}/groups",
-        params=SA,
         json={"group_ids": ids},
     )
     assert response.status_code == 200
@@ -476,9 +556,14 @@ async def test_multiple_groups_allowed_when_enabled(
 
 @pytest.mark.asyncio
 async def test_empty_set_rejected_when_ungrouped_not_allowed(
-    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
-    sample_users, sample_personnel,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_attendance_scope,
+    sample_users,
+    sample_personnel,
 ):
+    client = await client_as("super_admin")
     strict = Grouping(
         label="Strict Roster",
         nominal_roll_id=str(sample_attendance_scope.id),
@@ -492,7 +577,6 @@ async def test_empty_set_rejected_when_ungrouped_not_allowed(
 
     response = client.put(
         f"{BASE}/{strict.id}/personnel/{sample_personnel[0].id}/groups",
-        params=SA,
         json={"group_ids": []},
     )
     assert response.status_code == 400
@@ -501,12 +585,15 @@ async def test_empty_set_rejected_when_ungrouped_not_allowed(
 
 @pytest.mark.asyncio
 async def test_set_groups_unknown_group_id(
-    client: TestClient, sample_attendance_scope, sample_grouping,
+    client: TestClient,
+    client_as,
+    sample_attendance_scope,
+    sample_grouping,
     sample_personnel,
 ):
+    client = await client_as("super_admin")
     response = client.put(
         f"{BASE}/{sample_grouping.id}/personnel/{sample_personnel[0].id}/groups",
-        params=SA,
         json={"group_ids": ["bogus"]},
     )
     assert response.status_code == 400
@@ -514,9 +601,14 @@ async def test_set_groups_unknown_group_id(
 
 @pytest.mark.asyncio
 async def test_set_groups_personnel_from_other_roll_404(
-    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
-    sample_grouping, sample_users,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_attendance_scope,
+    sample_grouping,
+    sample_users,
 ):
+    client = await client_as("super_admin")
     other_roll = NominalRoll(
         caa=date(2024, 6, 1),
         csv_hash="hash-two",
@@ -539,7 +631,6 @@ async def test_set_groups_personnel_from_other_roll_404(
 
     response = client.put(
         f"{BASE}/{sample_grouping.id}/personnel/{str(outsider.id)}/groups",
-        params=SA,
         json={"group_ids": []},
     )
     assert response.status_code == 404
@@ -547,13 +638,16 @@ async def test_set_groups_personnel_from_other_roll_404(
 
 @pytest.mark.asyncio
 async def test_set_groups_non_super_admin_forbidden(
-    client: TestClient, sample_attendance_scope, sample_grouping,
+    client: TestClient,
+    client_as,
+    sample_attendance_scope,
+    sample_grouping,
     sample_personnel,
 ):
-    for params in (ADMIN, USER):
+    for role in ("admin", "user"):
+        client = await client_as(role)
         response = client.put(
             f"{BASE}/{sample_grouping.id}/personnel/{sample_personnel[0].id}/groups",
-            params=params,
             json={"group_ids": []},
         )
         assert response.status_code == 403
@@ -566,14 +660,19 @@ async def test_set_groups_non_super_admin_forbidden(
 
 @pytest.mark.asyncio
 async def test_member_state_upsert_and_clear(
-    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
-    sample_grouping, sample_personnel,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_attendance_scope,
+    sample_grouping,
+    sample_personnel,
 ):
+    client = await client_as("super_admin")
     pid = str(sample_personnel[0].id)
     grouping_id = str(sample_grouping.id)
     url = f"{BASE}/{grouping_id}/personnel/{pid}/state"
 
-    response = client.patch(url, params=SA, json={"checkbox": True, "remarks": "driver"})
+    response = client.patch(url, json={"checkbox": True, "remarks": "driver"})
     assert response.status_code == 200
 
     async def _load_state() -> GroupingMemberState | None:
@@ -592,7 +691,7 @@ async def test_member_state_upsert_and_clear(
     assert state.remarks == "driver"
 
     # Empty string clears remarks; checkbox untouched.
-    response = client.patch(url, params=SA, json={"remarks": ""})
+    response = client.patch(url, json={"remarks": ""})
     assert response.status_code == 200
     db_session.expire_all()
     state = await _load_state()
@@ -602,12 +701,15 @@ async def test_member_state_upsert_and_clear(
 
 @pytest.mark.asyncio
 async def test_member_state_non_super_admin_forbidden(
-    client: TestClient, sample_attendance_scope, sample_grouping,
+    client: TestClient,
+    client_as,
+    sample_attendance_scope,
+    sample_grouping,
     sample_personnel,
 ):
+    client = await client_as("admin")
     response = client.patch(
         f"{BASE}/{sample_grouping.id}/personnel/{sample_personnel[0].id}/state",
-        params=ADMIN,
         json={"checkbox": True},
     )
     assert response.status_code == 403
@@ -620,12 +722,15 @@ async def test_member_state_non_super_admin_forbidden(
 
 @pytest.mark.asyncio
 async def test_clone_structure_only(
-    client: TestClient, sample_attendance_scope,
-    sample_grouping, sample_grouping_memberships,
+    client: TestClient,
+    client_as,
+    sample_attendance_scope,
+    sample_grouping,
+    sample_grouping_memberships,
 ):
+    client = await client_as("super_admin")
     response = client.post(
         f"{BASE}/{sample_grouping.id}/clone",
-        params=SA,
         json={"label": "Test Grouping (copy)", "include_memberships": False},
     )
     assert response.status_code == 201, response.text
@@ -637,9 +742,16 @@ async def test_clone_structure_only(
 
 @pytest.mark.asyncio
 async def test_clone_with_memberships_and_state(
-    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
-    sample_grouping, sample_grouping_memberships, sample_personnel, sample_users,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_attendance_scope,
+    sample_grouping,
+    sample_grouping_memberships,
+    sample_personnel,
+    sample_users,
 ):
+    client = await client_as("super_admin")
     db_session.add(
         GroupingMemberState(
             grouping_id=sample_grouping.id,
@@ -653,32 +765,45 @@ async def test_clone_with_memberships_and_state(
 
     response = client.post(
         f"{BASE}/{sample_grouping.id}/clone",
-        params=SA,
         json={"label": "With Members", "include_memberships": True},
     )
     assert response.status_code == 201
     clone_id = response.json()["id"]
 
     memberships = (
-        (await db_session.execute(select(GroupingMembership).where(
-            GroupingMembership.grouping_id == clone_id)))
-    ).scalars().all()
+        (
+            await db_session.execute(
+                select(GroupingMembership).where(
+                    GroupingMembership.grouping_id == clone_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(memberships) == 2
     states = (
-        (await db_session.execute(select(GroupingMemberState).where(
-            GroupingMemberState.grouping_id == clone_id)))
-    ).scalars().all()
+        (
+            await db_session.execute(
+                select(GroupingMemberState).where(
+                    GroupingMemberState.grouping_id == clone_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(states) == 1
     assert states[0].remarks == "keep me"
 
 
 @pytest.mark.asyncio
 async def test_clone_duplicate_label_409(
-    client: TestClient, sample_attendance_scope, sample_grouping
+    client: TestClient, client_as, sample_attendance_scope, sample_grouping
 ):
+    client = await client_as("super_admin")
     response = client.post(
         f"{BASE}/{sample_grouping.id}/clone",
-        params=SA,
         json={"label": "Test Grouping"},
     )
     assert response.status_code == 409
@@ -692,10 +817,14 @@ async def test_clone_duplicate_label_409(
 async def _activate_roll(db_session: AsyncSession, roll: NominalRoll) -> None:
     """Make ``roll`` the attendance-active NR, deactivating others."""
     others = (
-        await db_session.execute(
-            select(NominalRoll).where(NominalRoll.attendance_active.is_(True))
+        (
+            await db_session.execute(
+                select(NominalRoll).where(NominalRoll.attendance_active.is_(True))
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for other in others:
         other.attendance_active = False
     roll.attendance_active = True
@@ -705,10 +834,16 @@ async def _activate_roll(db_session: AsyncSession, roll: NominalRoll) -> None:
 
 @pytest.mark.asyncio
 async def test_copy_from_previous_relinks_by_pers_no(
-    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
-    sample_grouping, sample_grouping_memberships, sample_personnel,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_attendance_scope,
+    sample_grouping,
+    sample_grouping_memberships,
+    sample_personnel,
     sample_users,
 ):
+    client = await client_as("super_admin")
     # New roll: person 0's pers_no matches, person 1 does not, plus a
     # newcomer with no counterpart.
     new_roll = NominalRoll(
@@ -743,7 +878,6 @@ async def test_copy_from_previous_relinks_by_pers_no(
 
     response = client.post(
         f"{BASE}/copy-from-previous",
-        params=SA,
         json={"source_grouping_id": str(sample_grouping.id)},
     )
     assert response.status_code == 201, response.text
@@ -758,9 +892,13 @@ async def test_copy_from_previous_relinks_by_pers_no(
 
 @pytest.mark.asyncio
 async def test_copy_from_previous_label_collision(
-    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_attendance_scope,
     sample_users,
 ):
+    client = await client_as("super_admin")
     # Previous roll (activated earlier, now inactive) carrying the source.
     previous_roll = NominalRoll(
         caa=date(2023, 12, 1),
@@ -792,14 +930,12 @@ async def test_copy_from_previous_label_collision(
 
     response = client.post(
         f"{BASE}/copy-from-previous",
-        params=SA,
         json={"source_grouping_id": str(source.id)},
     )
     assert response.status_code == 409, response.text
 
     explicit = client.post(
         f"{BASE}/copy-from-previous",
-        params=SA,
         json={
             "source_grouping_id": str(source.id),
             "label": "Old Label 2026-09",
@@ -811,11 +947,11 @@ async def test_copy_from_previous_label_collision(
 
 @pytest.mark.asyncio
 async def test_copy_from_previous_without_previous_roll(
-    client: TestClient, sample_attendance_scope, sample_grouping
+    client: TestClient, client_as, sample_attendance_scope, sample_grouping
 ):
+    client = await client_as("super_admin")
     response = client.post(
         f"{BASE}/copy-from-previous",
-        params=SA,
         json={"source_grouping_id": str(sample_grouping.id)},
     )
     # The source grouping is on the active roll itself; no grouping on a
@@ -830,10 +966,16 @@ async def test_copy_from_previous_without_previous_roll(
 
 @pytest.mark.asyncio
 async def test_export_csv_columns_and_content(
-    client: TestClient, db_session: AsyncSession, sample_attendance_scope,
-    sample_grouping, sample_grouping_memberships, sample_personnel,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_attendance_scope,
+    sample_grouping,
+    sample_grouping_memberships,
+    sample_personnel,
     sample_users,
 ):
+    client = await client_as("admin")
     db_session.add(
         GroupingMemberState(
             grouping_id=sample_grouping.id,
@@ -845,13 +987,19 @@ async def test_export_csv_columns_and_content(
     )
     await db_session.commit()
 
-    response = client.get(f"{BASE}/{sample_grouping.id}/export", params=USER)
+    response = client.get(f"{BASE}/{sample_grouping.id}/export")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/csv")
 
     rows = list(csv.reader(io.StringIO(response.text)))
     assert rows[0] == [
-        "Group", "Rank", "Name", "Unit", "Sub Unit", "Checkbox", "Remarks",
+        "Group",
+        "Rank",
+        "Name",
+        "Unit",
+        "Sub Unit",
+        "Checkbox",
+        "Remarks",
     ]
     by_name = {row[2]: row for row in rows[1:]}
     assert by_name["John Doe"][0] == "Grp 1"

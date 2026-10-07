@@ -46,21 +46,15 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("label", name="uq_taggings_label"),
     )
-    op.create_index(
-        "ix_taggings_id", "taggings", ["id"], unique=False
-    )
-    op.create_index(
-        "ix_taggings_label", "taggings", ["label"], unique=False
-    )
+    op.create_index("ix_taggings_id", "taggings", ["id"], unique=False)
+    op.create_index("ix_taggings_label", "taggings", ["label"], unique=False)
     op.create_index(
         "ix_taggings_nominal_roll_id",
         "taggings",
         ["nominal_roll_id"],
         unique=False,
     )
-    op.create_index(
-        "ix_taggings_updated_at", "taggings", ["updated_at"], unique=False
-    )
+    op.create_index("ix_taggings_updated_at", "taggings", ["updated_at"], unique=False)
 
     # --- tagging_entries ---
     op.create_table(
@@ -77,20 +71,14 @@ def upgrade() -> None:
         sa.Column("to_sub_unit_2", sa.String(length=255), nullable=True),
         sa.Column("to_sub_unit_3", sa.String(length=255), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["tagging_id"], ["taggings.id"], ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["personnel_id"], ["personnel.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["tagging_id"], ["taggings.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["personnel_id"], ["personnel.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "tagging_id", "personnel_id", name="uq_tagging_entry_person"
         ),
     )
-    op.create_index(
-        "ix_tagging_entries_id", "tagging_entries", ["id"], unique=False
-    )
+    op.create_index("ix_tagging_entries_id", "tagging_entries", ["id"], unique=False)
     op.create_index(
         "ix_tagging_entries_tagging_id",
         "tagging_entries",
@@ -107,9 +95,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Drop tagging_entries + taggings tables."""
-    op.drop_index(
-        "ix_tagging_entries_personnel_id", table_name="tagging_entries"
-    )
+    op.drop_index("ix_tagging_entries_personnel_id", table_name="tagging_entries")
     op.drop_index("ix_tagging_entries_tagging_id", table_name="tagging_entries")
     op.drop_index("ix_tagging_entries_id", table_name="tagging_entries")
     op.drop_table("tagging_entries")

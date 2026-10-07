@@ -1,9 +1,10 @@
 """Audit log API endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from parade_state.auth.dependencies import require_admin_user
 from parade_state.db import get_db_session
 from parade_state.models import AuditLog, User
 from parade_state.models.schemas import AuditLogListItem, AuditLogListResponse
@@ -20,8 +21,7 @@ async def list_audit_logs(
     ),
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
-    user_id: str = Query(..., description="Requesting user ID"),
-    user_role: str = Query(..., description="Requesting user role"),
+    user: User = Depends(require_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> AuditLogListResponse:
     """List audit log entries with optional filtering and pagination.
@@ -29,21 +29,9 @@ async def list_audit_logs(
     Returns entries ordered by timestamp desc (newest first).
     User name/email are resolved via left outer join on User.
 
-    Requires admin or super_admin role.
+    Caller identity is session-derived (issue 31): requires an
+    authenticated admin or super_admin session.
     """
-    if user_role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and super admins can view audit logs",
-        )
-
-    user_result = await db.execute(select(User).where(User.id == user_id))
-    if not user_result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
-
     # Build filter conditions (reused for both data and count queries)
     conditions = []
     if entity_type is not None:

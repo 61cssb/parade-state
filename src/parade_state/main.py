@@ -5,7 +5,6 @@ import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -13,9 +12,7 @@ from jinja2 import Environment, FileSystemLoader
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import RedirectResponse
 
-# Load environment variables from .env file
-load_dotenv()
-
+# .env is loaded by the package __init__ before this import.
 from parade_state.admin_routes import router as admin_router
 from parade_state.api import (
     access_control,
@@ -26,6 +23,8 @@ from parade_state.api import (
     csv_upload,
     db_restore,
     deferments,
+    discussions,
+    feature_access,
     groupings,
     nominal_rolls,
     personnel,
@@ -36,6 +35,10 @@ from parade_state.api import (
 from parade_state.auth.admin_dependencies import get_current_admin_user_optional
 from parade_state.config import Settings, get_settings
 from parade_state.db import init_database
+from parade_state.feature_access import (
+    FeatureAccessMiddleware,
+    require_feature_access,
+)
 from parade_state.features import FeatureDisabledError, feature_label, require_feature
 from parade_state.web.attendance import router as web_attendance_router
 from parade_state.web.auth import router as web_auth_router
@@ -127,6 +130,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         https_only=settings.AUTH_COOKIE_SECURE,  # Secure flag on the OAuth-state cookie
     )
 
+    # Feature-access matrix (issue 37): stash the per-role matrix on
+    # request.state for page renders (sidebar + page-route gates); API
+    # edges use require_feature_access instead. Fails open.
+    app.add_middleware(FeatureAccessMiddleware)
+
     # Include routers
     # User-facing web routes (OAuth flows, redirects)
     app.include_router(web_auth_router, prefix="/auth", tags=["web-auth"])
@@ -161,16 +169,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         groupings.router,
         prefix="/api/v1/groupings",
         tags=["groupings"],
-        dependencies=[Depends(require_feature("FEATURE_GROUPING"))],
+        dependencies=[
+            Depends(require_feature("FEATURE_GROUPING")),
+            # Matrix gate (issue 37): grouping hidden from admins when
+            # toggled off in Settings. Super-admins bypass.
+            Depends(require_feature_access("grouping")),
+        ],
     )
     app.include_router(sessions.router, prefix="/api/v1/sessions", tags=["sessions"])
     app.include_router(
         attendance.router,
         prefix="/api/v1/attendance",
         tags=["attendance"],
-        dependencies=[Depends(require_feature("FEATURE_ATTENDANCE"))],
+        dependencies=[
+            Depends(require_feature("FEATURE_ATTENDANCE")),
+            # Matrix gate (issue 37): attendance hidden from admins when
+            # toggled off in Settings. Super-admins bypass.
+            Depends(require_feature_access("attendance")),
+        ],
     )
-    app.include_router(personnel.router, prefix="/api/v1", tags=["personnel"])
+    app.include_router(
+        personnel.router,
+        prefix="/api/v1",
+        tags=["personnel"],
+        dependencies=[
+            # Matrix gate (issue 37): the NR browser's data edges. Reads
+            # and writes refuse admins when nominal_roll is toggled off;
+            # super-admins bypass.
+            Depends(require_feature_access("nominal_roll")),
+        ],
+    )
     app.include_router(
         access_control.router, prefix="/api/v1/access-control", tags=["access-control"]
     )
@@ -184,7 +212,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         nominal_rolls.router,
         prefix="/api/v1/nominal-rolls",
         tags=["nominal-rolls"],
-        dependencies=[Depends(require_feature("FEATURE_NOMINALROLL"))],
+        dependencies=[
+            Depends(require_feature("FEATURE_NOMINALROLL")),
+            # Matrix gate (issue 37): see personnel router above.
+            Depends(require_feature_access("nominal_roll")),
+        ],
     )
     app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
     app.include_router(
@@ -194,16 +226,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         dependencies=[Depends(require_feature("FEATURE_DEFERMENTS"))],
     )
     app.include_router(
+        discussions.router,
+        prefix="/api/v1/discussions",
+        tags=["discussions"],
+        dependencies=[Depends(require_feature("FEATURE_DISCUSSIONS"))],
+    )
+    app.include_router(
         tagging.router,
         prefix="/api/v1/taggings",
         tags=["taggings"],
         dependencies=[Depends(require_feature("FEATURE_NOMINALROLL"))],
     )
+    app.include_router(db_restore.router, prefix="/api/v1/admin", tags=["db-restore"])
+    app.include_router(admin_purge.router, prefix="/api/v1/admin", tags=["admin-purge"])
     app.include_router(
-        db_restore.router, prefix="/api/v1/admin", tags=["db-restore"]
-    )
-    app.include_router(
-        admin_purge.router, prefix="/api/v1/admin", tags=["admin-purge"]
+        feature_access.router, prefix="/api/v1/admin", tags=["feature-access"]
     )
 
     @app.exception_handler(FeatureDisabledError)

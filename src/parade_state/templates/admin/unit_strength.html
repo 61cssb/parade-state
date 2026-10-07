@@ -16,17 +16,33 @@
         font-weight: 600;
         color: #374151;
     }
-    .slot-toggle {
+    .segmented {
         display: inline-flex;
-        gap: 0.75rem;
-        align-items: center;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+        overflow: hidden;
     }
-    .slot-toggle label {
-        display: inline-flex;
-        gap: 0.3rem;
-        align-items: center;
-        font-weight: 400;
+    .segmented input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+    }
+    .segmented label {
+        margin: 0;
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
         cursor: pointer;
+    }
+    .segmented label:last-of-type {
+        border-left: 1px solid #d1d5db;
+    }
+    .segmented input:checked + label {
+        background: #6366f1;
+        color: #fff;
+    }
+    .segmented input:focus-visible + label {
+        outline: 2px solid #6366f1;
+        outline-offset: -2px;
     }
     .strength-table {
         width: 100%;
@@ -74,19 +90,25 @@
         <label for="date">Date:</label>
         <input type="date" name="date" id="date" value="{{ target_date.strftime('%Y-%m-%d') }}"
                onchange="this.form.submit()">
-        <div class="slot-toggle" role="group" aria-label="Attendance slot">
-            <span style="font-weight: 600; color: #374151;">Slot:</span>
-            <label><input type="radio" name="slot" value="am"
-                {% if slot == 'am' %}checked{% endif %}
-                onchange="this.form.submit()"> AM</label>
-            <label><input type="radio" name="slot" value="pm"
-                {% if slot == 'pm' %}checked{% endif %}
-                onchange="this.form.submit()"> PM</label>
+        {% if user.role == 'super_admin' %}
+        <span style="font-weight: 600; color: #374151;">Basis:</span>
+        <div class="segmented" role="group" aria-label="Reporting basis">
+            <input type="radio" name="basis" id="basis-tagged" value="tagged"
+                   onchange="this.form.submit()"{% if basis == 'tagged' %} checked{% endif %}>
+            <label for="basis-tagged">Tagged</label>
+            <input type="radio" name="basis" id="basis-untagged" value="untagged"
+                   onchange="this.form.submit()"{% if basis == 'untagged' %} checked{% endif %}>
+            <label for="basis-untagged">Untagged</label>
         </div>
+        {% endif %}
     </form>
     <p style="color: #6b7280; margin-top: 1rem; margin-bottom: 0;">
-        In = Called Up on the nominal roll · Current = Present/Late ·
-        Out = all other statuses (unmarked = absent).
+        In = on the nominal roll (not Deferred) · Current = Present ·
+        Out = Absent (unmarked = absent).
+        {% if basis == 'untagged' %}
+        Untagged = personnel counted under their original nominal-roll
+        unit allocations (tagging not applied).
+        {% endif %}
     </p>
 </div>
 
@@ -111,14 +133,15 @@
 <div class="card">
     <h3>Unit Strength</h3>
     <p style="color: #6b7280;">
-        No Called Up personnel are visible to you on the active nominal roll
+        No rostered personnel (Inpro status not Deferred) are visible to you on the active nominal roll
         ({{ nr_label }}) for {{ target_date.strftime('%Y-%m-%d') }}.
     </p>
 </div>
 {% else %}
 <div class="card">
     <h3>Unit Strength — {{ nr_label }}
-        · {{ target_date.strftime('%Y-%m-%d') }} · {{ slot|upper }}</h3>
+        · {{ target_date.strftime('%Y-%m-%d') }}
+        · {{ 'Untagged (original NR)' if basis == 'untagged' else 'Tagged' }}</h3>
     <div class="table-wrap">
         <table class="strength-table">
             <thead>
@@ -172,32 +195,22 @@
 
 {% block scripts %}
 <script>
-    // Default date/slot from the browser's local datetime on first visit
+    // Default the date from the browser's local datetime on first visit
     // (URL without params): the server cannot know the viewer's timezone.
-    // Reloads once at most — after submit both params are in the URL.
+    // Reloads once at most — after submit the param is in the URL.
     (function () {
         var params = new URLSearchParams(window.location.search);
-        if (params.has('date') && params.has('slot')) return;
+        if (params.has('date')) return;
         var form = document.getElementById('strength-form');
         var now = new Date();
         var changed = false;
 
-        if (!params.has('date')) {
-            var localDate = now.getFullYear() + '-' +
-                String(now.getMonth() + 1).padStart(2, '0') + '-' +
-                String(now.getDate()).padStart(2, '0');
-            if (form.elements.date.value !== localDate) {
-                form.elements.date.value = localDate;
-                changed = true;
-            }
-        }
-        if (!params.has('slot')) {
-            var localSlot = now.getHours() < 12 ? 'am' : 'pm';
-            var checked = form.querySelector('input[name="slot"]:checked');
-            if (checked && checked.value !== localSlot) {
-                form.elements.slot.value = localSlot;
-                changed = true;
-            }
+        var localDate = now.getFullYear() + '-' +
+            String(now.getMonth() + 1).padStart(2, '0') + '-' +
+            String(now.getDate()).padStart(2, '0');
+        if (form.elements.date.value !== localDate) {
+            form.elements.date.value = localDate;
+            changed = true;
         }
         if (changed) form.submit();
     })();

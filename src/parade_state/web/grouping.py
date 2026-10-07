@@ -13,12 +13,14 @@ from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from parade_state.admin_routes import no_permission_response
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
+from parade_state.feature_access import feature_allowed
 from parade_state.models import (
     Grouping,
-    GroupingMemberState,
     GroupingMembership,
+    GroupingMemberState,
     NominalRoll,
     Personnel,
 )
@@ -36,6 +38,11 @@ async def grouping_view(
     current_user = await get_current_user_optional(request)
     if not current_user:
         return RedirectResponse(url="/auth/login", status_code=302)
+
+    # Matrix gate (issue 37): grouping hidden from admins when toggled
+    # off in Settings; super-admins bypass.
+    if not feature_allowed(request, current_user.role, "grouping"):
+        return no_permission_response(request, current_user, "Grouping", "grouping")
 
     session_maker = get_session_maker()
     async with session_maker() as db:
@@ -89,9 +96,7 @@ async def grouping_view(
                         (
                             await db.execute(
                                 select(Grouping)
-                                .where(
-                                    Grouping.nominal_roll_id == previous_nr.id
-                                )
+                                .where(Grouping.nominal_roll_id == previous_nr.id)
                                 .order_by(Grouping.created_at)
                             )
                         )
@@ -115,20 +120,22 @@ async def grouping_view(
             )
             groups_by_person: dict[str, list[str]] = {}
             for membership in group_rows:
-                groups_by_person.setdefault(
-                    membership.personnel_id, []
-                ).append(membership.group_id)
+                groups_by_person.setdefault(membership.personnel_id, []).append(
+                    membership.group_id
+                )
 
             state_rows = (
-                await db.execute(
-                    select(GroupingMemberState).where(
-                        GroupingMemberState.grouping_id == selected.id
+                (
+                    await db.execute(
+                        select(GroupingMemberState).where(
+                            GroupingMemberState.grouping_id == selected.id
+                        )
                     )
                 )
-            ).scalars().all()
-            state_by_person = {
-                state.personnel_id: state for state in state_rows
-            }
+                .scalars()
+                .all()
+            )
+            state_by_person = {state.personnel_id: state for state in state_rows}
 
             all_groups = sorted(selected.groups, key=lambda g: g.position)
             member_counts: dict[str, int] = {}
@@ -191,9 +198,7 @@ async def grouping_view(
         known = {g["id"] for g in selected_groups}
         if group == "ungrouped" and selected.allow_ungrouped:
             group_filter = group
-            personnel_rows = [
-                row for row in personnel_rows if not row["group_ids"]
-            ]
+            personnel_rows = [row for row in personnel_rows if not row["group_ids"]]
         elif group in known:
             group_filter = group
             personnel_rows = [
@@ -212,9 +217,7 @@ async def grouping_view(
             if active_nr is not None
             else None
         ),
-        groupings=[
-            {"id": str(g.id), "label": g.label} for g in groupings
-        ],
+        groupings=[{"id": str(g.id), "label": g.label} for g in groupings],
         selected_grouping=(
             {
                 "id": str(selected.id),

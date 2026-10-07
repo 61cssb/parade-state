@@ -147,6 +147,7 @@ pytest -k "test_create"  # Run tests containing "test_create"
 import pytest
 from parade_state.utils.module_name import function_name
 
+
 class TestFunctionName:
     """Test function_name behavior."""
 
@@ -175,6 +176,7 @@ class TestFunctionName:
 import pytest
 from fastapi.testclient import TestClient
 
+
 @pytest.mark.asyncio
 async def test_create_resource_as_admin(
     client: TestClient,
@@ -185,12 +187,13 @@ async def test_create_resource_as_admin(
     # Arrange
     resource_data = {"name": "Test Resource"}
 
-    # Act
+    # Act — identity comes from the session headers; never send
+    # user_id/user_role params (issue 31: they are ignored, and the
+    # structural gate forbids endpoints from declaring them)
     response = client.post(
         "/api/v1/resources/",
         json=resource_data,
         headers=admin_token_headers,
-        params={"user_id": "admin-id", "user_role": "admin"},
     )
 
     # Assert
@@ -208,6 +211,7 @@ import pytest
 from sqlalchemy import select
 
 from parade_state.models import ModelName
+
 
 class TestDomainBehavior:
     """Test domain behavior and business rules."""
@@ -234,7 +238,13 @@ class TestDomainBehavior:
 - **`client`** - FastAPI TestClient for API testing (synchronous interface)
 - **`test_db`** - Database engine and session factory with tables created
 - **`db_session`** - Database session for database operations
-- **`admin_token_headers`** - Authentication headers for admin user
+- **`admin_token_headers` / `user_token_headers` / `super_admin_token_headers`** -
+  Bearer headers carrying a real minted `UserSession` for the sample admin /
+  regular user / well-known super-admin (issue 31: sessions, not raw IDs)
+- **`client_as(user)`** (integration) - factory that authenticates the
+  client with the `session_token` cookie as a role shorthand
+  (`"admin"`, `"super_admin"`, `"user"`), a well-known user id, or a
+  `User` object — the cookie equivalent of the header fixtures
 - **`sample_grouping`** - Sample grouping (issue 26 model: label + two groups)
 - **`sample_personnel`** - Sample personnel entities
 - **`sample_users`** - Sample user entities
@@ -297,6 +307,7 @@ This should be a deliberate architectural decision, not incidental complexity.
 
 ```python
 # In conftest.py or your test file
+
 
 @pytest.fixture
 async def custom_resource(test_db):
@@ -417,6 +428,7 @@ Fixtures are cached and reused, making tests faster:
 def expensive_resource():
     return create_expensive_resource()
 
+
 @pytest.fixture(scope="function")  # Default: created for each test
 def fresh_resource():
     return create_fresh_resource()
@@ -436,8 +448,9 @@ pytest tests/unit/  # Only fast unit tests
 ```python
 from unittest.mock import patch
 
+
 def test_with_external_service():
-    with patch('parade_state.external_api.call') as mock_call:
+    with patch("parade_state.external_api.call") as mock_call:
         mock_call.return_value = {"status": "ok"}
         result = function_using_external_api()
         assert result is True

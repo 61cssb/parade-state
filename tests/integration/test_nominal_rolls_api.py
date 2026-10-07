@@ -1,5 +1,7 @@
-"""Tests for nominal_roll API endpoints (attendance activation, label, DELETE)."""
+"""Tests for nominal_roll API endpoints (attendance activation, label, DELETE, CSV export)."""
 
+import csv
+import io
 from datetime import date
 
 import pytest
@@ -9,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from parade_state.models.csv_ingestion import NominalRoll
 from tests.test_utils import assert_permission_denied
 
-
 # ============================================================================
 # POST /api/v1/nominal-rolls/{id}/activate-attendance | deactivate-attendance
 # ============================================================================
@@ -17,14 +18,14 @@ from tests.test_utils import assert_permission_denied
 
 @pytest.mark.asyncio
 async def test_activate_attendance_marks_nr_active(
-    client: TestClient, super_admin_token_headers: dict[str, str],
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
     sample_nominal_roll,
 ):
     """Super admin can mark an NR active for attendance."""
     response = client.post(
         f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/activate-attendance",
         headers=super_admin_token_headers,
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
 
     assert response.status_code == 200
@@ -36,8 +37,11 @@ async def test_activate_attendance_marks_nr_active(
 
 @pytest.mark.asyncio
 async def test_activate_attendance_auto_switches(
-    client: TestClient, super_admin_token_headers: dict[str, str],
-    db_session: AsyncSession, sample_nominal_roll, sample_users,
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
+    db_session: AsyncSession,
+    sample_nominal_roll,
+    sample_users,
 ):
     """Activating a second NR deactivates the previously active one."""
     sample_nominal_roll.attendance_active = True
@@ -54,7 +58,6 @@ async def test_activate_attendance_auto_switches(
     response = client.post(
         f"/api/v1/nominal-rolls/{other.id}/activate-attendance",
         headers=super_admin_token_headers,
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
     assert response.status_code == 200
     assert response.json()["attendance_active"] is True
@@ -68,20 +71,19 @@ async def test_activate_attendance_auto_switches(
 
 @pytest.mark.asyncio
 async def test_deactivate_attendance(
-    client: TestClient, super_admin_token_headers: dict[str, str],
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
     sample_nominal_roll,
 ):
     """Deactivate clears the active flag; activation stamp kept as history."""
     client.post(
         f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/activate-attendance",
         headers=super_admin_token_headers,
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
 
     response = client.post(
         f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/deactivate-attendance",
         headers=super_admin_token_headers,
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
     assert response.status_code == 200
     data = response.json()
@@ -91,26 +93,27 @@ async def test_deactivate_attendance(
 
 @pytest.mark.asyncio
 async def test_activate_attendance_requires_super_admin(
-    client: TestClient, admin_token_headers: dict[str, str], sample_nominal_roll,
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_nominal_roll,
 ):
     """Admins cannot toggle attendance activation."""
     response = client.post(
         f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/activate-attendance",
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
     )
     assert response.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_activate_attendance_non_existent_404(
-    client: TestClient, super_admin_token_headers: dict[str, str],
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
 ):
     """404 when activating a non-existent nominal_roll."""
     response = client.post(
         "/api/v1/nominal-rolls/does-not-exist/activate-attendance",
         headers=super_admin_token_headers,
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
@@ -123,14 +126,14 @@ async def test_activate_attendance_non_existent_404(
 
 @pytest.mark.asyncio
 async def test_update_nominal_roll_non_existent_404(
-    client: TestClient, admin_token_headers: dict[str, str],
+    client: TestClient,
+    admin_token_headers: dict[str, str],
 ):
     """404 when updating a non-existent nominal_roll."""
     response = client.patch(
         "/api/v1/nominal-rolls/does-not-exist",
         json={"remarks": "x"},
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
     )
 
     assert response.status_code == 404
@@ -139,7 +142,9 @@ async def test_update_nominal_roll_non_existent_404(
 
 @pytest.mark.asyncio
 async def test_update_nominal_roll_as_regular_user_forbidden(
-    client: TestClient, user_token_headers: dict[str, str], sample_nominal_roll,
+    client: TestClient,
+    user_token_headers: dict[str, str],
+    sample_nominal_roll,
 ):
     """Regular users cannot update nominal_rolls."""
     assert_permission_denied(
@@ -147,8 +152,7 @@ async def test_update_nominal_roll_as_regular_user_forbidden(
         "patch",
         f"/api/v1/nominal-rolls/{sample_nominal_roll.id}",
         user_token_headers,
-        expected_detail="Only admins and super admins",
-        params={"user_id": "regular-user-id", "user_role": "user"},
+        expected_detail="Admin access required",
         json_data={"remarks": "nope"},
     )
 
@@ -160,8 +164,10 @@ async def test_update_nominal_roll_as_regular_user_forbidden(
 
 @pytest.mark.asyncio
 async def test_delete_nominal_roll(
-    client: TestClient, super_admin_token_headers: dict[str, str],
-    db_session: AsyncSession, sample_users,
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
+    db_session: AsyncSession,
+    sample_users,
 ):
     """Super admin can delete a nominal_roll (no status gating)."""
     doomed = NominalRoll(
@@ -176,7 +182,6 @@ async def test_delete_nominal_roll(
     response = client.delete(
         f"/api/v1/nominal-rolls/{nominal_roll_id}",
         headers=super_admin_token_headers,
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
 
     assert response.status_code == 200
@@ -186,14 +191,14 @@ async def test_delete_nominal_roll(
     verify = client.get(
         f"/api/v1/nominal-rolls/{nominal_roll_id}",
         headers=super_admin_token_headers,
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
     assert verify.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_delete_confirmed_nominal_roll(
-    client: TestClient, super_admin_token_headers: dict[str, str],
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
     sample_nominal_roll,
 ):
     """Super admin can delete the sample nominal_roll."""
@@ -202,7 +207,6 @@ async def test_delete_confirmed_nominal_roll(
     response = client.delete(
         f"/api/v1/nominal-rolls/{nominal_roll_id}",
         headers=super_admin_token_headers,
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
 
     assert response.status_code == 200
@@ -212,35 +216,35 @@ async def test_delete_confirmed_nominal_roll(
     verify = client.get(
         f"/api/v1/nominal-rolls/{nominal_roll_id}",
         headers=super_admin_token_headers,
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
     assert verify.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_delete_nominal_roll_as_admin_forbidden(
-    client: TestClient, admin_token_headers: dict[str, str], sample_nominal_roll,
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_nominal_roll,
 ):
     """Admins (non-super) cannot delete nominal_rolls."""
     response = client.delete(
         f"/api/v1/nominal-rolls/{sample_nominal_roll.id}",
         headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
     )
 
     assert response.status_code == 403
-    assert "super admins" in response.json()["detail"]
+    assert response.json()["detail"] == "Super admin access required"
 
 
 @pytest.mark.asyncio
 async def test_delete_non_existent_nominal_roll(
-    client: TestClient, super_admin_token_headers: dict[str, str],
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
 ):
     """404 when deleting a non-existent nominal_roll."""
     response = client.delete(
         "/api/v1/nominal-rolls/does-not-exist",
         headers=super_admin_token_headers,
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
 
     assert response.status_code == 404
@@ -249,14 +253,15 @@ async def test_delete_non_existent_nominal_roll(
 
 @pytest.mark.asyncio
 async def test_delete_nominal_roll_blocked_by_groupings(
-    client: TestClient, super_admin_token_headers: dict[str, str],
-    sample_nominal_roll, sample_grouping,
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
+    sample_nominal_roll,
+    sample_grouping,
 ):
     """Groupings are RESTRICTed: a roll with groupings cannot be deleted."""
     response = client.delete(
         f"/api/v1/nominal-rolls/{str(sample_nominal_roll.id)}",
         headers=super_admin_token_headers,
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
     assert response.status_code == 400
     assert "grouping" in response.json()["detail"].lower()
@@ -264,8 +269,10 @@ async def test_delete_nominal_roll_blocked_by_groupings(
 
 @pytest.mark.asyncio
 async def test_delete_nominal_roll_cascades(
-    client: TestClient, super_admin_token_headers: dict[str, str],
-    sample_nominal_roll, sample_attendance,
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
+    sample_nominal_roll,
+    sample_attendance,
 ):
     """Deleting a roll without groupings cascade-deletes dependent data."""
     nominal_roll_id = str(sample_nominal_roll.id)
@@ -273,14 +280,12 @@ async def test_delete_nominal_roll_cascades(
     response = client.delete(
         f"/api/v1/nominal-rolls/{nominal_roll_id}",
         headers=super_admin_token_headers,
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
     assert response.status_code == 200
 
     nominal_roll_response = client.get(
         f"/api/v1/nominal-rolls/{nominal_roll_id}",
         headers=super_admin_token_headers,
-        params={"user_id": "super-admin-test-id", "user_role": "super_admin"},
     )
     assert nominal_roll_response.status_code == 404
 
@@ -290,12 +295,40 @@ async def test_delete_nominal_roll_cascades(
 # ============================================================================
 
 
+async def _grant_nr_access(
+    db_session: AsyncSession, nominal_roll_id, user_id: str = "admin-user-id"
+) -> None:
+    """Insert a scope grant so a regular admin can access a test-made NR.
+
+    Issue #28: NR reads/writes are deny-by-default per NR. Test-created
+    rolls have no roster, so the grant is a direct DB insert with a
+    marker sub_unit_1 (the API's roster validation does not apply).
+    """
+    from parade_state.models import UserSubunitAssignment
+
+    db_session.add(
+        UserSubunitAssignment(
+            user_id=user_id,
+            nominal_roll_id=str(nominal_roll_id),
+            unit="*",
+            sub_unit_1="granted",
+            created_by="super-admin-test-id",
+        )
+    )
+    await db_session.commit()
+
+
 @pytest.mark.asyncio
 async def test_update_nominal_roll_label(
-    client: TestClient, admin_token_headers: dict[str, str],
-    db_session: AsyncSession, sample_users,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_users,
+    admin_subunit_assignment,
 ):
-    """Admin can set a label on an nominal_roll; response and GET reflect it."""
+    """Admin can set a label on a nominal roll they hold a grant on."""
+    client = await client_as("admin")
+    client = await client_as("admin")
     draft_nominal_roll = NominalRoll(
         caa=date(2024, 9, 1),
         csv_hash="label-hash-set",
@@ -303,12 +336,11 @@ async def test_update_nominal_roll_label(
     )
     db_session.add(draft_nominal_roll)
     await db_session.commit()
+    await _grant_nr_access(db_session, draft_nominal_roll.id)
 
     response = client.patch(
         f"/api/v1/nominal-rolls/{draft_nominal_roll.id}",
         json={"label": "Q1 Roster"},
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
     )
 
     assert response.status_code == 200
@@ -317,8 +349,6 @@ async def test_update_nominal_roll_label(
     # GET reflects the change
     get_resp = client.get(
         f"/api/v1/nominal-rolls/{draft_nominal_roll.id}",
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
     )
     assert get_resp.status_code == 200
     assert get_resp.json()["label"] == "Q1 Roster"
@@ -326,10 +356,14 @@ async def test_update_nominal_roll_label(
 
 @pytest.mark.asyncio
 async def test_update_nominal_roll_label_strips_whitespace(
-    client: TestClient, admin_token_headers: dict[str, str],
-    db_session: AsyncSession, sample_users,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_users,
+    admin_subunit_assignment,
 ):
     """Label is stripped before storage."""
+    client = await client_as("admin")
     draft_nominal_roll = NominalRoll(
         caa=date(2024, 10, 1),
         csv_hash="label-hash-strip",
@@ -337,12 +371,11 @@ async def test_update_nominal_roll_label_strips_whitespace(
     )
     db_session.add(draft_nominal_roll)
     await db_session.commit()
+    await _grant_nr_access(db_session, draft_nominal_roll.id)
 
     response = client.patch(
         f"/api/v1/nominal-rolls/{draft_nominal_roll.id}",
         json={"label": "  Padded  "},
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
     )
 
     assert response.status_code == 200
@@ -351,10 +384,14 @@ async def test_update_nominal_roll_label_strips_whitespace(
 
 @pytest.mark.asyncio
 async def test_update_nominal_roll_label_duplicate_rejected(
-    client: TestClient, admin_token_headers: dict[str, str],
-    db_session: AsyncSession, sample_users,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_users,
+    admin_subunit_assignment,
 ):
     """Setting a label that's already in use returns 409."""
+    client = await client_as("admin")
     nominal_roll_a = NominalRoll(
         caa=date(2024, 11, 1),
         csv_hash="label-hash-dup-a",
@@ -368,12 +405,11 @@ async def test_update_nominal_roll_label_duplicate_rejected(
     )
     db_session.add_all([nominal_roll_a, nominal_roll_b])
     await db_session.commit()
+    await _grant_nr_access(db_session, nominal_roll_b.id)
 
     response = client.patch(
         f"/api/v1/nominal-rolls/{nominal_roll_b.id}",
         json={"label": "Shared Label"},
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
     )
 
     assert response.status_code == 409
@@ -382,10 +418,15 @@ async def test_update_nominal_roll_label_duplicate_rejected(
 
 @pytest.mark.asyncio
 async def test_update_nominal_roll_label_empty_rejected(
-    client: TestClient, admin_token_headers: dict[str, str],
-    db_session: AsyncSession, sample_users,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_users,
+    admin_subunit_assignment,
 ):
     """Empty/whitespace label fails schema validation (422)."""
+    client = await client_as("admin")
+    client = await client_as("admin")
     draft_nominal_roll = NominalRoll(
         caa=date(2025, 1, 1),
         csv_hash="label-hash-empty",
@@ -393,12 +434,11 @@ async def test_update_nominal_roll_label_empty_rejected(
     )
     db_session.add(draft_nominal_roll)
     await db_session.commit()
+    await _grant_nr_access(db_session, draft_nominal_roll.id)
 
     response = client.patch(
         f"/api/v1/nominal-rolls/{draft_nominal_roll.id}",
         json={"label": "   "},
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
     )
 
     assert response.status_code == 422
@@ -406,10 +446,15 @@ async def test_update_nominal_roll_label_empty_rejected(
 
 @pytest.mark.asyncio
 async def test_list_nominal_rolls_includes_label(
-    client: TestClient, admin_token_headers: dict[str, str],
-    db_session: AsyncSession, sample_users,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_users,
+    admin_subunit_assignment,
 ):
     """List endpoint returns the label field (null when unset)."""
+    client = await client_as("admin")
+    client = await client_as("admin")
     labeled = NominalRoll(
         caa=date(2025, 2, 1),
         csv_hash="label-hash-list-a",
@@ -423,13 +468,96 @@ async def test_list_nominal_rolls_includes_label(
     )
     db_session.add_all([labeled, unlabeled])
     await db_session.commit()
+    await _grant_nr_access(db_session, labeled.id)
+    await _grant_nr_access(db_session, unlabeled.id)
 
     response = client.get(
         "/api/v1/nominal-rolls",
-        headers=admin_token_headers,
-        params={"user_id": "admin-user-id", "user_role": "admin"},
     )
     assert response.status_code == 200
     items = {item["id"]: item for item in response.json()}
     assert items[labeled.id]["label"] == "Visible"
     assert items[unlabeled.id]["label"] is None
+
+
+# ============================================================================
+# GET /api/v1/nominal-rolls/{id}/export
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_export_csv_columns_and_content(
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+    sample_personnel,
+    admin_subunit_assignment,
+):
+    """Export returns the browser table's columns and personnel values."""
+    client = await client_as("admin")
+    response = client.get(
+        f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/export",
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers["content-disposition"]
+
+    rows = list(csv.reader(io.StringIO(response.text)))
+    assert rows[0] == [
+        "Unit",
+        "Sub Unit 1",
+        "Sub Unit 2",
+        "Sub Unit 3",
+        "Category",
+        "Rank",
+        "Full Name",
+        "Pers No",
+        "Inpro Status",
+        "Remarks",
+    ]
+    assert len(rows) == 4  # header + all three sample personnel
+    by_name = {row[6]: row for row in rows[1:]}
+    assert by_name["John Doe"][0] == "Coy A"
+    assert by_name["John Doe"][1] == "Platoon 1"
+    assert by_name["John Doe"][2] == "Section 1"
+    assert by_name["John Doe"][7] == "10000001"
+    assert by_name["John Doe"][8] == "yet_to_inpro"
+
+
+@pytest.mark.asyncio
+async def test_export_csv_honours_view_filters(
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+    sample_personnel,
+    admin_subunit_assignment,
+):
+    """Filters applied on the page (category, search) scope the export too."""
+    client = await client_as("admin")
+    by_category = client.get(
+        f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/export",
+        params={"category": "Officer"},
+    )
+    assert by_category.status_code == 200
+    rows = list(csv.reader(io.StringIO(by_category.text)))
+    assert [row[6] for row in rows[1:]] == ["Bob Johnson"]
+
+    by_search = client.get(
+        f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/export",
+        params={"search": "10000002"},
+    )
+    assert by_search.status_code == 200
+    rows = list(csv.reader(io.StringIO(by_search.text)))
+    assert [row[6] for row in rows[1:]] == ["Jane Smith"]
+
+
+@pytest.mark.asyncio
+async def test_export_csv_requires_admin(
+    client: TestClient, client_as, sample_nominal_roll
+):
+    """Non-admin roles are refused (the browser page is admin-only too)."""
+    client = await client_as("user")
+    response = client.get(
+        f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/export",
+    )
+    assert response.status_code == 403

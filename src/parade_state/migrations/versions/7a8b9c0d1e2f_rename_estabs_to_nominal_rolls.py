@@ -49,7 +49,9 @@ def upgrade() -> None:
     op.drop_index("ix_estabs_caa", table_name="nominal_rolls")
     op.create_index("ix_nominal_rolls_caa", "nominal_rolls", ["caa"], unique=True)
     op.drop_index("ix_estabs_csv_hash", table_name="nominal_rolls")
-    op.create_index("ix_nominal_rolls_csv_hash", "nominal_rolls", ["csv_hash"], unique=False)
+    op.create_index(
+        "ix_nominal_rolls_csv_hash", "nominal_rolls", ["csv_hash"], unique=False
+    )
     op.drop_index("ix_estabs_label", table_name="nominal_rolls")
     op.create_index("ix_nominal_rolls_label", "nominal_rolls", ["label"], unique=True)
 

@@ -1,15 +1,13 @@
 """Test configuration and fixtures."""
 
 import asyncio
-import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import AsyncGenerator
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 # Ensure all models are imported so they're registered with Base
@@ -19,27 +17,27 @@ import parade_state.models.audit  # noqa: F401
 import parade_state.models.auth_session  # noqa: F401
 import parade_state.models.csv_ingestion  # noqa: F401
 import parade_state.models.deferments  # noqa: F401
+import parade_state.models.discussions  # noqa: F401
 import parade_state.models.grouping  # noqa: F401
 import parade_state.models.personnel  # noqa: F401
 import parade_state.models.tagging  # noqa: F401
+from parade_state.auth.session import create_user_session
 from parade_state.config import get_settings
-from parade_state.db import Base, get_session_maker, init_database, normalize_database_url
+from parade_state.db import (
+    Base,
+    init_database,
+    normalize_database_url,
+)
 from parade_state.main import app
 from parade_state.models import (
     AccessLevel,
     Attendance,
-    AuditLog,
-    ColumnMapping,
-    ColumnMetadata,
-    CsvUpload,
     Grouping,
     GroupingGroup,
-    GroupingMemberState,
     GroupingMembership,
     NominalRoll,
     Personnel,
     User,
-    UserSession,
 )
 from parade_state.utils import env, ids, utc_dt
 
@@ -65,7 +63,12 @@ def feature_flags_enabled(monkeypatch):
     lives in tests/integration/test_core_feature_kill_switches.py).
     """
     for settings_obj in {get_settings(), app.state.settings}:
-        for flag in ("FEATURE_DEFERMENTS", "FEATURE_GROUPING", "FEATURE_STRENGTH"):
+        for flag in (
+            "FEATURE_DEFERMENTS",
+            "FEATURE_GROUPING",
+            "FEATURE_STRENGTH",
+            "FEATURE_DISCUSSIONS",
+        ):
             monkeypatch.setattr(settings_obj, flag, True)
 
 
@@ -394,10 +397,23 @@ def client(session_maker):
 
 
 @pytest.fixture
-def admin_token_headers(sample_users) -> dict[str, str]:
-    """Provide headers with admin authentication token."""
-    admin_id = str(sample_users["admin"].id)
-    return {"Authorization": f"Bearer {admin_id}"}
+async def admin_token_headers(db_session, sample_users) -> dict[str, str]:
+    """Bearer headers with a real session token for the sample admin.
+
+    The token is a minted ``UserSession`` for ``sample_users["admin"]`` —
+    the same identity tests pass as ``user_id``/``admin_id`` — so
+    session-derived authorization (issue 31) and provenance assertions
+    agree on who is calling.
+    """
+    admin = sample_users["admin"]
+    session = await create_user_session(
+        db_session,
+        user_id=str(admin.id),
+        email=admin.email,
+        name=admin.name,
+        role=admin.role,
+    )
+    return {"Authorization": f"Bearer {session.token}"}
 
 
 @pytest.fixture
@@ -407,17 +423,36 @@ def admin_id(sample_users) -> str:
 
 
 @pytest.fixture
-def user_token_headers(sample_users) -> dict[str, str]:
-    """Provide headers with regular user authentication token."""
-    user_id = str(sample_users["user"].id)
-    return {"Authorization": f"Bearer {user_id}"}
+async def user_token_headers(db_session, sample_users) -> dict[str, str]:
+    """Bearer headers with a real session token for the sample regular user."""
+    regular_user = sample_users["user"]
+    session = await create_user_session(
+        db_session,
+        user_id=str(regular_user.id),
+        email=regular_user.email,
+        name=regular_user.name,
+        role=regular_user.role,
+    )
+    return {"Authorization": f"Bearer {session.token}"}
 
 
 @pytest.fixture
-def super_admin_token_headers() -> dict[str, str]:
-    """Provide headers with super admin authentication token."""
-    super_admin_id = "super-admin-test-id"
-    return {"Authorization": f"Bearer {super_admin_id}"}
+async def super_admin_token_headers(db_session, well_known_users) -> dict[str, str]:
+    """Bearer headers with a real session token for the well-known super-admin.
+
+    Depends on ``well_known_users`` (autouse under tests/integration/) so
+    the ``super-admin-test-id`` row exists before the session is minted;
+    the session token replaces the pre-#31 fake Bearer (the raw user id).
+    """
+    super_admin = well_known_users["super-admin-test-id"]
+    session = await create_user_session(
+        db_session,
+        user_id=str(super_admin.id),
+        email=super_admin.email,
+        name=super_admin.name,
+        role=super_admin.role,
+    )
+    return {"Authorization": f"Bearer {session.token}"}
 
 
 @pytest.fixture
@@ -431,9 +466,7 @@ async def sample_attendance_scope(
     """
     admin_id = str(sample_users["admin"].id)
     sample_nominal_roll.attendance_active = True
-    sample_nominal_roll.attendance_activated_at = utc_dt.ensure_naive(
-        utc_dt.utcnow()
-    )
+    sample_nominal_roll.attendance_activated_at = utc_dt.ensure_naive(utc_dt.utcnow())
     sample_nominal_roll.attendance_activated_by = admin_id
     db_session.add(sample_nominal_roll)
     await db_session.commit()
@@ -444,25 +477,29 @@ async def sample_attendance_scope(
 async def admin_subunit_assignment(
     db_session: AsyncSession, sample_nominal_roll, sample_personnel, sample_users
 ):
-    """Grant the admin user Subunit-1 assignments covering the sample roster.
+    """Grant the admin users scope covering the sample roster.
 
-    Sample personnel span Platoon 1 (personnel 0, 1) and Platoon 2 (personnel 2).
-    This lets attendance-mechanics tests exercise the happy path under the
-    PR 2 deny-by-default gate without each test re-granting access.
+    Sample personnel span Platoon 1 (personnel 0, 1) and Platoon 2
+    (personnel 2). Grants go to both admin identities tests act as: the
+    ``sample_users`` admin and the well-known ``admin-user-id`` (seeded
+    by the integration conftest for every integration test). Issue #28
+    read/write scoping is deny-by-default, so mechanics tests that act
+    as a plain admin need this coverage without each re-granting.
     """
     from parade_state.models import UserSubunitAssignment
 
     admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
-    for sub1 in {"Platoon 1", "Platoon 2"}:
-        db_session.add(
-            UserSubunitAssignment(
-                user_id=admin_id,
-                nominal_roll_id=nr_id,
-                sub_unit_1=sub1,
-                created_by=admin_id,
+    for user_id in {admin_id, "admin-user-id"}:
+        for sub1 in {"Platoon 1", "Platoon 2"}:
+            db_session.add(
+                UserSubunitAssignment(
+                    user_id=user_id,
+                    nominal_roll_id=nr_id,
+                    sub_unit_1=sub1,
+                    created_by=admin_id,
+                )
             )
-        )
     await db_session.commit()
     return admin_id
 
@@ -474,11 +511,11 @@ async def sample_attendance(
     sample_nominal_roll,
     sample_users,
 ):
-    """Create sample attendance rows (AM/PM) for testing.
+    """Create sample attendance rows (single session) for testing.
 
     Builds two days of history for the first personnel member:
-    - Today: AM present, PM absent (remarks)
-    - Yesterday: AM late (remarks), PM absent
+    - Today: absent with reason + remarks
+    - Yesterday: present with remarks
     """
     admin_id = str(sample_users["admin"].id)
     nominal_roll_id = str(sample_nominal_roll.id)
@@ -490,9 +527,9 @@ async def sample_attendance(
             personnel_id=str(sample_personnel[0].id),
             nominal_roll_id=nominal_roll_id,
             date=today,
-            status_am="present",
-            status_pm="absent",
-            remarks_pm="Sick leave",
+            status="absent",
+            reason="mc",
+            remarks="Sick leave",
             created_by=admin_id,
             updated_by=admin_id,
         ),
@@ -500,9 +537,8 @@ async def sample_attendance(
             personnel_id=str(sample_personnel[0].id),
             nominal_roll_id=nominal_roll_id,
             date=yesterday,
-            status_am="late",
-            remarks_am="Official duty",
-            status_pm="absent",
+            status="present",
+            remarks="Official duty",
             created_by=admin_id,
             updated_by=admin_id,
         ),
@@ -510,8 +546,7 @@ async def sample_attendance(
             personnel_id=str(sample_personnel[1].id),
             nominal_roll_id=nominal_roll_id,
             date=today,
-            status_am="present",
-            status_pm="present",
+            status="present",
             created_by=admin_id,
             updated_by=admin_id,
         ),

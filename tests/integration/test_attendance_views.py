@@ -43,9 +43,9 @@ async def test_user_attendance_filters_roster_to_assigned_subunits(
     Granting Platoon 1 shows only Platoon 1 personnel. (The viewer role is
     deferred, so the filtered user here is a plain admin.)
     """
-    from parade_state.web import attendance as web_attendance
-    from parade_state.models import UserSubunitAssignment
     from parade_state.db import get_session_maker
+    from parade_state.models import UserSubunitAssignment
+    from parade_state.web import attendance as web_attendance
 
     admin = sample_users["admin"]
 
@@ -124,8 +124,8 @@ async def test_user_attendance_overlays_active_tagging_values(
     """With the NR active for attendance, the roster shows effective (to_*)
     values, per-row autosave (no Save button, no tagged-row highlight —
     issue 19), and the Copy Remarks modal (issue 20)."""
-    from parade_state.web import attendance as web_attendance
     from parade_state.models import Tagging, TaggingEntry, User
+    from parade_state.web import attendance as web_attendance
 
     admin_id = str(sample_users["admin"].id)
 
@@ -201,8 +201,8 @@ async def test_user_attendance_copy_remarks_available_to_all_admins(
 ):
     """Copy Remarks is open to every admin (issue 20): the endpoint enforces
     sub-unit write access, so the button is no longer super-admin-only."""
-    from parade_state.web import attendance as web_attendance
     from parade_state.models import UserSubunitAssignment
+    from parade_state.web import attendance as web_attendance
 
     admin = sample_users["admin"]
 
@@ -246,8 +246,8 @@ async def test_user_attendance_subunit_filter_is_effective_aware(
     monkeypatch,
 ):
     """The sub-unit filter matches effective (tagging-overlaid) values."""
-    from parade_state.web import attendance as web_attendance
     from parade_state.models import Tagging, TaggingEntry, User
+    from parade_state.web import attendance as web_attendance
 
     admin_id = str(sample_users["admin"].id)
 
@@ -310,7 +310,7 @@ async def test_user_attendance_subunit_filter_is_effective_aware(
 
 
 @pytest.mark.asyncio
-async def test_attendance_hides_non_called_up_personnel(
+async def test_attendance_lists_all_personnel_with_inpro_column(
     client: TestClient,
     sample_nominal_roll,
     sample_attendance_scope,
@@ -319,18 +319,19 @@ async def test_attendance_hides_non_called_up_personnel(
     db_session,
     monkeypatch,
 ):
-    """Only Called Up personnel render on the attendance page; every other
-    callup status is filtered out of the roster (issue 06)."""
-    from parade_state.web import attendance as web_attendance
+    """Issue 33: the roster is everyone on the NR — deferred included —
+    with a read-only Inpro Status column rendered before the status."""
     from parade_state.models import User
+    from parade_state.web import attendance as web_attendance
 
-    # John Doe → Deferred, Jane Smith stays Called Up.
-    sample_personnel[0].callup_status = "Deferred"
-    db_session.add(sample_personnel[0])
+    # John Doe → deferred, Jane Smith → inproed, Bob stays yet_to_inpro.
+    sample_personnel[0].inpro_status = "deferred"
+    sample_personnel[1].inpro_status = "inproed"
+    db_session.add_all(sample_personnel[:2])
     await db_session.commit()
 
     super_admin = User(
-        email="super-callup@example.com",
+        email="super-inpro@example.com",
         name="Super Admin",
         role="super_admin",
         status="active",
@@ -347,12 +348,23 @@ async def test_attendance_hides_non_called_up_personnel(
         "/attendance", params={"nominal_roll_id": str(sample_nominal_roll.id)}
     )
     assert response.status_code == 200
-    assert "Jane Smith" in response.text  # Called Up → visible
-    assert "John Doe" not in response.text  # Deferred → hidden
+    # Read-only Inpro Status column between Name and Status.
+    assert "Inpro Status" in response.text
+    # Everyone renders, each with their inpro label.
+    assert "John Doe" in response.text  # deferred → still listed
+    assert "Jane Smith" in response.text  # inproed
+    assert "Bob Johnson" in response.text  # yet_to_inpro (default)
+    assert "Deferred" in response.text
+    assert "Inpro&#39;ed" in response.text or "Inpro'ed" in response.text
+    assert "Yet to Inpro" in response.text
+    # Single-session grid: one status column, one reason column.
+    assert "AM Status" not in response.text
+    assert "PM Status" not in response.text
+    assert 'class="reason-select"' in response.text
 
 
 @pytest.mark.asyncio
-async def test_attendance_hidden_person_records_preserved(
+async def test_attendance_inpro_filter_hides_deferred(
     client: TestClient,
     sample_nominal_roll,
     sample_attendance_scope,
@@ -361,30 +373,28 @@ async def test_attendance_hidden_person_records_preserved(
     db_session,
     monkeypatch,
 ):
-    """Flipping a person off Called Up is non-destructive: existing
-    attendance records survive untouched, the person is simply hidden from
-    the attendance view (and rendered with no special treatment anywhere)."""
-    from parade_state.web import attendance as web_attendance
+    """The Inpro Status view filter narrows the roster (e.g. hide Deferred),
+    and filtering is non-destructive: attendance records survive untouched."""
     from parade_state.models import Attendance, User
     from parade_state.utils import utc_dt
+    from parade_state.web import attendance as web_attendance
 
     p = sample_personnel[0]
     record = Attendance(
         personnel_id=str(p.id),
         nominal_roll_id=str(sample_nominal_roll.id),
         date=utc_dt.utcnow().date(),
-        status_am="present",
-        remarks_am="marked earlier",
-        status_pm="present",
+        status="present",
+        remarks="marked earlier",
         created_by=str(sample_users["admin"].id),
         updated_by=str(sample_users["admin"].id),
     )
     db_session.add(record)
-    await db_session.commit()
 
-    # Post-hoc status change away from Called Up.
-    p.callup_status = "MR"
-    db_session.add(p)
+    # John Doe → deferred, Jane Smith → inproed.
+    p.inpro_status = "deferred"
+    sample_personnel[1].inpro_status = "inproed"
+    db_session.add_all([p, sample_personnel[1]])
     await db_session.commit()
 
     super_admin = User(
@@ -401,14 +411,237 @@ async def test_attendance_hidden_person_records_preserved(
 
     monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
 
+    # Deferred filter: only John Doe.
     response = client.get(
-        "/attendance", params={"nominal_roll_id": str(sample_nominal_roll.id)}
+        "/attendance",
+        params={
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "inpro_status": "deferred",
+        },
     )
     assert response.status_code == 200
-    assert p.full_name not in response.text  # hidden from the view
+    assert "John Doe" in response.text
+    assert "Jane Smith" not in response.text
+    assert "Bob Johnson" not in response.text
 
-    # The attendance record itself is untouched.
+    # Inpro'ed filter: only Jane Smith; John's record survives untouched.
+    response = client.get(
+        "/attendance",
+        params={
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "inpro_status": "inproed",
+        },
+    )
+    assert response.status_code == 200
+    assert "Jane Smith" in response.text
+    assert "John Doe" not in response.text
+
     await db_session.refresh(record)
-    assert record.status_am == "present"
-    assert record.remarks_am == "marked earlier"
-    assert record.status_pm == "present"
+    assert record.status == "present"
+    assert record.remarks == "marked earlier"
+
+
+@pytest.mark.asyncio
+async def test_attendance_status_and_reason_filters(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_attendance_scope,
+    sample_personnel,
+    sample_users,
+    db_session,
+    monkeypatch,
+):
+    """The Status / Reason view filters narrow the roster like the Inpro
+    filter: unmarked rows count as absent, a Reason filter excludes rows
+    without a reason, and filtering is non-destructive."""
+    from parade_state.models import Attendance, User
+    from parade_state.utils import utc_dt
+    from parade_state.web import attendance as web_attendance
+
+    today = utc_dt.utcnow().date()
+    # John → present + MC, Jane → absent + Off, Bob → unmarked.
+    records = []
+    for person, status, reason in (
+        (sample_personnel[0], "present", "mc"),
+        (sample_personnel[1], "absent", "off"),
+    ):
+        record = Attendance(
+            personnel_id=str(person.id),
+            nominal_roll_id=str(sample_nominal_roll.id),
+            date=today,
+            status=status,
+            reason=reason,
+            created_by=str(sample_users["admin"].id),
+            updated_by=str(sample_users["admin"].id),
+        )
+        records.append(record)
+        db_session.add(record)
+
+    super_admin = User(
+        email="super-srfilter@example.com",
+        name="Super Admin",
+        role="super_admin",
+        status="active",
+    )
+    db_session.add(super_admin)
+    await db_session.commit()
+
+    async def _fake_current_user(_request):
+        return super_admin
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
+
+    base = {"nominal_roll_id": str(sample_nominal_roll.id)}
+
+    # Status=present: only John.
+    response = client.get("/attendance", params={**base, "status": "present"})
+    assert response.status_code == 200
+    assert "John Doe" in response.text
+    assert "Jane Smith" not in response.text
+    assert "Bob Johnson" not in response.text
+
+    # Status=absent: Jane + unmarked Bob (the grid's effective value).
+    response = client.get("/attendance", params={**base, "status": "absent"})
+    assert response.status_code == 200
+    assert "Jane Smith" in response.text
+    assert "Bob Johnson" in response.text
+    assert "John Doe" not in response.text
+
+    # Reason=mc: only John; unmarked and other reasons drop out.
+    response = client.get("/attendance", params={**base, "reason": "mc"})
+    assert response.status_code == 200
+    assert "John Doe" in response.text
+    assert "Jane Smith" not in response.text
+    assert "Bob Johnson" not in response.text
+
+    # Unknown values are ignored (filter falls back to "all").
+    response = client.get("/attendance", params={**base, "reason": "nonsense"})
+    assert response.status_code == 200
+    assert "John Doe" in response.text
+    assert "Jane Smith" in response.text
+    assert "Bob Johnson" in response.text
+
+    # Filtering is non-destructive: records survive untouched.
+    for record in records:
+        await db_session.refresh(record)
+        assert record.remarks is None
+
+
+@pytest.mark.asyncio
+async def test_frozen_day_banner_and_readonly_grid(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_attendance_scope,
+    sample_users,
+    db_session,
+    monkeypatch,
+):
+    """Issue 35: on a frozen day every role sees the banner (with the
+    freeze timestamp); admins get a read-only grid (no inputs, no toggle),
+    super-admins keep the editable grid and the freeze toggle."""
+    from parade_state.db import get_session_maker
+    from parade_state.models import AttendanceFreeze, User, UserSubunitAssignment
+    from parade_state.utils import utc_dt
+    from parade_state.web import attendance as web_attendance
+
+    admin = sample_users["admin"]
+    admin_id = str(admin.id)
+    nr_id = str(sample_nominal_roll.id)
+
+    # Grant an assignment so the roster renders, and freeze today.
+    sm = get_session_maker()
+    async with sm() as db:
+        db.add(
+            UserSubunitAssignment(
+                user_id=admin_id,
+                nominal_roll_id=nr_id,
+                sub_unit_1="Platoon 1",
+                created_by=admin_id,
+            )
+        )
+        db.add(
+            AttendanceFreeze(
+                nominal_roll_id=nr_id,
+                date=utc_dt.utcnow().date(),
+                created_by=admin_id,
+            )
+        )
+        await db.commit()
+
+    async def _fake_current_user(_request):
+        return admin
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
+
+    response = client.get("/attendance", params={"nominal_roll_id": nr_id})
+    assert response.status_code == 200
+    assert "Attendance for this day is frozen" in response.text
+    assert "frozen at" in response.text  # banner names the freeze timestamp
+    assert "read-only" in response.text
+    # Admin grid is read-only: no inputs at all (so no autosave edges).
+    # (The selectors below match element markup, not the autosave JS.)
+    assert '<select class="status-select"' not in response.text
+    assert '<select class="reason-select"' not in response.text
+    assert 'onblur="onRemarksBlur(this)"' not in response.text
+    # The toggle is super-admin-only.
+    assert 'id="freeze-toggle"' not in response.text
+
+    super_admin = User(
+        email="super-freeze@example.com",
+        name="Super Admin",
+        role="super_admin",
+        status="active",
+    )
+    db_session.add(super_admin)
+    await db_session.commit()
+
+    async def _fake_super_admin(_request):
+        return super_admin
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_super_admin)
+
+    response = client.get("/attendance", params={"nominal_roll_id": nr_id})
+    assert response.status_code == 200
+    assert "Attendance for this day is frozen" in response.text
+    assert '<select class="status-select"' in response.text  # still editable
+    assert 'id="freeze-toggle"' in response.text
+    assert "Unfreeze day" in response.text
+
+
+@pytest.mark.asyncio
+async def test_attendance_default_date_is_utc_with_local_redefault(
+    client: TestClient,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_users,
+    db_session,
+    monkeypatch,
+):
+    """The viewed day defaults server-side to UTC today (an explicit ?date=
+    always wins); the page ships a first-visit script that re-defaults the
+    date to the browser's local day — the server cannot know the viewer's
+    timezone, and UTC lags SGT mornings until 08:00. Mirrors the strength
+    report's script."""
+    from parade_state.utils import utc_dt
+    from parade_state.web import attendance as web_attendance
+
+    sample_nominal_roll.attendance_active = True
+    sample_nominal_roll.attendance_activated_by = str(sample_users["admin"].id)
+    db_session.add(sample_nominal_roll)
+    await db_session.commit()
+
+    async def _fake_current_user(_request):
+        return sample_users["admin"]
+
+    monkeypatch.setattr(web_attendance, "get_current_user_optional", _fake_current_user)
+
+    # No date param: the rendered input carries the UTC-default date.
+    response = client.get("/attendance")
+    assert response.status_code == 200
+    assert f'value="{utc_dt.utcnow().date().isoformat()}"' in response.text
+    # Best-effort local re-default ships with the page, guarded to URLs
+    # without a date param, and resubmits the filter form so the other
+    # filters survive the reload.
+    assert "params.has('date')" in response.text
+    assert "dateInput.form.submit()" in response.text

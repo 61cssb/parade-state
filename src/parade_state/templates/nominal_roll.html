@@ -139,7 +139,8 @@
     }
 </style>
 
-{# Super-admin click-to-edit cell for unit/subunit values. Edits are staged
+{# Click-to-edit cell for unit/subunit values (issue 38: all four levels
+   for super-admins; sub-unit 2/3 only for admins). Edits are staged
    client-side (cell turns darker yellow) and sent as one PATCH
    /api/v1/personnel/{id} per person on Apply, which records them as a tagging
    overlay — the NR itself stays read-only and the row turns yellow once
@@ -151,17 +152,25 @@
 {% if nominal_rolls %}
 <!-- Nominal roll selector -->
 <div class="card">
-    <form method="get" action="/nominal-roll" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-        <label for="nominal_roll_id" style="font-weight: bold;">Nominal Roll:</label>
-        <select name="nominal_roll_id" id="nominal_roll_id" onchange="this.form.submit()"
-                style="flex: 1; min-width: 240px; max-width: 400px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
-            {% for e in nominal_rolls %}
-            <option value="{{ e.id }}" {% if selected_nominal_roll and e.id == selected_nominal_roll.id %}selected{% endif %}>
-                CAA {{ e.caa }} — {{ e.personnel_count }} pers{% if e.attendance_active %} (active for attendance){% endif %}
-            </option>
-            {% endfor %}
-        </select>
-    </form>
+    <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+        <form method="get" action="/nominal-roll" style="display: flex; gap: 0.75rem; align-items: center; flex: 1; min-width: 240px; flex-wrap: wrap;">
+            <label for="nominal_roll_id" style="font-weight: bold;">Nominal Roll:</label>
+            <select name="nominal_roll_id" id="nominal_roll_id" onchange="this.form.submit()"
+                    style="flex: 1; min-width: 240px; max-width: 400px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+                {% for e in nominal_rolls %}
+                <option value="{{ e.id }}" {% if selected_nominal_roll and e.id == selected_nominal_roll.id %}selected{% endif %}>
+                    CAA {{ e.caa }} — {{ e.personnel_count }} pers{% if e.attendance_active %} (active for attendance){% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </form>
+        {# Export carries the current filters so the CSV matches the table
+           exactly as displayed (same contract as the grouping export). #}
+        {% if selected_nominal_roll %}
+        <a href="/api/v1/nominal-rolls/{{ selected_nominal_roll.id }}/export?{% if search %}&search={{ search | urlencode }}{% endif %}{% if unit %}&unit={{ unit | urlencode }}{% endif %}{% if sub_unit_1 %}&sub_unit_1={{ sub_unit_1 | urlencode }}{% endif %}{% if sub_unit_2 %}&sub_unit_2={{ sub_unit_2 | urlencode }}{% endif %}{% if category %}&category={{ category | urlencode }}{% endif %}{% if rank %}&rank={{ rank | urlencode }}{% endif %}{% if inpro_status %}&inpro_status={{ inpro_status | urlencode }}{% endif %}"
+           class="btn" style="background: #e5e7eb; color: #374151; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.25rem; font-size: 0.875rem;">Export CSV</a>
+        {% endif %}
+    </div>
 
     {% if selected_nominal_roll %}
     {# Roll management (merged from the retired admin nominal rolls page).
@@ -262,8 +271,15 @@
             <option value="{{ r }}" {% if rank == r %}selected{% endif %}>{{ r }}</option>
             {% endfor %}
         </select>
+        <select name="inpro_status" onchange="this.form.submit()"
+                style="padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
+            <option value="" {% if not inpro_status %}selected{% endif %}>All inpro statuses</option>
+            {% for value, label in inpro_labels.items() %}
+            <option value="{{ value }}" {% if inpro_status == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
         <button type="submit" class="btn btn-primary">Filter</button>
-        {% if search or unit or sub_unit_1 or sub_unit_2 or category or rank %}
+        {% if search or unit or sub_unit_1 or sub_unit_2 or category or rank or inpro_status %}
         <a href="/nominal-roll?nominal_roll_id={{ selected_nominal_roll.id }}" class="btn" style="background: #e5e7eb; color: #374151; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.25rem; font-size: 0.875rem;">Clear</a>
         {% endif %}
     </form>
@@ -286,6 +302,23 @@
         clears the value. Edits are recorded on the tagging, never on the
         nominal roll.
     </p>
+    {% elif user.role == 'admin' %}
+    <p style="margin: 0.5rem 0 0; font-size: 0.8rem; color: #6b7280;">
+        Yellow rows carry a tagging overlay. You can click a Sub Unit 2/3
+        cell to reallocate a person — the cell keeps its current text and
+        cursor so you can edit it directly, or pick from the suggestion
+        list (picking saves immediately; Enter saves typed text, Esc
+        cancels); a "leave blank" option clears the value. Unit and Sub
+        Unit 1 stay read-only — ask a super-admin to change those. Edits
+        are recorded on the tagging, never on the nominal roll.
+    </p>
+    {% endif %}
+
+    {% if no_assignments %}
+    <p style="color: #6b7280; margin-top: 1rem;">
+        You have no access assignments on this nominal roll — ask a
+        super-admin to grant scope access.
+    </p>
     {% endif %}
 
     {% if personnel %}
@@ -302,7 +335,7 @@
                     <th style="padding: 0.5rem;">Rank</th>
                     <th style="padding: 0.5rem;">Full Name</th>
                     <th style="padding: 0.5rem;">Pers No</th>
-                    <th style="padding: 0.5rem;">Callup</th>
+                    <th style="padding: 0.5rem;">Inpro Status</th>
                     <th style="padding: 0.5rem;">Remarks</th>
                 </tr>
             </thead>
@@ -310,10 +343,13 @@
                 {% for p in personnel %}
                 <tr class="{% if p.is_changed %}changed-row{% endif %}" style="border-bottom: 1px solid #e5e7eb;">
                     <td style="padding: 0.5rem; color: #9ca3af; font-variant-numeric: tabular-nums;">{{ loop.index }}</td>
+                    {# Issue 38: unit / sub-unit 1 remaps are super-admin-only;
+                       admins may reallocate sub-units 2/3 (recorded on the
+                       tagging overlay, same as every location edit). #}
                     <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'unit', p.unit) if user.role == 'super_admin' else (p.unit or '—') }}</td>
                     <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_1', p.sub_unit_1) if user.role == 'super_admin' else (p.sub_unit_1 or '—') }}</td>
-                    <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_2', p.sub_unit_2) if user.role == 'super_admin' else (p.sub_unit_2 or '—') }}</td>
-                    <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_3', p.sub_unit_3) if user.role == 'super_admin' else (p.sub_unit_3 or '—') }}</td>
+                    <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_2', p.sub_unit_2) if user.role in ('admin', 'super_admin') else (p.sub_unit_2 or '—') }}</td>
+                    <td style="padding: 0.5rem;">{{ editable_cell(p.id, 'sub_unit_3', p.sub_unit_3) if user.role in ('admin', 'super_admin') else (p.sub_unit_3 or '—') }}</td>
                     <td style="padding: 0.5rem; white-space: nowrap;">{{ p.category }}</td>
                     <td style="padding: 0.5rem; white-space: nowrap;">{{ p.rank }}</td>
                     <td style="padding: 0.5rem;">{{ p.full_name }}{% if p.source == 'manual' %} <span class="manual-badge" title="Added manually — not from the CSV">manual</span>{% endif %}</td>
@@ -325,14 +361,18 @@
                         {% endif %}
                     </td>
                     <td style="padding: 0.5rem; white-space: nowrap;">
-                        {% if user.role == 'admin' or user.role == 'super_admin' %}
-                        <select data-pid="{{ p.id }}" data-prev="{{ p.callup_status }}" onchange="onCallupChange(this)" style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem; background: #fff; color: #111827;" title="Callup decision status">
-                            {% for s in callup_statuses %}
-                            <option value="{{ s }}"{% if s == p.callup_status %} selected{% endif %}>{{ s }}</option>
+                        {# Issue 39: inpro status drives the attendance
+                           roster, so the select is super-admin-only for the
+                           admin trial — admins see the plain label (read
+                           paths, including the filter, are unchanged). #}
+                        {% if user.role == 'super_admin' %}
+                        <select data-pid="{{ p.id }}" data-prev="{{ p.inpro_status }}" onchange="onInproChange(this)" style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-size: 0.85rem; background: #fff; color: #111827;" title="Inpro status">
+                            {% for value, label in inpro_labels.items() %}
+                            <option value="{{ value }}"{% if value == p.inpro_status %} selected{% endif %}>{{ label }}</option>
                             {% endfor %}
                         </select>
                         {% else %}
-                        {{ p.callup_status }}
+                        {{ inpro_labels.get(p.inpro_status, p.inpro_status) }}
                         {% endif %}
                     </td>
                     <td style="padding: 0.5rem; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
@@ -436,10 +476,10 @@
                 <input type="text" id="svc-pers-no" maxlength="20" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; font-family: monospace;" placeholder="Leave blank if not yet known">
             </div>
             <div style="flex: 1;">
-                <label for="svc-callup" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Callup Status</label>
-                <select id="svc-callup" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: #fff;">
-                    {% for s in callup_statuses %}
-                    <option value="{{ s }}"{% if s == 'Called Up' %} selected{% endif %}>{{ s }}</option>
+                <label for="svc-inpro" style="display: block; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem;">Inpro Status</label>
+                <select id="svc-inpro" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: #fff;">
+                    {% for value, label in inpro_labels.items() %}
+                    <option value="{{ value }}"{% if value == 'yet_to_inpro' %} selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                 </select>
             </div>
@@ -486,8 +526,6 @@
 <script>
     {# Roll management (merged from the retired admin nominal rolls page).
        Acts on the currently selected roll only. #}
-    const ADMIN_USER_ID = "{{ user.id }}";
-    const ADMIN_USER_ROLE = "{{ user.role }}";
     const SINGAPORE_OFFSET = "+08:00";
     // Acts on the selected roll; openCreateModal re-affirms it for the modal.
     let activeNominalRollId = "{{ selected_nominal_roll.id }}";
@@ -502,7 +540,7 @@
         if (!confirm('Mark the nominal roll with CAA date ' + caa + ' as active for attendance?\n\nAny currently active nominal roll is deactivated automatically.')) return;
         try {
             const response = await fetch(
-                '/api/v1/nominal-rolls/' + nominalRollId + '/activate-attendance?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/nominal-rolls/' + nominalRollId + '/activate-attendance',
                 { method: 'POST' }
             );
             if (response.ok) {
@@ -521,7 +559,7 @@
         if (!confirm('Deactivate attendance for the nominal roll with CAA date ' + caa + '?\n\nAttendance is inactive until another roll is marked "Use for Attendance".')) return;
         try {
             const response = await fetch(
-                '/api/v1/nominal-rolls/' + nominalRollId + '/deactivate-attendance?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/nominal-rolls/' + nominalRollId + '/deactivate-attendance',
                 { method: 'POST' }
             );
             if (response.ok) {
@@ -546,7 +584,7 @@
         if (!confirm(message)) return;
         try {
             const response = await fetch(
-                '/api/v1/nominal-rolls/' + nominalRollId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/nominal-rolls/' + nominalRollId,
                 { method: 'DELETE' }
             );
             if (response.ok) {
@@ -576,7 +614,7 @@
         document.getElementById('add-modal-nr-caa').textContent = caa;
         document.getElementById('add-modal-status').innerHTML = '';
         document.getElementById('add-serviceman-form').reset();
-        document.getElementById('svc-callup').value = 'Called Up';
+        document.getElementById('svc-inpro').value = 'yet_to_inpro';
         document.getElementById('add-modal-backdrop').style.display = 'block';
         modal.style.display = 'block';
         document.getElementById('svc-rank').focus();
@@ -605,7 +643,7 @@
         const sub1 = document.getElementById('svc-sub1').value.trim();
         const sub2 = document.getElementById('svc-sub2').value.trim();
         const sub3 = document.getElementById('svc-sub3').value.trim();
-        const callup = document.getElementById('svc-callup').value;
+        const inpro = document.getElementById('svc-inpro').value;
         const remarks = document.getElementById('svc-remarks').value.trim();
 
         if (!rank || !name || !unit) {
@@ -622,13 +660,13 @@
             sub_unit_1: sub1 || null,
             sub_unit_2: sub2 || null,
             sub_unit_3: sub3 || null,
-            callup_status: callup,
+            inpro_status: inpro,
             remarks: remarks || null,
         };
 
         try {
             const response = await fetch(
-                '/api/v1/personnel?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/personnel',
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -685,7 +723,7 @@
 
         try {
             const response = await fetch(
-                '/api/v1/nominal-rolls/' + activeNominalRollId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/nominal-rolls/' + activeNominalRollId,
                 {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
@@ -773,7 +811,7 @@
 
         try {
             const response = await fetch(
-                '/api/v1/nominal-rolls/' + activeNominalRollId + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/nominal-rolls/' + activeNominalRollId,
                 {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
@@ -806,14 +844,15 @@
         display.style.display = '';
     }
 
-    // --- Per-person callup status & remarks (admin / super_admin) ---
+    // --- Per-person remarks (admin / super_admin); inpro & pers_no are
+    // super-admin-only (issues 39 / 26) ---
     // Immediate PATCH on change, like the roll-management saves above.
     // The staged-edits flow below is super_admin-only unit/subunit remapping.
     {% if user.role == 'admin' or user.role == 'super_admin' %}
     async function patchPersonnel(pid, body) {
         try {
             const response = await fetch(
-                '/api/v1/personnel/' + pid + '?user_id=' + ADMIN_USER_ID + '&user_role=' + ADMIN_USER_ROLE,
+                '/api/v1/personnel/' + pid,
                 {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
@@ -828,19 +867,23 @@
         }
     }
 
-    async function onCallupChange(sel) {
+    // Inpro status select (super-admin only; issue 39 — the select and
+    // this handler are not rendered/shipped for anyone else).
+    {% if user.role == 'super_admin' %}
+    async function onInproChange(sel) {
         const pid = sel.getAttribute('data-pid');
         const prev = sel.getAttribute('data-prev');
         const value = sel.value;
-        const err = await patchPersonnel(pid, { callup_status: value });
+        const err = await patchPersonnel(pid, { inpro_status: value });
         if (err) {
             sel.value = prev;  // revert — the DB kept the old value
-            showPageStatus('Callup status update failed: ' + err, 'error');
+            showPageStatus('Inpro status update failed: ' + err, 'error');
             return;
         }
         sel.setAttribute('data-prev', value);
-        showPageStatus('Callup status updated.', 'success');
+        showPageStatus('Inpro status updated.', 'success');
     }
+    {% endif %}
 
     async function onPersonnelRemarksChange(input) {
         const pid = input.getAttribute('data-pid');
@@ -883,19 +926,21 @@
     }
 </script>
 {% endif %}
-{% if user.role == 'super_admin' and selected_nominal_roll %}
+{% if user.role in ('admin', 'super_admin') and selected_nominal_roll %}
 <script>
-    const USER_ID = "{{ user.id }}";
-    const USER_ROLE = "{{ user.role }}";
     // Staged (unapplied) cell edits persist per roll, so they survive a page
     // refresh. Cleared only by Apply (per person) or Discard (all).
     const STAGE_KEY = 'ps:nr-edits:' + "{{ selected_nominal_roll.id }}";
 
-    // Suggestion lists for the cell editor (unscoped NR values; typed
-    // values outside these lists are accepted too).
+    // Suggestion lists for the cell editor (typed values outside these
+    // lists are accepted too). Issue 38: admins only get the sub-unit 2/3
+    // lists — their cells are the only editable ones, so the unit /
+    // sub-unit 1 lists are neither rendered nor shipped.
     const EDIT_OPTIONS = {
+        {% if user.role == 'super_admin' %}
         unit: {{ edit_unit_options | tojson }},
         sub_unit_1: {{ edit_sub1_options | tojson }},
+        {% endif %}
         sub_unit_2: {{ edit_sub2_options | tojson }},
         sub_unit_3: {{ edit_sub3_options | tojson }},
     };
@@ -1124,8 +1169,7 @@
         for (const pid of Object.keys(staged)) {
             try {
                 const res = await fetch(
-                    '/api/v1/personnel/' + encodeURIComponent(pid) +
-                    '?user_id=' + USER_ID + '&user_role=' + USER_ROLE,
+                    '/api/v1/personnel/' + encodeURIComponent(pid),
                     {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },

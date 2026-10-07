@@ -45,11 +45,19 @@ def upgrade() -> None:
     # --- 1. nominal_rolls: active-attendance columns ---
     with op.batch_alter_table("nominal_rolls", schema=None) as batch_op:
         batch_op.add_column(
-            sa.Column("attendance_active", sa.Boolean(), nullable=False,
-                      server_default=sa.false())
+            sa.Column(
+                "attendance_active",
+                sa.Boolean(),
+                nullable=False,
+                server_default=sa.false(),
+            )
         )
-        batch_op.add_column(sa.Column("attendance_activated_at", sa.DateTime(), nullable=True))
-        batch_op.add_column(sa.Column("attendance_activated_by", sa.String(length=36), nullable=True))
+        batch_op.add_column(
+            sa.Column("attendance_activated_at", sa.DateTime(), nullable=True)
+        )
+        batch_op.add_column(
+            sa.Column("attendance_activated_by", sa.String(length=36), nullable=True)
+        )
         batch_op.create_foreign_key(
             "fk_nominal_rolls_attendance_activated_by",
             "users",
@@ -111,10 +119,14 @@ def downgrade() -> None:
             )
         )
         batch_op.add_column(sa.Column("confirmed_at", sa.DateTime(), nullable=True))
-        batch_op.add_column(sa.Column("confirmed_by", sa.String(length=36), nullable=True))
+        batch_op.add_column(
+            sa.Column("confirmed_by", sa.String(length=36), nullable=True)
+        )
 
     with op.batch_alter_table("attendance", schema=None) as batch_op:
-        batch_op.add_column(sa.Column("tagging_id", sa.String(length=36), nullable=True))
+        batch_op.add_column(
+            sa.Column("tagging_id", sa.String(length=36), nullable=True)
+        )
         batch_op.create_index("ix_attendance_tagging_id", ["tagging_id"])
         batch_op.create_foreign_key(
             "fk_attendance_tagging_id_taggings",

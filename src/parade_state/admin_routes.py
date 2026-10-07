@@ -1,39 +1,40 @@
 """Admin interface routes using Jinja2 templates."""
 
+from urllib.parse import urlsplit
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import func, or_, select
-from urllib.parse import urlsplit
 
-from parade_state.api.subunit_access import get_assigned_subunit_1s
+from parade_state.api.subunit_access import get_scope_grants, grant_matches
 from parade_state.api.tagging import _load_nr_tagging
-from parade_state.auth.admin_dependencies import (
-    get_current_admin_user_optional,
-    require_admin_user_flexible,
-)
+from parade_state.auth.admin_dependencies import get_current_admin_user_optional
 from parade_state.db import get_session_maker
+from parade_state.feature_access import MATRIX_FEATURES, feature_allowed
 from parade_state.features import require_feature
 from parade_state.models import (
+    PRESENT_LIKE_STATUSES,
     AccessLevel,
     Attendance,
     AuditLog,
     CsvUpload,
     Deferment,
-    Grouping,
+    DiscussionComment,
+    DiscussionPost,
     NominalRoll,
-    PRESENT_LIKE_STATUSES,
     Personnel,
     Tagging,
     TaggingEntry,
     User,
+    UserSubunitAssignment,
 )
-from parade_state.utils import utc_dt
+from parade_state.utils import markdown, utc_dt
 
 router = APIRouter()
-depends_admin = Depends(require_admin_user_flexible)
 
-# Audit log filter dropdown options (mirrors AuditLog model enum values)
+# Audit log filter dropdown options (mirrors AuditLog model enum values,
+# including values no longer written — retained logs may still carry them)
 AUDIT_ENTITY_TYPES = [
     "attendance",
     "grouping",
@@ -44,8 +45,20 @@ AUDIT_ENTITY_TYPES = [
     "personnel",
     "access_level",
     "column_mapping",
+    "database",
+    "discussion_post",
+    "feature_access",
 ]
-AUDIT_ACTIONS = ["create", "update", "delete", "archive", "close", "finalize"]
+AUDIT_ACTIONS = [
+    "create",
+    "update",
+    "delete",
+    "archive",
+    "close",
+    "finalize",
+    "restore",
+    "attendance_freeze",
+]
 
 # Deferment filter dropdown options (mirrors Deferment model enums)
 DEFERMENT_REASONS = [
@@ -76,6 +89,7 @@ DEFERMENT_STATUSES = [
 # Global Jinja2 environment (singleton)
 _jinja_env = None
 
+
 def get_templates(request: Request) -> Environment:
     """Get Jinja2 environment singleton from app state or create if needed."""
     global _jinja_env
@@ -84,12 +98,12 @@ def get_templates(request: Request) -> Environment:
         _jinja_env = Environment(
             loader=FileSystemLoader(templates_dir),
             autoescape=False,
-            cache_size=0  # Disable caching completely
+            cache_size=0,  # Disable caching completely
         )
     return _jinja_env
 
 
-def _no_permission_response(
+def no_permission_response(
     request: Request, current_admin, page_name: str, active_page: str
 ) -> HTMLResponse:
     """Render the in-page no-access message for super-admin-only pages.
@@ -124,7 +138,7 @@ def _strength_buckets() -> dict[str, dict[str, int]]:
 def _strength_cell(bucket: dict[str, int]) -> dict[str, int]:
     """Render-ready In/Out/Current/% cell from one In/Current counter.
 
-    Out is the complement of Current within In (every Called Up person is
+    Out is the complement of Current within In (every rostered person is
     exactly one of Current/Out — unmarked attendance counts as absent),
     and % is Current over In, whole-number, 0 when In is 0.
     """
@@ -159,25 +173,44 @@ def _strength_cells(buckets: dict[str, dict[str, int]]) -> dict:
 async def admin_unit_strength(
     request: Request,
     date: utc_dt.date | None = None,
-    slot: str = "am",
+    basis: str | None = None,
 ):
     """Render the Unit Strength report (issue 25).
 
     Aggregates the parade state of the NR active for attendance by
     effective sub_unit_1/sub_unit_2 into the strength reporting format:
     Officer/WOSE/Total column groups, each In/Out/Current/%. In counts
-    Called Up personnel; Current those marked present/late in the selected
-    slot; Out everyone else (unmarked = absent). Unit and sub_unit_3 are
-    ignored — attached personnel from other units report here too.
-    Super-admins see the whole unit; regular admins see only the
-    sub_unit_1 sections assigned to them on the NR.
+    non-deferred personnel; Current those marked present (single daily
+    session, issue 33 — reason never participates); Out everyone else
+    (unmarked = absent). Unit and sub_unit_3 are ignored — attached
+    personnel from other units report here too.
+    Super-admins see the whole unit; regular admins see only the sections
+    inside their (unit, sub_unit_1) scope grants on the NR.
+
+    Reporting basis (issue 36): ``tagged`` (default) groups personnel
+    under their effective (tagging-applied) allocations; ``untagged``
+    groups them under the original NR allocations (the canonical
+    Personnel columns). Untagged is super-admin-only.
     """
     current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
 
-    if slot not in ("am", "pm"):
-        slot = "am"
+    # Matrix gate (issue 37): strength hidden from admins when toggled
+    # off in Settings; super-admins bypass.
+    if not feature_allowed(request, current_admin.role, "strength"):
+        return no_permission_response(
+            request, current_admin, "Unit Strength", "strength"
+        )
+
+    # Absent/unknown basis values fall back to the tagged default.
+    if basis not in ("tagged", "untagged"):
+        basis = "tagged"
+    if basis == "untagged" and current_admin.role != "super_admin":
+        return no_permission_response(
+            request, current_admin, "Unit Strength", "strength"
+        )
+
     target_date = date or utc_dt.utcnow().date()
 
     sections: list[dict] = []
@@ -188,64 +221,83 @@ async def admin_unit_strength(
     session_maker = get_session_maker()
     async with session_maker() as db:
         active_nr = (
-            await db.execute(
-                select(NominalRoll).where(NominalRoll.attendance_active.is_(True))
+            (
+                await db.execute(
+                    select(NominalRoll).where(NominalRoll.attendance_active.is_(True))
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
 
         if active_nr is not None:
             nr_id = str(active_nr.id)
-            nr_label = (
-                active_nr.caa.isoformat() if active_nr.caa else nr_id[:8]
-            )
+            nr_label = active_nr.caa.isoformat() if active_nr.caa else nr_id[:8]
 
             # The strength population is the attendance roster: active
-            # personnel on the NR with callup status Called Up.
+            # personnel on the NR who are not deferred (issue 32 interim
+            # rule — yet_to_inpro + inproed).
             roster = (
-                await db.execute(
-                    select(Personnel).where(
-                        Personnel.nominal_roll_id == nr_id,
-                        Personnel.status == "active",
-                        Personnel.callup_status == "Called Up",
-                    )
-                )
-            ).scalars().all()
-
-            # Tagging overlay: effective unit/subunits come from the NR's
-            # 1:1 tagging entries where present (as in the attendance view).
-            entry_by_person: dict[str, TaggingEntry] = {}
-            tagging = await _load_nr_tagging(db, nr_id, with_entries=False)
-            if tagging is not None:
-                entries = (
+                (
                     await db.execute(
-                        select(TaggingEntry).where(
-                            TaggingEntry.tagging_id == str(tagging.id)
+                        select(Personnel).where(
+                            Personnel.nominal_roll_id == nr_id,
+                            Personnel.status == "active",
+                            Personnel.inpro_status != "deferred",
                         )
                     )
-                ).scalars().all()
-                entry_by_person = {str(e.personnel_id): e for e in entries}
+                )
+                .scalars()
+                .all()
+            )
+
+            # Tagging overlay: effective unit/subunits come from the NR's
+            # 1:1 tagging entries where present (as in the attendance
+            # view). On the untagged basis (issue 36) the overlay is not
+            # applied at all — personnel group under their canonical
+            # (original NR) allocations.
+            entry_by_person: dict[str, TaggingEntry] = {}
+            if basis == "tagged":
+                tagging = await _load_nr_tagging(db, nr_id, with_entries=False)
+                if tagging is not None:
+                    entries = (
+                        (
+                            await db.execute(
+                                select(TaggingEntry).where(
+                                    TaggingEntry.tagging_id == str(tagging.id)
+                                )
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    entry_by_person = {str(e.personnel_id): e for e in entries}
 
             attendance_rows = (
-                await db.execute(
-                    select(Attendance).where(
-                        Attendance.nominal_roll_id == nr_id,
-                        Attendance.date == target_date,
+                (
+                    await db.execute(
+                        select(Attendance).where(
+                            Attendance.nominal_roll_id == nr_id,
+                            Attendance.date == target_date,
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             att_by_person = {a.personnel_id: a for a in attendance_rows}
 
-            # (effective sub_unit_1, effective sub_unit_2, category, slot
-            # status) per person; no attendance row = absent (model default).
-            per_person: list[tuple[str | None, str | None, str, str]] = []
+            # (effective unit, effective sub_unit_1, effective sub_unit_2,
+            # category, status) per person; no attendance row = absent
+            # (model default).
+            per_person: list[tuple[str | None, str | None, str | None, str, str]] = []
             for person in roster:
                 entry = entry_by_person.get(str(person.id))
                 record = att_by_person.get(str(person.id))
-                status = (
-                    record.status_pm if slot == "pm" else record.status_am
-                ) if record is not None else "absent"
+                status = record.status if record is not None else "absent"
                 per_person.append(
                     (
+                        entry.to_unit if entry is not None else person.unit,
                         entry.to_sub_unit_1 if entry is not None else person.sub_unit_1,
                         entry.to_sub_unit_2 if entry is not None else person.sub_unit_2,
                         person.category,
@@ -253,20 +305,20 @@ async def admin_unit_strength(
                     )
                 )
 
-            # Subunit-1 access scope (deny-by-default, tagging-aware) —
-            # super-admins bypass and see the whole unit.
+            # Access scope (deny-by-default, tagging-aware) — super-admins
+            # bypass and see the whole unit.
             if current_admin.role != "super_admin":
-                allowed = await get_assigned_subunit_1s(
-                    db, str(current_admin.id), nr_id
-                )
-                no_assignments = not allowed
-                per_person = [t for t in per_person if t[0] in allowed]
+                grants = await get_scope_grants(db, str(current_admin.id), nr_id)
+                no_assignments = not grants
+                per_person = [
+                    t for t in per_person if grant_matches(grants, t[0], t[1])
+                ]
 
             # Aggregate into (sub_unit_1, sub_unit_2) cells, then section
             # per sub_unit_1 (displayed once) with a SUBTOTAL, plus a
             # unit-wide TOTAL rollup.
             cells: dict[tuple[str | None, str | None], dict] = {}
-            for sub1, sub2, category, status in per_person:
+            for _unit, sub1, sub2, category, status in per_person:
                 buckets = cells.setdefault((sub1, sub2), _strength_buckets())
                 bucket = buckets[category]
                 bucket["in"] += 1
@@ -312,9 +364,9 @@ async def admin_unit_strength(
             "role": current_admin.role,
         },
         active_page="strength",
+        basis=basis,
         nr_label=nr_label,
         target_date=target_date,
-        slot=slot,
         sections=sections,
         total=total_cells,
         no_assignments=no_assignments,
@@ -362,6 +414,53 @@ async def admin_users(
         result = await db.execute(query)
         rows = result.all()
 
+        # NR options for the super-admin scope-grant form (issue #28).
+        nr_rows = (
+            (await db.execute(select(NominalRoll).order_by(NominalRoll.caa.desc())))
+            .scalars()
+            .all()
+        )
+        nr_label_by_id = {
+            str(nr.id): nr.label or (nr.caa.isoformat() if nr.caa else str(nr.id)[:8])
+            for nr in nr_rows
+        }
+        nr_options = [
+            {"id": nr_id, "label": label} for nr_id, label in nr_label_by_id.items()
+        ]
+
+        # Each listed user's scope grants, shown directly in the table
+        # (issue #28) instead of behind the Scope panel toggle.
+        grants_by_user: dict[str, list[dict]] = {}
+        listed_user_ids = [str(user.id) for user, _ in rows]
+        if listed_user_ids:
+            grant_rows = (
+                (
+                    await db.execute(
+                        select(UserSubunitAssignment)
+                        .where(UserSubunitAssignment.user_id.in_(listed_user_ids))
+                        .order_by(
+                            UserSubunitAssignment.nominal_roll_id,
+                            UserSubunitAssignment.unit,
+                            UserSubunitAssignment.sub_unit_1,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for grant in grant_rows:
+                grants_by_user.setdefault(str(grant.user_id), []).append(
+                    {
+                        "id": str(grant.id),
+                        "unit": grant.unit,
+                        "sub_unit_1": grant.sub_unit_1,
+                        "nr_label": nr_label_by_id.get(
+                            str(grant.nominal_roll_id),
+                            str(grant.nominal_roll_id)[:8],
+                        ),
+                    }
+                )
+
     users = [
         {
             "id": str(user.id),
@@ -372,6 +471,7 @@ async def admin_users(
             "access_level": access_level.name if access_level else None,
             "created_at": user.created_at,
             "last_sign_in_at": user.last_sign_in_at,
+            "grants": grants_by_user.get(str(user.id), []),
         }
         for user, access_level in rows
     ]
@@ -382,13 +482,14 @@ async def admin_users(
     html_content = template.render(
         request=request,
         user={
-            "id": current_admin.id,
+            "id": str(current_admin.id),
             "name": current_admin.name,
             "email": current_admin.email,
             "role": current_admin.role,
         },
         active_page="users",
         users=users,
+        nominal_rolls=nr_options,
         search=search or "",
         status_filter=status_filter or "",
         role_filter=role_filter or "",
@@ -409,6 +510,12 @@ async def admin_csv_upload(
     current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
+
+    # Matrix gate (issue 37): the trial hides Upload NR from plain
+    # admins. The POST APIs are already super-admin-only; this page gate
+    # stops admins from reaching a page that 403s on submit.
+    if not feature_allowed(request, current_admin.role, "upload_nr"):
+        return no_permission_response(request, current_admin, "Upload NR", "csv-upload")
 
     # Fetch recent uploads for the table
     session_maker = get_session_maker()
@@ -523,7 +630,9 @@ async def admin_deferments(
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
     if current_admin.role != "super_admin":
-        return _no_permission_response(request, current_admin, "Deferments", "deferments")
+        return no_permission_response(
+            request, current_admin, "Deferments", "deferments"
+        )
 
     session_maker = get_session_maker()
     async with session_maker() as db:
@@ -614,6 +723,197 @@ async def admin_deferments(
     return HTMLResponse(content=html_content)
 
 
+# Discussion board filter dropdown options (mirror the model enums)
+DISCUSSION_CATEGORIES = ["requests", "bugs"]
+DISCUSSION_STATUSES = ["Open", "Duplicate", "Accepted", "Implemented", "Closed"]
+
+
+def _fmt_ts(value) -> str:  # noqa: ANN001 — naive datetime or None from the DB
+    """Render a model timestamp for the board pages (ISO date + time)."""
+    return value.strftime("%Y-%m-%d %H:%M") if value else ""
+
+
+@router.get(
+    "/admin/discussions",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_feature("FEATURE_DISCUSSIONS"))],
+)
+async def admin_discussions(
+    request: Request,
+    category: str | None = None,
+    status_filter: str | None = None,
+):
+    """Render the discussions board list page (issue 24).
+
+    Flat newest-first list with category / status filters, capped at the
+    200 most recent posts — no pagination at the expected admin-only
+    volume. Open to every admin; triage controls live on the post page.
+    """
+    current_admin = await get_current_admin_user_optional(request)
+    if not current_admin:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    session_maker = get_session_maker()
+    async with session_maker() as db:
+        query = (
+            select(
+                DiscussionPost,
+                User.name,
+                func.count(DiscussionComment.id),
+            )
+            .outerjoin(User, DiscussionPost.author_id == User.id)
+            .outerjoin(
+                DiscussionComment, DiscussionComment.post_id == DiscussionPost.id
+            )
+            .group_by(DiscussionPost.id, User.name)
+            .order_by(DiscussionPost.created_at.desc())
+            .limit(200)
+        )
+        if category:
+            query = query.where(DiscussionPost.category == category)
+        if status_filter:
+            query = query.where(DiscussionPost.status == status_filter)
+        rows = (await db.execute(query)).all()
+
+    posts = [
+        {
+            "id": str(post.id),
+            "title": post.title,
+            "author_name": author_name or "(unknown)",
+            "category": post.category,
+            "status": post.status,
+            "comment_count": comment_count,
+            "created_at": _fmt_ts(post.created_at),
+            "edited_at": _fmt_ts(post.edited_at),
+        }
+        for post, author_name, comment_count in rows
+    ]
+
+    env = get_templates(request)
+    template = env.get_template("admin/discussions_list.html")
+
+    html_content = template.render(
+        request=request,
+        user={
+            "id": current_admin.id,
+            "name": current_admin.name,
+            "email": current_admin.email,
+            "role": current_admin.role,
+        },
+        active_page="discussions",
+        posts=posts,
+        categories=DISCUSSION_CATEGORIES,
+        statuses=DISCUSSION_STATUSES,
+        category_filter=category or "",
+        status_filter=status_filter or "",
+        is_super_admin=current_admin.role == "super_admin",
+    )
+
+    return HTMLResponse(content=html_content)
+
+
+@router.get(
+    "/admin/discussions/posts/{post_id}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_feature("FEATURE_DISCUSSIONS"))],
+)
+async def admin_discussion_post(request: Request, post_id: str):
+    """Render a single board post with its comments (issue 24).
+
+    Bodies render through the sanitized markdown subset. Edit controls
+    appear only for the author; triage (category / status) and delete
+    controls only for super-admins — the API enforces both regardless.
+    """
+    current_admin = await get_current_admin_user_optional(request)
+    if not current_admin:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    session_maker = get_session_maker()
+    async with session_maker() as db:
+        row = (
+            await db.execute(
+                select(DiscussionPost, User.name)
+                .outerjoin(User, DiscussionPost.author_id == User.id)
+                .where(DiscussionPost.id == post_id)
+            )
+        ).one_or_none()
+        if row is None:
+            return HTMLResponse(
+                content=(
+                    get_templates(request)
+                    .get_template("admin/no_permission.html")
+                    .render(
+                        request=request,
+                        user={
+                            "id": current_admin.id,
+                            "name": current_admin.name,
+                            "email": current_admin.email,
+                            "role": current_admin.role,
+                        },
+                        active_page="discussions",
+                        page_name="Discussion post",
+                    )
+                ),
+                status_code=404,
+            )
+        post, author_name = row
+
+        comment_rows = (
+            await db.execute(
+                select(DiscussionComment, User.name)
+                .outerjoin(User, DiscussionComment.author_id == User.id)
+                .where(DiscussionComment.post_id == post_id)
+                .order_by(DiscussionComment.created_at)
+            )
+        ).all()
+
+    comments = [
+        {
+            "id": str(comment.id),
+            "author_id": str(comment.author_id),
+            "author_name": name or "(unknown)",
+            "body_html": markdown.render_markdown(comment.body),
+            "raw_body": comment.body,
+            "created_at": _fmt_ts(comment.created_at),
+            "edited_at": _fmt_ts(comment.edited_at),
+        }
+        for comment, name in comment_rows
+    ]
+
+    env = get_templates(request)
+    template = env.get_template("admin/discussion_post.html")
+
+    html_content = template.render(
+        request=request,
+        user={
+            "id": current_admin.id,
+            "name": current_admin.name,
+            "email": current_admin.email,
+            "role": current_admin.role,
+        },
+        active_page="discussions",
+        post={
+            "id": str(post.id),
+            "title": post.title,
+            "body_html": markdown.render_markdown(post.body),
+            "raw_body": post.body,
+            "author_id": str(post.author_id),
+            "author_name": author_name or "(unknown)",
+            "category": post.category,
+            "status": post.status,
+            "created_at": _fmt_ts(post.created_at),
+            "edited_at": _fmt_ts(post.edited_at),
+        },
+        comments=comments,
+        categories=DISCUSSION_CATEGORIES,
+        statuses=DISCUSSION_STATUSES,
+        is_super_admin=current_admin.role == "super_admin",
+        is_author=str(current_admin.id) == str(post.author_id),
+    )
+
+    return HTMLResponse(content=html_content)
+
+
 @router.get(
     "/admin/taggings",
     response_class=HTMLResponse,
@@ -633,7 +933,7 @@ async def admin_taggings(
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
     if current_admin.role != "super_admin":
-        return _no_permission_response(request, current_admin, "Taggings", "taggings")
+        return no_permission_response(request, current_admin, "Taggings", "taggings")
 
     session_maker = get_session_maker()
     async with session_maker() as db:
@@ -750,17 +1050,28 @@ async def admin_taggings(
     return HTMLResponse(content=html_content)
 
 
-
 @router.get("/admin/settings", response_class=HTMLResponse)
 async def admin_settings(
     request: Request,
 ):
-    """Render the settings page."""
+    """Render the settings page (super admin only, issue 37).
+
+    Settings hosts the feature-access matrix — the admin-role
+    configuration surface — so the page itself is hard-gated, matching
+    Restore Backup. Plain admins never see the sidebar entry.
+    """
     current_admin = await get_current_admin_user_optional(request)
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
 
+    if current_admin.role != "super_admin":
+        return no_permission_response(request, current_admin, "Settings", "settings")
+
     from parade_state.config import get_settings
+
+    # The middleware already loaded the matrix for this request; reuse
+    # it instead of a second read.
+    matrix = getattr(request.state, "feature_access", None) or {}
 
     env = get_templates(request)
     template = env.get_template("admin/settings.html")
@@ -775,6 +1086,8 @@ async def admin_settings(
         },
         active_page="settings",
         purge_enabled=get_settings().PURGE_ENABLED,
+        matrix_features=MATRIX_FEATURES,
+        admin_matrix=matrix.get("admin", {}),
     )
 
     return HTMLResponse(content=html_content)
@@ -871,16 +1184,14 @@ async def admin_database_restore(request: Request):
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
     if current_admin.role != "super_admin":
-        return _no_permission_response(
+        return no_permission_response(
             request, current_admin, "Restore Backup", "database-restore"
         )
 
     from parade_state.config import get_settings
 
     settings = get_settings()
-    database_name = (
-        urlsplit(settings.DATABASE_URL).path.lstrip("/") or "postgres"
-    )
+    database_name = urlsplit(settings.DATABASE_URL).path.lstrip("/") or "postgres"
 
     env = get_templates(request)
     template = env.get_template("admin/db_restore.html")

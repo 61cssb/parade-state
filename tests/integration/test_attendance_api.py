@@ -1,21 +1,26 @@
 """Behavioral tests for the reworked attendance API.
 
-Covers the NR/Tagging-scoped AM/PM attendance model: active-scope gating,
-bulk + per-row upsert, list, copy-remarks (explicit source/destination,
-issue 20), and the scope-activation endpoint.
+Covers the NR/Tagging-scoped single-session attendance model (issue 33):
+active-scope gating, bulk + per-row upsert with reason validation, list,
+copy-remarks (date-to-date, issue 20), CSV export, and the
+scope-activation endpoint.
 """
 
+import csv
+import io
 from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.mark.asyncio
 async def test_list_requires_nominal_roll_and_date(
-    client: TestClient, sample_nominal_roll, sample_attendance_scope
+    client: TestClient, client_as, sample_nominal_roll, sample_attendance_scope
 ):
     """Missing query params yield 422 (FastAPI validation)."""
+    client = await client_as("admin")
     response = client.get("/api/v1/attendance/")
     assert response.status_code == 422
 
@@ -23,12 +28,15 @@ async def test_list_requires_nominal_roll_and_date(
 @pytest.mark.asyncio
 async def test_list_returns_rows_for_date(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
     sample_attendance,
+    admin_subunit_assignment,
 ):
-    """List returns rows for the requested NR + date."""
+    """List returns rows for the requested NR + date (scope-filtered)."""
+    client = await client_as("admin")
     today = date.today().isoformat()
     response = client.get(
         "/api/v1/attendance/",
@@ -44,21 +52,20 @@ async def test_list_returns_rows_for_date(
 
 @pytest.mark.asyncio
 async def test_upsert_refuses_when_nr_not_active(
-    client: TestClient, sample_nominal_roll, sample_personnel, admin_id
+    client: TestClient, client_as, sample_nominal_roll, sample_personnel
 ):
     """When the NR is not the one active for attendance, upsert returns 400."""
+    client = await client_as("admin")
     today = date.today().isoformat()
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "records": [
                 {
                     "personnel_id": str(sample_personnel[0].id),
                     "date": today,
-                    "status_am": "present",
-                    "status_pm": "absent",
+                    "status": "present",
                 }
             ],
         },
@@ -70,13 +77,14 @@ async def test_upsert_refuses_when_nr_not_active(
 @pytest.mark.asyncio
 async def test_upsert_creates_then_updates(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
     admin_subunit_assignment,
-    admin_id,
 ):
     """Upsert creates a row, then a second upsert updates it in place."""
+    client = await client_as("admin")
     today = date.today().isoformat()
     pid = str(sample_personnel[0].id)
     nr_id = str(sample_nominal_roll.id)
@@ -84,38 +92,36 @@ async def test_upsert_creates_then_updates(
     # Create.
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={
             "nominal_roll_id": nr_id,
             "records": [
                 {
                     "personnel_id": pid,
                     "date": today,
-                    "status_am": "present",
-                    "remarks_am": "in",
-                    "status_pm": "absent",
+                    "status": "present",
+                    "remarks": "in",
                 }
             ],
         },
     )
     assert response.status_code == 200
     created = response.json()[0]
-    assert created["status_am"] == "present"
-    assert created["remarks_am"] == "in"
+    assert created["status"] == "present"
+    assert created["reason"] is None
+    assert created["remarks"] == "in"
 
     # Update same row.
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={
             "nominal_roll_id": nr_id,
             "records": [
                 {
                     "personnel_id": pid,
                     "date": today,
-                    "status_am": "late",
-                    "remarks_am": "duty",
-                    "status_pm": "present",
+                    "status": "absent",
+                    "reason": "mc",
+                    "remarks": "duty",
                 }
             ],
         },
@@ -123,35 +129,123 @@ async def test_upsert_creates_then_updates(
     assert response.status_code == 200
     updated = response.json()[0]
     assert updated["id"] == created["id"]  # same row, updated in place
-    assert updated["status_am"] == "late"
-    assert updated["status_pm"] == "present"
+    assert updated["status"] == "absent"
+    assert updated["reason"] == "mc"
+    assert updated["remarks"] == "duty"
+
+
+@pytest.mark.asyncio
+async def test_upsert_rejects_invalid_status(
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_attendance_scope,
+):
+    """The status vocabulary is exactly present/absent (422 otherwise)."""
+    client = await client_as("super_admin")
+    today = date.today().isoformat()
+    response = client.put(
+        "/api/v1/attendance/upsert",
+        json={
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "records": [
+                {
+                    "personnel_id": str(sample_personnel[0].id),
+                    "date": today,
+                    "status": "late",  # legacy value, removed by issue 33
+                }
+            ],
+        },
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_upsert_rejects_invalid_reason(
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_attendance_scope,
+):
+    """The reason vocabulary is the 5-value enum (422 otherwise)."""
+    client = await client_as("super_admin")
+    today = date.today().isoformat()
+    response = client.put(
+        "/api/v1/attendance/upsert",
+        json={
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "records": [
+                {
+                    "personnel_id": str(sample_personnel[0].id),
+                    "date": today,
+                    "status": "absent",
+                    "reason": "sick",  # not one of mc/off/early_outpro/other/awol
+                }
+            ],
+        },
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_upsert_accepts_reason_regardless_of_status(
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_attendance_scope,
+):
+    """Reason classifies remarks and is optional regardless of status —
+    a Present row may carry one (issue 33 decision)."""
+    client = await client_as("super_admin")
+    today = date.today().isoformat()
+    response = client.put(
+        "/api/v1/attendance/upsert",
+        json={
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "records": [
+                {
+                    "personnel_id": str(sample_personnel[0].id),
+                    "date": today,
+                    "status": "present",
+                    "reason": "other",
+                    "remarks": "attached out for the day",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    row = response.json()[0]
+    assert row["status"] == "present"
+    assert row["reason"] == "other"
 
 
 @pytest.mark.asyncio
 async def test_upsert_rejects_personnel_not_on_nr(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
-    admin_id,
 ):
     """Upsert rejects a personnel_id that is not on the NR.
 
     Run as super_admin so the request reaches personnel validation rather than
     being short-circuited by the Subunit-1 access check.
     """
+    client = await client_as("super_admin")
     today = date.today().isoformat()
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "super_admin"},
         json={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "records": [
                 {
                     "personnel_id": "not-a-real-personnel-id",
                     "date": today,
-                    "status_am": "present",
-                    "status_pm": "absent",
+                    "status": "present",
                 }
             ],
         },
@@ -161,12 +255,12 @@ async def test_upsert_rejects_personnel_not_on_nr(
 
 @pytest.mark.asyncio
 async def test_activate_attendance_requires_super_admin(
-    client: TestClient, sample_nominal_roll, admin_id
+    client: TestClient, client_as, sample_nominal_roll
 ):
     """Non-super-admins cannot mark an NR active for attendance."""
+    client = await client_as("admin")
     response = client.post(
         f"/api/v1/nominal-rolls/{sample_nominal_roll.id}/activate-attendance",
-        params={"user_id": admin_id, "user_role": "admin"},
     )
     assert response.status_code == 403
 
@@ -174,19 +268,19 @@ async def test_activate_attendance_requires_super_admin(
 @pytest.mark.asyncio
 async def test_activate_attendance_then_upsert_succeeds(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_personnel,
     admin_subunit_assignment,
-    admin_id,
 ):
     """Marking the NR "Use for Attendance" unblocks attendance upsert."""
+    client = await client_as("super_admin")
     nr_id = str(sample_nominal_roll.id)
     today = date.today().isoformat()
 
     # Activate (as super-admin).
     response = client.post(
         f"/api/v1/nominal-rolls/{nr_id}/activate-attendance",
-        params={"user_id": admin_id, "user_role": "super_admin"},
     )
     assert response.status_code == 200
     assert response.json()["attendance_active"] is True
@@ -194,15 +288,13 @@ async def test_activate_attendance_then_upsert_succeeds(
     # Now upsert works.
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={
             "nominal_roll_id": nr_id,
             "records": [
                 {
                     "personnel_id": str(sample_personnel[0].id),
                     "date": today,
-                    "status_am": "present",
-                    "status_pm": "present",
+                    "status": "present",
                 }
             ],
         },
@@ -213,38 +305,38 @@ async def test_activate_attendance_then_upsert_succeeds(
 @pytest.mark.asyncio
 async def test_copy_remarks_is_well_formed(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_attendance_scope,
     sample_attendance,
     admin_subunit_assignment,
-    admin_id,
 ):
-    """copy-remarks returns the documented shape (explicit source/dest)."""
-    today = date.today().isoformat()
+    """copy-remarks returns the documented shape (date-to-date copy)."""
+    client = await client_as("admin")
     response = client.post(
         "/api/v1/attendance/copy-remarks",
         params={
             "nominal_roll_id": str(sample_nominal_roll.id),
-            "source_date": today,
-            "source_slot": "am",
-            "dest_date": today,
-            "dest_slot": "pm",
-            "user_id": admin_id,
-            "user_role": "admin",
+            "source_date": (date.today() - timedelta(days=1)).isoformat(),
+            "dest_date": date.today().isoformat(),
         },
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["source_slot"] == "am"
-    assert body["dest_slot"] == "pm"
+    assert body["source_date"] == (date.today() - timedelta(days=1)).isoformat()
+    assert body["dest_date"] == date.today().isoformat()
     assert body["updated"] + body["skipped"] >= 1
+    # The slot fields of the old AM/PM contract are gone.
+    assert "source_slot" not in body
+    assert "dest_slot" not in body
 
 
 @pytest.mark.asyncio
 async def test_copy_remarks_refuses_when_not_active(
-    client: TestClient, sample_nominal_roll, admin_id
+    client: TestClient, client_as, sample_nominal_roll
 ):
     """copy-remarks refuses (400) when the NR isn't active for attendance."""
+    client = await client_as("admin")
     today = date.today().isoformat()
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     response = client.post(
@@ -252,18 +344,14 @@ async def test_copy_remarks_refuses_when_not_active(
         params={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "source_date": yesterday,
-            "source_slot": "pm",
             "dest_date": today,
-            "dest_slot": "am",
-            "user_id": admin_id,
-            "user_role": "admin",
         },
     )
     assert response.status_code == 400
 
 
 # ============================================================================
-# Copy Remarks: explicit source/destination (issue 20)
+# Copy Remarks: explicit source/destination dates (issue 20, single session)
 # ============================================================================
 
 
@@ -271,7 +359,9 @@ async def _make_super_admin(db_session):
     from parade_state.models import User
 
     sa = User(
-        email="copy-sa@example.com", name="Super Admin", role="super_admin",
+        email="copy-sa@example.com",
+        name="Super Admin",
+        role="super_admin",
         status="active",
     )
     db_session.add(sa)
@@ -282,22 +372,19 @@ async def _make_super_admin(db_session):
 @pytest.mark.asyncio
 async def test_copy_remarks_rejects_same_source_and_destination(
     client: TestClient,
+    client_as,
     sample_nominal_roll,
     sample_attendance_scope,
-    admin_id,
 ):
-    """Source and destination date+slot must differ (400 otherwise)."""
+    """Source and destination dates must differ (400 otherwise)."""
+    client = await client_as("admin")
     today = date.today().isoformat()
     response = client.post(
         "/api/v1/attendance/copy-remarks",
         params={
             "nominal_roll_id": str(sample_nominal_roll.id),
             "source_date": today,
-            "source_slot": "pm",
             "dest_date": today,
-            "dest_slot": "pm",
-            "user_id": admin_id,
-            "user_role": "admin",
         },
     )
     assert response.status_code == 400
@@ -305,36 +392,38 @@ async def test_copy_remarks_rejects_same_source_and_destination(
 
 
 @pytest.mark.asyncio
-async def test_copy_remarks_prev_day_pm_to_today_am(
+async def test_copy_remarks_prev_day_to_today(
     client: TestClient,
+    client_as,
     db_session,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
     sample_users,
 ):
-    """Yesterday's PM remarks land in today's AM: rows with a source remark
-    are updated (destination rows created on demand with snapshots), blank
-    or missing sources are skipped and touch nothing."""
+    """Yesterday's remarks land today: rows with a source remark are
+    updated (destination rows created on demand with snapshots), blank or
+    missing sources are skipped and touch nothing."""
     from sqlalchemy import select
 
     from parade_state.models import Attendance
 
     sa = await _make_super_admin(db_session)
+    client = await client_as(sa)
     admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
     today = date.today()
     yesterday = today - timedelta(days=1)
 
-    # p0 has a yesterday PM remark; p1 has a yesterday row but blank PM;
+    # p0 has a yesterday remark; p1 has a yesterday row but blank remarks;
     # p2 (Officer, Platoon 2) has no attendance at all.
     db_session.add(
         Attendance(
             personnel_id=str(sample_personnel[0].id),
             nominal_roll_id=nr_id,
             date=yesterday,
-            status_am="present",
-            remarks_pm="On MC",
+            status="present",
+            remarks="On MC",
             created_by=admin_id,
             updated_by=admin_id,
         )
@@ -344,7 +433,7 @@ async def test_copy_remarks_prev_day_pm_to_today_am(
             personnel_id=str(sample_personnel[1].id),
             nominal_roll_id=nr_id,
             date=yesterday,
-            status_am="present",
+            status="present",
             created_by=admin_id,
             updated_by=admin_id,
         )
@@ -356,11 +445,7 @@ async def test_copy_remarks_prev_day_pm_to_today_am(
         params={
             "nominal_roll_id": nr_id,
             "source_date": yesterday.isoformat(),
-            "source_slot": "pm",
             "dest_date": today.isoformat(),
-            "dest_slot": "am",
-            "user_id": str(sa.id),
-            "user_role": "super_admin",
         },
     )
     assert response.status_code == 200
@@ -383,63 +468,70 @@ async def test_copy_remarks_prev_day_pm_to_today_am(
     assert len(rows) == 1  # only p0 got a destination row
     row = rows[0]
     assert row.personnel_id == str(sample_personnel[0].id)
-    assert row.remarks_am == "On MC"
-    assert row.status_am == "absent"  # created with defaults
+    assert row.remarks == "On MC"
+    assert row.status == "absent"  # created with defaults
     assert row.sub_unit_1_snapshot == sample_personnel[0].sub_unit_1
 
 
 @pytest.mark.asyncio
-async def test_copy_remarks_same_day_am_to_pm_overwrites(
+async def test_copy_remarks_overwrites_existing_destination(
     client: TestClient,
+    client_as,
     db_session,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
     sample_users,
 ):
-    """A same-day AM → PM copy overwrites the existing PM remark."""
+    """A copy onto an existing destination row overwrites its remark."""
     from parade_state.models import Attendance
 
     sa = await _make_super_admin(db_session)
+    client = await client_as(sa)
     admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
     today = date.today()
 
+    source = Attendance(
+        personnel_id=str(sample_personnel[0].id),
+        nominal_roll_id=nr_id,
+        date=today - timedelta(days=1),
+        status="present",
+        remarks="Duty",
+        created_by=admin_id,
+        updated_by=admin_id,
+    )
     target = Attendance(
         personnel_id=str(sample_personnel[0].id),
         nominal_roll_id=nr_id,
         date=today,
-        status_am="present",
-        remarks_am="Duty",
-        remarks_pm="stale remark",
+        status="present",
+        remarks="stale remark",
         created_by=admin_id,
         updated_by=admin_id,
     )
-    db_session.add(target)
+    db_session.add_all([source, target])
     await db_session.commit()
 
     response = client.post(
         "/api/v1/attendance/copy-remarks",
         params={
             "nominal_roll_id": nr_id,
-            "source_date": today.isoformat(),
-            "source_slot": "am",
+            "source_date": (today - timedelta(days=1)).isoformat(),
             "dest_date": today.isoformat(),
-            "dest_slot": "pm",
-            "user_id": str(sa.id),
-            "user_role": "super_admin",
         },
     )
     assert response.status_code == 200
     assert response.json()["updated"] == 1
 
     await db_session.refresh(target)
-    assert target.remarks_pm == "Duty"
+    assert target.remarks == "Duty"
 
 
 @pytest.mark.asyncio
 async def test_copy_remarks_subunit_filter_scopes_the_copy(
     client: TestClient,
+    client_as,
     db_session,
     sample_nominal_roll,
     sample_personnel,
@@ -454,19 +546,20 @@ async def test_copy_remarks_subunit_filter_scopes_the_copy(
     from parade_state.models import Attendance
 
     sa = await _make_super_admin(db_session)
+    client = await client_as(sa)
     admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
     today = date.today()
 
-    # Everyone has a yesterday PM remark.
+    # Everyone has a yesterday remark.
     for p in sample_personnel:
         db_session.add(
             Attendance(
                 personnel_id=str(p.id),
                 nominal_roll_id=nr_id,
                 date=today - timedelta(days=1),
-                status_am="present",
-                remarks_pm="note " + p.full_name,
+                status="present",
+                remarks="note " + p.full_name,
                 created_by=admin_id,
                 updated_by=admin_id,
             )
@@ -478,12 +571,8 @@ async def test_copy_remarks_subunit_filter_scopes_the_copy(
         params={
             "nominal_roll_id": nr_id,
             "source_date": (today - timedelta(days=1)).isoformat(),
-            "source_slot": "pm",
             "dest_date": today.isoformat(),
-            "dest_slot": "am",
             "sub_unit_1": "Platoon 1",
-            "user_id": str(sa.id),
-            "user_role": "super_admin",
         },
     )
     assert response.status_code == 200
@@ -506,6 +595,7 @@ async def test_copy_remarks_subunit_filter_scopes_the_copy(
 @pytest.mark.asyncio
 async def test_copy_remarks_filter_matches_effective_subunit(
     client: TestClient,
+    client_as,
     db_session,
     sample_nominal_roll,
     sample_personnel,
@@ -519,6 +609,7 @@ async def test_copy_remarks_filter_matches_effective_subunit(
     from parade_state.models import Attendance, Tagging, TaggingEntry
 
     sa = await _make_super_admin(db_session)
+    client = await client_as(sa)
     admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
     today = date.today()
@@ -529,8 +620,8 @@ async def test_copy_remarks_filter_matches_effective_subunit(
             personnel_id=str(officer.id),
             nominal_roll_id=nr_id,
             date=today - timedelta(days=1),
-            status_am="present",
-            remarks_pm="moved remark",
+            status="present",
+            remarks="moved remark",
             created_by=admin_id,
             updated_by=admin_id,
         )
@@ -551,12 +642,8 @@ async def test_copy_remarks_filter_matches_effective_subunit(
         params={
             "nominal_roll_id": nr_id,
             "source_date": (today - timedelta(days=1)).isoformat(),
-            "source_slot": "pm",
             "dest_date": today.isoformat(),
-            "dest_slot": "am",
             "sub_unit_1": "Platoon 9",
-            "user_id": str(sa.id),
-            "user_role": "super_admin",
         },
     )
     assert response.status_code == 200
@@ -570,23 +657,25 @@ async def test_copy_remarks_filter_matches_effective_subunit(
             )
         )
     ).scalar_one()
-    assert row.remarks_am == "moved remark"
+    assert row.remarks == "moved remark"
 
 
 @pytest.mark.asyncio
 async def test_copy_remarks_allows_earlier_destination(
     client: TestClient,
+    client_as,
     db_session,
     sample_nominal_roll,
     sample_personnel,
     sample_attendance_scope,
     sample_users,
 ):
-    """Copying to an earlier session is allowed server-side (the
+    """Copying to an earlier day is allowed server-side (the
     probably-a-mistake warning is client-side only)."""
     from parade_state.models import Attendance
 
     sa = await _make_super_admin(db_session)
+    client = await client_as(sa)
     admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
     today = date.today()
@@ -595,8 +684,8 @@ async def test_copy_remarks_allows_earlier_destination(
         personnel_id=str(sample_personnel[0].id),
         nominal_roll_id=nr_id,
         date=today,
-        status_am="present",
-        remarks_am="earlier copy",
+        status="present",
+        remarks="earlier copy",
         created_by=admin_id,
         updated_by=admin_id,
     )
@@ -608,11 +697,7 @@ async def test_copy_remarks_allows_earlier_destination(
         params={
             "nominal_roll_id": nr_id,
             "source_date": today.isoformat(),
-            "source_slot": "am",
             "dest_date": (today - timedelta(days=1)).isoformat(),
-            "dest_slot": "pm",
-            "user_id": str(sa.id),
-            "user_role": "super_admin",
         },
     )
     assert response.status_code == 200
@@ -627,6 +712,7 @@ async def test_copy_remarks_allows_earlier_destination(
 @pytest.mark.asyncio
 async def test_per_row_upsert_single_record(
     client: TestClient,
+    client_as,
     db_session,
     sample_nominal_roll,
     sample_personnel,
@@ -640,22 +726,21 @@ async def test_per_row_upsert_single_record(
 
     from parade_state.models import Attendance, User
 
-    admin_id = str(sample_users["admin"].id)
+    client = await client_as(sample_users["admin"])
     nr_id = str(sample_nominal_roll.id)
     today = date.today().isoformat()
 
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": admin_id, "user_role": "admin"},
         json={
             "nominal_roll_id": nr_id,
             "records": [
                 {
                     "personnel_id": str(sample_personnel[0].id),
                     "date": today,
-                    "status_am": "late",
-                    "remarks_am": "arrived 0900",
-                    "status_pm": "present",
+                    "status": "absent",
+                    "reason": "early_outpro",
+                    "remarks": "outpro by 1000",
                 }
             ],
         },
@@ -668,8 +753,9 @@ async def test_per_row_upsert_single_record(
             )
         )
     ).scalar_one()
-    assert row.status_am == "late"
-    assert row.remarks_am == "arrived 0900"
+    assert row.status == "absent"
+    assert row.reason == "early_outpro"
+    assert row.remarks == "outpro by 1000"
 
     # Auth: an admin with no assignments gets 403 on the same payload shape.
     outsider = User(
@@ -677,20 +763,396 @@ async def test_per_row_upsert_single_record(
     )
     db_session.add(outsider)
     await db_session.commit()
+    client = await client_as(outsider)
 
     response = client.put(
         "/api/v1/attendance/upsert",
-        params={"user_id": str(outsider.id), "user_role": "admin"},
         json={
             "nominal_roll_id": nr_id,
             "records": [
                 {
                     "personnel_id": str(sample_personnel[1].id),
                     "date": today,
-                    "status_am": "present",
-                    "status_pm": "present",
+                    "status": "present",
                 }
             ],
         },
     )
     assert response.status_code == 403
+
+
+# ============================================================================
+# GET /api/v1/attendance/export
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_export_csv_columns_and_content(
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_attendance_scope,
+    sample_attendance,
+):
+    """Super-admin export mirrors the marking table: Inpro Status, labels
+    for status/reason, missing rows default to Absent."""
+    client = await client_as("super_admin")
+    today = date.today().isoformat()
+    response = client.get(
+        "/api/v1/attendance/export",
+        params={
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "date": today,
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers["content-disposition"]
+
+    rows = list(csv.reader(io.StringIO(response.text)))
+    assert rows[0] == [
+        "Unit",
+        "Sub-unit 1",
+        "Sub-unit 2",
+        "Sub-unit 3",
+        "Category",
+        "Rank",
+        "Name",
+        "Inpro Status",
+        "Status",
+        "Reason",
+        "Remarks",
+    ]
+    assert len(rows) == 4  # header + whole roster (deferred included)
+    by_name = {row[6]: row for row in rows[1:]}
+    # John Doe: absent with reason mc + remarks (sample_attendance today).
+    assert by_name["John Doe"][7] == "Yet to Inpro"
+    assert by_name["John Doe"][8] == "Absent"
+    assert by_name["John Doe"][9] == "MC"
+    assert by_name["John Doe"][10] == "Sick leave"
+    # Jane Smith: present, no reason/remarks.
+    assert by_name["Jane Smith"][8] == "Present"
+    assert by_name["Jane Smith"][9] == ""
+    # Bob Johnson has no attendance row → the page's Absent default.
+    assert by_name["Bob Johnson"][8] == "Absent"
+    assert by_name["Bob Johnson"][10] == ""
+
+
+@pytest.mark.asyncio
+async def test_export_csv_includes_deferred_personnel(
+    client: TestClient,
+    client_as,
+    db_session,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_attendance_scope,
+):
+    """The export roster is everyone on the NR — deferred included (issue
+    33); their row exports the page's Absent default."""
+    client = await client_as("super_admin")
+    sample_personnel[2].inpro_status = "deferred"
+    db_session.add(sample_personnel[2])
+    await db_session.commit()
+
+    today = date.today().isoformat()
+    response = client.get(
+        "/api/v1/attendance/export",
+        params={
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "date": today,
+        },
+    )
+    assert response.status_code == 200
+    rows = list(csv.reader(io.StringIO(response.text)))
+    by_name = {row[6]: row for row in rows[1:]}
+    assert by_name["Bob Johnson"][7] == "Deferred"  # in the roster
+    assert by_name["Bob Johnson"][8] == "Absent"
+
+
+@pytest.mark.asyncio
+async def test_export_csv_scopes_to_assigned_subunits(
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_attendance_scope,
+    sample_attendance,
+    sample_users,
+):
+    """Admin export follows the Subunit-1 rule: 403 without assignments,
+    assigned scope with them, and the page's sub-unit filter narrows it."""
+    from parade_state.models import UserSubunitAssignment
+
+    client = await client_as(sample_users["admin"])
+    admin_id = str(sample_users["admin"].id)
+
+    base = {
+        "nominal_roll_id": str(sample_nominal_roll.id),
+        "date": date.today().isoformat(),
+    }
+
+    # Deny-by-default: no UserSubunitAssignment rows for this admin yet.
+    denied = client.get("/api/v1/attendance/export", params=base)
+    assert denied.status_code == 403
+
+    granted = UserSubunitAssignment(
+        user_id=admin_id,
+        nominal_roll_id=str(sample_nominal_roll.id),
+        sub_unit_1="Platoon 1",
+        created_by=admin_id,
+    )
+    db_session.add(granted)
+    await db_session.commit()
+
+    allowed = client.get("/api/v1/attendance/export", params=base)
+    assert allowed.status_code == 200
+    rows = list(csv.reader(io.StringIO(allowed.text)))
+    # Platoon 1 only — Bob Johnson (Platoon 2) stays out of the export.
+    assert [row[6] for row in rows[1:]] == ["John Doe", "Jane Smith"]
+
+    filtered = client.get(
+        "/api/v1/attendance/export",
+        params={**base, "sub_unit_1": "Platoon 2"},
+    )
+    assert filtered.status_code == 200
+    rows = list(csv.reader(io.StringIO(filtered.text)))
+    assert rows[1:] == []  # outside the admin's assigned scope
+
+
+# ============================================================================
+# Freeze (issue 35): day-level lock, super-admin writable / admin read-only
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_freeze_requires_super_admin(
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+    sample_attendance_scope,
+):
+    """Freeze/unfreeze are NR-lifecycle-grade ops: non-super-admins 403."""
+    body = {
+        "nominal_roll_id": str(sample_nominal_roll.id),
+        "date": date.today().isoformat(),
+    }
+    for role in ("admin", "user"):
+        client = await client_as(role)
+        assert client.put("/api/v1/attendance/freeze", json=body).status_code == 403
+        assert (
+            client.delete("/api/v1/attendance/freeze", params=body).status_code == 403
+        )
+
+
+@pytest.mark.asyncio
+async def test_freeze_unfreeze_roundtrip_with_audit(
+    client: TestClient,
+    client_as,
+    db_session,
+    sample_nominal_roll,
+    sample_attendance_scope,
+):
+    """Super-admin roundtrip: freeze 200 (frozen + frozen_at), double-freeze
+    409, unfreeze 200, unfreeze-again 404 — both directions audit-logged."""
+    from sqlalchemy import select
+
+    from parade_state.models import AuditLog
+
+    client = await client_as("super_admin")
+    body = {
+        "nominal_roll_id": str(sample_nominal_roll.id),
+        "date": date.today().isoformat(),
+    }
+
+    frozen = client.put("/api/v1/attendance/freeze", json=body)
+    assert frozen.status_code == 200
+    assert frozen.json()["frozen"] is True
+    assert frozen.json()["frozen_at"] is not None
+
+    duplicate = client.put("/api/v1/attendance/freeze", json=body)
+    assert duplicate.status_code == 409
+    assert "already frozen" in duplicate.json()["detail"]
+
+    thawed = client.delete("/api/v1/attendance/freeze", params=body)
+    assert thawed.status_code == 200
+    assert thawed.json()["frozen"] is False
+    assert thawed.json()["frozen_at"] is None
+
+    missing = client.delete("/api/v1/attendance/freeze", params=body)
+    assert missing.status_code == 404
+    assert "not frozen" in missing.json()["detail"]
+
+    logs = (
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.entity_type == "nominal_roll",
+                    AuditLog.entity_id == str(sample_nominal_roll.id),
+                    AuditLog.action == "attendance_freeze",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    descriptions = " | ".join(log.description for log in logs)
+    assert "Froze attendance" in descriptions
+    assert "Unfroze attendance" in descriptions
+
+
+@pytest.mark.asyncio
+async def test_freeze_requires_attendance_active_nr(
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+):
+    """Freezing a day on a non-active NR → 400 (require_attendance_active)."""
+    client = await client_as("super_admin")
+    response = client.put(
+        "/api/v1/attendance/freeze",
+        json={
+            "nominal_roll_id": str(sample_nominal_roll.id),
+            "date": date.today().isoformat(),
+        },
+    )
+    assert response.status_code == 400
+    assert "not active" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_frozen_day_upsert_role_split(
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_attendance_scope,
+    admin_subunit_assignment,
+):
+    """Frozen day: admin upsert 403s naming the freeze, super-admin upsert
+    succeeds; other dates stay admin-writable; unfreezing restores writes."""
+    nr_id = str(sample_nominal_roll.id)
+    pid = str(sample_personnel[0].id)
+    today = date.today().isoformat()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    freeze_body = {"nominal_roll_id": nr_id, "date": today}
+
+    def _upsert(when: str) -> dict:
+        return {
+            "nominal_roll_id": nr_id,
+            "records": [{"personnel_id": pid, "date": when, "status": "present"}],
+        }
+
+    super_admin = await client_as("super_admin")
+    assert (
+        super_admin.put("/api/v1/attendance/freeze", json=freeze_body).status_code
+        == 200
+    )
+
+    admin = await client_as("admin")
+    blocked = admin.put("/api/v1/attendance/upsert", json=_upsert(today))
+    assert blocked.status_code == 403
+    assert "frozen" in blocked.json()["detail"].lower()
+
+    # Freeze is per (NR, date): another day stays admin-writable.
+    assert (
+        admin.put("/api/v1/attendance/upsert", json=_upsert(tomorrow)).status_code
+        == 200
+    )
+
+    # Super-admins keep editing the frozen day.
+    super_admin = await client_as("super_admin")
+    sa_edit = super_admin.put("/api/v1/attendance/upsert", json=_upsert(today))
+    assert sa_edit.status_code == 200
+    assert sa_edit.json()[0]["status"] == "present"
+
+    # Unfreezing restores admin editability.
+    assert (
+        super_admin.delete("/api/v1/attendance/freeze", params=freeze_body).status_code
+        == 200
+    )
+    admin = await client_as("admin")
+    assert (
+        admin.put("/api/v1/attendance/upsert", json=_upsert(today)).status_code == 200
+    )
+
+
+@pytest.mark.asyncio
+async def test_copy_remarks_respects_freeze(
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+    sample_personnel,
+    sample_attendance_scope,
+    sample_attendance,
+    admin_subunit_assignment,
+):
+    """Copy-remarks into a frozen destination 403s for admins; a frozen
+    source is fine (it is only read)."""
+    nr_id = str(sample_nominal_roll.id)
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    today = date.today().isoformat()
+
+    def _copy(dest: str) -> dict:
+        return {
+            "nominal_roll_id": nr_id,
+            "source_date": yesterday,
+            "dest_date": dest,
+        }
+
+    super_admin = await client_as("super_admin")
+    assert (
+        super_admin.put(
+            "/api/v1/attendance/freeze",
+            json={"nominal_roll_id": nr_id, "date": today},
+        ).status_code
+        == 200
+    )
+
+    admin = await client_as("admin")
+    blocked = admin.post("/api/v1/attendance/copy-remarks", params=_copy(today))
+    assert blocked.status_code == 403
+    assert "frozen" in blocked.json()["detail"].lower()
+
+    # Freeze the source too, thaw the destination: copy reads frozen
+    # sources without complaint.
+    super_admin = await client_as("super_admin")
+    super_admin.put(
+        "/api/v1/attendance/freeze", json={"nominal_roll_id": nr_id, "date": yesterday}
+    )
+    super_admin.delete(
+        "/api/v1/attendance/freeze", params={"nominal_roll_id": nr_id, "date": today}
+    )
+
+    admin = await client_as("admin")
+    allowed = admin.post("/api/v1/attendance/copy-remarks", params=_copy(today))
+    assert allowed.status_code == 200
+    assert allowed.json()["updated"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_export_unaffected_by_freeze(
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+    sample_attendance_scope,
+    sample_attendance,
+):
+    """Freeze never blocks reads: export on a frozen day returns 200 CSV."""
+    client = await client_as("super_admin")
+    today = date.today().isoformat()
+    assert (
+        client.put(
+            "/api/v1/attendance/freeze",
+            json={"nominal_roll_id": str(sample_nominal_roll.id), "date": today},
+        ).status_code
+        == 200
+    )
+
+    response = client.get(
+        "/api/v1/attendance/export",
+        params={"nominal_roll_id": str(sample_nominal_roll.id), "date": today},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
