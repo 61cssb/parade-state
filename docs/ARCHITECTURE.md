@@ -1,7 +1,7 @@
 # System Architecture
 
-**Version:** 1.0  
-**Date:** 2026-05-08  
+**Version:** 1.1  
+**Date:** 2026-10-07  
 **Status:** Architecture Overview  
 
 ---
@@ -31,8 +31,9 @@
 │                    Parade State System                       │
 │                                                               │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │ Mobile UI    │  │  Admin UI    │  │   REST API   │     │
-│  │ (Static HTML)│  │   (NiceGUI)  │  │   (FastAPI)  │     │
+│  │  Web pages   │  │  Admin UI    │  │   REST API   │     │
+│  │  (Jinja2)    │  │  (Jinja2)    │  │  (FastAPI)   │     │
+│  │  /attendance │  │  /admin/*    │  │  /api/v1/*   │     │
 │  └──────────────┘  └──────────────┘  └──────────────┘     │
 │         │                  │                  │              │
 │         └──────────────────┴──────────────────┘              │
@@ -55,22 +56,32 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
+All three surfaces are served by the same FastAPI process: server-rendered
+Jinja2 pages for the user-facing views and the admin section, and a JSON
+REST API under `/api/v1/*`. There is no separate SPA build step and no
+static frontend bundle.
+
 ### 1.2 Application Architecture
 
 ```
 uvicorn (single process)
  └── FastAPI app
-      ├── Authlib session middleware
-      ├── /api/v1/*        REST API routes (attendance, groupings, sessions, etc.)
-      ├── /admin/*         NiceGUI admin UI (mounted via nicegui.app.mount)
-      ├── /                Static file serving (mobile HTML/JS)
-      ├── /events/*        SSE endpoints
+      ├── Middleware: CORSMiddleware, SessionMiddleware (OAuth flow
+      │   state), FeatureAccessMiddleware (issue 37 matrix)
+      ├── /auth/*          Login page, OAuth start/callback, logout, no-access
+      ├── /attendance      Attendance marking view (Jinja2)
+      ├── /nominal-roll    NR roster browser (Jinja2)
+      ├── /grouping        Grouping browser (Jinja2, flag-gated)
+      ├── /admin/*         Admin pages (Jinja2, via admin_routes.py)
+      ├── /api/v1/*        REST API routes (JSON; sessions/* = 410 Gone stub)
+      ├── /                Redirects to /auth/login
+      └── /health          Health check
 ```
 
 **Key design decisions:**
 - Single uvicorn process for MVP (no separate worker)
 - SQLAlchemy async session factory shared across all layers
-- No Redis required for MVP (database for job storage)
+- No Redis and no background job queue — all work happens in-request
 - Stateless API design for horizontal scaling
 
 ---
@@ -79,45 +90,54 @@ uvicorn (single process)
 
 ### 2.1 Frontend Components
 
-#### Mobile UI (Static HTML/JS)
-- **Technology:** Vanilla JavaScript, HTML5, CSS3
-- **Served at:** `/` (root path)
-- **Purpose:** Field attendance taking
+All "frontend" is server-rendered Jinja2 templates (`src/parade_state/templates/`)
+— there is no JavaScript build step, no SPA, and no service worker.
+
+#### User-Facing Web Pages (Jinja2)
+- **Technology:** Jinja2 templates (shared `base.html` shell)
+- **Served at:** `/attendance` (marking), `/nominal-roll` (roster browser), `/grouping` (flag-gated viewer)
+- **Purpose:** Field attendance taking and roster browsing
 - **Features:**
-  - Responsive mobile-first design
-  - Offline support via Service Worker + IndexedDB
-  - SSE for real-time updates
-  - Progressive Web App capabilities
+  - Responsive server-rendered pages (no offline mode — a network connection is assumed)
+  - Per-row autosave on the attendance page (fetch calls to the REST API)
+  - View filters (sub-unit, Inpro Status, Status/Reason) applied server-side and client-side
+  - `/` redirects to `/auth/login`, which routes active admins to `/admin`
 
 #### Admin UI (Jinja2 templates)
 - **Technology:** Jinja2 templates (shared `base.html` shell)
 - **Served at:** `/admin` (Unit Strength report), `/admin/*` pages
 - **Purpose:** System administration + strength reporting
 - **Features:**
-  - Unit Strength report (issue 25, `FEATURE_STRENGTH`-gated)
-  - CSV upload pipeline
-  - Grouping management
-  - User management
-  - Column configuration
-  - Audit log viewer
+  - Unit Strength report (`/admin`, `FEATURE_STRENGTH`-gated)
+  - CSV upload pipeline (`/admin/csv-upload`)
+  - User management + subunit scope grants (`/admin/users`)
+  - Taggings manager (`/admin/taggings`)
+  - Deferments (`/admin/deferments`)
+  - Discussions board (`/admin/discussions`)
+  - Audit log viewer (`/admin/audit`)
+  - Settings: feature-access matrix + DB restore (`/admin/settings`, `/admin/database-restore`)
 
 ### 2.2 Backend Components
 
 #### REST API (FastAPI)
 - **Purpose:** Data operations and business logic
-- **Authentication:** Google OAuth + session cookies
+- **Authentication:** Google OAuth; DB-backed session token carried by the
+  HttpOnly auth cookie (admin UI) or a Bearer header (API clients)
 - **Key endpoints:**
-  - `/api/v1/attendance/*` - Attendance operations
-  - `/api/v1/groupings/*` - Grouping management
-  - `/api/v1/sessions/*` - Session management
+  - `/api/v1/attendance/*` - Attendance operations (list, upsert, copy-remarks, freeze, export)
+  - `/api/v1/nominal-rolls/*` - Nominal Roll lifecycle + attendance activation + CSV export
+  - `/api/v1/personnel/*` - Personnel listing, manual add, remaps, attendance history
+  - `/api/v1/groupings/*` - Grouping management (flag-gated)
+  - `/api/v1/taggings/*` - Tagging overlay management
   - `/api/v1/users/*` - User operations
-  - `/api/v1/events/*` - SSE endpoints
+  - `/api/v1/sessions/*` - 410 Gone signposts (sessions were removed)
 
-#### Background Scheduler (APScheduler)
-- **Removed.** The scheduled grouping-activation jobs died with the old
-  groupings design (issue 26 redesign: no lifecycle, no validity windows,
-  no scheduled activation). Attendance is gated by the active-NR switch,
-  not by time-based jobs.
+#### Background Scheduler
+- **None.** There is no scheduler and no job queue. The scheduled
+  grouping-activation jobs died with the old groupings design (issue 26
+  redesign: no lifecycle, no validity windows, no scheduled activation).
+  Attendance is gated by the active-NR switch
+  (`NominalRoll.attendance_active`), not by time-based jobs.
 
 ---
 
@@ -141,16 +161,20 @@ The `parade_state` application follows a strict layered architecture with clear 
 │                                                              │
 │  ┌────────────────────┐    ┌────────────────────┐          │
 │  │ parade_state.web   │    │ parade_state.api   │          │
-│  │ (OAuth flows)      │    │ (REST API)         │          │
-│  │ /auth/login        │    │ /api/v1/*          │          │
-│  │ /auth/callback     │    │ (JSON responses)   │          │
+│  │ + admin_routes     │    │ (REST API)         │          │
+│  │ (Jinja2 pages,     │    │ /api/v1/*          │          │
+│  │  OAuth flows)      │    │ (JSON responses)   │          │
+│  │ /auth/* /attendance│    │                    │          │
+│  │ /nominal-roll      │    │                    │          │
+│  │ /grouping /admin/* │    │                    │          │
 │  └────────────────────┘    └────────────────────┘          │
 │           │                           │                     │
 │           └───────────┬───────────────┘                     │
 │                       ▼                                     │
 │         ┌───────────────────────────┐                      │
 │         │ parade_state.auth         │                      │
-│         │ (dependencies, session)   │                      │
+│         │ (dependencies, session,   │                      │
+│         │  oauth, admin deps)       │                      │
 │         └───────────────────────────┘                      │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -159,7 +183,9 @@ The `parade_state` application follows a strict layered architecture with clear 
 ┌─────────────────────────────────────────────────────────────┐
 │                   LAYER 3: Business Logic                   │
 │                   parade_state.config                        │
-│                   (Configuration & domain logic)             │
+│                   parade_state.features                      │
+│                   parade_state.feature_access                │
+│                   (Configuration, flags, access matrix)      │
 └─────────────────────────────────────────────────────────────┘
                               │
                               │ depends on
@@ -185,7 +211,7 @@ The `parade_state` application follows a strict layered architecture with clear 
 #### **Layer 1: Foundation (No internal dependencies)**
 
 **`parade_state.utils`**
-- **Modules:** `env.py`, `ids.py`, `utc_dt.py`
+- **Modules:** `cookies.py`, `csv_constants.py`, `env.py`, `ids.py`, `markdown.py`, `ranks.py`, `utc_dt.py`
 - **Purpose:** Core utility functions with no internal dependencies
 - **Dependencies:** Standard library only
 - **Initialization:** First
@@ -193,20 +219,27 @@ The `parade_state` application follows a strict layered architecture with clear 
   - Environment variable access (`env`)
   - UUID generation and validation (`ids`)
   - UTC datetime operations (`utc_dt`)
+  - Cookie set/get/clear with consistent security flags (`cookies`)
+  - CSV ingestion contract: header-name column matching (`csv_constants`)
+  - Safe markdown rendering for discussions (`markdown`)
+  - Rank-to-category mapping (`ranks`)
 
 **`parade_state.db`**
+- **Modules:** `__init__.py`, `restore.py`
 - **Purpose:** Database connection and session management
 - **Dependencies:** `parade_state.utils.ids`
 - **Initialization:** Second
 - **Key responsibilities:**
-  - SQLAlchemy engine and session factory
-  - Base model class with default UUID generation
-  - Database initialization lifecycle
+  - SQLAlchemy engine and session factory (`init_database`, `get_db_session`)
+  - `normalize_database_url` (platform `postgresql://` URLs → `postgresql+asyncpg://`, `sslmode=` → `ssl=`)
+  - Base model class with String(36) UUID default via `ids.db_default`
+  - Verified in-app restore from a `pg_dump` archive (`restore.py`: restore into a
+    temp database, verify, swap, conditionally `alembic upgrade head`)
 
 #### **Layer 2: Data Models**
 
 **`parade_state.models`**
-- **Modules:** `access.py`, `attendance.py`, `audit.py`, `auth_session.py`, `csv_ingestion.py`, `grouping.py`, `personnel.py`, `schemas.py`
+- **Modules:** `access.py`, `attendance.py`, `audit.py`, `auth_session.py`, `csv_ingestion.py`, `deferments.py`, `discussions.py`, `grouping.py`, `personnel.py`, `schemas.py`, `tagging.py`
 - **Purpose:** Database models and Pydantic schemas
 - **Dependencies:** `parade_state.db` (for `Base` class)
 - **Initialization:** Third
@@ -219,32 +252,48 @@ The `parade_state` application follows a strict layered architecture with clear 
 #### **Layer 3: Business Logic**
 
 **`parade_state.config`**
-- **Purpose:** Application configuration management
+- **Purpose:** Application configuration management (`Settings` read from env, production validation)
 - **Dependencies:** `parade_state.utils.env`
 - **Initialization:** Fourth
+
+**`parade_state.features`**
+- **Purpose:** Env-var feature flags (`require_feature` dependency; flag-off = 404 for every role)
+
+**`parade_state.feature_access`**
+- **Purpose:** Per-role feature-access matrix (issue 37): `FeatureAccessMiddleware`,
+  page-route gate, `require_feature_access(key)` API dependency; fails open
 
 #### **Layer 4: Routes & Authentication**
 
 **`parade_state.auth`**
-- **Modules:** `dependencies.py`, `session.py`, `oauth.py`
+- **Modules:** `admin_dependencies.py`, `dependencies.py`, `oauth.py`, `session.py`
 - **Purpose:** Authentication and authorization utilities
 - **Dependencies:** `parade_state.models`, `parade_state.db`, `parade_state.utils`
 - **Initialization:** Fifth
-- **Note:** Reusable authentication logic for both API and web routes
+- **Note:** Reusable authentication logic for both API and web routes. Bearer
+  header or HttpOnly auth cookie both resolve to the same DB-backed
+  `UserSession` token.
 
 **`parade_state.web`**
-- **Modules:** `auth.py`
-- **Purpose:** User-facing web routes (OAuth flows, redirects)
+- **Modules:** `auth.py`, `attendance.py`, `grouping.py`, `nominal_roll.py`
+- **Purpose:** User-facing web routes (OAuth flows, Jinja2 page views)
 - **Dependencies:** `parade_state.auth`, `parade_state.models`, `parade_state.db`
 - **Initialization:** Sixth
 - **Note:** Returns HTML/redirects, not JSON
 
+**`parade_state.admin_routes`** (top-level module)
+- **Purpose:** Admin section routes (`/admin/*`), Jinja2-rendered
+- **Note:** Unit Strength report, users, CSV upload, taggings, deferments,
+  discussions, audit, settings, DB restore
+
 **`parade_state.api`**
-- **Modules:** `auth.py`, `users.py`, `groupings.py`, `sessions.py`, `attendance.py`, `personnel.py`, `access_control.py`
+- **Modules:** `access_control.py`, `admin_purge.py`, `attendance.py`, `audit.py`, `auth.py`, `csv_upload.py`, `db_restore.py`, `deferments.py`, `discussions.py`, `feature_access.py`, `groupings.py`, `nominal_rolls.py`, `personnel.py`, `sessions.py`, `subunit_access.py`, `tagging.py`, `users.py`
 - **Purpose:** REST API route handlers (JSON responses)
 - **Dependencies:** All previous layers
 - **Initialization:** Seventh
-- **Note:** Pure JSON API, documented in OpenAPI
+- **Note:** Pure JSON API, documented in OpenAPI. `subunit_access.py` is the
+  shared enforcement seam for NR-scoped row-level access (issue #28/#31);
+  `sessions.py` is the 410-Gone catch-all.
 
 #### **Layer 5: Application**
 
@@ -264,16 +313,30 @@ The `parade_state` application follows a strict layered architecture with clear 
 5. **API Layer** → Initialize middleware and route handlers
 6. **Application** → Create FastAPI app and mount routes
 
-**Current implementation** ([`main.py:22-29`](../src/parade_state/main.py#L22-L29)):
+**Current implementation** ([`main.py:69-81`](../src/parade_state/main.py#L69-L81)):
 ```python
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Manage application lifecycle."""
     # Startup
-    database_url = env.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
-    init_database(database_url)  # Step 2
+    # Only initialize if not already initialized (prevents test
+    # database from being reset)
+    from parade_state.db import get_session_maker
+
+    if get_session_maker() is None:
+        init_database(settings.DATABASE_URL)
     yield
     # Shutdown
+    pass
 ```
+
+`settings.DATABASE_URL` comes from the environment (`Settings` in
+`config.py`); when unset it defaults to in-memory SQLite
+(`sqlite+aiosqlite:///:memory:`). Local development normally loads `.env`,
+which points at a file-based SQLite database (`parade_state.db`); production
+injects the Railway PostgreSQL URL. Schema creation is not part of the
+lifespan: the container runs `alembic upgrade head` before uvicorn starts
+(see section 7).
 
 ### 3.4 Circular Dependency Management
 
@@ -292,7 +355,7 @@ from ..db import Base
 
 if TYPE_CHECKING:
     from .auth_session import UserSession
-    from .grouping import Grouping
+    from .csv_ingestion import ColumnMetadata, NominalRoll
 ```
 
 **Why this works:**
@@ -308,7 +371,7 @@ FastAPI's dependency injection breaks circular dependency chains:
 # API endpoints receive dependencies via FastAPI DI
 async def endpoint(
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_authenticated_user)
 ):
     # No direct imports needed at module level
 ```
@@ -354,12 +417,14 @@ Application → API → Business Logic → Models → Foundation
 
 #### **Middleware ↔ Models (Low Risk ✅)**
 
-**Risk:** Middleware imports models for type annotations
+**Risk:** Middleware (`FeatureAccessMiddleware`) reads model-backed data
+(the feature-access matrix) on every page request
 
 **Mitigation:**
-- Middleware only uses models for type hints
-- No runtime model operations in middleware
-- All database operations via dependency injection
+- One tiny SELECT per page request, fails open on any error
+- Result stashed on `request.state` for the render; no model mutation
+- Regular request-scoped database operations still go through
+  dependency injection
 
 ### 3.6 Web Routes vs REST API
 
@@ -370,22 +435,30 @@ The application separates user-facing web routes from REST API endpoints for cle
 **Purpose:** Handle browser-based authentication flows and user interactions
 
 **Characteristics:**
-- Return HTTP redirects, not JSON
+- Return HTTP redirects or rendered HTML, not JSON
 - Handle OAuth flows (Google OAuth)
 - Intended for frontend navigation
 - Not documented in OpenAPI/Swagger
 
 **URL Structure:**
 ```
-/auth/login     → Redirect to Google OAuth
-/auth/callback  → OAuth callback, redirect to frontend with token
+/auth/login        → Login page (redirects signed-in admins to /admin)
+/auth/oauth/start  → Redirect to Google OAuth
+/auth/callback     → OAuth callback: set HttpOnly auth cookie, redirect to /admin
+/auth/logout       → Clear auth cookie, redirect to login
+/auth/no-access    → 403 page for authenticated non-admins
 ```
 
 **Example:**
 ```python
-@router.get("/login")
-async def login(request: Request):
-    """Initiate Google OAuth login flow (user-facing)."""
+@router.get("/oauth/start")
+async def start_oauth(request: Request):
+    """Start the OAuth flow with Google."""
+    base_url = f"{request.url.scheme}://{request.url.netloc}"
+    redirect_uri = f"{base_url}/auth/callback"
+
+    oauth = get_oauth()
+    google = oauth.create_client("google")
     return await google.authorize_redirect(request, redirect_uri)
 ```
 
@@ -395,8 +468,8 @@ async def login(request: Request):
 
 **Characteristics:**
 - Return JSON responses only
-- Require Bearer token authentication
-- Documented in OpenAPI/Swagger (`/docs`)
+- Accept a Bearer token header or the HttpOnly session cookie
+- Documented in OpenAPI/Swagger (`/docs`, disabled in production)
 - Intended for programmatic access
 
 **URL Structure:**
@@ -404,7 +477,8 @@ async def login(request: Request):
 /api/v1/auth/me     → Get current user info
 /api/v1/auth/logout → Logout user
 /api/v1/users/      → List users
-/api/v1/groupings/ → Manage groupings
+/api/v1/attendance/ → Attendance marking table
+/api/v1/groupings/  → Manage groupings
 ```
 
 **Example:**
@@ -427,7 +501,8 @@ async def get_current_user_info(
 **Purpose:** Reusable authentication utilities for both web and API
 
 **Modules:**
-- `dependencies.py` - FastAPI dependencies for authentication
+- `dependencies.py` - FastAPI dependencies for authentication (Bearer-or-cookie)
+- `admin_dependencies.py` - Optional admin/user resolution for page routes
 - `session.py` - Session management utilities
 - `oauth.py` - OAuth client configuration
 
@@ -442,21 +517,24 @@ async def get_current_user_info(
 #### **Authentication Flow**
 
 ```
-1. User clicks "Sign in with Google"
+1. User visits /auth/login and clicks "Sign in with Google"
    ↓
-2. Frontend redirects to /auth/login (web route)
+2. /auth/oauth/start redirects to Google (Authlib OAuth client)
    ↓
 3. Google OAuth flow completes
    ↓
 4. Google redirects to /auth/callback (web route)
    ↓
-5. Server creates session and redirects to frontend with token
+5. Server upserts the User; only active admins (admin / super_admin)
+   proceed — everyone else gets the 403 no-access page and no session
    ↓
-6. Frontend stores token for API calls
+6. Server creates a DB-backed UserSession (7-day token) and sets the
+   HttpOnly auth cookie (24 hours, SameSite=lax)
    ↓
-7. Frontend calls /api/v1/auth/me with Bearer token (API route)
+7. Browser is redirected to /admin; same-origin fetches send the cookie
+   automatically (API clients may instead send the token as Bearer)
    ↓
-8. Server returns JSON user data
+8. API dependencies validate the token against the database per request
 ```
 
 ### 3.7 Dependency Rules
@@ -485,7 +563,7 @@ from parade_state.models import User  # Violates layer boundaries
 @router.get("/endpoint")
 async def endpoint(
     db: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_authenticated_user)
 ):
     # Use injected dependencies
 
@@ -495,9 +573,9 @@ from parade_state.api.some_module import function  # Circular risk
 
 ---
 
-## 3. Data Flow
+## 4. Data Flow
 
-### 3.1 Authentication Flow
+### 4.1 Authentication Flow
 
 ```
 ┌─────────┐         ┌──────────┐         ┌──────────┐
@@ -506,19 +584,22 @@ from parade_state.api.some_module import function  # Circular risk
 └─────────┘         └──────────┘         └──────────┘
      │                                        │
      │                                        │
-     └────────<──────── Session Cookie ──────┘
+     └────────<──────── Auth Cookie ──────────┘
 ```
 
 **Process:**
-1. User clicks "Sign in with Google"
-2. Redirect to Google OAuth
+1. User clicks "Sign in with Google" on `/auth/login`
+2. `/auth/oauth/start` redirects to Google OAuth
 3. Google redirects back with authorization code
 4. FastAPI exchanges code for user info
-5. Check if email matches preregistered user
-6. Create session cookie
-7. Redirect to application
+5. Existing email → update sign-in timestamp; new email → auto-register
+   (bootstrap super-admin active, everyone else `unrecognised`)
+6. Suspended or non-admin accounts get the 403 no-access page, no session
+7. Active admins: create `UserSession` (7-day token) and set the
+   HttpOnly auth cookie (24 hours)
+8. Redirect to `/admin`
 
-### 3.2 CSV Upload Flow
+### 4.2 CSV Upload Flow
 
 ```
 ┌──────────┐   Upload   ┌──────────┐   Parse    ┌──────────┐
@@ -547,7 +628,7 @@ from parade_state.api.some_module import function  # Circular risk
                                                  └──────────────┘
 ```
 
-### 3.3 Attendance Taking Flow
+### 4.3 Attendance Taking Flow
 
 ```
 ┌──────────┐  Request  ┌──────────┐  Query   ┌──────────┐
@@ -561,27 +642,32 @@ from parade_state.api.some_module import function  # Circular risk
 ```
 
 **Access control in flow:**
-1. User session cookie provides identity
-2. User's access level determines visible columns
-3. User's subunit scope determines visible rows
-4. Attendance writes validated against scope
+1. Auth cookie (or Bearer token) provides identity, validated per request
+2. User's role and subunit scope determine visible rows (`api/subunit_access.py`)
+3. Attendance writes validated against scope; frozen days are read-only for admins
+4. Every write is against the one NR active for attendance
 
 ---
 
 ## 5. Entity Relationships
 
-### 4.1 Core Entity Hierarchy
+### 5.1 Core Entity Hierarchy
 
 ```
 Nominal Roll (CSV source of truth)
  │
  ├── Personnel (roster entries)
- │    ├── AttendanceRecord (one row per personnel/day; active-NR gated)
+ │    ├── Attendance (one row per personnel/day; active-NR gated)
  │    ├── GroupingMembership (group memberships within a grouping)
  │    └── GroupingMemberState (per-grouping checkbox + remarks)
  │
  ├── Grouping (labelled set of groups on the roll; issue 26 redesign)
  │    └── GroupingGroup (closed vocabulary; position = display order)
+ │
+ ├── Tagging (exactly one per NR; 1:1 subunit overlay)
+ │    └── TaggingEntry (per-person from_* → to_* remap)
+ │
+ ├── Deferment (per-personnel deferment records)
  │
  └── CsvUpload (raw file storage)
 ```
@@ -590,29 +676,38 @@ Groupings never interact with attendance: no attendance columns,
 endpoints, or exports in the grouping feature, and no grouping coupling
 anywhere in the attendance path.
 
-### 4.2 User Management Hierarchy
+### 5.2 User Management Hierarchy
 
 ```
-AccessLevel (vocabulary)
+AccessLevel (vocabulary; orders ColumnMetadata sensitivity)
  │
- └── User (Google-authenticated accounts)
-      └── UserSubunitAssignment (NR-scoped sub_unit_1 write grants)
+ ├── User (Google-authenticated accounts; roles: super_admin / admin / user)
+ │    ├── UserSession (DB-backed session tokens)
+ │    └── UserSubunitAssignment (NR-scoped (unit, sub_unit_1) write grants)
+ │
+ └── FeatureAccess (per-role feature matrix; issue 37)
 ```
 
 (The old grouping-specific scoping tables — GroupingUserAccess and
 UserSubunitScope — were removed in the issue 26 redesign.)
 
-### 4.3 Attendance Tracking Hierarchy
+### 5.3 Attendance Tracking Hierarchy
 
 ```
 Nominal Roll (the one active for attendance; 1:1 Tagging overlay applied)
  │
- └── AttendanceRecord (per-personnel per-day, single session — issue 33)
-      ├── status (present/absent) / reason (nullable enum) / remarks
-      └── unit_snapshot / sub_unit_*_snapshot (frozen at write time)
+ ├── Attendance (per-personnel per-day; UNIQUE(personnel_id, date))
+ │    ├── status (present/absent) / reason (nullable enum) / remarks
+ │    └── unit_snapshot / sub_unit_*_snapshot (frozen at write time)
+ │
+ └── AttendanceFreeze (row presence = (NR, date) frozen; issue 35)
 ```
 
-### 4.4 Key Cascades
+Sessions and the AM/PM split were removed (issues #4/#33): there is no
+`Session` model and no `session_id` anywhere; `/api/v1/sessions/*` returns
+410 Gone.
+
+### 5.4 Key Cascades
 
 **Grouping cascades:**
 - Grouping deleted → its groups, memberships, and member state cascade
@@ -622,7 +717,7 @@ Nominal Roll (the one active for attendance; 1:1 Tagging overlay applied)
   member follows
 
 **Nominal Roll cascades:**
-- Nominal Roll deleted → personnel, attendance, taggings cascade;
+- Nominal Roll deleted → personnel, attendance, freezes, taggings cascade;
   deletion refused (400) while groupings still reference the roll
   (FK RESTRICT)
 
@@ -634,44 +729,48 @@ Nominal Roll (the one active for attendance; 1:1 Tagging overlay applied)
 
 ## 6. Technology Stack
 
-### 5.1 Technology Choices
+### 6.1 Technology Choices
 
 | Layer | Technology | Rationale |
 |-------|-----------|-----------|
 | **Frontend** | | |
-| Mobile UI | Vanilla JavaScript + HTML | No build step, works offline, progressive web app |
-| Admin UI | NiceGUI | Fast development, Quasar components, integrates with FastAPI |
+| Web UI (user-facing) | Jinja2 server-rendered pages | No build step, no SPA; scoping and flags enforced server-side |
+| Admin UI | Jinja2 templates | Same stack as the rest of the app; shared `base.html` shell |
 | **Backend** | | |
 | API Framework | FastAPI | Async support, auto OpenAPI docs, type validation |
 | ORM | SQLAlchemy 2.x async | Mature, async support, cross-database compatibility |
-| Auth | Authlib | Google OAuth 2.0, session management |
-| Scheduler | APScheduler | Async scheduler, SQLAlchemy job store |
+| Auth | Authlib | Google OAuth 2.0 client (flows only) |
+| Sessions | Starlette SessionMiddleware + DB `UserSession` tokens | Signed cookie carries OAuth flow state; API auth uses DB-backed tokens via HttpOnly cookie or Bearer header |
+| Templates | Jinja2 + markdown2 | Server-rendered pages; safe markdown for discussions |
 | **Database** | | |
-| Production | PostgreSQL 15+ | ACID compliance, JSONB, partial indexes, proven reliability |
-| Testing | SQLite (in-memory) | Fast, isolated, cross-platform, async support |
+| Production | PostgreSQL 18 (Railway) | ACID compliance, JSONB, partial indexes, proven reliability |
+| Testing | SQLite (file-based, one per test) | Fast, isolated, cross-platform, async support |
+| Migrations | Alembic (async env) | Versioned schema; container upgrades before serving |
 | **Infrastructure** | | |
 | Hosting | Railway | Simple deployment, managed Postgres, CI/CD |
 | Package Manager | uv | Fast dependency resolution, lock files |
-| Process | Single uvicorn | NiceGUI + FastAPI + APScheduler in one process |
+| Process | Single uvicorn | FastAPI + Jinja2 + Alembic in one process |
 
-### 5.2 Async Architecture
+### 6.2 Async Architecture
 
 **Why async throughout:**
 
 ```python
-# FastAPI async endpoint
-@router.get("/api/v1/attendance/{session_id}")
-async def get_attendance(session_id: str, db: AsyncSession = Depends(get_db_session)):
+# FastAPI async endpoint (api/attendance.py, abridged)
+@router.get("/", response_model=list[AttendanceResponse])
+async def list_attendance(
+    nominal_roll_id: str,
+    attendance_date: date,
+    current_user: User = Depends(require_authenticated_user),
+    db: AsyncSession = Depends(get_db_session),
+):
     result = await db.execute(
-        select(AttendanceRecord)
-        .where(AttendanceRecord.session_id == session_id)
+        select(Attendance).where(
+            Attendance.nominal_roll_id == nominal_roll_id,
+            Attendance.date == attendance_date,
+        )
     )
     return result.scalars().all()
-
-# Background async job pattern (no scheduler jobs remain; illustrative)
-async def rebuild_rollup(nominal_roll_id: str):
-    async with get_db_session() as db:
-        await recompute_rollup(db, nominal_roll_id)
 ```
 
 **Benefits:**
@@ -680,63 +779,73 @@ async def rebuild_rollup(nominal_roll_id: str):
 - Efficient database connection usage
 - Works seamlessly with FastAPI's async model
 
-### 5.3 Database Compatibility
+### 6.3 Database Compatibility
 
 **Cross-database compatibility strategy:**
 
 ```python
 # Works in both SQLite (testing) and PostgreSQL (production)
-class User(Base):
-    id: Mapped[uuid.UUID] = mapped_column(String(36), primary_key=True)
-    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+class Base(DeclarativeBase):
+    id: Mapped[str] = mapped_column(
+        String(36),              # String storage for SQLite compatibility
+        primary_key=True,
+        default=ids.db_default,  # parade_state.utils.ids
+        index=True,
+    )
 ```
 
 **SQLite limitations handled:**
-- UUIDs stored as String(36) instead of native UUID
+- UUIDs stored as String(36) instead of native UUID (same representation in
+  production PostgreSQL — no native UUID columns anywhere)
 - JSON instead of JSONB (automatic serialization)
-- Partial indexes implemented at application layer
-- Referential integrity via ORM, not DB triggers
+- Uniqueness via `UniqueConstraint` (e.g. attendance `UNIQUE(personnel_id, date)`)
+- Referential integrity via ORM/FKs, not DB triggers
 
 ---
 
 ## 7. Deployment Architecture
 
-### 6.1 Single Instance Deployment (MVP)
+### 7.1 Single Instance Deployment (MVP)
 
 ```
 ┌──────────────────────────────────────┐
-│        Railway Service               │
-│                                       │
+│        Railway Service (Docker)      │
+│                                      │
 │  ┌─────────────────────────────────┐ │
 │  │   uvicorn process               │ │
 │  │                                 │ │
 │  │  ┌─────────────────────────┐   │ │
 │  │  │   FastAPI App           │   │ │
-│  │  │   - REST API            │   │ │
-│  │  │   - NiceGUI Admin       │   │ │
-│  │  │   - Static Files        │   │ │
-│  │  │   - SSE Endpoints       │   │ │
-│  │  │   - APScheduler         │   │ │
+│  │  │   - REST API (/api/v1)  │   │ │
+│  │  │   - Jinja2 pages        │   │ │
+│  │  │   - Jinja2 admin UI     │   │ │
+│  │  │   - Alembic (upgrade    │   │ │
+│  │  │     head before serve)  │   │ │
 │  │  └─────────────────────────┘   │ │
 │  │                                 │ │
 │  │  ┌─────────────────────────┐   │ │
-│  │  │   SQLAlchemy            │   │ │
-│  │  │   (connection pool)     │   │ │
+│  │  │   SQLAlchemy async      │   │ │
+│  │  │   (asyncpg pool)        │   │ │
 │  │  └─────────────────────────┘   │ │
 │  └─────────────────────────────────┘ │
-│               │                        │
-│               │                        │
-└───────────────┼────────────────────────┘
+│               │                      │
+└───────────────┼──────────────────────┘
                 │
                 v
 ┌──────────────────────────────────────┐
-│   Railway Managed PostgreSQL          │
-│   - Database                        │
-│   - APScheduler Job Store            │
+│   Railway Managed PostgreSQL 18      │
+│   (single application database)      │
 └──────────────────────────────────────┘
 ```
 
-### 6.2 Future Multi-Instance Architecture
+The container (python:3.12-slim + uv, non-root user) installs
+postgresql-client-18 so the admin-UI restore can run `pg_restore` against
+the same-major server. The start command runs `alembic upgrade head && uvicorn
+parade_state.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers`
+(`--proxy-headers` honors Railway's X-Forwarded-Proto so OAuth redirect
+URIs and Secure cookies see https).
+
+### 7.2 Future Multi-Instance Architecture
 
 ```
 ┌─────────────────────┐    ┌─────────────────────┐
@@ -744,7 +853,7 @@ class User(Base):
 │                     │    │                     │
 │  ┌───────────────┐  │    │  ┌───────────────┐  │
 │  │   FastAPI     │  │    │  │   FastAPI     │  │
-│  │   + APScheduler│  │    │  │   + APScheduler│  │
+│  │   + Alembic   │  │    │  │   + Alembic   │  │
 │  └───────────────┘  │    │  └───────────────┘  │
 └─────────┬───────────┘    └─────────┬───────────┘
           │                          │
@@ -753,22 +862,22 @@ class User(Base):
                      v
         ┌────────────────────────────────┐
         │   Shared PostgreSQL             │
-        │   - Application Data            │
-        │   - APScheduler Job Store       │
-        │   (prevents duplicate job runs) │
+        │   (single application database; │
+        │   one instance owns migrations) │
         └────────────────────────────────┘
 ```
 
 **No code changes required:**
-- APScheduler SQLAlchemy job store prevents duplicate job execution
-- Session state stored in database, not memory
+- Session tokens are DB rows, so any instance can validate any request
+- OAuth flow state lives in signed cookies, not process memory
 - Stateless API design allows horizontal scaling
+- Run migrations from one deploy target only to avoid concurrent upgrades
 
 ---
 
 ## 8. Security Architecture
 
-### 7.1 Authentication & Authorization
+### 8.1 Authentication & Authorization
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -782,9 +891,9 @@ class User(Base):
 │                         │                                 │
 │  ┌───────────────────────────────────────────────────┐  │
 │  │  2. Authentication                                │  │
-│  │     - Google OAuth 2.0                            │  │
+│  │     - Google OAuth 2.0 (Authlib client)           │  │
 │  │     - HttpOnly session cookies                    │  │
-│  │     - SameSite=Strict CSRF protection             │  │
+│  │     - SameSite=lax CSRF protection                │  │
 │  └───────────────────────────────────────────────────┘  │
 │                         │                                 │
 │  ┌───────────────────────────────────────────────────┐  │
@@ -804,7 +913,7 @@ class User(Base):
 └─────────────────────────────────────────────────────────┘
 ```
 
-### 7.2 Access Control Implementation
+### 8.2 Access Control Implementation
 
 **Row-level security:**
 ```python
@@ -834,7 +943,7 @@ async def get_visible_columns(user_id: str):
     return columns
 ```
 
-### 7.3 Grouping Access Control (per-grouping scoping removed)
+### 8.3 Grouping Access Control (per-grouping scoping removed)
 
 The multi-tenant, per-grouping access model (GroupingUserAccess grants
 plus UserSubunitScope scoping) was **removed** in the issue 26 groupings
@@ -851,7 +960,19 @@ redesign — the redesigned groupings carry no access scoping at all:
 Row-level write scoping elsewhere in the app is per nominal roll
 (`UserSubunitAssignment` on effective `sub_unit_1`), not per grouping.
 
-### 7.4 Session Management Implementation
+### 8.4 Session Management Implementation
+
+Two cookie/session mechanisms coexist, each with a single job:
+
+1. **OAuth flow state** — Starlette `SessionMiddleware` (cookie
+   `session_data`, `max_age=86400`, `SameSite=lax`, signed with
+   `SESSION_SECRET`). Exists only to carry the OAuth handshake state;
+   Authlib is used purely as the OAuth client.
+2. **Application authentication** — a DB-backed `UserSession` token stored
+   in the HttpOnly auth cookie `session_token` (`utils/cookies.py`:
+   HttpOnly, `SameSite=lax`, 24-hour expiry, Secure in production via
+   `AUTH_COOKIE_SECURE`). API clients may send the same token as an
+   `Authorization: Bearer` header instead; dependencies accept both.
 
 **Session Storage Pattern:**
 ```python
@@ -861,7 +982,8 @@ class UserSession(Base):
 
     token: Mapped[str] = mapped_column(String(255), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
-    # ... other fields
+    # ... email, name, role, created_at, expires_at, last_accessed_at,
+    #     user_agent, ip_address
 ```
 
 **Critical Pattern - UUID String Storage:**
@@ -882,17 +1004,18 @@ result = await db.execute(
 ```
 
 **Authentication Flow:**
-1. User logs in via Google OAuth → creates `User` record
+1. User logs in via Google OAuth → creates/updates `User` record
 2. System creates `UserSession` with secure token → stores in database
-3. Client receives token → includes in Authorization header
-4. HTTP request triggers `require_authenticated_user()` dependency
+3. Server sets the HttpOnly auth cookie (24 hours) and redirects to `/admin`
+4. HTTP request presents the cookie (or a Bearer header) →
+   `require_authenticated_user()` dependency
 5. Dependency validates token via `get_valid_session()` → retrieves UserSession
 6. Dependency looks up User by string ID → returns authenticated user
 7. Request proceeds with user context
 
 **Security Features:**
 - **Token Generation**: `secrets.token_urlsafe(32)` for 256-bit security
-- **Expiration**: 7-day default expiration
+- **Expiration**: 7-day DB session default; 24-hour auth cookie
 - **Tracking**: Stores IP, user agent, last accessed time
 - **Validation**: Every request validates session in database
 
@@ -900,7 +1023,7 @@ result = await db.execute(
 
 ## 9. Code Standards & Best Practices
 
-### 8.1 Development Patterns
+### 9.1 Development Patterns
 
 This project follows specific development patterns to ensure consistency and maintainability. For comprehensive development guidance, see **[CLAUDE.md](../CLAUDE.md)**.
 
@@ -999,8 +1122,9 @@ async def test_endpoint():
 
 **Integration Tests (`tests/integration/`)**
 - **Purpose:** Test API endpoints with database
-- **Characteristics:** Real database (SQLite in-memory), HTTP requests
-- **Example:** Testing `POST /api/v1/attendance` with authentication
+- **Characteristics:** Real database (file-based SQLite, one file per test
+  under `tmp_path`; optional PostgreSQL via `TEST_DATABASE_URL`), HTTP requests
+- **Example:** Testing `POST /api/v1/attendance/upsert` with authentication
 
 **Behavioral Tests (`tests/behavioral/`)**
 - **Purpose:** Test domain logic and business rules
@@ -1009,46 +1133,32 @@ async def test_endpoint():
 
 ### 10.4 Dependency Decisions
 
-**httpx Removal (2026-05-09):**
+**httpx (removed 2026-05-09, restored since):**
 
-**Decision:** Removed httpx as a direct dependency from `pyproject.toml`
+**Decision history:** httpx was removed as a direct dependency on
+2026-05-09 in favor of FastAPI's TestClient (sync, built in, less
+overhead) — that conversion still holds: every integration test uses
+`fastapi.testclient.TestClient`, not `httpx.AsyncClient`.
 
-**Reasons:**
-1. **Overengineering:** httpx.AsyncClient provided unnecessary complexity for our testing needs
-2. **Framework-native:** FastAPI TestClient is designed specifically for FastAPI applications
-3. **Dependency surface:** Reducing direct dependencies improves maintainability
-4. **Performance:** TestClient has lower overhead for our use case
+**Update:** httpx is a direct dependency again in `pyproject.toml`
+(`httpx>=0.24.0`) because Authlib's OAuth client requires it at runtime.
+It is still not used for testing.
 
-**Impact:**
-- All integration tests converted from `async_client: AsyncClient` to `client: TestClient`
-- Removed `await` keywords from HTTP test calls
-- Updated test fixtures to use synchronous interface
-- All 100+ integration tests passing with new approach
-
-**Future considerations:**
-If httpx.AsyncClient is added back in the future, it should be for specific, intentional reasons:
-- **Concurrent request testing** - Testing parallel API calls
-- **Load testing** - High concurrency performance testing
-- **WebSocket testing** - Advanced WebSocket testing capabilities
-- **External async API integration** - When the app needs to make async HTTP calls
-
-This should be a deliberate architectural decision, not incidental complexity.
+**Current testing stack:**
+- `fastapi.testclient.TestClient` for all HTTP-level tests
+- `pytest`, `pytest-asyncio`, `pytest-cov` (dev dependency group)
 
 ### 10.5 Test Coverage Requirements
 
-**Minimum Coverage: 80%**
+**Minimum Coverage: 60% (enforced)**
 
-The project requires 80% code coverage across all modules.
-
-**Coverage targets by component:**
-- **Utils modules:** 90%+ (isolated, easy to test)
-- **API endpoints:** 85%+ (critical paths)
-- **Models:** 80%+ (business logic)
-- **Middleware:** 75%+ (harder to test)
+The coverage gate lives in `pyproject.toml`
+(`--cov-fail-under=60` in `[tool.pytest.ini_options]`); the suite
+currently sits above it (~62%).
 
 **Verification:**
 ```bash
-pytest --cov=src/parade_state --cov-report=term-missing
+uv run pytest   # addopts already enable coverage + the gate
 ```
 
 ---
@@ -1058,27 +1168,28 @@ pytest --cov=src/parade_state --cov-report=term-missing
 ### 11.1 Current Performance Characteristics
 
 **Test results:**
-- 26 tests execute in ~2 seconds
-- Test database: In-memory SQLite
-- Coverage: 93.77%
+- 685 tests (681 passing, 4 skipped) execute in ~2.5-3 minutes
+- Test database: file-based SQLite, one file per test under `tmp_path`
+  (optional PostgreSQL via `TEST_DATABASE_URL`)
+- Coverage gate: 60% enforced in `pyproject.toml` (currently ~62%)
 
 **Expected production performance:**
 - API response time: < 200ms for typical queries
-- Mobile UI load time: < 2s on 4G
+- Page load time: < 2s on 4G
 - Attendance write: < 500ms round-trip
 
 ### 11.2 Scalability Considerations
 
 **Current single-instance limits:**
 - Max concurrent users: ~200 (based on typical FastAPI performance)
-- Database connections: Managed by connection pool (default 20 connections)
-- Background jobs: APScheduler SQLAlchemy job store ensures safe execution
+- Database connections: Managed by the asyncpg connection pool
+- Background jobs: none — all work happens in-request
 
 **Future scaling path:**
-1. **Horizontal scaling:** Add more Railway instances
+1. **Horizontal scaling:** Add more Railway instances (see 7.2)
 2. **Database scaling:** PostgreSQL read replicas for heavy read operations
 3. **Caching:** Redis cache for frequently accessed data (sessions, groupings)
-4. **CDN:** Serve static files via CDN for better global performance
+4. **CDN:** Not applicable today — no static asset bundle; pages are server-rendered
 
 ---
 

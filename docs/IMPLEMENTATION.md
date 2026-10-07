@@ -1,7 +1,7 @@
 # Implementation Guide
 
-**Version:** 1.0  
-**Date:** 2026-05-08  
+**Version:** 1.1  
+**Date:** 2026-10-07  
 **Status:** Technical Implementation Guide  
 
 ---
@@ -10,9 +10,12 @@
 
 1. [Development Setup](#1-development-setup)
 2. [Testing Strategy](#2-testing-strategy)
-3. [Database Implementation](#3-database-implementation)
-4. [Code Organization](#4-code-organization)
-5. [Build & Deployment](#5-build--deployment)
+3. [API Implementation Status](#3-api-implementation-status)
+4. [Database Implementation](#4-database-implementation)
+5. [Code Organization](#5-code-organization)
+6. [Build & Deployment](#6-build--deployment)
+7. [Performance Considerations](#7-performance-considerations)
+8. [Troubleshooting](#8-troubleshooting)
 
 ---
 
@@ -50,7 +53,7 @@ uv run pytest
 uv run pytest -v
 
 # Run specific test file
-uv run pytest tests/test_access_control.py
+uv run pytest tests/behavioral/test_access_control.py
 
 # Run tests matching pattern
 uv run pytest -k "test_access_level"
@@ -65,7 +68,14 @@ uv run ruff format src/
 
 ### 1.4 Pre-commit Configuration
 
-The project uses ruff for fast linting and formatting. Configure your editor to use ruff or run manually before commits.
+The project uses [pre-commit](https://pre-commit.com/) with ruff hooks
+(`ruff check --fix` + `ruff-format`, pinned to the ruff version in
+`uv.lock` — see `.pre-commit-config.yaml`):
+
+```bash
+uv run pre-commit install   # one-time setup
+uv run pre-commit run --all-files   # manual run
+```
 
 ---
 
@@ -93,29 +103,52 @@ The project uses ruff for fast linting and formatting. Configure your editor to 
 ### 2.2 Test Categories
 
 **Current Test Suite:**
-- `tests/integration/test_api.py` - Authentication, user management, role management (18 tests)
-- `tests/integration/test_attendance_api.py` - Attendance management, snapshots, constraints, CSV export scoping
-- `tests/integration/test_csv_upload_api.py` - CSV upload pipeline, hash dedup, mapping (9 tests)
-- `tests/integration/test_csv_process_api.py` - CSV → NR processing under
-  contract v2 (issue 34): required-column errors, strict Yes-only filter +
-  skip counts, storage map (Pers/Age optional, ORNS alias, first Remarks,
-  Reason non-storage, extras ignored, quoted commas, old-format
-  convergence), canonical-fixture acceptance (397/163), tagging import
-- `tests/integration/test_deferments_api.py` - Deferment CRUD, inpro_status transitions (issue 32), super_admin auth
-- `tests/integration/test_feature_flags.py` - Flag-off hides Deferments/Grouping entirely (nav, pages, API) for every role incl. super-admin; flag-on restore; env-var defaults (8 tests)
-- `tests/integration/test_environment_banner.py` - ENVIRONMENT_BANNER renders the top strip pre-auth (login) and post-auth, escapes its text, and emits no markup when unset (5 tests)
-- `tests/integration/test_groupings_api.py` - Groupings (issue 26 redesign): CRUD, group-enum set replacement, memberships, member state, clone, copy-from-previous-NR, CSV export, super-admin-only mutations, flag gating
-- `tests/integration/test_nominal_rolls_api.py` - Nominal Roll lifecycle (attendance activation auto-switch/deactivate, delete, label updates, CSV export)
-- `tests/integration/test_personnel_api.py` - Personnel management, search, filtering (12 tests)
-- `tests/integration/test_personnel_attendance_history.py` - Personnel attendance history and statistics (NR/Tagging-scoped, single session)
-- `tests/integration/test_sessions_410.py` - Sessions endpoints return 410 Gone (sessions removed in issue #4)
-- `tests/integration/test_users_api.py` - User CRUD, role/status transitions (3 tests)
-- `tests/integration/test_audit_api.py` - Audit log filtering and pagination (10 tests)
-- `tests/integration/test_core_feature_kill_switches.py` - FEATURE_NOMINALROLL/FEATURE_ATTENDANCE default-on kill switches: unset = fully available; explicit false hides page+API+nav for every role incl. super-admin; independent gating (9 tests)
 
-**Total:** 647 collected (643 passing, 4 skipped) ✅ UPDATED
-**Coverage:** Comprehensive integration test coverage across all major features
-**Performance:** ~23 seconds for full integration test suite
+*Unit (`tests/unit/`, pure functions):*
+- `test_config.py`, `test_db_url.py`, `test_ids.py`, `test_ranks.py`, `test_utc_dt.py`
+- `tests/test_utils.py` (top-level utils tests)
+
+*Behavioral (`tests/behavioral/`, domain contracts):*
+- `test_access_control.py` - Access hierarchy and scoping rules
+- `test_auth.py` - Authentication/session behavior
+- `test_csv_personnel.py` - CSV → personnel domain rules
+
+*Integration (`tests/integration/`, API + database via TestClient):*
+- `test_api.py` - Authentication, user management, role management (18 tests)
+- `test_admin_only_auth.py` - Admin-only gating across endpoints
+- `test_admin_purge_api.py` - Super-admin purge of nominal rolls (PURGE_ENABLED)
+- `test_admin_scoped_access.py` - Subunit scope grants: deny-by-default, overlay boundaries, grant CRUD
+- `test_attendance_api.py` - Attendance management, snapshots, constraints, CSV export scoping
+- `test_attendance_views.py` - `/attendance` page rendering and filters
+- `test_audit_api.py` - Audit log filtering and pagination (10 tests)
+- `test_core_feature_kill_switches.py` - FEATURE_NOMINALROLL/FEATURE_ATTENDANCE default-on kill switches: unset = fully available; explicit false hides page+API+nav for every role incl. super-admin; independent gating (9 tests)
+- `test_csv_upload_api.py` - CSV upload pipeline, hash dedup, mapping (9 tests)
+- `test_csv_process_api.py` - CSV → NR processing under contract v2 (issue 34): required-column errors, strict Yes-only filter + skip counts, storage map (Pers/Age optional, ORNS alias, first Remarks, Reason non-storage, extras ignored, quoted commas, old-format convergence), canonical-fixture acceptance (397/163), tagging import
+- `test_db_restore_api.py` - Super-admin DB restore endpoint (validation, version guard)
+- `test_deferments_api.py` - Deferment CRUD, inpro_status transitions (issue 32), super_admin auth
+- `test_discussions.py` - Discussions posts/comments CRUD, markdown, triage
+- `test_environment_banner.py` - ENVIRONMENT_BANNER renders the top strip pre-auth (login) and post-auth, escapes its text, and emits no markup when unset (5 tests)
+- `test_feature_access.py` - Feature-access matrix (issue 37): upsert API, middleware, gates
+- `test_feature_flags.py` - Flag-off hides Deferments/Grouping entirely (nav, pages, API) for every role incl. super-admin; flag-on restore; env-var defaults (8 tests)
+- `test_groupings_api.py` - Groupings (issue 26 redesign): CRUD, group-enum set replacement, memberships, member state, clone, copy-from-previous-NR, CSV export, super-admin-only mutations, flag gating
+- `test_migration_attendance_single_session.py` - Runs the real Alembic chain for the issue-33 attendance collapse
+- `test_migration_inpro_status.py` - Runs the real Alembic chain for the callup → inpro status remap
+- `test_no_client_identity.py` - Endpoints reject identity supplied via query/body (session-derived identity only)
+- `test_nominal_rolls_api.py` - Nominal Roll lifecycle (attendance activation auto-switch/deactivate, delete, label updates, CSV export)
+- `test_nominal_roll_views.py` - `/nominal-roll` browser rendering, remap editor, Add Serviceman
+- `test_personnel_api.py` - Personnel management, search, filtering (12 tests)
+- `test_personnel_attendance_history.py` - Personnel attendance history and statistics (NR/Tagging-scoped, single session)
+- `test_production_hardening.py` - Production validation: refuses to boot on missing secrets, wildcard CORS; docs disabled
+- `test_sessions_410.py` - Sessions endpoints return 410 Gone (sessions removed in issue #4)
+- `test_sidebar_restructure.py` - Sidebar workflow pages + Admin section rendering
+- `test_strength_views.py` - Unit Strength report (issue 25 + basis toggle, issue 36)
+- `test_subunit_assignments_api.py` - Super-admin grant API under `/api/v1/access-control`
+- `test_tagging_api.py` - Tagging CRUD, 1:1 per NR, clone/merge, personnel remap redirect
+- `test_users_api.py` - User CRUD, role/status transitions (3 tests)
+
+**Total:** 685 collected (681 passing, 4 skipped) ✅ UPDATED
+**Coverage:** Comprehensive integration test coverage across all major features; 60% gate enforced in `pyproject.toml` (currently ~62%)
+**Performance:** ~2.5-3 minutes for the full suite (file-based SQLite per test; set `TEST_DATABASE_URL` to a PostgreSQL server to validate the production dialect)
 
 ### 2.3 Writing New Tests
 
@@ -147,20 +180,33 @@ async def test_your_feature(db_session, sample_grouping, sample_users):
 **Core fixtures:**
 
 ```python
-test_engine     # Creates database engine and file, initializes global state
+feature_flags_enabled       # Autouse: runs every test with FEATURE_* flags on
+test_engine     # File-based SQLite engine per test (tmp_path/test.db),
+                # or a fresh per-test PostgreSQL DB when TEST_DATABASE_URL is set
 session_maker   # Creates session factory for test database
-db_session       # Provides database session for direct operations
+db_session      # Provides database session for direct operations
 client          # Provides TestClient with database dependency override
-test_db          # Alias for session_maker (backward compatibility)
+test_db         # Alias for session_maker (backward compatibility)
 
 # Sample data fixtures (automatically create fresh data)
-sample_access_levels    # Creates: unit, coy, platoon, section
-sample_users            # Creates: admin user, regular user
-sample_nominal_roll            # Creates: sample establishment
-sample_personnel        # Creates: 3 sample personnel records
-sample_grouping       # Creates: sample grouping (with groups) on the sample NR
-sample_sessions         # Creates: multiple session records
-sample_attendance_records  # Creates: attendance records
+sample_access_levels      # Creates: unit, coy, platoon, section
+sample_users              # Creates: admin user, regular user
+sample_nominal_roll       # Creates: sample nominal roll
+sample_personnel          # Creates: 3 sample personnel records
+sample_grouping           # Creates: sample grouping (with groups) on the sample NR
+sample_grouping_memberships  # Memberships for the sample grouping
+sample_attendance         # Creates: attendance rows (single session)
+sample_attendance_scope   # Marks the sample NR active for attendance
+admin_subunit_assignment  # Grants admins subunit scope over the sample roster
+
+# Auth helpers
+admin_token_headers        # Bearer headers for the sample admin
+user_token_headers         # Bearer headers for the sample regular user
+super_admin_token_headers  # Bearer headers for the well-known super admin
+
+# tests/integration/conftest.py
+well_known_users           # Stable-id users (admin-user-id, super-admin-user-id, ...)
+client_as                  # TestClient acting as a given well-known user
 ```
 
 **Using fixtures:**
@@ -184,12 +230,12 @@ async def test_example(client, sample_users, sample_grouping):
 
 **Authentication & User Management (✅ Complete)**
 - Google OAuth integration with callback handling
-- User auto-registration and activation
+- User auto-registration (unknown sign-ins land as `unrecognised`; super-admins promote or pre-provision via /admin/users)
 - Role-based authorization (super_admin, admin, user)
 - Session management with expiration and cleanup
 - User CRUD operations with proper access control
 - User pre-provisioning: super-admins can create accounts by email (Add User form on /admin/users) before first sign-in; promotion to super_admin/admin auto-activates unrecognised accounts
-- **Endpoints:** 7 authentication + 6 user management = 13 total
+- **Endpoints:** 2 authentication + 5 user management = 7 total
 
 **Grouping Management (✅ Redesigned in issue 26 — feature-flagged, default off)**
 - A grouping is a labelled, closed vocabulary of groups based on the
@@ -211,8 +257,8 @@ async def test_example(client, sample_users, sample_grouping):
   roles including super-admins; default-off posture unchanged
 - Mutations super-admin only (403 otherwise); reads open to every
   authenticated role; groupings on non-active rolls unreachable (404)
-- **Endpoints:** 9 grouping endpoints (CRUD, membership set, member
-  state, clone, copy-from-previous, export)
+- **Endpoints:** 10 grouping endpoints (create, list, get, update, delete,
+  group-set replacement, member state, clone, copy-from-previous, export)
 
 **Attendance Session Management (🗑 Removed in issue #4; slots removed in #33)**
 - The user-managed `Session` model (open/closed/finalized) has been removed.
@@ -461,7 +507,7 @@ async def test_example(client, sample_users, sample_grouping):
 - The old grouping-scoped query surface (`grouping_id` params, grouping
   overrides/context in responses, grouping access checks) was removed with
   the issue 26 groupings redesign
-- **Endpoints:** 3 personnel management endpoints
+- **Endpoints:** 5 personnel endpoints under `/api/v1/personnel`
 - **Tests:** 12+ behavioral tests
 
 **Deferments (✅ Super-admin MVP — feature-flagged)**
@@ -609,7 +655,8 @@ async def test_example(client, sample_users, sample_grouping):
   process endpoint under `/api/v1/csv/{id}/process`
 - **Tests:** tagging (24) + personnel remap/409 + CSV process (7)
 
-**Total API Endpoints:** 64 fully implemented and tested endpoints ✨ UPDATED
+**Total API Endpoints:** 68 route handlers across the 17 `api/` modules
+(67 live endpoints + the `/api/v1/sessions` 410-Gone catch-all) ✨ UPDATED
 
 ### 3.2 Personnel API (historical note)
 
@@ -633,7 +680,7 @@ GET /api/v1/personnel/{id}/attendance-history?date_from=xxx&date_to=xxx
 
 ## 4. Database Implementation
 
-### 3.1 Database Choice Rationale
+### 4.1 Database Choice Rationale
 
 **Production: PostgreSQL**
 - Native UUID support
@@ -642,44 +689,53 @@ GET /api/v1/personnel/{id}/attendance-history?date_from=xxx&date_to=xxx
 - ACID compliance for data integrity
 - Proven reliability at scale
 
-**Testing: SQLite (in-memory)**
+**Testing: SQLite (file-based, one per test)**
 - Fast test execution
-- Complete test isolation
+- Complete test isolation (each test gets its own database file under `tmp_path`)
 - Async support via aiosqlite
 - No external dependencies
 - Cross-platform compatibility
+- Optional: set `TEST_DATABASE_URL` to run the suite against PostgreSQL
+  (a fresh database is created per test and dropped on teardown)
 
-### 3.2 Schema Management
+### 4.2 Schema Management
 
-**Current Status:** Models defined in SQLAlchemy ORM, but no Alembic migrations yet.
+**Current Status:** Alembic migrations, async environment.
 
-**Future Migration Path:**
+- `alembic.ini` points `script_location` at `src/parade_state/migrations`;
+  `migrations/env.py` runs migrations through the async engine and applies
+  `normalize_database_url` to the `DATABASE_URL` environment variable
+  (so platform `postgresql://` URLs work as-is).
+- The `versions/` directory holds the full revision chain (26 revisions),
+  including the data-migrating steps (attendance single-session collapse,
+  inpro-status remap — both covered by tests that run the real chain).
+- The production container runs `alembic upgrade head` before uvicorn
+  accepts traffic (see the Dockerfile CMD).
+- The admin-UI restore path checks the restored database's Alembic revision
+  and upgrades it to head if it is behind the code.
 
 ```bash
-# Initialize Alembic (when needed)
-uv run alembic init migrations
+# Generate a migration from model changes
+uv run alembic revision --autogenerate -m "Describe the change"
 
-# Generate migration from models
-uv run alembic revision --autogenerate -m "Initial schema"
-
-# Apply migrations
+# Apply migrations (local dev; the container does this automatically)
 uv run alembic upgrade head
 
-# Production database migration
+# Production database migration (or let the container CMD handle it)
 DATABASE_URL=postgresql://... uv run alembic upgrade head
 ```
 
-### 3.3 UUID Storage Implementation
+### 4.3 UUID Storage Implementation
 
 **Cross-Database UUID Strategy:**
 
 ```python
 # Base class (src/parade_state/db/__init__.py)
 class Base(DeclarativeBase):
-    id: Mapped[uuid.UUID] = mapped_column(
+    id: Mapped[str] = mapped_column(
         String(36),              # String storage for SQLite compatibility
         primary_key=True,
-        default=lambda: str(uuid.uuid4()),  # Generate as string
+        default=ids.db_default,  # parade_state.utils.ids — UUID4 as string
         index=True,
     )
 ```
@@ -694,19 +750,12 @@ grouping_id: Mapped[str] = mapped_column(
 )
 ```
 
-**PostgreSQL migration (when needed):**
+**PostgreSQL note:**
 
-```sql
--- Migrate String(36) to native UUID
-ALTER TABLE users 
-ALTER COLUMN id 
-TYPE UUID 
-USING id::UUID;
+IDs stay String(36) in production PostgreSQL too — the same representation
+on both dialects means no native-UUID migration is needed or planned.
 
--- Repeat for all tables with UUID columns
-```
-
-### 3.4 JSON vs JSONB
+### 4.4 JSON vs JSONB
 
 **Implementation:**
 
@@ -717,13 +766,13 @@ extra_fields: Mapped[dict] = mapped_column(JSON, default=dict)
 
 **Behavior:**
 - SQLite: Stores as JSON text, automatic serialization/deserialization
-- PostgreSQL: Stores as JSONB for better query performance
+- PostgreSQL: Stores as JSON (SQLAlchemy's generic JSON type — not JSONB)
 - Application layer: Works with Python dicts seamlessly
 
-**Future PostgreSQL optimization:**
+**Possible future optimization (not currently needed):**
 
 ```sql
--- Migrate JSON to JSONB for better performance
+-- Migrate JSON to JSONB for better query performance
 ALTER TABLE personnel 
 ALTER COLUMN extra_fields 
 TYPE JSONB 
@@ -738,74 +787,101 @@ ON personnel USING GIN (extra_fields);
 
 ## 5. Code Organization
 
-### 4.1 Project Structure
+### 5.1 Project Structure
 
 ```
 parade-state/
 ├── src/parade_state/
 │   ├── __init__.py
-│   ├── main.py                  # FastAPI app setup and router registration
-│   ├── config.py                # Configuration management
+│   ├── main.py                  # FastAPI app factory, middleware, routers, lifespan
+│   ├── config.py                # Settings from env + production validation
 │   ├── features.py              # Feature-flag gate (require_feature dependency)
+│   ├── feature_access.py        # Per-role feature matrix (middleware + gates, issue 37)
 │   ├── admin_routes.py          # Admin section Jinja2 routes (/admin/*)
 │   ├── api/                     # REST API endpoints (JSON)
 │   │   ├── __init__.py
-│   │   ├── access_control.py    # NR-scoped subunit assignments
-│   │   ├── attendance.py        # Attendance record CRUD + bulk ops
+│   │   ├── access_control.py    # Super-admin subunit grant API (NR-scoped)
+│   │   ├── admin_purge.py       # Super-admin purge of all NRs (testing-only flag)
+│   │   ├── attendance.py        # Attendance list/upsert/copy-remarks/freeze/export
 │   │   ├── audit.py             # Audit log query
-│   │   ├── auth.py              # Google OAuth flow, login/logout
-│   │   ├── csv_upload.py        # CSV upload pipeline
+│   │   ├── auth.py              # /me + /logout (OAuth lives in web/auth.py)
+│   │   ├── csv_upload.py        # CSV upload pipeline (upload, list, process)
+│   │   ├── db_restore.py        # Super-admin DB restore endpoint
 │   │   ├── deferments.py        # Deferment CRUD (super_admin only)
-│   │   ├── groupings.py      # Groupings (issue 26 redesign)
-│   │   ├── nominal_rolls.py            # Nominal Roll list/get/update (status, notes, label)/delete
-│   │   ├── personnel.py         # Personnel listing + attendance history
-│   │   ├── sessions.py          # Session open/close/reopen/finalize
+│   │   ├── discussions.py       # Discussions posts/comments + triage
+│   │   ├── feature_access.py    # Feature-access matrix upsert (super_admin only)
+│   │   ├── groupings.py         # Groupings (issue 26 redesign)
+│   │   ├── nominal_rolls.py     # NR lifecycle + attendance activation + CSV export
+│   │   ├── personnel.py         # Personnel listing/add/remaps/attendance history
+│   │   ├── sessions.py          # 410 Gone signposts (sessions removed)
+│   │   ├── subunit_access.py    # Shared NR-scoped enforcement seam (issue #28/#31)
+│   │   ├── tagging.py           # Tagging overlay CRUD + clone
 │   │   └── users.py             # User CRUD + role/status transitions
 │   ├── auth/                    # Auth dependencies and OAuth helpers
+│   │   ├── __init__.py
 │   │   ├── admin_dependencies.py
-│   │   ├── dependencies.py
-│   │   ├── oauth.py
-│   │   └── session.py
+│   │   ├── dependencies.py      # Bearer-or-cookie session resolution + role deps
+│   │   ├── oauth.py             # Authlib Google client (OAuth flows only)
+│   │   └── session.py           # UserSession create/validate/invalidate/cleanup
 │   ├── db/                      # Database setup, Base class, session management
-│   │   └── __init__.py
-│   ├── migrations/              # Alembic migrations
+│   │   ├── __init__.py
+│   │   └── restore.py           # Verified in-app restore from pg_dump archive
+│   ├── migrations/              # Alembic migrations (async env)
 │   │   ├── env.py
-│   │   └── versions/
+│   │   └── versions/            # 26 revisions (full schema history)
 │   ├── models/                  # SQLAlchemy ORM models
 │   │   ├── __init__.py
-│   │   ├── access.py            # User, AccessLevel, UserSubunitAssignment
-│   │   ├── attendance.py        # Session, AttendanceRecord
+│   │   ├── access.py            # User, AccessLevel, UserSubunitAssignment, FeatureAccess
+│   │   ├── attendance.py        # Attendance, AttendanceFreeze (single daily session)
 │   │   ├── audit.py             # AuditLog
-│   │   ├── auth_session.py      # UserSession
+│   │   ├── auth_session.py      # UserSession (DB-backed tokens)
 │   │   ├── csv_ingestion.py     # Nominal Roll, CsvUpload, ColumnMapping, ColumnMetadata
 │   │   ├── deferments.py        # Deferment
-│   │   ├── grouping.py        # Grouping, GroupingGroup, GroupingMembership, GroupingMemberState
+│   │   ├── discussions.py       # DiscussionPost, DiscussionComment
+│   │   ├── grouping.py          # Grouping, GroupingGroup, GroupingMembership, GroupingMemberState
 │   │   ├── personnel.py         # Personnel (with inpro_status)
-│   │   └── schemas.py           # Pydantic request/response schemas
+│   │   ├── schemas.py           # Pydantic request/response schemas
+│   │   └── tagging.py           # Tagging, TaggingEntry (1:1 with NR)
+│   ├── templates/               # Jinja2 pages (shared base.html shell)
+│   │   ├── admin/               # Admin section templates (users, taggings, audit, ...)
+│   │   ├── attendance.html      # /attendance marking view
+│   │   ├── login.html, no_access.html, auth_callback.html
+│   │   ├── grouping.html, nominal_roll.html
+│   │   ├── feature_disabled.html
+│   │   └── base.html
 │   ├── utils/                   # Shared utilities (see CODE_STYLE.md)
 │   │   ├── __init__.py
-│   │   ├── cookies.py
+│   │   ├── cookies.py           # HttpOnly auth cookie set/get/clear
+│   │   ├── csv_constants.py     # CSV ingestion contract v2 (header-name matching)
 │   │   ├── env.py
 │   │   ├── ids.py
+│   │   ├── markdown.py          # Safe markdown rendering for discussions
+│   │   ├── ranks.py             # Rank-to-category mapping
 │   │   └── utc_dt.py
 │   └── web/                     # User-facing web routes (Jinja2)
+│       ├── __init__.py
 │       ├── attendance.py        # /attendance marking view
-│       ├── auth.py              # /auth login/logout redirects
-│       ├── grouping.py        # /grouping browser view
-│       └── nominal roll.py             # /nominal-roll roster browser
+│       ├── auth.py              # /auth login/logout/callback/no-access
+│       ├── grouping.py          # /grouping browser view
+│       └── nominal_roll.py      # /nominal-roll roster browser
 ├── tests/
 │   ├── conftest.py              # Pytest fixtures (db, client, sample data)
 │   ├── test_utils.py
 │   ├── behavioral/              # Behavioral contract tests
 │   ├── integration/             # API integration tests (primary suite)
-│   └── unit/                    # Pure-function unit tests (ids, utc_dt)
+│   └── unit/                    # Pure-function unit tests (config, db_url, ids, ranks, utc_dt)
+├── scripts/
+│   ├── alpha_sanity_check.py    # Alpha-milestone sanity checks
+│   └── visual_check.py          # Playwright visual checks
+├── .github/workflows/           # ci.yml, pip-audit.yml, backup-db.yml
 ├── docs/                        # Architecture, spec, security, deployment, etc.
 ├── alembic.ini
+├── Dockerfile                   # Production image (migrations + uvicorn)
 ├── pyproject.toml
 └── uv.lock
 ```
 
-### 4.2 Model Organization
+### 5.2 Model Organization
 
 **Principles:**
 - Each file contains a logical grouping of related models
@@ -822,7 +898,7 @@ parade-state/
 5. Create tests in appropriate test file
 6. Update documentation
 
-### 4.3 Database Session Management
+### 5.3 Database Session Management
 
 **Current pattern:**
 
@@ -847,7 +923,7 @@ async def get_users(db: AsyncSession = Depends(get_db_session)):
 
 ## 6. Build & Deployment
 
-### 5.1 Local Development
+### 6.1 Local Development
 
 **Development server:**
 
@@ -856,21 +932,31 @@ async def get_users(db: AsyncSession = Depends(get_db_session)):
 uv run uvicorn src.parade_state.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-**Database setup (local PostgreSQL):**
+**Database setup (local SQLite by default):**
+
+The repo `.env` points `DATABASE_URL` at a local SQLite file
+(`sqlite+aiosqlite:///parade_state.db`). Create the schema with Alembic
+before first run:
 
 ```bash
-# Using Docker for local PostgreSQL
+uv run alembic upgrade head
+```
+
+**Optional: local PostgreSQL**
+
+```bash
 docker run --name parade-state-postgres \
   -e POSTGRES_PASSWORD=password \
   -e POSTGRES_DB=parade_state \
   -p 5432:5432 \
-  -d postgres:15
+  -d postgres:18
 
 # Set environment variables
 export DATABASE_URL="postgresql://postgres:password@localhost:5432/parade_state"
+uv run alembic upgrade head
 ```
 
-### 5.2 Production Deployment (Railway)
+### 6.2 Production Deployment (Railway)
 
 **Environment variables:**
 
@@ -882,27 +968,38 @@ GOOGLE_CLIENT_SECRET   # Google OAuth client secret
 SESSION_SECRET         # Session encryption secret
 ALLOWED_ORIGINS        # Explicit CORS origins ("*" rejected in production)
 APP_BASE_URL           # https://{your-app}.railway.app
+
+# Optional
+AUTH_COOKIE_SECURE     # Secure flag on auth cookies (default: on in production)
+ENVIRONMENT_BANNER     # Non-production identifier strip
+FEATURE_*              # Feature flags / kill switches (see config.py)
 ```
 
 Production is detected via `ENVIRONMENT=production` or automatically on
-Railway. The app then refuses to boot without the required variables
-above (no fallback secrets), sets the Secure flag on auth cookies, and
-disables `/docs` / `/redoc` / `/openapi.json`.
+Railway (the platform injects `RAILWAY_PROJECT_ID`/`RAILWAY_SERVICE_ID`).
+The app then refuses to boot without the required variables above (no
+fallback secrets), sets the Secure flag on auth cookies, and disables
+`/docs` / `/redoc` / `/openapi.json`.
 
 **Railway deployment:**
 
-1. Push to main branch → Railway detects Python app via pyproject.toml
-2. Installs dependencies via uv
-3. Runs DB migrations (alembic upgrade head) as start command pre-step
-4. Starts uvicorn
+1. Push to main branch → Railway builds the `Dockerfile`
+   (python:3.12-slim + uv; `uv sync --frozen --no-dev`; non-root user)
+2. The image installs `postgresql-client-18` (PGDG) so the admin-UI
+   database restore can run `pg_restore` against the PostgreSQL 18 server
+3. The container CMD runs DB migrations, then starts uvicorn
 
-**Start command:**
+**Start command (Dockerfile CMD):**
 
 ```bash
-uvicorn src.parade_state.main:app --host 0.0.0.0 --port $PORT
+alembic upgrade head && uvicorn parade_state.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips=*
 ```
 
-### 5.3 Static Analysis
+`--proxy-headers` lets uvicorn honor Railway's `X-Forwarded-Proto` so
+`request.url.scheme` is https behind the edge proxy (required for OAuth
+redirect URIs and Secure cookies).
+
+### 6.3 Static Analysis
 
 **🚨 Code Style Requirements:**
 - **Read [CODE_STYLE.md](CODE_STYLE.md) before writing code**
@@ -921,8 +1018,8 @@ uv run ruff check src/ tests/
 # Format code automatically
 uv run ruff format src/ tests/
 
-# Check for type issues (when ruff type checking is fully enabled)
-uv run ruff check --select TYP src/
+# Type-check with pyright (dev dependency group)
+uv run pyright
 ```
 
 **Common Violations to Avoid:**
@@ -944,44 +1041,54 @@ def schedule_session(date: utc_dt.date) -> utc_dt.datetime:
 
 **CI/CD Integration:**
 
+`.github/workflows/ci.yml` runs on every PR and push to main:
+
 ```yaml
-# Example GitHub Actions workflow
-- name: Run ruff
-  run: |
-    uv run ruff check src/ tests/
-    uv run ruff format --check src/ tests/
+# Lint job
+- name: Ruff lint
+  run: uv run ruff check src tests scripts
+
+- name: Ruff format check
+  run: uv run ruff format --check src tests scripts
+
+# Test job
+- name: Run test suite
+  run: uv run pytest -q
+# ... then uploads htmlcov/ as a coverage artifact
 ```
 
-### 5.4 Dependency Management
+Two other workflows exist: `pip-audit.yml` (weekly audit of the production
+dependency set) and `backup-db.yml` (daily encrypted `pg_dump` backup).
+
+### 6.4 Dependency Management
 
 **Current Status:**
 - **15 core dependencies** - all actively used, no bloat
-- **Modern versions**: FastAPI 0.136+, Pydantic 2.13+, SQLAlchemy 2.0+
-- **No security vulnerabilities** detected in current versions
-- **Appropriate version constraints** (>=) allows security updates
+- **Modern versions**: FastAPI >=0.104, Pydantic >=2.5, SQLAlchemy >=2.0 (>= constraints allow security updates; the lockfile pins exact versions)
+- **Dev dependency group**: pyright, ruff, pre-commit, pytest, pytest-asyncio, pytest-cov, pip-audit
 
 **Dependency Categories:**
-- **Core Framework**: FastAPI, Uvicorn, Pydantic, SQLAlchemy
-- **Database**: asyncpg (PostgreSQL), aiosqlite (testing), Alembic (migrations)
-- **Authentication**: authlib, python-multipart
-- **UI/Scheduling**: nicegui, apscheduler
-- **Testing**: pytest, pytest-asyncio, pytest-cov, faker
+- **Core Framework**: FastAPI, Uvicorn, Pydantic, Starlette
+- **Database**: asyncpg (PostgreSQL), aiosqlite (SQLite dev/testing), Alembic (migrations), SQLAlchemy
+- **Authentication**: authlib (OAuth client), httpx (its HTTP transport)
+- **Pages/Templates**: Jinja2, markdown2, itsdangerous (session cookie signing), python-dotenv
+- **File uploads**: python-multipart
 
-**Future Maintenance:**
-1. **Security Automation**: Consider adding `pip-audit` to CI/CD for automated vulnerability scanning
+**Maintenance:**
+1. **Security Automation**: `pip-audit` runs weekly via `.github/workflows/pip-audit.yml` (manual dispatch for immediate checks)
 2. **Version Management**: Current '>=' constraints are good for development; consider pinning major versions for production stability
 3. **Regular Audits**: Quarterly dependency review recommended
 4. **Update Policy**: Keep dependencies current, test upgrades before deployment
 
 **Dependency Health Check:**
 ```bash
-# Check for security vulnerabilities (future)
-pip-audit
+# Check for security vulnerabilities
+uv run pip-audit
 
 # Check for outdated packages
 pip list --outdated
 
-# Update dependencies safely
+# Update dependencies safely (then commit the updated uv.lock)
 uv sync --upgrade
 ```
 
@@ -989,7 +1096,7 @@ uv sync --upgrade
 
 ## 7. Performance Considerations
 
-### 6.1 Database Query Optimization
+### 7.1 Database Query Optimization
 
 **Current optimizations:**
 - Indexed foreign keys for fast joins
@@ -1002,7 +1109,7 @@ uv sync --upgrade
 - Use database EXPLAIN ANALYZE to identify slow queries
 - Consider read replicas for heavy read operations
 
-### 6.2 Async Operations
+### 7.2 Async Operations
 
 **Benefits:**
 - Non-blocking database operations
@@ -1018,11 +1125,11 @@ uv sync --upgrade
 
 ## 8. Troubleshooting
 
-### 7.1 Common Development Issues
+### 8.1 Common Development Issues
 
 **Import errors:**
-- Ensure you've run `uv sync` after pulling changes
-- Check that PYTHONPATH includes `src/` directory
+- Ensure you've run `uv sync` after pulling changes (the package is
+  installed into the venv from `src/`; no manual PYTHONPATH needed)
 
 **Test failures:**
 - Each test is independent - failures are self-contained
@@ -1034,7 +1141,7 @@ uv sync --upgrade
 - Verify PostgreSQL server is running
 - Ensure database migrations are up to date
 
-### 7.2 Debugging Tips
+### 8.2 Debugging Tips
 
 **Enable SQL logging:**
 
@@ -1061,4 +1168,4 @@ print(f"Result: {result}")
 
 ---
 
-*End of Implementation Guide v1.0*
+*End of Implementation Guide v1.1*

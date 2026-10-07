@@ -254,7 +254,7 @@ uv run pytest -k "personnel"
 ### Quick Testing Reference
 
 - **Integration tests:** `tests/integration/test_*.py`
-- **Test fixtures:** `tests/conftest.py`
+- **Test fixtures:** `tests/conftest.py` (shared) + `tests/integration/conftest.py` (well-known users, `client_as`)
 - **Database:** File-based SQLite (not `:memory:`) for proper isolation
 - **Async tests:** Use `@pytest.mark.asyncio`
 - **HTTP testing:** Use `client` fixture, never create TestClient directly

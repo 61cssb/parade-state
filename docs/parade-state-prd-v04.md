@@ -6,12 +6,53 @@
 **Changelog v0.4:** Tech stack pinned (FastAPI + NiceGUI + SQLAlchemy + APScheduler + Railway); deployment section updated for Railway; APScheduler job store model specified; mobile attendance UI confirmed as static HTML/JS for MVP; Vue SFC refactor deferred; Flask removed.  
 **Amended 2026-07-02:** §8 Session — session creation restricted to `active` groupings (was: draft or active); session status lifecycle rewritten to reflect individual close/reopen (was: cascade-only via grouping). §9.1 — `excused` added to status enum; closed/finalized session read-only rule noted. See [SPECIFICATION.md](SPECIFICATION.md) for the authoritative current behavior.
 
-> ⚠️ **SUPERSEDED — personnel identity sections.** This is a historical document.
-> References to `short_id` (a server-generated 8-char base62 identifier) are **historical**;
-> `short_id` has been removed. Personnel are now identified by `pers_no` — the external
-> personnel number imported from the CSV `Pers` column, shared by every row belonging to the
-> same person across nominal rolls (policy change 2026-08-15: `pers_no` is no longer treated
-> as sensitive). See [SPECIFICATION.md §3.2.1](SPECIFICATION.md) for the current model.
+> ⚠️ **SUPERSEDED — this is a historical product document.** The body below
+> is kept unmodified as product history; it does **not** describe the
+> implemented system. Beyond the identity correction at the end of this
+> banner, the following sections are superseded (current behavior lives in
+> [SPECIFICATION.md](SPECIFICATION.md)):
+>
+> - **§2, §7–§9 — Grouping / Session / AM-PM attendance model.** All
+>   superseded by a **single daily attendance** taken against the one
+>   nominal roll active for attendance: one row per personnel/day
+>   (present/absent + optional reason + remarks), no Session model, no
+>   AM/PM split (SPECIFICATION §2.3). Groupings were redesigned (issue 26)
+>   into **labelled group sets** on a nominal roll — memberships,
+>   per-person checkbox/remarks, no validity ranges, no lifecycle, no
+>   overrides, no notes, no attendance interaction (SPECIFICATION §2.2).
+> - **§4.4 — Account lifecycle (admin preregisters → `pending` → activate
+>   on first sign-in).** Superseded: unknown Google sign-ins
+>   **auto-register as `unrecognised`** (no access, no session) and a
+>   super-admin promotes them or pre-provisions the account
+>   (SPECIFICATION §5.2).
+> - **§6.1 — `personnel_snapshots` table; `pers_no` stored in
+>   `extra_fields`.** Superseded: personnel live in a `personnel` table
+>   with a dedicated `pers_no` column — the cross-roll person identity
+>   (SPECIFICATION §3.2.1).
+> - **§12–§13 — static HTML/JS mobile app, service worker + IndexedDB
+>   cache, SSE stale detection** (and the matching §14 NFR rows: client
+>   cache, admin-preregistered accounts). None of it was built, and the
+>   design was removed (2026-10-07). The attendance surface is the
+>   server-rendered Jinja `/attendance` page with per-row autosave
+>   (SPECIFICATION §2.3).
+> - **§11, §15 — NiceGUI admin UI; APScheduler; static-file frontend;
+>   `app.config.json`.** Superseded: the admin UI is server-rendered
+>   Jinja2 templates under `/admin`; there is no scheduler in the process;
+>   uploaded CSVs are stored verbatim as raw file bytes in the database;
+>   the CSV column contract lives in code
+>   (`parade_state.utils.csv_constants`), not `app.config.json` (a dead
+>   file nothing reads) — SPECIFICATION §7.7, §6.2.
+> - **§16 — offline unsaved-state indicator.** Superseded by the same
+>   server-side autosave: a failed save marks the row (red edge) and
+>   retries on the next edit; there is no offline mode.
+>
+> **Personnel identity (superseded 2026-08-15).** References to `short_id`
+> (a server-generated 8-char base62 identifier) are **historical**;
+> `short_id` has been removed. Personnel are now identified by `pers_no` —
+> the external personnel number imported from the CSV `Pers` column, shared
+> by every row belonging to the same person across nominal rolls (policy
+> change 2026-08-15: `pers_no` is no longer treated as sensitive). See
+> [SPECIFICATION.md §3.2.1](SPECIFICATION.md) for the current model.
 
 ---
 
@@ -126,6 +167,15 @@ Declared in `app.config.json` (deployment-time change, not admin UI):
 ---
 
 ## 7. Grouping
+
+> ⚠️ **Terminology collision — read this section carefully.** In this PRD
+> "grouping" means the *subunit-remap overlay* (re-mapping personnel to
+> different unit+subunit assignments for attendance scoping). That concept
+> shipped as the **Tagging** (1:1 overlay per nominal roll —
+> SPECIFICATION §3.4). The name "Grouping" in the shipped app means
+> something else entirely: the issue-26 **labelled group-set** feature
+> (SPECIFICATION §2.2). The lifecycle, validity ranges, sessions, and
+> access grants described below were never built.
 
 ### 7.1 Data Model
 Each grouping: name, nominal roll reference, status (`draft` | `active` | `inactive` | `archived` | `closed` | `finalized`), validity range (`valid_from` + `valid_until` datetimes), optional `scheduled_activation` datetime, personnel assignment overrides, and per-user access list.
