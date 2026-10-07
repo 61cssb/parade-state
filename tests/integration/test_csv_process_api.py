@@ -821,6 +821,12 @@ async def test_process_canonical_fixture_acceptance(
 ):
     """The canonical 560-row fixture processes into 397 personnel with 163
     No rows skipped; the 2 Yes rows without Pers store NULL pers_no."""
+    if not CANONICAL_FIXTURE.exists():
+        pytest.skip(
+            "real callup fixture not present — /fixtures is gitignored "
+            "(public repo, the file carries live PII); runs on machines "
+            "that have it locally"
+        )
     raw = CANONICAL_FIXTURE.read_bytes()
     upload_id = _upload(
         client,
