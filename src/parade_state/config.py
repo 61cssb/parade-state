@@ -114,9 +114,7 @@ class Settings:
         self.FEATURE_NOMINALROLL: bool = env.get_bool(
             "FEATURE_NOMINALROLL", default=True
         )
-        self.FEATURE_ATTENDANCE: bool = env.get_bool(
-            "FEATURE_ATTENDANCE", default=True
-        )
+        self.FEATURE_ATTENDANCE: bool = env.get_bool("FEATURE_ATTENDANCE", default=True)
 
         # Non-production identifier banner: when set (e.g. on the Railway
         # development environment), a thin fixed strip at the very top of

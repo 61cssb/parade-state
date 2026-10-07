@@ -18,9 +18,7 @@ from parade_state.models import User
 from parade_state.utils.cookies import AUTH_COOKIE_NAME
 
 
-async def _sign_in(
-    client: TestClient, db_session: AsyncSession, user: User
-) -> None:
+async def _sign_in(client: TestClient, db_session: AsyncSession, user: User) -> None:
     """Create a session for ``user`` and set the auth cookie on ``client``."""
     session = await create_user_session(
         db_session,

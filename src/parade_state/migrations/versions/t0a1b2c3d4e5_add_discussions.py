@@ -60,7 +60,11 @@ def upgrade() -> None:
             sa.ForeignKey("users.id"),
             nullable=False,
         ),
-        sa.Column("category", sa.Enum("requests", "bugs", name="discussion_category"), nullable=False),
+        sa.Column(
+            "category",
+            sa.Enum("requests", "bugs", name="discussion_category"),
+            nullable=False,
+        ),
         sa.Column(
             "status",
             sa.Enum(
@@ -84,9 +88,7 @@ def upgrade() -> None:
     op.create_index(
         op.f("ix_discussion_posts_category"), "discussion_posts", ["category"]
     )
-    op.create_index(
-        op.f("ix_discussion_posts_status"), "discussion_posts", ["status"]
-    )
+    op.create_index(op.f("ix_discussion_posts_status"), "discussion_posts", ["status"])
 
     op.create_table(
         "discussion_comments",
@@ -137,9 +139,7 @@ def upgrade() -> None:
             for value in NEW_AUDIT_ENTITY_TYPES:
                 if value not in existing:
                     # value comes from the hardcoded NEW_AUDIT_ENTITY_TYPES
-                    op.execute(
-                        f"ALTER TYPE audit_entity_type ADD VALUE '{value}'"
-                    )
+                    op.execute(f"ALTER TYPE audit_entity_type ADD VALUE '{value}'")
     else:
         # SQLite: sa.Enum is VARCHAR + CHECK; rebuild the column with the
         # wider value set (render_as_batch=True is set in env.py).
@@ -149,9 +149,7 @@ def upgrade() -> None:
                 existing_type=sa.Enum(
                     *LEGACY_AUDIT_ENTITY_TYPES, name="audit_entity_type"
                 ),
-                type_=sa.Enum(
-                    *NEW_AUDIT_ENTITY_TYPES, name="audit_entity_type"
-                ),
+                type_=sa.Enum(*NEW_AUDIT_ENTITY_TYPES, name="audit_entity_type"),
                 existing_nullable=False,
                 existing_server_default=None,
             )
@@ -187,9 +185,7 @@ def downgrade() -> None:
                 existing_type=sa.Enum(
                     *NEW_AUDIT_ENTITY_TYPES, name="audit_entity_type"
                 ),
-                type_=sa.Enum(
-                    *LEGACY_AUDIT_ENTITY_TYPES, name="audit_entity_type"
-                ),
+                type_=sa.Enum(*LEGACY_AUDIT_ENTITY_TYPES, name="audit_entity_type"),
                 existing_nullable=False,
                 existing_server_default=None,
             )

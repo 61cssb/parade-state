@@ -48,13 +48,13 @@ class Grouping(Base):
     )
     multiple_membership: Mapped[bool] = mapped_column(Boolean, default=False)
     allow_ungrouped: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    created_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
 
     __table_args__ = (
-        UniqueConstraint(
-            "nominal_roll_id", "label", name="uq_groupings_nr_label"
-        ),
+        UniqueConstraint("nominal_roll_id", "label", name="uq_groupings_nr_label"),
     )
 
     # Relationships
@@ -169,7 +169,9 @@ class GroupingMemberState(Base):
     )
     checkbox: Mapped[bool] = mapped_column(Boolean, default=False)
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
-    updated_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    updated_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
     updated_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
 
     # Relationships

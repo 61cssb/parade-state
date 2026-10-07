@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from parade_state.api.tagging import _load_nr_tagging, copy_entries_by_pers_no
 from parade_state.auth.dependencies import require_admin_user, require_super_admin_user
 from parade_state.db import get_db_session
 from parade_state.models import (
@@ -32,15 +33,14 @@ from parade_state.utils import ranks, utc_dt
 from parade_state.utils.csv_constants import (
     EXTRA_INT_FIELDS,
     INFERRED_TYPES,
-    MissingColumnsError,
     REQUIRED_FIELDS,
+    MissingColumnsError,
     ResolvedColumns,
     coerce_int,
     is_callup_yes,
     parse_caa_date,
     resolve_columns,
 )
-from parade_state.api.tagging import _load_nr_tagging, copy_entries_by_pers_no
 
 router = APIRouter()
 
@@ -215,7 +215,8 @@ async def upload_csv(
     if auto_process:
         try:
             process_result = await _process_upload_into_nr(
-                db, upload,
+                db,
+                upload,
                 CsvUploadProcessRequest(source_nominal_roll_id=None),
                 created_by=user_id,
             )
@@ -375,7 +376,10 @@ async def process_csv_upload(
 
 
 async def _process_upload_into_nr(
-    db: AsyncSession, upload: CsvUpload, payload: CsvUploadProcessRequest, created_by: str
+    db: AsyncSession,
+    upload: CsvUpload,
+    payload: CsvUploadProcessRequest,
+    created_by: str,
 ) -> CsvUploadProcessResponse:
     """Core CSV → NominalRoll pipeline, shared by the process endpoint
     and the upload endpoint's auto-processing.
@@ -496,14 +500,10 @@ async def _process_upload_into_nr(
         extra_fields: dict[str, int | None] = {}
         for field_name in EXTRA_INT_FIELDS:
             if resolved.has(field_name):
-                extra_fields[field_name] = coerce_int(
-                    _cell(row, resolved, field_name)
-                )
+                extra_fields[field_name] = coerce_int(_cell(row, resolved, field_name))
 
         pers_no = (
-            _cell(row, resolved, "pers_no") or None
-            if resolved.has("pers_no")
-            else None
+            _cell(row, resolved, "pers_no") or None if resolved.has("pers_no") else None
         )
 
         db.add(

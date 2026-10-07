@@ -342,9 +342,7 @@ async def test_list_audit_logs_null_user_id(
 
     assert response.status_code == 200
     data = response.json()
-    sys_entry = next(
-        item for item in data["items"] if item["entity_id"] == "ent-sys"
-    )
+    sys_entry = next(item for item in data["items"] if item["entity_id"] == "ent-sys")
     assert sys_entry["user_id"] is None
     assert sys_entry["user_name"] is None
     assert sys_entry["user_email"] is None

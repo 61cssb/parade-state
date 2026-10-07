@@ -60,7 +60,13 @@ def _seed_legacy_personnel(db_path) -> None:
                 ("p-mig-3", "nr-1", "MR Person", "MR", None),
                 ("p-mig-4", "nr-1", "Disrupted Person", "Disrupted", None),
                 # Pre-existing remarks must be preserved, note appended.
-                ("p-mig-5", "nr-1", "Age Limit Person", "Age Limit", "course till Friday"),
+                (
+                    "p-mig-5",
+                    "nr-1",
+                    "Age Limit Person",
+                    "Age Limit",
+                    "course till Friday",
+                ),
                 ("p-mig-6", "nr-1", "Other Person", "Other", None),
             ],
         )
@@ -87,8 +93,7 @@ def _columns(db_path, table: str) -> list[str]:
     conn = sqlite3.connect(db_path)
     try:
         return [
-            row[1]
-            for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+            row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
         ]
     finally:
         conn.close()
@@ -150,8 +155,8 @@ def test_migration_maps_callup_to_inpro(tmp_path):
 @pytest.mark.parametrize(
     "inpro_value,expected_callup",
     [
-        ("deferred", "Deferred"),   # the only recoverable distinction
-        ("inproed", "Called Up"),   # collapses (lossy, documented)
+        ("deferred", "Deferred"),  # the only recoverable distinction
+        ("inproed", "Called Up"),  # collapses (lossy, documented)
         ("yet_to_inpro", "Called Up"),
     ],
 )

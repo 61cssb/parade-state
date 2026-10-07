@@ -56,7 +56,9 @@ async def test_nominal_roll_super_admin_cell_editor_wiring(
     async def _fake_current_user(_request):
         return super_admin
 
-    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+    monkeypatch.setattr(
+        web_nominal_roll, "get_current_user_optional", _fake_current_user
+    )
 
     response = client.get(
         "/nominal-roll", params={"nominal_roll_id": str(sample_nominal_roll.id)}
@@ -103,7 +105,9 @@ async def test_nominal_roll_staged_edits_wiring(
     async def _fake_current_user(_request):
         return super_admin
 
-    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+    monkeypatch.setattr(
+        web_nominal_roll, "get_current_user_optional", _fake_current_user
+    )
 
     response = client.get(
         "/nominal-roll", params={"nominal_roll_id": str(sample_nominal_roll.id)}
@@ -141,7 +145,9 @@ async def test_nominal_roll_admin_sub23_cells_only(
     async def _fake_current_user(_request):
         return sample_users["admin"]
 
-    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+    monkeypatch.setattr(
+        web_nominal_roll, "get_current_user_optional", _fake_current_user
+    )
 
     response = client.get(
         "/nominal-roll", params={"nominal_roll_id": str(sample_nominal_roll.id)}
@@ -176,8 +182,8 @@ async def test_nominal_roll_shows_inpro_column_for_all_statuses(
 ):
     """The NR table shows every inpro status — the NR is the management
     surface; only the attendance view filters (issue 32)."""
-    from parade_state.web import nominal_roll as web_nominal_roll
     from parade_state.models import User
+    from parade_state.web import nominal_roll as web_nominal_roll
 
     sample_personnel[0].inpro_status = "deferred"
     sample_personnel[0].remarks = "Course till Friday"
@@ -196,7 +202,9 @@ async def test_nominal_roll_shows_inpro_column_for_all_statuses(
     async def _fake_current_user(_request):
         return super_admin
 
-    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+    monkeypatch.setattr(
+        web_nominal_roll, "get_current_user_optional", _fake_current_user
+    )
 
     response = client.get(
         "/nominal-roll", params={"nominal_roll_id": str(sample_nominal_roll.id)}
@@ -237,7 +245,9 @@ async def test_nominal_roll_filters_by_inpro_status(
     async def _fake_current_user(_request):
         return sample_users["admin"]
 
-    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+    monkeypatch.setattr(
+        web_nominal_roll, "get_current_user_optional", _fake_current_user
+    )
 
     base = {"nominal_roll_id": str(sample_nominal_roll.id)}
 
@@ -276,7 +286,9 @@ async def test_nominal_roll_redirects_non_admins(
     async def _fake_current_user(_request):
         return sample_users["user"]
 
-    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+    monkeypatch.setattr(
+        web_nominal_roll, "get_current_user_optional", _fake_current_user
+    )
 
     response = client.get(
         "/nominal-roll",
@@ -322,7 +334,9 @@ async def test_nominal_roll_add_serviceman_wiring(
     async def _fake_current_user(_request):
         return super_admin
 
-    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+    monkeypatch.setattr(
+        web_nominal_roll, "get_current_user_optional", _fake_current_user
+    )
 
     response = client.get(
         "/nominal-roll", params={"nominal_roll_id": str(sample_nominal_roll.id)}
@@ -331,7 +345,9 @@ async def test_nominal_roll_add_serviceman_wiring(
     # Button + modal + submit wiring. The button is a roster action, so it
     # sits below the personnel table — not inside Roll management.
     assert "Add Serviceman" in response.text
-    assert response.text.rindex('onclick="openAddModal') > response.text.rindex("</table>")
+    assert response.text.rindex('onclick="openAddModal') > response.text.rindex(
+        "</table>"
+    )
     assert 'id="add-modal"' in response.text
     assert "openAddModal" in response.text
     assert "submitAddServiceman" in response.text
@@ -339,7 +355,7 @@ async def test_nominal_roll_add_serviceman_wiring(
     # Rank is a closed set — a plain select with optgroups (no native
     # datalist popup: placement is browser-controlled and mispositions),
     # matching the Inpro Status select styling.
-    assert "<select id=\"svc-rank\"" in response.text
+    assert '<select id="svc-rank"' in response.text
     assert '<optgroup label="Officer">' in response.text
     assert '<optgroup label="WOSE">' in response.text
     assert '<option value="PTE">' in response.text
@@ -372,7 +388,9 @@ async def test_nominal_roll_add_serviceman_hidden_for_admins(
     async def _fake_current_user(_request):
         return sample_users["admin"]
 
-    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+    monkeypatch.setattr(
+        web_nominal_roll, "get_current_user_optional", _fake_current_user
+    )
 
     response = client.get(
         "/nominal-roll", params={"nominal_roll_id": str(sample_nominal_roll.id)}
@@ -406,7 +424,9 @@ async def test_nominal_roll_inpro_read_only_for_admins(
     async def _fake_current_user(_request):
         return sample_users["admin"]
 
-    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+    monkeypatch.setattr(
+        web_nominal_roll, "get_current_user_optional", _fake_current_user
+    )
 
     response = client.get(
         "/nominal-roll", params={"nominal_roll_id": str(sample_nominal_roll.id)}
@@ -440,7 +460,9 @@ async def test_roll_management_panel_placement(
     async def _fake_current_user(_request):
         return sample_users["admin"]
 
-    monkeypatch.setattr(web_nominal_roll, "get_current_user_optional", _fake_current_user)
+    monkeypatch.setattr(
+        web_nominal_roll, "get_current_user_optional", _fake_current_user
+    )
 
     response = client.get(
         "/nominal-roll", params={"nominal_roll_id": str(sample_nominal_roll.id)}

@@ -11,10 +11,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import and_, select
 
+from parade_state.admin_routes import no_permission_response
 from parade_state.api.attendance import attendance_counts_for_date
 from parade_state.api.subunit_access import get_scope_grants, in_scope_pids
 from parade_state.api.tagging import _load_nr_tagging
-from parade_state.admin_routes import no_permission_response
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
 from parade_state.feature_access import feature_allowed
@@ -68,9 +68,7 @@ async def attendance_view(
     # Matrix gate (issue 37): attendance hidden from admins when toggled
     # off in Settings; super-admins bypass.
     if not feature_allowed(request, current_user.role, "attendance"):
-        return no_permission_response(
-            request, current_user, "Attendance", "attendance"
-        )
+        return no_permission_response(request, current_user, "Attendance", "attendance")
 
     target_date = date or utc_dt.utcnow().date()
 
@@ -79,11 +77,7 @@ async def attendance_view(
         # All NRs for the selector. Attendance is NR-scoped — groupings
         # play no part in choosing or accessing the roster.
         all_rolls = (
-            (
-                await db.execute(
-                    select(NominalRoll).order_by(NominalRoll.caa.desc())
-                )
-            )
+            (await db.execute(select(NominalRoll).order_by(NominalRoll.caa.desc())))
             .scalars()
             .all()
         )
@@ -134,10 +128,12 @@ async def attendance_view(
             # attendance records for filtered-out personnel are preserved
             # untouched.
             roster_result = await db.execute(
-                select(Personnel).where(
+                select(Personnel)
+                .where(
                     Personnel.nominal_roll_id == selected_nr_id,
                     Personnel.status == "active",
-                ).order_by(
+                )
+                .order_by(
                     Personnel.unit,
                     Personnel.sub_unit_1,
                     Personnel.sub_unit_2,
@@ -153,12 +149,16 @@ async def attendance_view(
             entry_by_person: dict[str, TaggingEntry] = {}
             if applied_tagging_id:
                 entries = (
-                    await db.execute(
-                        select(TaggingEntry).where(
-                            TaggingEntry.tagging_id == applied_tagging_id
+                    (
+                        await db.execute(
+                            select(TaggingEntry).where(
+                                TaggingEntry.tagging_id == applied_tagging_id
+                            )
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 entry_by_person = {str(e.personnel_id): e for e in entries}
 
             # Filter roster to the user's scope (tagging-aware).
@@ -186,12 +186,13 @@ async def attendance_view(
                     )
                 )
             )
-            att_by_person = {
-                a.personnel_id: a for a in att_result.scalars().all()
-            }
+            att_by_person = {a.personnel_id: a for a in att_result.scalars().all()}
 
             for person in roster:
-                if accessible_pids is not None and str(person.id) not in accessible_pids:
+                if (
+                    accessible_pids is not None
+                    and str(person.id) not in accessible_pids
+                ):
                     continue
                 record = att_by_person.get(str(person.id))
                 entry = entry_by_person.get(str(person.id))
@@ -224,11 +225,7 @@ async def attendance_view(
             # Filter dropdown options: distinct effective sub_unit_1 across
             # the user's whole visible roster (before the filters apply).
             subunit_options = sorted(
-                {
-                    r["sub_unit_1"]
-                    for r in attendance_rows
-                    if r["sub_unit_1"]
-                }
+                {r["sub_unit_1"] for r in attendance_rows if r["sub_unit_1"]}
             )
             if sub_unit_1:
                 attendance_rows = [
@@ -238,8 +235,7 @@ async def attendance_view(
             # Unknown values are ignored (filter falls back to "all").
             if inpro_status and inpro_status in INPRO_STATUSES:
                 attendance_rows = [
-                    r for r in attendance_rows
-                    if r["inpro_status"] == inpro_status
+                    r for r in attendance_rows if r["inpro_status"] == inpro_status
                 ]
             # Status / Reason view filters — same non-destructive contract
             # as the Inpro filter: rows are hidden, records untouched.
@@ -247,13 +243,9 @@ async def attendance_view(
             # display as absent); a Reason filter excludes unmarked rows
             # (they carry no reason).
             if status and status in ATTENDANCE_STATUSES:
-                attendance_rows = [
-                    r for r in attendance_rows if r["status"] == status
-                ]
+                attendance_rows = [r for r in attendance_rows if r["status"] == status]
             if reason and reason in ATTENDANCE_REASONS:
-                attendance_rows = [
-                    r for r in attendance_rows if r["reason"] == reason
-                ]
+                attendance_rows = [r for r in attendance_rows if r["reason"] == reason]
 
         counts = (
             await attendance_counts_for_date(selected_nr_id, target_date, db)
@@ -283,9 +275,7 @@ async def attendance_view(
         target_date=target_date,
         sub_unit_1_filter=sub_unit_1 or "",
         subunit_options=subunit_options,
-        inpro_filter=(
-            inpro_status if inpro_status in INPRO_STATUSES else ""
-        ),
+        inpro_filter=(inpro_status if inpro_status in INPRO_STATUSES else ""),
         inpro_labels=INPRO_STATUS_LABELS,
         status_filter=(status if status in ATTENDANCE_STATUSES else ""),
         reason_filter=(reason if reason in ATTENDANCE_REASONS else ""),

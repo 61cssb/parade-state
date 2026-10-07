@@ -128,7 +128,9 @@ async def list_deferments(
     return [_to_response(d, nominal_roll_id=eid) for d, eid in rows]
 
 
-@router.post("", response_model=DefermentResponse, status_code=http_status.HTTP_201_CREATED)
+@router.post(
+    "", response_model=DefermentResponse, status_code=http_status.HTTP_201_CREATED
+)
 async def create_deferment(
     payload: DefermentCreate,
     user: User = Depends(require_super_admin_user),
@@ -216,9 +218,7 @@ async def update_deferment(
     """
     user_id = str(user.id)
 
-    result = await db.execute(
-        select(Deferment).where(Deferment.id == deferment_id)
-    )
+    result = await db.execute(select(Deferment).where(Deferment.id == deferment_id))
     deferment = result.scalar_one_or_none()
     if deferment is None:
         raise HTTPException(
@@ -278,9 +278,7 @@ async def delete_deferment(
     ``inpro_status`` to ``yet_to_inpro``.
     """
 
-    result = await db.execute(
-        select(Deferment).where(Deferment.id == deferment_id)
-    )
+    result = await db.execute(select(Deferment).where(Deferment.id == deferment_id))
     deferment = result.scalar_one_or_none()
     if deferment is None:
         raise HTTPException(

@@ -27,6 +27,7 @@ from parade_state.utils.cookies import AUTH_COOKIE_NAME
 
 SUPER_ADMIN_PARAMS = {"user_id": "super-admin-test-id", "user_role": "super_admin"}
 
+
 def _attendance_list_params(nominal_roll_id: str) -> dict:
     """list_attendance requires NR + date + caller identity params. The NR
     must exist — issue #28 made unknown NRs 404 like the other endpoints."""
@@ -35,13 +36,16 @@ def _attendance_list_params(nominal_roll_id: str) -> dict:
         "date": "2026-08-20",
     }
 
-NR_NAV_HREFS = ('href="/admin/csv-upload"', 'href="/nominal-roll"', 'href="/admin/taggings"')
+
+NR_NAV_HREFS = (
+    'href="/admin/csv-upload"',
+    'href="/nominal-roll"',
+    'href="/admin/taggings"',
+)
 ATTENDANCE_NAV_HREFS = ('href="/attendance"',)
 
 
-async def _sign_in(
-    client: TestClient, db_session: AsyncSession, user: User
-) -> None:
+async def _sign_in(client: TestClient, db_session: AsyncSession, user: User) -> None:
     """Create a session for ``user`` and set the auth cookie on ``client``."""
     session = await create_user_session(
         db_session,
@@ -140,7 +144,7 @@ async def test_switch_off_hides_nav(
     _set_switches(monkeypatch, nominal_roll=False, attendance=False)
     sa = await _make_super_admin(db_session)
     await _sign_in(client, db_session, sa)
-    nr = await _make_nr(db_session, sa)
+    await _make_nr(db_session, sa)
 
     dashboard = client.get("/admin")
     assert dashboard.status_code == 200
@@ -262,12 +266,16 @@ async def test_switches_gate_independently(
         assert href in dashboard.text, href
     assert client.get("/nominal-roll").status_code == 404
     assert client.get("/attendance").status_code == 200
-    assert client.get(
-        "/api/v1/nominal-rolls", params=SUPER_ADMIN_PARAMS
-    ).status_code == 404
-    assert client.get(
-        "/api/v1/attendance/", params=_attendance_list_params(str(nr.id))
-    ).status_code == 200
+    assert (
+        client.get("/api/v1/nominal-rolls", params=SUPER_ADMIN_PARAMS).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            "/api/v1/attendance/", params=_attendance_list_params(str(nr.id))
+        ).status_code
+        == 200
+    )
 
     # NR on, Attendance off.
     _set_switches(monkeypatch, nominal_roll=True, attendance=False)
@@ -278,12 +286,16 @@ async def test_switches_gate_independently(
         assert href not in dashboard.text, href
     assert client.get("/nominal-roll").status_code == 200
     assert client.get("/attendance").status_code == 404
-    assert client.get(
-        "/api/v1/nominal-rolls", params=SUPER_ADMIN_PARAMS
-    ).status_code == 200
-    assert client.get(
-        "/api/v1/attendance/", params=_attendance_list_params(str(nr.id))
-    ).status_code == 404
+    assert (
+        client.get("/api/v1/nominal-rolls", params=SUPER_ADMIN_PARAMS).status_code
+        == 200
+    )
+    assert (
+        client.get(
+            "/api/v1/attendance/", params=_attendance_list_params(str(nr.id))
+        ).status_code
+        == 404
+    )
 
 
 # --- Unset (the everywhere posture): identical to today ---
@@ -321,15 +333,17 @@ async def test_default_posture_unchanged(
     ):
         assert client.get(path).status_code == 200, path
 
-    assert client.get(
-        "/api/v1/nominal-rolls", params=SUPER_ADMIN_PARAMS
-    ).status_code == 200
-    assert client.get(
-        "/api/v1/attendance/", params=_attendance_list_params(str(nr.id))
-    ).status_code == 200
-    assert client.get(
-        "/api/v1/taggings", params=SUPER_ADMIN_PARAMS
-    ).status_code == 200
-    assert client.get(
-        "/api/v1/csv/uploads", params=SUPER_ADMIN_PARAMS
-    ).status_code == 200
+    assert (
+        client.get("/api/v1/nominal-rolls", params=SUPER_ADMIN_PARAMS).status_code
+        == 200
+    )
+    assert (
+        client.get(
+            "/api/v1/attendance/", params=_attendance_list_params(str(nr.id))
+        ).status_code
+        == 200
+    )
+    assert client.get("/api/v1/taggings", params=SUPER_ADMIN_PARAMS).status_code == 200
+    assert (
+        client.get("/api/v1/csv/uploads", params=SUPER_ADMIN_PARAMS).status_code == 200
+    )

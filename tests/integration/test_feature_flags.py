@@ -25,9 +25,7 @@ from parade_state.utils.cookies import AUTH_COOKIE_NAME
 SUPER_ADMIN_PARAMS = {"user_id": "super-admin-test-id", "user_role": "super_admin"}
 
 
-async def _sign_in(
-    client: TestClient, db_session: AsyncSession, user: User
-) -> None:
+async def _sign_in(client: TestClient, db_session: AsyncSession, user: User) -> None:
     """Create a session for ``user`` and set the auth cookie on ``client``."""
     session = await create_user_session(
         db_session,
@@ -260,7 +258,9 @@ async def test_discussions_flag_off_blocks_api_even_for_super_admin(
         ("PATCH", f"/api/v1/discussions/comments/{any_id}"),
     ]
     for method, url in requests:
-        response = client.request(method, url, json={"title": "x", "body": "y", "category": "requests"})
+        response = client.request(
+            method, url, json={"title": "x", "body": "y", "category": "requests"}
+        )
         assert response.status_code == 404, f"{method} {url}"
         assert response.headers["content-type"].startswith("application/json")
         assert "not available on this deployment" in response.json()["detail"]
@@ -277,7 +277,10 @@ async def test_discussions_flag_on_restores_routes_and_nav(
     """With the flag on (the conftest default posture), the board page and
     nav entry are reachable for an admin."""
     admin = User(
-        email="board-admin@example.com", name="Board Admin", status="active", role="admin"
+        email="board-admin@example.com",
+        name="Board Admin",
+        status="active",
+        role="admin",
     )
     db_session.add(admin)
     await db_session.commit()
@@ -308,12 +311,12 @@ async def test_flag_on_restores_routes_and_nav(
     assert 'href="/grouping"' in dashboard.text
 
     assert client.get("/grouping").status_code == 200
-    assert client.get(
-        "/api/v1/deferments", params=SUPER_ADMIN_PARAMS
-    ).status_code == 200
-    assert client.get(
-        "/api/v1/groupings/", params=SUPER_ADMIN_PARAMS
-    ).status_code == 200
+    assert (
+        client.get("/api/v1/deferments", params=SUPER_ADMIN_PARAMS).status_code == 200
+    )
+    assert (
+        client.get("/api/v1/groupings/", params=SUPER_ADMIN_PARAMS).status_code == 200
+    )
 
 
 @pytest.mark.asyncio
@@ -331,9 +334,9 @@ async def test_flags_gate_independently(
     assert 'href="/admin/deferments"' not in dashboard.text
     assert 'href="/grouping"' in dashboard.text
 
-    assert client.get(
-        "/api/v1/deferments", params=SUPER_ADMIN_PARAMS
-    ).status_code == 404
-    assert client.get(
-        "/api/v1/groupings/", params=SUPER_ADMIN_PARAMS
-    ).status_code == 200
+    assert (
+        client.get("/api/v1/deferments", params=SUPER_ADMIN_PARAMS).status_code == 404
+    )
+    assert (
+        client.get("/api/v1/groupings/", params=SUPER_ADMIN_PARAMS).status_code == 200
+    )

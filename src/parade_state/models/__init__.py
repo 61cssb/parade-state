@@ -27,12 +27,12 @@ from .discussions import DiscussionComment, DiscussionPost
 from .grouping import (
     Grouping,
     GroupingGroup,
-    GroupingMemberState,
     GroupingMembership,
+    GroupingMemberState,
 )
 from .personnel import (
-    INPRO_STATUSES,
     INPRO_STATUS_LABELS,
+    INPRO_STATUSES,
     SOURCE_MANUAL,
     Personnel,
 )
@@ -65,6 +65,7 @@ __all__ = [
     "GroupingMemberState",
     "GroupingMembership",
     "Personnel",
+    "SOURCE_MANUAL",
     "Tagging",
     "TaggingEntry",
 ]

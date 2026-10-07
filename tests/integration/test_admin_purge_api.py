@@ -19,8 +19,8 @@ from parade_state.models import (
     CsvUpload,
     Grouping,
     GroupingGroup,
-    GroupingMemberState,
     GroupingMembership,
+    GroupingMemberState,
     NominalRoll,
     Personnel,
     Tagging,
@@ -30,6 +30,7 @@ from parade_state.models import (
 )
 
 PURGE_URL = "/api/v1/admin/purge"
+
 
 @pytest.fixture
 async def seeded_downstream_data(
@@ -89,9 +90,7 @@ async def test_purge_forbidden_for_plain_admin(client: TestClient, client_as):
 async def test_purge_rejects_wrong_confirmation(client: TestClient, client_as):
     """The type-to-confirm guard must match the exact word."""
     client = await client_as("super_admin")
-    response = client.post(
-        PURGE_URL, params={"confirmation": "purge"}
-    )
+    response = client.post(PURGE_URL, params={"confirmation": "purge"})
     assert response.status_code == 400
     assert "PURGE" in response.json()["detail"]
 
@@ -108,14 +107,14 @@ async def test_purge_disabled_deployment(client: TestClient, client_as, monkeypa
 
 @pytest.mark.asyncio
 async def test_purge_deletes_downstream_and_preserves_the_rest(
-    client: TestClient, client_as,
+    client: TestClient,
+    client_as,
     db_session: AsyncSession,
     sample_users,
     sample_attendance,
     seeded_downstream_data,
 ):
     """Happy path: NRs and downstream data vanish, config/users/audit stay."""
-    admin_id = str(sample_users["admin"].id)
 
     async def count(model) -> int:
         return (await db_session.scalar(select(func.count()).select_from(model))) or 0

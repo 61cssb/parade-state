@@ -50,12 +50,16 @@ def upgrade() -> None:
     # updated one (tiebreak: created_at) as the survivor. Re-link orphaned
     # tagging_entries to the survivor, then delete the surplus taggings.
     # ------------------------------------------------------------------
-    nr_ids_with_extras = bind.execute(
-        sa.text(
-            "SELECT nominal_roll_id FROM taggings "
-            "GROUP BY nominal_roll_id HAVING COUNT(*) > 1"
+    nr_ids_with_extras = (
+        bind.execute(
+            sa.text(
+                "SELECT nominal_roll_id FROM taggings "
+                "GROUP BY nominal_roll_id HAVING COUNT(*) > 1"
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     for nr_id in nr_ids_with_extras:
         # Survivor: highest updated_at (NULLS LAST), tiebreak highest created_at.

@@ -1,14 +1,14 @@
 """Tests for personnel management API endpoints."""
 
-from datetime import date, datetime, timedelta
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from parade_state.models.audit import AuditLog
 from parade_state.models.csv_ingestion import NominalRoll
 from parade_state.models.personnel import Personnel
-from parade_state.models.audit import AuditLog
 from parade_state.models.tagging import TaggingEntry
 from tests.test_utils import (
     assert_404_response,
@@ -113,7 +113,7 @@ async def test_list_personnel_with_sub_unit_filter(
             "/api/v1/personnel",
             headers=admin_token_headers,
             params={
-                    "sub_unit_1": sub_unit,
+                "sub_unit_1": sub_unit,
             },
         )
 
@@ -382,12 +382,16 @@ async def test_update_personnel_admin_unit_and_sub1_forbidden(
 
     # Nothing applied anywhere: no overlay entry, canonical row unchanged.
     entries = (
-        await db_session.execute(
-            select(TaggingEntry).where(
-                TaggingEntry.personnel_id == str(sample_personnel[0].id)
+        (
+            await db_session.execute(
+                select(TaggingEntry).where(
+                    TaggingEntry.personnel_id == str(sample_personnel[0].id)
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert entries == []
     await db_session.refresh(sample_personnel[0])
     assert sample_personnel[0].unit == "Coy A"
@@ -415,13 +419,19 @@ async def test_update_personnel_admin_mixed_levels_rejected_whole(
     )
 
     assert response.status_code == 403
-    assert "Only super-admins can change unit or sub-unit 1" in response.json()["detail"]
+    assert (
+        "Only super-admins can change unit or sub-unit 1" in response.json()["detail"]
+    )
 
     entries = (
-        await db_session.execute(
-            select(TaggingEntry).where(TaggingEntry.personnel_id == str(p.id))
+        (
+            await db_session.execute(
+                select(TaggingEntry).where(TaggingEntry.personnel_id == str(p.id))
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert entries == []
     await db_session.refresh(p)
     assert p.sub_unit_2 == "Section 1"
@@ -500,8 +510,7 @@ async def test_update_personnel_identity_fields_rejected(
         response = client.patch(
             f"/api/v1/personnel/{sample_personnel[0].id}",
             headers=admin_token_headers,
-            params={
-            },
+            params={},
             json=payload,
         )
         assert response.status_code == 409, payload
@@ -662,9 +671,15 @@ async def test_update_personnel_status_only_does_not_touch_tagging(
     await db_session.refresh(p)
     assert p.status == "archived"
     # No tagging entry was created.
-    rows = (await db_session.execute(
-        select(TaggingEntry).where(TaggingEntry.personnel_id == p.id)
-    )).scalars().all()
+    rows = (
+        (
+            await db_session.execute(
+                select(TaggingEntry).where(TaggingEntry.personnel_id == p.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert rows == []
 
 
@@ -1277,9 +1292,7 @@ async def test_create_personnel_manual_with_pers_no_and_fields(
     assert data["remarks"] == "On course"
 
     row = (
-        await db_session.execute(
-            select(Personnel).where(Personnel.id == data["id"])
-        )
+        await db_session.execute(select(Personnel).where(Personnel.id == data["id"]))
     ).scalar_one()
     assert row.source == "manual"
 
@@ -1356,7 +1369,8 @@ async def test_create_personnel_duplicate_pers_no_within_roll(
         "/api/v1/personnel",
         headers=super_admin_token_headers,
         json=_create_payload(
-            sample_nominal_roll.id, pers_no="10000001"  # sample_personnel[0]
+            sample_nominal_roll.id,
+            pers_no="10000001",  # sample_personnel[0]
         ),
     )
     assert dup.status_code == 409

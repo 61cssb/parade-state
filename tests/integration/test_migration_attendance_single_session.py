@@ -87,8 +87,7 @@ def _columns(db_path, table: str) -> list[str]:
     conn = sqlite3.connect(db_path)
     try:
         return [
-            row[1]
-            for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+            row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
         ]
     finally:
         conn.close()
@@ -128,25 +127,52 @@ def test_migration_collapses_am_pm_to_single_session(tmp_path):
     rows = _fetch_attendance(db_path)
 
     # Per-slot mapping table (issue 33).
-    assert (rows["a-present"]["status"], rows["a-present"]["reason"]) == ("present", None)
+    assert (rows["a-present"]["status"], rows["a-present"]["reason"]) == (
+        "present",
+        None,
+    )
     assert (rows["a-absent"]["status"], rows["a-absent"]["reason"]) == ("absent", None)
     assert (rows["a-mc"]["status"], rows["a-mc"]["reason"]) == ("absent", "mc")
-    assert (rows["a-time-off"]["status"], rows["a-time-off"]["reason"]) == ("absent", "off")
-    assert (rows["a-outpro"]["status"], rows["a-outpro"]["reason"]) == ("absent", "early_outpro")
-    assert (rows["a-yet-to-inpro"]["status"], rows["a-yet-to-inpro"]["reason"]) == ("absent", None)
-    assert (rows["a-reporting-sick"]["status"], rows["a-reporting-sick"]["reason"]) == ("absent", "other")
-    assert (rows["a-att-out"]["status"], rows["a-att-out"]["reason"]) == ("absent", "other")
+    assert (rows["a-time-off"]["status"], rows["a-time-off"]["reason"]) == (
+        "absent",
+        "off",
+    )
+    assert (rows["a-outpro"]["status"], rows["a-outpro"]["reason"]) == (
+        "absent",
+        "early_outpro",
+    )
+    assert (rows["a-yet-to-inpro"]["status"], rows["a-yet-to-inpro"]["reason"]) == (
+        "absent",
+        None,
+    )
+    assert (rows["a-reporting-sick"]["status"], rows["a-reporting-sick"]["reason"]) == (
+        "absent",
+        "other",
+    )
+    assert (rows["a-att-out"]["status"], rows["a-att-out"]["reason"]) == (
+        "absent",
+        "other",
+    )
 
     # Late maps to present with "Late" appended after the slot's remarks.
     assert (rows["a-late"]["status"], rows["a-late"]["reason"]) == ("present", None)
     assert rows["a-late"]["remarks"] == "Official duty; Late"
 
     # PM's mapping wins when the PM slot carried a non-default status.
-    assert (rows["a-pm-wins"]["status"], rows["a-pm-wins"]["reason"]) == ("absent", "mc")
-    assert (rows["a-pm-late"]["status"], rows["a-pm-late"]["reason"]) == ("present", None)
+    assert (rows["a-pm-wins"]["status"], rows["a-pm-wins"]["reason"]) == (
+        "absent",
+        "mc",
+    )
+    assert (rows["a-pm-late"]["status"], rows["a-pm-late"]["reason"]) == (
+        "present",
+        None,
+    )
     assert rows["a-pm-late"]["remarks"] == "Late"
     # PM-only marked row keeps PM's mapping.
-    assert (rows["a-pm-only"]["status"], rows["a-pm-only"]["reason"]) == ("absent", "mc")
+    assert (rows["a-pm-only"]["status"], rows["a-pm-only"]["reason"]) == (
+        "absent",
+        "mc",
+    )
 
     # Remarks from both slots join with "; " (AM first).
     assert rows["a-join"]["remarks"] == "AM note; PM note"

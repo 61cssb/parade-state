@@ -5,15 +5,11 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
-from dotenv import load_dotenv
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-# Load environment variables
-load_dotenv()
-
-# Import Base and models
+# .env is loaded by the package __init__ before these imports.
 from parade_state.db import Base, normalize_database_url
 from parade_state.models import *  # noqa: F401, F403
 

@@ -6,7 +6,7 @@ sentinel marking a wildcard column. Grants are managed by super-admins
 only; the /admin/users view is the UI for this API.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi import status as http_status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -39,9 +39,7 @@ router = APIRouter()
 
 async def _load_nr_or_404(db: AsyncSession, nominal_roll_id: str) -> NominalRoll:
     nr = (
-        await db.execute(
-            select(NominalRoll).where(NominalRoll.id == nominal_roll_id)
-        )
+        await db.execute(select(NominalRoll).where(NominalRoll.id == nominal_roll_id))
     ).scalar_one_or_none()
     if nr is None:
         raise HTTPException(
@@ -109,10 +107,7 @@ async def _validate_grant_against_roster(
             scope = f"unit {payload.unit}" if payload.unit != WILDCARD else "the roster"
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"Sub-unit 1 not present under {scope}: "
-                    f"{payload.sub_unit_1}"
-                ),
+                detail=(f"Sub-unit 1 not present under {scope}: {payload.sub_unit_1}"),
             )
 
 

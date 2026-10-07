@@ -6,9 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 
 from parade_state import db
 from parade_state.auth.dependencies import require_super_admin_user
-from parade_state.models import User
 from parade_state.config import get_settings
 from parade_state.db.restore import RestoreError, restore_from_dump
+from parade_state.models import User
 
 router = APIRouter()
 

@@ -337,7 +337,9 @@ async def update_user(
                     detail="Access level not found",
                 )
 
-            changes.append(f"access_level_id: '{user.access_level_id}' -> '{update_data.access_level_id}'")
+            changes.append(
+                f"access_level_id: '{user.access_level_id}' -> '{update_data.access_level_id}'"
+            )
             user.access_level_id = update_data.access_level_id
         except ValueError:
             raise HTTPException(

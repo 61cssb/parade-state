@@ -36,9 +36,7 @@ from parade_state.utils.cookies import AUTH_COOKIE_NAME
 TODAY = date.today()
 
 
-async def _sign_in(
-    client: TestClient, db_session: AsyncSession, user: User
-) -> None:
+async def _sign_in(client: TestClient, db_session: AsyncSession, user: User) -> None:
     """Create a session for ``user`` and set the auth cookie on ``client``."""
     session = await create_user_session(
         db_session,
@@ -396,9 +394,7 @@ async def test_tagged_basis_selected_by_default_and_on_explicit_param(
     await _sign_in(client, db_session, sa)
 
     for params in ({}, {"basis": "tagged"}, {"basis": "banana"}):
-        response = client.get(
-            "/admin", params={"date": TODAY.isoformat(), **params}
-        )
+        response = client.get("/admin", params={"date": TODAY.isoformat(), **params})
         assert response.status_code == 200
         raw = _raw(response)
         assert "· Tagged" in raw

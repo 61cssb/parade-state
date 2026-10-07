@@ -78,9 +78,7 @@ async def list_nominal_rolls(
             NominalRoll.remarks,
             latest_upload.c.original_filename,
         )
-        .outerjoin(
-            latest_upload, latest_upload.c.nominal_roll_id == NominalRoll.id
-        )
+        .outerjoin(latest_upload, latest_upload.c.nominal_roll_id == NominalRoll.id)
         .order_by(NominalRoll.uploaded_at.desc())
     )
     if allowed_nrs is not None:
@@ -205,9 +203,9 @@ async def delete_nominal_roll(
         )
 
     grouping_count = await db.scalar(
-        select(func.count()).select_from(Grouping).where(
-            Grouping.nominal_roll_id == nominal_roll_id
-        )
+        select(func.count())
+        .select_from(Grouping)
+        .where(Grouping.nominal_roll_id == nominal_roll_id)
     )
     if grouping_count:
         raise HTTPException(
@@ -225,7 +223,9 @@ async def delete_nominal_roll(
     return {"detail": f"Nominal roll {nominal_roll_id} deleted"}
 
 
-@router.post("/{nominal_roll_id}/activate-attendance", response_model=NominalRollResponse)
+@router.post(
+    "/{nominal_roll_id}/activate-attendance", response_model=NominalRollResponse
+)
 async def activate_attendance(
     nominal_roll_id: str,
     user: User = Depends(require_super_admin_user),
@@ -244,13 +244,17 @@ async def activate_attendance(
 
     # Auto-switch: deactivate every other active NR.
     others = (
-        await db.execute(
-            select(NominalRoll).where(
-                NominalRoll.attendance_active.is_(True),
-                NominalRoll.id != nr.id,
+        (
+            await db.execute(
+                select(NominalRoll).where(
+                    NominalRoll.attendance_active.is_(True),
+                    NominalRoll.id != nr.id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for other in others:
         other.attendance_active = False
 
@@ -265,8 +269,7 @@ async def activate_attendance(
             entity_id=str(nr.id),
             action="update",
             description=(
-                f"Marked nominal roll CAA {nr.caa.isoformat()} "
-                "active for attendance."
+                f"Marked nominal roll CAA {nr.caa.isoformat()} active for attendance."
             ),
         )
     )
@@ -277,7 +280,9 @@ async def activate_attendance(
     return _row_to_response(row)
 
 
-@router.post("/{nominal_roll_id}/deactivate-attendance", response_model=NominalRollResponse)
+@router.post(
+    "/{nominal_roll_id}/deactivate-attendance", response_model=NominalRollResponse
+)
 async def deactivate_attendance(
     nominal_roll_id: str,
     user: User = Depends(require_super_admin_user),
@@ -303,8 +308,7 @@ async def deactivate_attendance(
                 entity_id=str(nr.id),
                 action="update",
                 description=(
-                    f"Deactivated attendance for nominal roll "
-                    f"CAA {nr.caa.isoformat()}."
+                    f"Deactivated attendance for nominal roll CAA {nr.caa.isoformat()}."
                 ),
             )
         )
@@ -329,7 +333,9 @@ async def export_nominal_roll_csv(
     sub_unit_2: str | None = Query(None, description="Filter: sub-unit 2"),
     category: str | None = Query(None, description="Filter: category (Officer / WOSE)"),
     rank: str | None = Query(None, description="Filter: rank"),
-    inpro_status: str | None = Query(None, description="Filter: inpro status (inproed / yet_to_inpro / deferred)"),
+    inpro_status: str | None = Query(
+        None, description="Filter: inpro status (inproed / yet_to_inpro / deferred)"
+    ),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Export the nominal roll browser table exactly as displayed.
@@ -352,9 +358,7 @@ async def export_nominal_roll_csv(
 
     await assert_nr_accessible(db, user_id, user.role, nominal_roll_id)
     tagging = (
-        await db.execute(
-            select(Tagging).where(Tagging.nominal_roll_id == str(nr.id))
-        )
+        await db.execute(select(Tagging).where(Tagging.nominal_roll_id == str(nr.id)))
     ).scalar_one_or_none()
 
     conds = [
@@ -405,14 +409,18 @@ async def export_nominal_roll_csv(
     entry_by_personnel: dict[str, TaggingEntry] = {}
     if personnel_rows:
         entries = (
-            await db.execute(
-                select(TaggingEntry).where(
-                    TaggingEntry.personnel_id.in_(
-                        [str(p.id) for p in personnel_rows]
+            (
+                await db.execute(
+                    select(TaggingEntry).where(
+                        TaggingEntry.personnel_id.in_(
+                            [str(p.id) for p in personnel_rows]
+                        )
                     )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         entry_by_personnel = {str(e.personnel_id): e for e in entries}
 
     # Read scoping: effective (unit, sub_unit_1) under the overlay.
@@ -429,8 +437,16 @@ async def export_nominal_roll_csv(
     writer = csv.writer(output)
     writer.writerow(
         [
-            "Unit", "Sub Unit 1", "Sub Unit 2", "Sub Unit 3",
-            "Category", "Rank", "Full Name", "Pers No", "Inpro Status", "Remarks",
+            "Unit",
+            "Sub Unit 1",
+            "Sub Unit 2",
+            "Sub Unit 3",
+            "Category",
+            "Rank",
+            "Full Name",
+            "Pers No",
+            "Inpro Status",
+            "Remarks",
         ]
     )
     for person in personnel_rows:
@@ -469,9 +485,7 @@ async def _load_nominal_roll_or_404(
     db: AsyncSession, nominal_roll_id: str
 ) -> NominalRoll:
     nr = (
-        await db.execute(
-            select(NominalRoll).where(NominalRoll.id == nominal_roll_id)
-        )
+        await db.execute(select(NominalRoll).where(NominalRoll.id == nominal_roll_id))
     ).scalar_one_or_none()
     if nr is None:
         raise HTTPException(
@@ -481,9 +495,7 @@ async def _load_nominal_roll_or_404(
     return nr
 
 
-async def _load_nominal_roll_with_filename(
-    db: AsyncSession, nominal_roll_id: str
-):
+async def _load_nominal_roll_with_filename(db: AsyncSession, nominal_roll_id: str):
     """Fetch a single nominal roll row joined with its latest CsvUpload's filename."""
     latest_upload = (
         select(
@@ -514,9 +526,7 @@ async def _load_nominal_roll_with_filename(
                 latest_upload.c.original_filename,
             )
             .where(NominalRoll.id == nominal_roll_id)
-            .outerjoin(
-                latest_upload, latest_upload.c.nominal_roll_id == NominalRoll.id
-            )
+            .outerjoin(latest_upload, latest_upload.c.nominal_roll_id == NominalRoll.id)
         )
     ).one_or_none()
 
@@ -539,4 +549,3 @@ def _row_to_response(row) -> NominalRollResponse:
         attendance_activated_by=row.attendance_activated_by,
         created_at=row.created_at,
     )
-

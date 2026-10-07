@@ -121,7 +121,11 @@ async def test_anonymous_api_call_is_401(client: TestClient, method: str, path: 
         ("get", "/api/v1/taggings", {}),
         ("post", "/api/v1/taggings", {"json": {"label": "x"}}),
         ("get", "/api/v1/deferments", {}),
-        ("post", "/api/v1/csv/upload", {"files": {"file": ("t.csv", b"a,b\n", "text/csv")}}),
+        (
+            "post",
+            "/api/v1/csv/upload",
+            {"files": {"file": ("t.csv", b"a,b\n", "text/csv")}},
+        ),
     ],
 )
 async def test_spoofed_params_cannot_escalate_to_super_admin(
@@ -164,16 +168,16 @@ async def test_spoofed_params_cannot_bypass_scope(
 
 @pytest.mark.asyncio
 async def test_spoofed_params_do_not_break_legitimate_admin_calls(
-    client: TestClient, client_as, admin_subunit_assignment,
+    client: TestClient,
+    client_as,
+    admin_subunit_assignment,
 ):
     """Params are ignored, not rejected: an in-scope admin with junk
     identity params appended still gets the normal 200."""
     client = await client_as("admin")
 
     plain = client.get("/api/v1/personnel")
-    spoofed = client.get(
-        "/api/v1/personnel", params=SPOOF_PARAMS
-    )
+    spoofed = client.get("/api/v1/personnel", params=SPOOF_PARAMS)
 
     assert plain.status_code == 200
     assert spoofed.status_code == 200
@@ -221,7 +225,9 @@ async def test_token_query_param_no_longer_authenticates(
 
     # Fresh client, no cookie: the token in the URL authenticates nothing
     # (the page bounces to the login page).
-    anonymous = client.get("/admin", params={"token": session.token}, follow_redirects=False)
+    anonymous = client.get(
+        "/admin", params={"token": session.token}, follow_redirects=False
+    )
     assert anonymous.status_code == 302
     assert anonymous.headers["location"] == "/auth/login"
 

@@ -59,10 +59,7 @@ def _personnel_columns(bind) -> set[str]:
 def _log_remap_counts(bind) -> None:
     """Warn with per-value row counts before the callup→inpro remap."""
     counts = bind.execute(
-        sa.text(
-            "SELECT callup_status, COUNT(*) FROM personnel "
-            "GROUP BY callup_status"
-        )
+        sa.text("SELECT callup_status, COUNT(*) FROM personnel GROUP BY callup_status")
     ).all()
     mapping = {
         "Called Up": "yet_to_inpro",
@@ -127,9 +124,7 @@ def upgrade() -> None:
         op.drop_index("ix_personnel_callup_status", table_name="personnel")
         op.drop_column("personnel", "callup_status")
         op.execute("DROP TYPE personnel_callup_status")
-        op.create_index(
-            "ix_personnel_inpro_status", "personnel", ["inpro_status"]
-        )
+        op.create_index("ix_personnel_inpro_status", "personnel", ["inpro_status"])
     else:
         # SQLite stores sa.Enum as VARCHAR + CHECK; batch_alter_table
         # rebuilds the table. render_as_batch=True is set in env.py.
@@ -182,9 +177,7 @@ def downgrade() -> None:
         op.drop_index("ix_personnel_inpro_status", table_name="personnel")
         op.drop_column("personnel", "inpro_status")
         op.execute("DROP TYPE personnel_inpro_status")
-        op.create_index(
-            "ix_personnel_callup_status", "personnel", ["callup_status"]
-        )
+        op.create_index("ix_personnel_callup_status", "personnel", ["callup_status"])
     else:
         with op.batch_alter_table("personnel", schema=None) as batch_op:
             batch_op.add_column(

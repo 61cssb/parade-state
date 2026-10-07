@@ -12,7 +12,7 @@ from parade_state.auth.session import (
     invalidate_session,
     invalidate_user_sessions,
 )
-from parade_state.models import User, UserSession
+from parade_state.models import User
 from parade_state.utils import utc_dt
 
 

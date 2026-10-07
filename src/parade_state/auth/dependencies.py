@@ -245,5 +245,3 @@ async def require_super_admin_user(
         )
 
     return user
-
-

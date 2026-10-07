@@ -296,8 +296,7 @@ async def triage_post(
                 entity_id=str(post.id),
                 action="update",
                 description=(
-                    f"Triaged discussion post {post.title!r} "
-                    f"({'; '.join(changes)})"
+                    f"Triaged discussion post {post.title!r} ({'; '.join(changes)})"
                 ),
             )
         )

@@ -34,9 +34,7 @@ async def _make_user(
     return user
 
 
-async def _sign_in(
-    client: TestClient, db_session: AsyncSession, user: User
-) -> None:
+async def _sign_in(client: TestClient, db_session: AsyncSession, user: User) -> None:
     """Create a session for ``user`` and set the auth cookie on ``client``."""
     session = await create_user_session(
         db_session,
@@ -64,9 +62,15 @@ def _post_payload(**overrides) -> dict:
 async def actors(db_session: AsyncSession):
     """The three roles the board distinguishes, plus a regular user."""
     return {
-        "author": await _make_user(db_session, "author@example.com", "Author Admin", "admin"),
-        "other": await _make_user(db_session, "other@example.com", "Other Admin", "admin"),
-        "super": await _make_user(db_session, "sa@example.com", "Super Admin", "super_admin"),
+        "author": await _make_user(
+            db_session, "author@example.com", "Author Admin", "admin"
+        ),
+        "other": await _make_user(
+            db_session, "other@example.com", "Other Admin", "admin"
+        ),
+        "super": await _make_user(
+            db_session, "sa@example.com", "Super Admin", "super_admin"
+        ),
         "user": await _make_user(db_session, "user@example.com", "Plain User", "user"),
     }
 
@@ -182,9 +186,7 @@ async def test_list_newest_first_with_filters(
     )
     assert [p["id"] for p in requests_only.json()] == [first["id"]]
 
-    open_only = client.get(
-        "/api/v1/discussions/posts", params={"status": "Open"}
-    )
+    open_only = client.get("/api/v1/discussions/posts", params={"status": "Open"})
     assert len(open_only.json()) == 2
 
 
@@ -338,10 +340,14 @@ async def test_super_admin_delete_post_cascades_comments(
     assert client.delete(f"/api/v1/discussions/posts/{post_id}").status_code == 200
 
     remaining = (
-        await db_session.execute(
-            select(DiscussionComment).where(DiscussionComment.post_id == post_id)
+        (
+            await db_session.execute(
+                select(DiscussionComment).where(DiscussionComment.post_id == post_id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert remaining == []
 
     assert client.get(f"/api/v1/discussions/posts/{post_id}").status_code == 404

@@ -160,8 +160,10 @@ async def test_restore_happy_path_swaps_and_reinitializes(
     # stamp the current head so the restored dump looks like production.
     head = _app_head_revision()
     await db_session.execute(
-        sa_text("CREATE TABLE IF NOT EXISTS alembic_version "
-                "(version_num VARCHAR(32) PRIMARY KEY)")
+        sa_text(
+            "CREATE TABLE IF NOT EXISTS alembic_version "
+            "(version_num VARCHAR(32) PRIMARY KEY)"
+        )
     )
     await db_session.execute(sa_text("DELETE FROM alembic_version"))
     await db_session.execute(
@@ -226,8 +228,10 @@ async def test_restore_older_dump_runs_post_restore_migration(
     assert isinstance(parent, str)  # head is never the base revision
 
     await db_session.execute(
-        sa_text("CREATE TABLE IF NOT EXISTS alembic_version "
-                "(version_num VARCHAR(32) PRIMARY KEY)")
+        sa_text(
+            "CREATE TABLE IF NOT EXISTS alembic_version "
+            "(version_num VARCHAR(32) PRIMARY KEY)"
+        )
     )
     await db_session.execute(sa_text("DELETE FROM alembic_version"))
     await db_session.execute(

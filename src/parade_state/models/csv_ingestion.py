@@ -47,9 +47,13 @@ class NominalRoll(Base):
         String(36), ForeignKey("users.id"), nullable=True
     )
     personnel_count: Mapped[int] = mapped_column(Integer, default=0)
-    uploaded_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    uploaded_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
     uploaded_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
-    created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    created_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     label: Mapped[str | None] = mapped_column(
         String(100), unique=True, nullable=True, index=True
@@ -95,11 +99,15 @@ class CsvUpload(Base):
     sha256_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     line_count: Mapped[int] = mapped_column(Integer)
-    uploaded_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    uploaded_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
     uploaded_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     mapping_confirmed_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True)
     diff_confirmed_at: Mapped[utc_dt.datetime | None] = mapped_column(nullable=True)
-    created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    created_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
     status: Mapped[str] = mapped_column(
         Enum(
             "received",
@@ -112,7 +120,9 @@ class CsvUpload(Base):
     )
 
     # Relationships
-    nominal_roll: Mapped["NominalRoll | None"] = relationship(back_populates="csv_uploads")
+    nominal_roll: Mapped["NominalRoll | None"] = relationship(
+        back_populates="csv_uploads"
+    )
 
     def __repr__(self) -> str:
         return f"<CsvUpload(hash={self.sha256_hash[:8]}..., status={self.status!r})>"
@@ -134,7 +144,9 @@ class ColumnMapping(Base):
         ),
         default="auto_detected",
     )
-    created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    created_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
     created_by: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True
     )
@@ -180,8 +192,12 @@ class ColumnMetadata(Base):
         String(36), ForeignKey("access_levels.id"), nullable=True
     )
     is_required: Mapped[bool] = mapped_column(default=False)
-    created_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
-    updated_at: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()))
+    created_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
+    updated_at: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
+    )
 
     # Relationships
     nominal_roll: Mapped["NominalRoll"] = relationship(back_populates="column_metadata")
@@ -190,7 +206,9 @@ class ColumnMetadata(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("nominal_roll_id", "original_name", name="unique_nominal_roll_column"),
+        UniqueConstraint(
+            "nominal_roll_id", "original_name", name="unique_nominal_roll_column"
+        ),
     )
 
     def __repr__(self) -> str:

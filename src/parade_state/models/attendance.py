@@ -43,13 +43,13 @@ ATTENDANCE_REASONS: tuple[str, ...] = (
     "awol",
 )
 
-ATTENDANCE_REASON_LABELS: dict[str, str] = dict(
-    mc="MC",
-    off="Off",
-    early_outpro="Early Outpro",
-    other="Other",
-    awol="AWOL",
-)
+ATTENDANCE_REASON_LABELS: dict[str, str] = {
+    "mc": "MC",
+    "off": "Off",
+    "early_outpro": "Early Outpro",
+    "other": "Other",
+    "awol": "AWOL",
+}
 
 # Statuses counted as "present" when aggregating into present/absent buckets.
 # Everything not in this set counts as absent.
@@ -111,9 +111,7 @@ class Attendance(Base):
     nominal_roll: Mapped["NominalRoll"] = relationship()
 
     __table_args__ = (
-        UniqueConstraint(
-            "personnel_id", "date", name="uq_attendance_personnel_date"
-        ),
+        UniqueConstraint("personnel_id", "date", name="uq_attendance_personnel_date"),
     )
 
     def __repr__(self) -> str:

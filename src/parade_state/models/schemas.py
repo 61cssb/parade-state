@@ -40,9 +40,7 @@ def _validate_label(value: str) -> str:
     if not stripped:
         raise ValueError("label must not be empty or whitespace-only")
     if _LABEL_FORBIDDEN.search(stripped):
-        raise ValueError(
-            "label must not contain angle brackets or control characters"
-        )
+        raise ValueError("label must not contain angle brackets or control characters")
     return stripped
 
 

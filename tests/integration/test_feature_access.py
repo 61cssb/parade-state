@@ -102,9 +102,7 @@ async def test_empty_matrix_super_admin_sees_admin_section(client_as):
 
 
 @pytest.mark.asyncio
-async def test_upload_nr_off_hides_page_and_nav_from_admin(
-    client_as, matrix_off
-):
+async def test_upload_nr_off_hides_page_and_nav_from_admin(client_as, matrix_off):
     """upload_nr=off: admins lose the page and the sidebar entry;
     super-admins keep both."""
     await matrix_off("upload_nr")
@@ -125,9 +123,7 @@ async def test_upload_nr_off_hides_page_and_nav_from_admin(
 
 
 @pytest.mark.asyncio
-async def test_nominal_roll_off_refuses_admin_at_page_and_api(
-    client_as, matrix_off
-):
+async def test_nominal_roll_off_refuses_admin_at_page_and_api(client_as, matrix_off):
     await matrix_off("nominal_roll")
 
     admin = await client_as("admin")
@@ -148,9 +144,7 @@ async def test_nominal_roll_off_refuses_admin_at_page_and_api(
 
 
 @pytest.mark.asyncio
-async def test_attendance_off_refuses_admin_at_page_and_api(
-    client_as, matrix_off
-):
+async def test_attendance_off_refuses_admin_at_page_and_api(client_as, matrix_off):
     await matrix_off("attendance")
 
     admin = await client_as("admin")
@@ -250,16 +244,12 @@ FULL_ITEMS = [
 @pytest.mark.asyncio
 async def test_save_feature_access_super_admin_only(client_as):
     admin = await client_as("admin")
-    response = admin.post(
-        "/api/v1/admin/feature-access", json={"items": FULL_ITEMS}
-    )
+    response = admin.post("/api/v1/admin/feature-access", json={"items": FULL_ITEMS})
     assert response.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_save_feature_access_upserts_and_enforces(
-    client_as, db_session
-):
+async def test_save_feature_access_upserts_and_enforces(client_as, db_session):
     super_admin = await client_as("super_admin")
     response = super_admin.post(
         "/api/v1/admin/feature-access", json={"items": FULL_ITEMS}
@@ -271,9 +261,7 @@ async def test_save_feature_access_upserts_and_enforces(
     assert body["features"]["attendance"] is True
 
     # Row persisted with the fail-open default elsewhere.
-    rows = (
-        (await db_session.execute(select(FeatureAccess))).scalars().all()
-    )
+    rows = (await db_session.execute(select(FeatureAccess))).scalars().all()
     by_key = {row.feature_key: row for row in rows}
     assert by_key["upload_nr"].enabled is False
     assert by_key["attendance"].enabled is True
@@ -285,10 +273,14 @@ async def test_save_feature_access_upserts_and_enforces(
 
     # Audit trail.
     audit = (
-        await db_session.execute(
-            select(AuditLog).where(AuditLog.entity_type == "feature_access")
+        (
+            await db_session.execute(
+                select(AuditLog).where(AuditLog.entity_type == "feature_access")
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert audit and audit[0].action == "update"
     assert "upload_nr" in (audit[0].changes or "")
 

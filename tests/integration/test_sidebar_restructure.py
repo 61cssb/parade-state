@@ -16,9 +16,7 @@ from parade_state.models import User
 from parade_state.utils.cookies import AUTH_COOKIE_NAME
 
 
-async def _sign_in(
-    client: TestClient, db_session: AsyncSession, user: User
-) -> None:
+async def _sign_in(client: TestClient, db_session: AsyncSession, user: User) -> None:
     """Create a session for ``user`` and set the auth cookie on ``client``."""
     session = await create_user_session(
         db_session,
@@ -142,8 +140,12 @@ async def test_sa_pages_render_for_super_admins(
 
 @pytest.mark.asyncio
 async def test_nominal_roll_view_has_management_element_for_admin(
-    client: TestClient, db_session: AsyncSession, sample_users, sample_nominal_roll,
-    sample_personnel, admin_subunit_assignment,
+    client: TestClient,
+    db_session: AsyncSession,
+    sample_users,
+    sample_nominal_roll,
+    sample_personnel,
+    admin_subunit_assignment,
 ):
     """Admins get the management expander with label/remarks editing, but
     not the super-admin-only attendance/delete buttons (grouping creation
@@ -158,9 +160,9 @@ async def test_nominal_roll_view_has_management_element_for_admin(
     assert 'id="label-display"' in body
     assert 'id="remarks-display"' in body
     # SA-only action buttons are not rendered (the shared JS helpers may be).
-    assert "onclick=\"useForAttendance" not in body
-    assert "onclick=\"deactivateAttendance" not in body
-    assert "onclick=\"deleteNominalRoll" not in body
+    assert 'onclick="useForAttendance' not in body
+    assert 'onclick="deactivateAttendance' not in body
+    assert 'onclick="deleteNominalRoll' not in body
 
 
 @pytest.mark.asyncio
@@ -176,8 +178,8 @@ async def test_nominal_roll_view_shows_sa_actions_for_super_admin(
     assert response.status_code == 200
     body = response.text
     assert "Roll management" in body
-    assert "onclick=\"useForAttendance" in body  # roll is not attendance-active
-    assert "onclick=\"deleteNominalRoll" in body
+    assert 'onclick="useForAttendance' in body  # roll is not attendance-active
+    assert 'onclick="deleteNominalRoll' in body
 
 
 # --- Grouping merge ---
@@ -185,8 +187,12 @@ async def test_nominal_roll_view_shows_sa_actions_for_super_admin(
 
 @pytest.mark.asyncio
 async def test_grouping_view_readonly_for_plain_admins(
-    client: TestClient, db_session: AsyncSession, sample_users,
-    sample_attendance_scope, sample_grouping, sample_personnel,
+    client: TestClient,
+    db_session: AsyncSession,
+    sample_users,
+    sample_attendance_scope,
+    sample_grouping,
+    sample_personnel,
 ):
     """Admins see the roster table but no management buttons and no
     inline editors — mutations are super-admin only (server-enforced)."""
@@ -208,8 +214,11 @@ async def test_grouping_view_readonly_for_plain_admins(
 
 @pytest.mark.asyncio
 async def test_grouping_view_super_admin_gets_management_surface(
-    client: TestClient, db_session: AsyncSession,
-    sample_attendance_scope, sample_grouping, sample_personnel,
+    client: TestClient,
+    db_session: AsyncSession,
+    sample_attendance_scope,
+    sample_grouping,
+    sample_personnel,
 ):
     """Super admins get the New / Edit / Clone / Delete row and inline
     group / checkbox / remarks editors on the selected grouping."""
@@ -229,13 +238,17 @@ async def test_grouping_view_super_admin_gets_management_surface(
     assert 'onchange="onCheckboxChange' in body
     assert 'onchange="onRemarksChange' in body
     # The empty "(no group)" option is offered — allow_ungrouped defaults True.
-    assert "<option value=\"\"" in body
+    assert '<option value=""' in body
 
 
 @pytest.mark.asyncio
 async def test_grouping_view_group_filter(
-    client: TestClient, db_session: AsyncSession, sample_users,
-    sample_attendance_scope, sample_grouping, sample_grouping_memberships,
+    client: TestClient,
+    db_session: AsyncSession,
+    sample_users,
+    sample_attendance_scope,
+    sample_grouping,
+    sample_grouping_memberships,
     sample_personnel,
 ):
     """The Group filter follows the NR filter pattern: a select over the
@@ -280,8 +293,11 @@ async def test_grouping_view_group_filter(
 
 @pytest.mark.asyncio
 async def test_grouping_view_ungrouped_filter_hidden_when_disallowed(
-    client: TestClient, db_session: AsyncSession, sample_users,
-    sample_attendance_scope, sample_personnel,
+    client: TestClient,
+    db_session: AsyncSession,
+    sample_users,
+    sample_attendance_scope,
+    sample_personnel,
 ):
     """A grouping that requires every serviceman to hold a group offers no
     Ungrouped filter; the sentinel value is ignored server-side."""

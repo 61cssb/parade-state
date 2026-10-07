@@ -11,8 +11,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from parade_state.models import UserSubunitAssignment
-
 SUPER_ADMIN_SESSION = "super_admin"  # client_as shorthand for grant CRUD
 ADMIN_SESSION = "admin"
 
@@ -117,8 +115,7 @@ async def test_revoke_assignment(
 
 @pytest.mark.asyncio
 async def test_list_for_user_self_only(
-    client: TestClient, client_as, sample_nominal_roll, sample_users,
-    sample_personnel
+    client: TestClient, client_as, sample_nominal_roll, sample_users, sample_personnel
 ):
     """A user can list their own assignments but not another user's."""
     user_id = str(sample_users["user"].id)

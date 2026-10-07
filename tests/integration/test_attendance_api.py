@@ -359,7 +359,9 @@ async def _make_super_admin(db_session):
     from parade_state.models import User
 
     sa = User(
-        email="copy-sa@example.com", name="Super Admin", role="super_admin",
+        email="copy-sa@example.com",
+        name="Super Admin",
+        role="super_admin",
         status="active",
     )
     db_session.add(sa)
@@ -725,7 +727,6 @@ async def test_per_row_upsert_single_record(
     from parade_state.models import Attendance, User
 
     client = await client_as(sample_users["admin"])
-    admin_id = str(sample_users["admin"].id)
     nr_id = str(sample_nominal_roll.id)
     today = date.today().isoformat()
 
@@ -811,8 +812,17 @@ async def test_export_csv_columns_and_content(
 
     rows = list(csv.reader(io.StringIO(response.text)))
     assert rows[0] == [
-        "Unit", "Sub-unit 1", "Sub-unit 2", "Sub-unit 3", "Category",
-        "Rank", "Name", "Inpro Status", "Status", "Reason", "Remarks",
+        "Unit",
+        "Sub-unit 1",
+        "Sub-unit 2",
+        "Sub-unit 3",
+        "Category",
+        "Rank",
+        "Name",
+        "Inpro Status",
+        "Status",
+        "Reason",
+        "Remarks",
     ]
     assert len(rows) == 4  # header + whole roster (deferred included)
     by_name = {row[6]: row for row in rows[1:]}
@@ -1046,7 +1056,10 @@ async def test_frozen_day_upsert_role_split(
     assert "frozen" in blocked.json()["detail"].lower()
 
     # Freeze is per (NR, date): another day stays admin-writable.
-    assert admin.put("/api/v1/attendance/upsert", json=_upsert(tomorrow)).status_code == 200
+    assert (
+        admin.put("/api/v1/attendance/upsert", json=_upsert(tomorrow)).status_code
+        == 200
+    )
 
     # Super-admins keep editing the frozen day.
     super_admin = await client_as("super_admin")
@@ -1060,7 +1073,9 @@ async def test_frozen_day_upsert_role_split(
         == 200
     )
     admin = await client_as("admin")
-    assert admin.put("/api/v1/attendance/upsert", json=_upsert(today)).status_code == 200
+    assert (
+        admin.put("/api/v1/attendance/upsert", json=_upsert(today)).status_code == 200
+    )
 
 
 @pytest.mark.asyncio

@@ -147,6 +147,7 @@ pytest -k "test_create"  # Run tests containing "test_create"
 import pytest
 from parade_state.utils.module_name import function_name
 
+
 class TestFunctionName:
     """Test function_name behavior."""
 
@@ -174,6 +175,7 @@ class TestFunctionName:
 
 import pytest
 from fastapi.testclient import TestClient
+
 
 @pytest.mark.asyncio
 async def test_create_resource_as_admin(
@@ -209,6 +211,7 @@ import pytest
 from sqlalchemy import select
 
 from parade_state.models import ModelName
+
 
 class TestDomainBehavior:
     """Test domain behavior and business rules."""
@@ -304,6 +307,7 @@ This should be a deliberate architectural decision, not incidental complexity.
 
 ```python
 # In conftest.py or your test file
+
 
 @pytest.fixture
 async def custom_resource(test_db):
@@ -424,6 +428,7 @@ Fixtures are cached and reused, making tests faster:
 def expensive_resource():
     return create_expensive_resource()
 
+
 @pytest.fixture(scope="function")  # Default: created for each test
 def fresh_resource():
     return create_fresh_resource()
@@ -443,8 +448,9 @@ pytest tests/unit/  # Only fast unit tests
 ```python
 from unittest.mock import patch
 
+
 def test_with_external_service():
-    with patch('parade_state.external_api.call') as mock_call:
+    with patch("parade_state.external_api.call") as mock_call:
         mock_call.return_value = {"status": "ok"}
         result = function_using_external_api()
         assert result is True

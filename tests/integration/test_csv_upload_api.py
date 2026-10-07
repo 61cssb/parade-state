@@ -95,7 +95,6 @@ async def test_upload_csv_permission_denied(
 ):
     """Test that non-super-admins cannot upload CSV files."""
     csv_content = b"rank,name\nPTE,John\n"
-    user_id = str(sample_users["user"].id)
 
     response = client.post(
         "/api/v1/csv/upload",
@@ -257,7 +256,6 @@ async def test_list_csv_uploads_permission_denied(
     sample_users,
 ):
     """Test that regular users cannot list CSV uploads."""
-    user_id = str(sample_users["user"].id)
 
     response = client.get(
         "/api/v1/csv/uploads",

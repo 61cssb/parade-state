@@ -139,20 +139,14 @@ def upgrade() -> None:
     # ========================================================================
     # 5. Rename unique constraints (column names changed in step 2).
     # ========================================================================
-    with op.batch_alter_table(
-        "grouping_personnel_overrides", schema=None
-    ) as batch_op:
-        batch_op.drop_constraint(
-            "unique_deployment_personnel_override", type_="unique"
-        )
+    with op.batch_alter_table("grouping_personnel_overrides", schema=None) as batch_op:
+        batch_op.drop_constraint("unique_deployment_personnel_override", type_="unique")
         batch_op.create_unique_constraint(
             "unique_grouping_personnel_override",
             ["grouping_id", "personnel_id"],
         )
 
-    with op.batch_alter_table(
-        "grouping_personnel_exclusions", schema=None
-    ) as batch_op:
+    with op.batch_alter_table("grouping_personnel_exclusions", schema=None) as batch_op:
         batch_op.drop_constraint(
             "unique_deployment_personnel_exclusion", type_="unique"
         )
@@ -162,17 +156,13 @@ def upgrade() -> None:
         )
 
     with op.batch_alter_table("grouping_notes", schema=None) as batch_op:
-        batch_op.drop_constraint(
-            "unique_deployment_personnel_notes", type_="unique"
-        )
+        batch_op.drop_constraint("unique_deployment_personnel_notes", type_="unique")
         batch_op.create_unique_constraint(
             "unique_grouping_personnel_notes",
             ["grouping_id", "personnel_id"],
         )
 
-    with op.batch_alter_table(
-        "grouping_user_accesses", schema=None
-    ) as batch_op:
+    with op.batch_alter_table("grouping_user_accesses", schema=None) as batch_op:
         batch_op.drop_constraint("unique_user_deployment_access", type_="unique")
         batch_op.create_unique_constraint(
             "unique_user_grouping_access",
@@ -280,9 +270,7 @@ def downgrade() -> None:
             ],
         )
 
-    with op.batch_alter_table(
-        "grouping_user_accesses", schema=None
-    ) as batch_op:
+    with op.batch_alter_table("grouping_user_accesses", schema=None) as batch_op:
         batch_op.drop_constraint("unique_user_grouping_access", type_="unique")
         batch_op.create_unique_constraint(
             "unique_user_deployment_access",
@@ -296,23 +284,15 @@ def downgrade() -> None:
             ["grouping_id", "personnel_id"],
         )
 
-    with op.batch_alter_table(
-        "grouping_personnel_exclusions", schema=None
-    ) as batch_op:
-        batch_op.drop_constraint(
-            "unique_grouping_personnel_exclusion", type_="unique"
-        )
+    with op.batch_alter_table("grouping_personnel_exclusions", schema=None) as batch_op:
+        batch_op.drop_constraint("unique_grouping_personnel_exclusion", type_="unique")
         batch_op.create_unique_constraint(
             "unique_deployment_personnel_exclusion",
             ["grouping_id", "personnel_id"],
         )
 
-    with op.batch_alter_table(
-        "grouping_personnel_overrides", schema=None
-    ) as batch_op:
-        batch_op.drop_constraint(
-            "unique_grouping_personnel_override", type_="unique"
-        )
+    with op.batch_alter_table("grouping_personnel_overrides", schema=None) as batch_op:
+        batch_op.drop_constraint("unique_grouping_personnel_override", type_="unique")
         batch_op.create_unique_constraint(
             "unique_deployment_personnel_override",
             ["grouping_id", "personnel_id"],
@@ -351,9 +331,7 @@ def downgrade() -> None:
     )
 
     op.drop_index("ix_grouping_notes_id", table_name="grouping_notes")
-    op.create_index(
-        "ix_deployment_notes_id", "grouping_notes", ["id"], unique=False
-    )
+    op.create_index("ix_deployment_notes_id", "grouping_notes", ["id"], unique=False)
 
     op.drop_index(
         "ix_grouping_personnel_overrides_id",
@@ -367,9 +345,7 @@ def downgrade() -> None:
     )
 
     op.drop_index("ix_groupings_id", table_name="groupings")
-    op.create_index(
-        "ix_deployments_id", "groupings", ["id"], unique=False
-    )
+    op.create_index("ix_deployments_id", "groupings", ["id"], unique=False)
 
     # 5. Reverse FK column renames.
     op.alter_column(

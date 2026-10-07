@@ -93,9 +93,7 @@ async def get_scope_grants(
 ) -> list[ScopeGrant]:
     """The user's scope grants on one NR (empty list = deny-by-default)."""
     result = await db.execute(
-        select(
-            UserSubunitAssignment.unit, UserSubunitAssignment.sub_unit_1
-        ).where(
+        select(UserSubunitAssignment.unit, UserSubunitAssignment.sub_unit_1).where(
             UserSubunitAssignment.user_id == user_id,
             UserSubunitAssignment.nominal_roll_id == nominal_roll_id,
         )
@@ -205,9 +203,7 @@ async def assert_locations_in_scope(
     deny-by-default falls out naturally. ``super_admin`` bypasses (map
     still returned).
     """
-    locations = await resolve_effective_locations(
-        db, personnel_ids, active_tagging_id
-    )
+    locations = await resolve_effective_locations(db, personnel_ids, active_tagging_id)
 
     if user_role == "super_admin":
         return locations
@@ -258,9 +254,7 @@ async def in_scope_pids(
     if not grants:
         return set()
 
-    locations = await resolve_effective_locations(
-        db, pid_list, active_tagging_id
-    )
+    locations = await resolve_effective_locations(db, pid_list, active_tagging_id)
     return {
         pid
         for pid in pid_list

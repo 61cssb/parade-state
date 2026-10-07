@@ -1,10 +1,11 @@
 """Admin interface routes using Jinja2 templates."""
 
+from urllib.parse import urlsplit
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import func, or_, select
-from urllib.parse import urlsplit
 
 from parade_state.api.subunit_access import get_scope_grants, grant_matches
 from parade_state.api.tagging import _load_nr_tagging
@@ -13,6 +14,7 @@ from parade_state.db import get_session_maker
 from parade_state.feature_access import MATRIX_FEATURES, feature_allowed
 from parade_state.features import require_feature
 from parade_state.models import (
+    PRESENT_LIKE_STATUSES,
     AccessLevel,
     Attendance,
     AuditLog,
@@ -21,7 +23,6 @@ from parade_state.models import (
     DiscussionComment,
     DiscussionPost,
     NominalRoll,
-    PRESENT_LIKE_STATUSES,
     Personnel,
     Tagging,
     TaggingEntry,
@@ -88,6 +89,7 @@ DEFERMENT_STATUSES = [
 # Global Jinja2 environment (singleton)
 _jinja_env = None
 
+
 def get_templates(request: Request) -> Environment:
     """Get Jinja2 environment singleton from app state or create if needed."""
     global _jinja_env
@@ -96,7 +98,7 @@ def get_templates(request: Request) -> Environment:
         _jinja_env = Environment(
             loader=FileSystemLoader(templates_dir),
             autoescape=False,
-            cache_size=0  # Disable caching completely
+            cache_size=0,  # Disable caching completely
         )
     return _jinja_env
 
@@ -219,29 +221,35 @@ async def admin_unit_strength(
     session_maker = get_session_maker()
     async with session_maker() as db:
         active_nr = (
-            await db.execute(
-                select(NominalRoll).where(NominalRoll.attendance_active.is_(True))
+            (
+                await db.execute(
+                    select(NominalRoll).where(NominalRoll.attendance_active.is_(True))
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
 
         if active_nr is not None:
             nr_id = str(active_nr.id)
-            nr_label = (
-                active_nr.caa.isoformat() if active_nr.caa else nr_id[:8]
-            )
+            nr_label = active_nr.caa.isoformat() if active_nr.caa else nr_id[:8]
 
             # The strength population is the attendance roster: active
             # personnel on the NR who are not deferred (issue 32 interim
             # rule — yet_to_inpro + inproed).
             roster = (
-                await db.execute(
-                    select(Personnel).where(
-                        Personnel.nominal_roll_id == nr_id,
-                        Personnel.status == "active",
-                        Personnel.inpro_status != "deferred",
+                (
+                    await db.execute(
+                        select(Personnel).where(
+                            Personnel.nominal_roll_id == nr_id,
+                            Personnel.status == "active",
+                            Personnel.inpro_status != "deferred",
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
             # Tagging overlay: effective unit/subunits come from the NR's
             # 1:1 tagging entries where present (as in the attendance
@@ -253,22 +261,30 @@ async def admin_unit_strength(
                 tagging = await _load_nr_tagging(db, nr_id, with_entries=False)
                 if tagging is not None:
                     entries = (
-                        await db.execute(
-                            select(TaggingEntry).where(
-                                TaggingEntry.tagging_id == str(tagging.id)
+                        (
+                            await db.execute(
+                                select(TaggingEntry).where(
+                                    TaggingEntry.tagging_id == str(tagging.id)
+                                )
                             )
                         )
-                    ).scalars().all()
+                        .scalars()
+                        .all()
+                    )
                     entry_by_person = {str(e.personnel_id): e for e in entries}
 
             attendance_rows = (
-                await db.execute(
-                    select(Attendance).where(
-                        Attendance.nominal_roll_id == nr_id,
-                        Attendance.date == target_date,
+                (
+                    await db.execute(
+                        select(Attendance).where(
+                            Attendance.nominal_roll_id == nr_id,
+                            Attendance.date == target_date,
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             att_by_person = {a.personnel_id: a for a in attendance_rows}
 
             # (effective unit, effective sub_unit_1, effective sub_unit_2,
@@ -400,18 +416,16 @@ async def admin_users(
 
         # NR options for the super-admin scope-grant form (issue #28).
         nr_rows = (
-            await db.execute(
-                select(NominalRoll).order_by(NominalRoll.caa.desc())
-            )
-        ).scalars().all()
+            (await db.execute(select(NominalRoll).order_by(NominalRoll.caa.desc())))
+            .scalars()
+            .all()
+        )
         nr_label_by_id = {
-            str(nr.id): nr.label
-            or (nr.caa.isoformat() if nr.caa else str(nr.id)[:8])
+            str(nr.id): nr.label or (nr.caa.isoformat() if nr.caa else str(nr.id)[:8])
             for nr in nr_rows
         }
         nr_options = [
-            {"id": nr_id, "label": label}
-            for nr_id, label in nr_label_by_id.items()
+            {"id": nr_id, "label": label} for nr_id, label in nr_label_by_id.items()
         ]
 
         # Each listed user's scope grants, shown directly in the table
@@ -420,18 +434,20 @@ async def admin_users(
         listed_user_ids = [str(user.id) for user, _ in rows]
         if listed_user_ids:
             grant_rows = (
-                await db.execute(
-                    select(UserSubunitAssignment)
-                    .where(
-                        UserSubunitAssignment.user_id.in_(listed_user_ids)
-                    )
-                    .order_by(
-                        UserSubunitAssignment.nominal_roll_id,
-                        UserSubunitAssignment.unit,
-                        UserSubunitAssignment.sub_unit_1,
+                (
+                    await db.execute(
+                        select(UserSubunitAssignment)
+                        .where(UserSubunitAssignment.user_id.in_(listed_user_ids))
+                        .order_by(
+                            UserSubunitAssignment.nominal_roll_id,
+                            UserSubunitAssignment.unit,
+                            UserSubunitAssignment.sub_unit_1,
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for grant in grant_rows:
                 grants_by_user.setdefault(str(grant.user_id), []).append(
                     {
@@ -499,9 +515,7 @@ async def admin_csv_upload(
     # admins. The POST APIs are already super-admin-only; this page gate
     # stops admins from reaching a page that 403s on submit.
     if not feature_allowed(request, current_admin.role, "upload_nr"):
-        return no_permission_response(
-            request, current_admin, "Upload NR", "csv-upload"
-        )
+        return no_permission_response(request, current_admin, "Upload NR", "csv-upload")
 
     # Fetch recent uploads for the table
     session_maker = get_session_maker()
@@ -616,7 +630,9 @@ async def admin_deferments(
     if not current_admin:
         return RedirectResponse(url="/auth/login", status_code=302)
     if current_admin.role != "super_admin":
-        return no_permission_response(request, current_admin, "Deferments", "deferments")
+        return no_permission_response(
+            request, current_admin, "Deferments", "deferments"
+        )
 
     session_maker = get_session_maker()
     async with session_maker() as db:
@@ -746,7 +762,9 @@ async def admin_discussions(
                 func.count(DiscussionComment.id),
             )
             .outerjoin(User, DiscussionPost.author_id == User.id)
-            .outerjoin(DiscussionComment, DiscussionComment.post_id == DiscussionPost.id)
+            .outerjoin(
+                DiscussionComment, DiscussionComment.post_id == DiscussionPost.id
+            )
             .group_by(DiscussionPost.id, User.name)
             .order_by(DiscussionPost.created_at.desc())
             .limit(200)
@@ -822,7 +840,9 @@ async def admin_discussion_post(request: Request, post_id: str):
         if row is None:
             return HTMLResponse(
                 content=(
-                    get_templates(request).get_template("admin/no_permission.html").render(
+                    get_templates(request)
+                    .get_template("admin/no_permission.html")
+                    .render(
                         request=request,
                         user={
                             "id": current_admin.id,
@@ -1030,7 +1050,6 @@ async def admin_taggings(
     return HTMLResponse(content=html_content)
 
 
-
 @router.get("/admin/settings", response_class=HTMLResponse)
 async def admin_settings(
     request: Request,
@@ -1046,9 +1065,7 @@ async def admin_settings(
         return RedirectResponse(url="/auth/login", status_code=302)
 
     if current_admin.role != "super_admin":
-        return no_permission_response(
-            request, current_admin, "Settings", "settings"
-        )
+        return no_permission_response(request, current_admin, "Settings", "settings")
 
     from parade_state.config import get_settings
 
@@ -1174,9 +1191,7 @@ async def admin_database_restore(request: Request):
     from parade_state.config import get_settings
 
     settings = get_settings()
-    database_name = (
-        urlsplit(settings.DATABASE_URL).path.lstrip("/") or "postgres"
-    )
+    database_name = urlsplit(settings.DATABASE_URL).path.lstrip("/") or "postgres"
 
     env = get_templates(request)
     template = env.get_template("admin/db_restore.html")

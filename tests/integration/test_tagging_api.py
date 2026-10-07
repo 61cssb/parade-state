@@ -18,10 +18,6 @@ from parade_state.models import (
     Tagging,
     TaggingEntry,
 )
-from parade_state.utils import utc_dt
-
-
-
 
 # ============================================================================
 # Fixtures
@@ -257,7 +253,10 @@ async def test_create_tagging_unknown_nominal_roll_404(
 
 @pytest.mark.asyncio
 async def test_list_filters_by_nominal_roll(
-    client: TestClient, super_admin_token_headers, sample_nominal_roll, second_nominal_roll
+    client: TestClient,
+    super_admin_token_headers,
+    sample_nominal_roll,
+    second_nominal_roll,
 ):
     other_nr, _ = second_nominal_roll
     client.post(
@@ -312,9 +311,7 @@ async def test_get_returns_entries(
 
 
 @pytest.mark.asyncio
-async def test_get_unknown_tagging_404(
-    client: TestClient, super_admin_token_headers
-):
+async def test_get_unknown_tagging_404(client: TestClient, super_admin_token_headers):
     response = client.get(
         "/api/v1/taggings/nonexistent",
         headers=super_admin_token_headers,
@@ -369,7 +366,9 @@ async def test_patch_full_replaces_entries(
 
 @pytest.mark.asyncio
 async def test_patch_label_no_longer_globally_unique(
-    client: TestClient, super_admin_token_headers, sample_nominal_roll,
+    client: TestClient,
+    super_admin_token_headers,
+    sample_nominal_roll,
     second_nominal_roll,
 ):
     """Labels are not globally unique under 1:1 — patching to a label that
@@ -384,13 +383,11 @@ async def test_patch_label_no_longer_globally_unique(
     assert a.status_code == 201
 
     # Patch the second NR's existing (auto-created) tagging to the same label.
-    target = (
-        client.get(
-            "/api/v1/taggings",
-            headers=super_admin_token_headers,
-            params={"nominal_roll_id": str(other_nr.id)},
-        ).json()[0]["id"]
-    )
+    target = client.get(
+        "/api/v1/taggings",
+        headers=super_admin_token_headers,
+        params={"nominal_roll_id": str(other_nr.id)},
+    ).json()[0]["id"]
     response = client.patch(
         f"/api/v1/taggings/{target}",
         headers=super_admin_token_headers,
@@ -432,7 +429,10 @@ async def test_patch_without_entries_preserves_entries(
 
 @pytest.mark.asyncio
 async def test_delete_cascades_entries(
-    client: TestClient, super_admin_token_headers, sample_personnel, sample_nominal_roll,
+    client: TestClient,
+    super_admin_token_headers,
+    sample_personnel,
+    sample_nominal_roll,
     db_session: AsyncSession,
 ):
     create = client.post(
@@ -465,8 +465,11 @@ async def test_delete_cascades_entries(
 
 @pytest.mark.asyncio
 async def test_delete_refuses_when_nr_has_attendance(
-    client: TestClient, super_admin_token_headers, sample_personnel,
-    sample_nominal_roll, db_session: AsyncSession,
+    client: TestClient,
+    super_admin_token_headers,
+    sample_personnel,
+    sample_nominal_roll,
+    db_session: AsyncSession,
 ):
     """A tagging whose NR has attendance rows cannot be deleted (409) —
     deleting would orphan the recorded history (per issue #4 Q5; under 1:1
@@ -514,7 +517,10 @@ async def test_delete_refuses_when_nr_has_attendance(
 
 @pytest.mark.asyncio
 async def test_tagging_does_not_mutate_personnel(
-    client: TestClient, super_admin_token_headers, sample_personnel, sample_nominal_roll,
+    client: TestClient,
+    super_admin_token_headers,
+    sample_personnel,
+    sample_nominal_roll,
     db_session: AsyncSession,
 ):
     """Overlay: creating/editing a tagging leaves Personnel rows untouched."""
@@ -530,7 +536,11 @@ async def test_tagging_does_not_mutate_personnel(
             "label": "overlay-test",
             "nominal_roll_id": str(sample_nominal_roll.id),
             "entries": [
-                {"personnel_id": p_id, "to_unit": "Remapped Coy", "to_sub_unit_1": "Remapped Plt"},
+                {
+                    "personnel_id": p_id,
+                    "to_unit": "Remapped Coy",
+                    "to_sub_unit_1": "Remapped Plt",
+                },
             ],
         },
     )
@@ -567,8 +577,12 @@ async def test_tagging_does_not_mutate_personnel(
 
 @pytest.mark.asyncio
 async def test_clone_matches_by_pers_no(
-    client: TestClient, super_admin_token_headers, sample_personnel, sample_nominal_roll,
-    second_nominal_roll, db_session: AsyncSession,
+    client: TestClient,
+    super_admin_token_headers,
+    sample_personnel,
+    sample_nominal_roll,
+    second_nominal_roll,
+    db_session: AsyncSession,
 ):
     """Clone-merge into the target NR's existing tagging: source has 3
     entries, target has 2 of those persons mirrored → 2 matched, 1 unmatched.
@@ -584,7 +598,10 @@ async def test_clone_matches_by_pers_no(
             "entries": [
                 {"personnel_id": str(sample_personnel[0].id), "to_unit": "Coy X"},
                 {"personnel_id": str(sample_personnel[1].id), "to_unit": "Coy Y"},
-                {"personnel_id": str(sample_personnel[2].id), "to_unit": "Coy Z"},  # not mirrored
+                {
+                    "personnel_id": str(sample_personnel[2].id),
+                    "to_unit": "Coy Z",
+                },  # not mirrored
             ],
         },
     )
@@ -618,8 +635,13 @@ async def test_clone_matches_by_pers_no(
 
 @pytest.mark.asyncio
 async def test_clone_null_pers_no_source_surfaces_unmatched(
-    client: TestClient, super_admin_token_headers, sample_personnel,
-    sample_nominal_roll, second_nominal_roll, db_session: AsyncSession, sample_users,
+    client: TestClient,
+    super_admin_token_headers,
+    sample_personnel,
+    sample_nominal_roll,
+    second_nominal_roll,
+    db_session: AsyncSession,
+    sample_users,
 ):
     """A source person with NULL pers_no can never match — surfaces unmatched
     with an empty pers_no string in the response.
@@ -687,19 +709,20 @@ async def test_clone_same_nr_400(
 
 @pytest.mark.asyncio
 async def test_clone_skips_existing_target_entries(
-    client: TestClient, super_admin_token_headers, sample_personnel, sample_nominal_roll,
+    client: TestClient,
+    super_admin_token_headers,
+    sample_personnel,
+    sample_nominal_roll,
     second_nominal_roll,
 ):
     """Clone-merge does not clobber entries already on the target tagging."""
     other_nr, mirrored = second_nominal_roll
     # Pre-populate the target tagging with an entry for mirrored[0].
-    target_tagging = (
-        client.get(
-            "/api/v1/taggings",
-            headers=super_admin_token_headers,
-            params={"nominal_roll_id": str(other_nr.id)},
-        ).json()[0]
-    )
+    target_tagging = client.get(
+        "/api/v1/taggings",
+        headers=super_admin_token_headers,
+        params={"nominal_roll_id": str(other_nr.id)},
+    ).json()[0]
     pre = client.patch(
         f"/api/v1/taggings/{target_tagging['id']}",
         headers=super_admin_token_headers,
@@ -749,7 +772,10 @@ async def test_clone_skips_existing_target_entries(
 
 @pytest.mark.asyncio
 async def test_delete_nominal_roll_cascades_taggings(
-    client: TestClient, super_admin_token_headers, sample_personnel, sample_nominal_roll,
+    client: TestClient,
+    super_admin_token_headers,
+    sample_personnel,
+    sample_nominal_roll,
     db_session: AsyncSession,
 ):
     nr_id = str(sample_nominal_roll.id)

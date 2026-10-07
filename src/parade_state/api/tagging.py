@@ -77,8 +77,9 @@ async def _build_entries_response(
     personnel_ids = [e.personnel_id for e in entries]
     rows = (
         await db.execute(
-            select(Personnel.id, Personnel.pers_no, Personnel.rank, Personnel.full_name)
-            .where(Personnel.id.in_(personnel_ids))
+            select(
+                Personnel.id, Personnel.pers_no, Personnel.rank, Personnel.full_name
+            ).where(Personnel.id.in_(personnel_ids))
         )
     ).all()
     info_by_id = {
@@ -122,10 +123,10 @@ async def _load_personnel_map(
     if not personnel_ids:
         return {}
     rows = (
-        await db.execute(
-            select(Personnel).where(Personnel.id.in_(personnel_ids))
-        )
-    ).scalars().all()
+        (await db.execute(select(Personnel).where(Personnel.id.in_(personnel_ids))))
+        .scalars()
+        .all()
+    )
     return {str(p.id): p for p in rows}
 
 
@@ -207,7 +208,9 @@ async def _validate_entries_for_nr(
                 }
             )
         else:
-            payload.update(_snapshot_from_personnel(personnel_map[entry_in.personnel_id]))
+            payload.update(
+                _snapshot_from_personnel(personnel_map[entry_in.personnel_id])
+            )
         payloads.append(payload)
     return payloads, personnel_map
 
@@ -277,19 +280,21 @@ async def copy_entries_by_pers_no(
     target_lookup: dict[str, Personnel] = {}
     if valid_pers_nos:
         target_rows = (
-            await db.execute(
-                select(Personnel).where(
-                    Personnel.nominal_roll_id == target_nominal_roll_id,
-                    Personnel.pers_no.in_(valid_pers_nos),
+            (
+                await db.execute(
+                    select(Personnel).where(
+                        Personnel.nominal_roll_id == target_nominal_roll_id,
+                        Personnel.pers_no.in_(valid_pers_nos),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         target_lookup = {p.pers_no: p for p in target_rows}
 
     # Load personnel_ids already on the target tagging (skip to avoid clobber).
-    existing_target_personnel_ids = {
-        e.personnel_id for e in target_tagging.entries
-    }
+    existing_target_personnel_ids = {e.personnel_id for e in target_tagging.entries}
 
     matched_count = 0
     unmatched: list[TaggingCloneUnmatchedItem] = []
@@ -576,9 +581,7 @@ async def clone_tagging(
     # Validate target NR exists and is distinct from the source.
     target_nr = (
         await db.execute(
-            select(NominalRoll).where(
-                NominalRoll.id == payload.target_nominal_roll_id
-            )
+            select(NominalRoll).where(NominalRoll.id == payload.target_nominal_roll_id)
         )
     ).scalar_one_or_none()
     if target_nr is None:

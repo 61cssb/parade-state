@@ -30,7 +30,8 @@ from parade_state.models import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CANONICAL_FIXTURE = (
-    REPO_ROOT / "fixtures"
+    REPO_ROOT
+    / "fixtures"
     / "61 CSSB WY2627 ICT - Callup Eligible (caa260220) - Callup status.csv"
 )
 
@@ -77,7 +78,20 @@ def _row(
     hk: str = "1",
 ) -> list[str]:
     """One data row aligned with ``STANDARD_HEADER``."""
-    return [unit, su1, su2, su3, rank, full_name, pers, decision, reason, remarks, orns, hk]
+    return [
+        unit,
+        su1,
+        su2,
+        su3,
+        rank,
+        full_name,
+        pers,
+        decision,
+        reason,
+        remarks,
+        orns,
+        hk,
+    ]
 
 
 @pytest.fixture
@@ -156,18 +170,24 @@ async def test_process_csv_creates_nr_personnel_and_tagging(
     nr_id = data["nominal_roll_id"]
 
     # NominalRoll created with CAA derived from filename (caa260220 → 2026-02-20).
-    nr = (await db_session.execute(
-        select(NominalRoll).where(NominalRoll.id == nr_id)
-    )).scalar_one()
+    nr = (
+        await db_session.execute(select(NominalRoll).where(NominalRoll.id == nr_id))
+    ).scalar_one()
     assert nr.caa == date(2026, 2, 20)
     assert nr.csv_hash == expected_hash
     assert nr.personnel_count == 2
 
     # Personnel rows: exact storage map — core columns, pers_no, first
     # Remarks → remarks, int extra_fields; Callup Decision / Reason nowhere.
-    rows = (await db_session.execute(
-        select(Personnel).where(Personnel.nominal_roll_id == nr_id)
-    )).scalars().all()
+    rows = (
+        (
+            await db_session.execute(
+                select(Personnel).where(Personnel.nominal_roll_id == nr_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(rows) == 2
     by_name = {p.full_name: p for p in rows}
     assert {p.pers_no for p in rows} == {"p001", "p002"}
@@ -188,15 +208,17 @@ async def test_process_csv_creates_nr_personnel_and_tagging(
     assert bob.extra_fields == {"orns": 6, "hk_ict": 2}
 
     # 1:1 tagging auto-created.
-    tagging = (await db_session.execute(
-        select(Tagging).where(Tagging.nominal_roll_id == nr_id)
-    )).scalar_one()
+    tagging = (
+        await db_session.execute(
+            select(Tagging).where(Tagging.nominal_roll_id == nr_id)
+        )
+    ).scalar_one()
     assert tagging.nominal_roll_id == nr_id
 
     # CsvUpload linked.
-    upload = (await db_session.execute(
-        select(CsvUpload).where(CsvUpload.id == upload_id)
-    )).scalar_one()
+    upload = (
+        await db_session.execute(select(CsvUpload).where(CsvUpload.id == upload_id))
+    ).scalar_one()
     assert upload.nominal_roll_id == nr_id
 
 
@@ -225,24 +247,32 @@ async def test_upload_with_auto_process_creates_nr_and_tagging(
     assert data["process_result"]["personnel_inserted"] == 2
     nr_id = data["process_result"]["nominal_roll_id"]
 
-    nr = (await db_session.execute(
-        select(NominalRoll).where(NominalRoll.id == nr_id)
-    )).scalar_one()
+    nr = (
+        await db_session.execute(select(NominalRoll).where(NominalRoll.id == nr_id))
+    ).scalar_one()
     assert nr.personnel_count == 2
 
     # 1:1 tagging auto-created and empty.
-    tagging = (await db_session.execute(
-        select(Tagging).where(Tagging.nominal_roll_id == nr_id)
-    )).scalar_one()
-    entries = (await db_session.execute(
-        select(TaggingEntry).where(TaggingEntry.tagging_id == tagging.id)
-    )).scalars().all()
+    tagging = (
+        await db_session.execute(
+            select(Tagging).where(Tagging.nominal_roll_id == nr_id)
+        )
+    ).scalar_one()
+    entries = (
+        (
+            await db_session.execute(
+                select(TaggingEntry).where(TaggingEntry.tagging_id == tagging.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert entries == []
 
     # Upload linked to the created NR.
-    upload = (await db_session.execute(
-        select(CsvUpload).where(CsvUpload.id == data["id"])
-    )).scalar_one()
+    upload = (
+        await db_session.execute(select(CsvUpload).where(CsvUpload.id == data["id"]))
+    ).scalar_one()
     assert upload.nominal_roll_id == nr_id
 
 
@@ -265,7 +295,9 @@ async def test_upload_with_auto_process_creates_nr_and_tagging(
             "Unit",
             id="blank-unit-header",
         ),
-        pytest.param(lambda h: [c for c in h if c != "Unit"], "Unit", id="missing-unit"),
+        pytest.param(
+            lambda h: [c for c in h if c != "Unit"], "Unit", id="missing-unit"
+        ),
         pytest.param(
             lambda h: [c for c in h if c != "HK ICT"], "HK ICT", id="missing-hk-ict"
         ),
@@ -340,9 +372,9 @@ async def test_upload_auto_process_failure_keeps_upload_for_manual_step(
     assert "Callup Decision" in data["process_error"]
 
     # Upload stored, unprocessed; no NR created.
-    upload = (await db_session.execute(
-        select(CsvUpload).where(CsvUpload.id == data["id"])
-    )).scalar_one()
+    upload = (
+        await db_session.execute(select(CsvUpload).where(CsvUpload.id == data["id"]))
+    ).scalar_one()
     assert upload.nominal_roll_id is None
     assert upload.status == "received"
     nrs = (await db_session.execute(select(NominalRoll))).scalars().all()
@@ -386,9 +418,15 @@ async def test_process_csv_strict_yes_filter(
     assert data["rows_skipped"] == 5
 
     nr_id = data["nominal_roll_id"]
-    stored = (await db_session.execute(
-        select(Personnel).where(Personnel.nominal_roll_id == nr_id)
-    )).scalars().all()
+    stored = (
+        (
+            await db_session.execute(
+                select(Personnel).where(Personnel.nominal_roll_id == nr_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert {p.full_name for p in stored} == {"Alpha", "Bravo", "Charlie"}
 
 
@@ -406,9 +444,7 @@ async def test_process_orns_alias_both_spellings(
 ):
     """ORNS and ORNS Yrs headers both land in extra_fields.orns."""
     for i, spelling in enumerate(("ORNS", "ORNS Yrs"), start=1):
-        header = [
-            c if c != "ORNS Yrs" else spelling for c in STANDARD_HEADER
-        ]
+        header = [c if c != "ORNS Yrs" else spelling for c in STANDARD_HEADER]
         raw = _make_csv_bytes(header, [_row("Alice", pers="p001", orns="7")])
         upload_id = _upload(
             client,
@@ -420,9 +456,11 @@ async def test_process_orns_alias_both_spellings(
         response = _process(client, super_admin_token_headers, upload_id)
         assert response.status_code == 201, response.text
         nr_id = response.json()["nominal_roll_id"]
-        person = (await db_session.execute(
-            select(Personnel).where(Personnel.nominal_roll_id == nr_id)
-        )).scalar_one()
+        person = (
+            await db_session.execute(
+                select(Personnel).where(Personnel.nominal_roll_id == nr_id)
+            )
+        ).scalar_one()
         assert person.extra_fields["orns"] == 7
 
 
@@ -447,9 +485,11 @@ async def test_process_duplicate_remarks_first_wins(
     response = _process(client, super_admin_token_headers, upload_id)
     assert response.status_code == 201, response.text
     nr_id = response.json()["nominal_roll_id"]
-    person = (await db_session.execute(
-        select(Personnel).where(Personnel.nominal_roll_id == nr_id)
-    )).scalar_one()
+    person = (
+        await db_session.execute(
+            select(Personnel).where(Personnel.nominal_roll_id == nr_id)
+        )
+    ).scalar_one()
     assert person.remarks == "first remarks"
 
 
@@ -478,9 +518,15 @@ async def test_process_optional_pers_absent_column(
     assert response.status_code == 201, response.text
     assert response.json()["personnel_inserted"] == 2
     nr_id = response.json()["nominal_roll_id"]
-    stored = (await db_session.execute(
-        select(Personnel).where(Personnel.nominal_roll_id == nr_id)
-    )).scalars().all()
+    stored = (
+        (
+            await db_session.execute(
+                select(Personnel).where(Personnel.nominal_roll_id == nr_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert {p.pers_no for p in stored} == {None}
 
 
@@ -508,9 +554,15 @@ async def test_process_csv_blank_pers_no_stored_as_null(
     assert response.json()["personnel_inserted"] == 2
 
     nr_id = response.json()["nominal_roll_id"]
-    rows = (await db_session.execute(
-        select(Personnel).where(Personnel.nominal_roll_id == nr_id)
-    )).scalars().all()
+    rows = (
+        (
+            await db_session.execute(
+                select(Personnel).where(Personnel.nominal_roll_id == nr_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     by_name = {p.full_name: p for p in rows}
     assert by_name["Alice"].pers_no == "p001"
     assert by_name["Bob"].pers_no is None
@@ -526,18 +578,18 @@ async def test_process_age_yr_optional_storage(
     """Age(Yr) is stored to extra_fields.age_yr when the file carries it;
     the key is absent when the column is missing."""
     header_with_age = STANDARD_HEADER + ["Age(Yr)"]
-    raw_with = _make_csv_bytes(
-        header_with_age, [_row("Alice", pers="p001") + ["31"]]
-    )
+    raw_with = _make_csv_bytes(header_with_age, [_row("Alice", pers="p001") + ["31"]])
     upload_with = _upload(
         client, super_admin_token_headers, raw_with, "age_caa260220.csv"
     ).json()["id"]
     response = _process(client, super_admin_token_headers, upload_with)
     assert response.status_code == 201, response.text
     nr_id = response.json()["nominal_roll_id"]
-    person = (await db_session.execute(
-        select(Personnel).where(Personnel.nominal_roll_id == nr_id)
-    )).scalar_one()
+    person = (
+        await db_session.execute(
+            select(Personnel).where(Personnel.nominal_roll_id == nr_id)
+        )
+    ).scalar_one()
     assert person.extra_fields == {"orns": 5, "hk_ict": 1, "age_yr": 31}
 
     raw_without = _make_csv_bytes(STANDARD_HEADER, [_row("Alice", pers="p002")])
@@ -547,9 +599,11 @@ async def test_process_age_yr_optional_storage(
     response = _process(client, super_admin_token_headers, upload_without)
     assert response.status_code == 201, response.text
     nr_id = response.json()["nominal_roll_id"]
-    person = (await db_session.execute(
-        select(Personnel).where(Personnel.nominal_roll_id == nr_id)
-    )).scalar_one()
+    person = (
+        await db_session.execute(
+            select(Personnel).where(Personnel.nominal_roll_id == nr_id)
+        )
+    ).scalar_one()
     assert person.extra_fields == {"orns": 5, "hk_ict": 1}
     assert "age_yr" not in person.extra_fields
 
@@ -574,9 +628,11 @@ async def test_process_reason_and_decision_not_stored(
     response = _process(client, super_admin_token_headers, upload_id)
     assert response.status_code == 201, response.text
     nr_id = response.json()["nominal_roll_id"]
-    person = (await db_session.execute(
-        select(Personnel).where(Personnel.nominal_roll_id == nr_id)
-    )).scalar_one()
+    person = (
+        await db_session.execute(
+            select(Personnel).where(Personnel.nominal_roll_id == nr_id)
+        )
+    ).scalar_one()
     assert person.remarks == "att_out ok"  # Remarks only — no Reason join
     assert set(person.extra_fields) == {"orns", "hk_ict"}
     assert person.inpro_status == "yet_to_inpro"
@@ -591,12 +647,17 @@ async def test_process_extra_columns_tolerated_and_ignored(
 ):
     """Unrecognized columns (the canonical fixture's extras) are tolerated
     and ignored — nothing is captured into extra_fields."""
-    header = STANDARD_HEADER[:6] + ["Rank-Name"] + STANDARD_HEADER[6:] + [
-        "NPI",
-        "SAR-21 Qual Date",
-        "Cbt Shoot History",
-        "Detail",
-    ]
+    header = (
+        STANDARD_HEADER[:6]
+        + ["Rank-Name"]
+        + STANDARD_HEADER[6:]
+        + [
+            "NPI",
+            "SAR-21 Qual Date",
+            "Cbt Shoot History",
+            "Detail",
+        ]
+    )
     # Insert values for Rank-Name (after Full Name) and the trailing extras.
     base = _row("Alice", pers="p001", remarks="ok")
     row = base[:6] + ["PTE Alice"] + base[6:] + ["n1", "2024-01-01", "3", "admin"]
@@ -609,9 +670,11 @@ async def test_process_extra_columns_tolerated_and_ignored(
     assert response.status_code == 201, response.text
     assert response.json()["personnel_inserted"] == 1
     nr_id = response.json()["nominal_roll_id"]
-    person = (await db_session.execute(
-        select(Personnel).where(Personnel.nominal_roll_id == nr_id)
-    )).scalar_one()
+    person = (
+        await db_session.execute(
+            select(Personnel).where(Personnel.nominal_roll_id == nr_id)
+        )
+    ).scalar_one()
     assert person.extra_fields == {"orns": 5, "hk_ict": 1}
 
 
@@ -623,9 +686,7 @@ async def test_process_quoted_comma_name(
     db_session: AsyncSession,
 ):
     """Quoted commas inside Full Name cells parse correctly."""
-    raw = _make_csv_bytes(
-        STANDARD_HEADER, [_row("TAN, JOHN", pers="p001")]
-    )
+    raw = _make_csv_bytes(STANDARD_HEADER, [_row("TAN, JOHN", pers="p001")])
     upload_id = _upload(
         client, super_admin_token_headers, raw, "quoted_caa260220.csv"
     ).json()["id"]
@@ -633,9 +694,11 @@ async def test_process_quoted_comma_name(
     response = _process(client, super_admin_token_headers, upload_id)
     assert response.status_code == 201, response.text
     nr_id = response.json()["nominal_roll_id"]
-    person = (await db_session.execute(
-        select(Personnel).where(Personnel.nominal_roll_id == nr_id)
-    )).scalar_one()
+    person = (
+        await db_session.execute(
+            select(Personnel).where(Personnel.nominal_roll_id == nr_id)
+        )
+    ).scalar_one()
     assert person.full_name == "TAN, JOHN"
 
 
@@ -667,8 +730,24 @@ async def test_process_old_format_converged(
         "NPI",
         "Ineligible Reason",
     ]
-    row = ["61 CSSB", "NON-ESTAB", "", "", "2LT", "BOH ZE KAI", "2LT BOH ZE KAI",
-           "Yes", "", "", "31", "", "1", "0", "TRUE", ""]
+    row = [
+        "61 CSSB",
+        "NON-ESTAB",
+        "",
+        "",
+        "2LT",
+        "BOH ZE KAI",
+        "2LT BOH ZE KAI",
+        "Yes",
+        "",
+        "",
+        "31",
+        "",
+        "1",
+        "0",
+        "TRUE",
+        "",
+    ]
     raw = _make_csv_bytes(header, [row])
     upload_id = _upload(
         client, super_admin_token_headers, raw, "oldfmt_caa260220.csv"
@@ -679,9 +758,11 @@ async def test_process_old_format_converged(
     data = response.json()
     assert data["personnel_inserted"] == 1
     nr_id = data["nominal_roll_id"]
-    person = (await db_session.execute(
-        select(Personnel).where(Personnel.nominal_roll_id == nr_id)
-    )).scalar_one()
+    person = (
+        await db_session.execute(
+            select(Personnel).where(Personnel.nominal_roll_id == nr_id)
+        )
+    ).scalar_one()
     assert person.full_name == "BOH ZE KAI"
     assert person.category == "Officer"
     assert person.pers_no is None  # no Pers column in the old format
@@ -713,9 +794,15 @@ async def test_process_duplicate_names_without_pers_both_stored(
     assert response.status_code == 201, response.text
     assert response.json()["personnel_inserted"] == 2
     nr_id = response.json()["nominal_roll_id"]
-    stored = (await db_session.execute(
-        select(Personnel).where(Personnel.nominal_roll_id == nr_id)
-    )).scalars().all()
+    stored = (
+        (
+            await db_session.execute(
+                select(Personnel).where(Personnel.nominal_roll_id == nr_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(stored) == 2
     assert len({p.id for p in stored}) == 2
 
@@ -750,9 +837,15 @@ async def test_process_canonical_fixture_acceptance(
     assert data["rows_skipped"] == 163
 
     nr_id = data["nominal_roll_id"]
-    rows = (await db_session.execute(
-        select(Personnel).where(Personnel.nominal_roll_id == nr_id)
-    )).scalars().all()
+    rows = (
+        (
+            await db_session.execute(
+                select(Personnel).where(Personnel.nominal_roll_id == nr_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(rows) == 397
 
     by_name = {p.full_name: p for p in rows}
@@ -814,9 +907,9 @@ async def test_upload_auto_process_reports_duplicate_caa(
     assert data["process_result"] is None
     assert "already exists" in data["process_error"]
 
-    upload = (await db_session.execute(
-        select(CsvUpload).where(CsvUpload.id == data["id"])
-    )).scalar_one()
+    upload = (
+        await db_session.execute(select(CsvUpload).where(CsvUpload.id == data["id"]))
+    ).scalar_one()
     assert upload.nominal_roll_id is None
 
 
@@ -829,9 +922,7 @@ async def test_upload_without_auto_process_stays_manual(
 ):
     """Default upload behavior is unchanged: nothing is processed."""
     raw = _make_csv_bytes(STANDARD_HEADER, [_row("Dan", pers="p301")])
-    response = _upload(
-        client, super_admin_token_headers, raw, "manual_caa260303.csv"
-    )
+    response = _upload(client, super_admin_token_headers, raw, "manual_caa260303.csv")
     assert response.status_code == 200, response.text
     data = response.json()
     assert data["process_result"] is None
@@ -865,12 +956,14 @@ async def test_process_csv_refuses_duplicate_caa(
 ):
     upload_id, _ = uploaded_csv
     # Pre-create an NR with the same CAA that the upload will resolve to.
-    db_session.add(NominalRoll(
-        caa=date(2026, 2, 20),
-        csv_hash="pre-empt",
-        personnel_count=0,
-        uploaded_by=admin_id,
-    ))
+    db_session.add(
+        NominalRoll(
+            caa=date(2026, 2, 20),
+            csv_hash="pre-empt",
+            personnel_count=0,
+            uploaded_by=admin_id,
+        )
+    )
     await db_session.commit()
 
     response = _process(client, super_admin_token_headers, upload_id)
@@ -896,9 +989,7 @@ async def test_process_csv_unknown_upload_404(
     super_admin_token_headers: dict[str, str],
     admin_id: str,
 ):
-    response = _process(
-        client, super_admin_token_headers, "does-not-exist"
-    )
+    response = _process(client, super_admin_token_headers, "does-not-exist")
     assert response.status_code == 404
 
 
@@ -940,12 +1031,14 @@ async def test_process_csv_imports_taggings_from_source_nr(
         nominal_roll_id=str(sample_nominal_roll.id),
         created_by=admin_id,
     )
-    source_tagging.entries.append(TaggingEntry(
-        personnel_id=str(sample_personnel[0].id),
-        from_unit=sample_personnel[0].unit,
-        from_sub_unit_1=sample_personnel[0].sub_unit_1,
-        to_unit="Coy X",
-    ))
+    source_tagging.entries.append(
+        TaggingEntry(
+            personnel_id=str(sample_personnel[0].id),
+            from_unit=sample_personnel[0].unit,
+            from_sub_unit_1=sample_personnel[0].sub_unit_1,
+            to_unit="Coy X",
+        )
+    )
     db_session.add(source_tagging)
     await db_session.commit()
 
@@ -992,19 +1085,19 @@ async def test_process_csv_imports_taggings_matching_pers_no(
         nominal_roll_id=str(sample_nominal_roll.id),
         created_by=admin_id,
     )
-    source_tagging.entries.append(TaggingEntry(
-        personnel_id=str(source_person.id),
-        from_unit=source_person.unit,
-        from_sub_unit_1=source_person.sub_unit_1,
-        to_unit="Coy X",
-    ))
+    source_tagging.entries.append(
+        TaggingEntry(
+            personnel_id=str(source_person.id),
+            from_unit=source_person.unit,
+            from_sub_unit_1=source_person.sub_unit_1,
+            to_unit="Coy X",
+        )
+    )
     db_session.add(source_tagging)
     await db_session.commit()
 
     raw = _make_csv_bytes(STANDARD_HEADER, [_row("Alice", pers="p001")])
-    upload = _upload(
-        client, super_admin_token_headers, raw, "match_caa260220.csv"
-    )
+    upload = _upload(client, super_admin_token_headers, raw, "match_caa260220.csv")
     upload_id = upload.json()["id"]
 
     response = _process(

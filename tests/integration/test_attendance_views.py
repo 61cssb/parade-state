@@ -43,9 +43,9 @@ async def test_user_attendance_filters_roster_to_assigned_subunits(
     Granting Platoon 1 shows only Platoon 1 personnel. (The viewer role is
     deferred, so the filtered user here is a plain admin.)
     """
-    from parade_state.web import attendance as web_attendance
-    from parade_state.models import UserSubunitAssignment
     from parade_state.db import get_session_maker
+    from parade_state.models import UserSubunitAssignment
+    from parade_state.web import attendance as web_attendance
 
     admin = sample_users["admin"]
 
@@ -124,8 +124,8 @@ async def test_user_attendance_overlays_active_tagging_values(
     """With the NR active for attendance, the roster shows effective (to_*)
     values, per-row autosave (no Save button, no tagged-row highlight —
     issue 19), and the Copy Remarks modal (issue 20)."""
-    from parade_state.web import attendance as web_attendance
     from parade_state.models import Tagging, TaggingEntry, User
+    from parade_state.web import attendance as web_attendance
 
     admin_id = str(sample_users["admin"].id)
 
@@ -201,8 +201,8 @@ async def test_user_attendance_copy_remarks_available_to_all_admins(
 ):
     """Copy Remarks is open to every admin (issue 20): the endpoint enforces
     sub-unit write access, so the button is no longer super-admin-only."""
-    from parade_state.web import attendance as web_attendance
     from parade_state.models import UserSubunitAssignment
+    from parade_state.web import attendance as web_attendance
 
     admin = sample_users["admin"]
 
@@ -246,8 +246,8 @@ async def test_user_attendance_subunit_filter_is_effective_aware(
     monkeypatch,
 ):
     """The sub-unit filter matches effective (tagging-overlaid) values."""
-    from parade_state.web import attendance as web_attendance
     from parade_state.models import Tagging, TaggingEntry, User
+    from parade_state.web import attendance as web_attendance
 
     admin_id = str(sample_users["admin"].id)
 
@@ -321,8 +321,8 @@ async def test_attendance_lists_all_personnel_with_inpro_column(
 ):
     """Issue 33: the roster is everyone on the NR — deferred included —
     with a read-only Inpro Status column rendered before the status."""
-    from parade_state.web import attendance as web_attendance
     from parade_state.models import User
+    from parade_state.web import attendance as web_attendance
 
     # John Doe → deferred, Jane Smith → inproed, Bob stays yet_to_inpro.
     sample_personnel[0].inpro_status = "deferred"
@@ -375,9 +375,9 @@ async def test_attendance_inpro_filter_hides_deferred(
 ):
     """The Inpro Status view filter narrows the roster (e.g. hide Deferred),
     and filtering is non-destructive: attendance records survive untouched."""
-    from parade_state.web import attendance as web_attendance
     from parade_state.models import Attendance, User
     from parade_state.utils import utc_dt
+    from parade_state.web import attendance as web_attendance
 
     p = sample_personnel[0]
     record = Attendance(
@@ -454,9 +454,9 @@ async def test_attendance_status_and_reason_filters(
     """The Status / Reason view filters narrow the roster like the Inpro
     filter: unmarked rows count as absent, a Reason filter excludes rows
     without a reason, and filtering is non-destructive."""
-    from parade_state.web import attendance as web_attendance
     from parade_state.models import Attendance, User
     from parade_state.utils import utc_dt
+    from parade_state.web import attendance as web_attendance
 
     today = utc_dt.utcnow().date()
     # John → present + MC, Jane → absent + Off, Bob → unmarked.
@@ -540,10 +540,10 @@ async def test_frozen_day_banner_and_readonly_grid(
     """Issue 35: on a frozen day every role sees the banner (with the
     freeze timestamp); admins get a read-only grid (no inputs, no toggle),
     super-admins keep the editable grid and the freeze toggle."""
-    from parade_state.web import attendance as web_attendance
-    from parade_state.models import AttendanceFreeze, User, UserSubunitAssignment
     from parade_state.db import get_session_maker
+    from parade_state.models import AttendanceFreeze, User, UserSubunitAssignment
     from parade_state.utils import utc_dt
+    from parade_state.web import attendance as web_attendance
 
     admin = sample_users["admin"]
     admin_id = str(admin.id)

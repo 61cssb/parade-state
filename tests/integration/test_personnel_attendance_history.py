@@ -4,7 +4,7 @@ Attendance is NR/Tagging-scoped and taken once daily (single session,
 issue 33); history returns per-day rows with per-day stats.
 """
 
-from datetime import date, timedelta
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,8 +25,7 @@ async def test_history_basic_stats(
     response = client.get(
         f"/api/v1/personnel/{personnel_id}/attendance-history",
         headers=admin_token_headers,
-        params={
-        },
+        params={},
     )
     assert response.status_code == 200
     data = response.json()
@@ -97,8 +96,7 @@ async def test_history_ordering_desc(
     response = client.get(
         f"/api/v1/personnel/{personnel_id}/attendance-history",
         headers=admin_token_headers,
-        params={
-        },
+        params={},
     )
     assert response.status_code == 200
     records = response.json()["attendance_records"]
@@ -117,8 +115,7 @@ async def test_history_invalid_personnel_404(
     response = client.get(
         "/api/v1/personnel/00000000-0000-0000-0000-000000000000/attendance-history",
         headers=admin_token_headers,
-        params={
-        },
+        params={},
     )
     assert response.status_code == 404
 
@@ -157,8 +154,7 @@ async def test_history_no_records(
     response = client.get(
         f"/api/v1/personnel/{personnel_id}/attendance-history",
         headers=admin_token_headers,
-        params={
-        },
+        params={},
     )
     assert response.status_code == 200
     data = response.json()

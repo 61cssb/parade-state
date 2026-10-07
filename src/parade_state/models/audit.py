@@ -13,7 +13,9 @@ class AuditLog(Base):
 
     __tablename__ = "audit_logs"
 
-    timestamp: Mapped[utc_dt.datetime] = mapped_column(default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()), index=True)
+    timestamp: Mapped[utc_dt.datetime] = mapped_column(
+        default=lambda: utc_dt.ensure_naive(utc_dt.utcnow()), index=True
+    )
     user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True
     )

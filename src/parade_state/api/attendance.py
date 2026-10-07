@@ -40,7 +40,6 @@ from parade_state.models.schemas import (
     AttendanceFreezeRequest,
     AttendanceFreezeResponse,
     AttendanceResponse,
-    AttendanceUpsert,
     CopyRemarksResponse,
 )
 from parade_state.utils import utc_dt
@@ -59,9 +58,7 @@ async def require_attendance_active(
 ) -> NominalRoll:
     """Load the NR; 400 unless it is the NR currently active for attendance."""
     nr = (
-        await db.execute(
-            select(NominalRoll).where(NominalRoll.id == nominal_roll_id)
-        )
+        await db.execute(select(NominalRoll).where(NominalRoll.id == nominal_roll_id))
     ).scalar_one_or_none()
     if nr is None:
         raise HTTPException(
@@ -165,9 +162,7 @@ async def list_attendance(
     deny-by-default, 403 with no grants on the NR.
     """
     nr = (
-        await db.execute(
-            select(NominalRoll).where(NominalRoll.id == nominal_roll_id)
-        )
+        await db.execute(select(NominalRoll).where(NominalRoll.id == nominal_roll_id))
     ).scalar_one_or_none()
     if nr is None:
         raise HTTPException(
@@ -376,15 +371,19 @@ async def copy_remarks(
     # Optional view filter: effective sub_unit_1 (tagging-aware).
     if sub_unit_1:
         entry_rows = (
-            await db.execute(
-                select(TaggingEntry).where(TaggingEntry.tagging_id == tagging_id)
+            (
+                await db.execute(
+                    select(TaggingEntry).where(TaggingEntry.tagging_id == tagging_id)
+                )
             )
-        ).scalars().all() if tagging_id else []
+            .scalars()
+            .all()
+            if tagging_id
+            else []
+        )
         to_sub1 = {str(e.personnel_id): e.to_sub_unit_1 for e in entry_rows}
         roster = [
-            p
-            for p in roster
-            if (to_sub1.get(str(p.id), p.sub_unit_1) == sub_unit_1)
+            p for p in roster if (to_sub1.get(str(p.id), p.sub_unit_1) == sub_unit_1)
         ]
 
     # Write access (scope rule): super_admin → all; deny-by-default.
@@ -395,15 +394,19 @@ async def copy_remarks(
     )
 
     rows = (
-        await db.execute(
-            select(Attendance).where(
-                and_(
-                    Attendance.nominal_roll_id == nominal_roll_id,
-                    Attendance.date.in_([source_date, dest_date]),
+        (
+            await db.execute(
+                select(Attendance).where(
+                    and_(
+                        Attendance.nominal_roll_id == nominal_roll_id,
+                        Attendance.date.in_([source_date, dest_date]),
+                    )
                 )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     by_key: dict[tuple[str, utc_dt.date], Attendance] = {
         (r.personnel_id, r.date): r for r in rows
     }
@@ -423,9 +426,7 @@ async def copy_remarks(
 
         target = by_key.get((pid, dest_date))
         if target is None:
-            person = next(
-                (p for p in roster if str(p.id) == pid), None
-            )
+            person = next((p for p in roster if str(p.id) == pid), None)
             if person is None:
                 skipped += 1
                 continue
@@ -529,9 +530,7 @@ async def freeze_attendance(
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Attendance for {payload.date.isoformat()} is already frozen"
-            ),
+            detail=(f"Attendance for {payload.date.isoformat()} is already frozen"),
         ) from None
     await db.refresh(freeze)
 
@@ -646,9 +645,7 @@ async def export_attendance_csv(
     """
     user_id = str(user.id)
     nr = (
-        await db.execute(
-            select(NominalRoll).where(NominalRoll.id == nominal_roll_id)
-        )
+        await db.execute(select(NominalRoll).where(NominalRoll.id == nominal_roll_id))
     ).scalar_one_or_none()
     if nr is None:
         raise HTTPException(
@@ -682,24 +679,23 @@ async def export_attendance_csv(
     entry_by_person: dict[str, TaggingEntry] = {}
     if tagging_id:
         entries = (
-            await db.execute(
-                select(TaggingEntry).where(
-                    TaggingEntry.tagging_id == tagging_id
+            (
+                await db.execute(
+                    select(TaggingEntry).where(TaggingEntry.tagging_id == tagging_id)
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         entry_by_person = {str(e.personnel_id): e for e in entries}
 
     # Optional view filter: effective sub_unit_1 (tagging-aware).
     if sub_unit_1:
         to_sub1 = {
-            pid: (e.to_sub_unit_1 if e else None)
-            for pid, e in entry_by_person.items()
+            pid: (e.to_sub_unit_1 if e else None) for pid, e in entry_by_person.items()
         }
         roster = [
-            p
-            for p in roster
-            if to_sub1.get(str(p.id), p.sub_unit_1) == sub_unit_1
+            p for p in roster if to_sub1.get(str(p.id), p.sub_unit_1) == sub_unit_1
         ]
 
     # Read scoping (scope rule, same deny-by-default as writes).
@@ -724,15 +720,26 @@ async def export_attendance_csv(
                     )
                 )
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     }
 
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(
         [
-            "Unit", "Sub-unit 1", "Sub-unit 2", "Sub-unit 3", "Category",
-            "Rank", "Name", "Inpro Status", "Status", "Reason", "Remarks",
+            "Unit",
+            "Sub-unit 1",
+            "Sub-unit 2",
+            "Sub-unit 3",
+            "Category",
+            "Rank",
+            "Name",
+            "Inpro Status",
+            "Status",
+            "Reason",
+            "Remarks",
         ]
     )
     for person in roster:
@@ -750,9 +757,7 @@ async def export_attendance_csv(
                 person.rank,
                 person.full_name,
                 INPRO_STATUS_LABELS.get(person.inpro_status, person.inpro_status),
-                _STATUS_LABELS.get(
-                    record.status if record else "absent", "absent"
-                ),
+                _STATUS_LABELS.get(record.status if record else "absent", "absent"),
                 (
                     _REASON_LABELS.get(record.reason, record.reason)
                     if record and record.reason

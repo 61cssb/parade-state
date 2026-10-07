@@ -1,15 +1,13 @@
 """Test configuration and fixtures."""
 
 import asyncio
-import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import AsyncGenerator
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 # Ensure all models are imported so they're registered with Base
@@ -25,23 +23,21 @@ import parade_state.models.personnel  # noqa: F401
 import parade_state.models.tagging  # noqa: F401
 from parade_state.auth.session import create_user_session
 from parade_state.config import get_settings
-from parade_state.db import Base, get_session_maker, init_database, normalize_database_url
+from parade_state.db import (
+    Base,
+    init_database,
+    normalize_database_url,
+)
 from parade_state.main import app
 from parade_state.models import (
     AccessLevel,
     Attendance,
-    AuditLog,
-    ColumnMapping,
-    ColumnMetadata,
-    CsvUpload,
     Grouping,
     GroupingGroup,
-    GroupingMemberState,
     GroupingMembership,
     NominalRoll,
     Personnel,
     User,
-    UserSession,
 )
 from parade_state.utils import env, ids, utc_dt
 
@@ -470,9 +466,7 @@ async def sample_attendance_scope(
     """
     admin_id = str(sample_users["admin"].id)
     sample_nominal_roll.attendance_active = True
-    sample_nominal_roll.attendance_activated_at = utc_dt.ensure_naive(
-        utc_dt.utcnow()
-    )
+    sample_nominal_roll.attendance_activated_at = utc_dt.ensure_naive(utc_dt.utcnow())
     sample_nominal_roll.attendance_activated_by = admin_id
     db_session.add(sample_nominal_roll)
     await db_session.commit()

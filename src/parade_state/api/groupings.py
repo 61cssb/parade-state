@@ -14,7 +14,7 @@ import csv
 import io
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -30,10 +30,11 @@ from parade_state.models import (
     AuditLog,
     Grouping,
     GroupingGroup,
-    GroupingMemberState,
     GroupingMembership,
+    GroupingMemberState,
     NominalRoll,
     Personnel,
+    User,
 )
 from parade_state.models.schemas import (
     GroupingCloneRequest,
@@ -43,10 +44,9 @@ from parade_state.models.schemas import (
     GroupingGroupResponse,
     GroupingResponse,
     GroupingUpdate,
-    MemberStateUpdate,
     MembershipSetRequest,
+    MemberStateUpdate,
 )
-from parade_state.models import User
 from parade_state.utils import utc_dt
 
 router = APIRouter()
@@ -107,7 +107,7 @@ async def _member_counts(db: AsyncSession, grouping_id: str) -> dict[str, int]:
         .where(GroupingMembership.grouping_id == grouping_id)
         .group_by(GroupingMembership.group_id)
     )
-    return {group_id: count for group_id, count in rows.all()}
+    return dict(rows.all())
 
 
 def _to_response(grouping: Grouping, counts: dict[str, int]) -> GroupingResponse:
@@ -162,9 +162,7 @@ def _check_group_labels_unique(labels: list[str]) -> None:
         seen.add(label)
 
 
-async def _fetch_for_response(
-    db: AsyncSession, grouping_id: str
-) -> Grouping:
+async def _fetch_for_response(db: AsyncSession, grouping_id: str) -> Grouping:
     """Re-fetch a grouping with its children eagerly loaded.
 
     After an insert, an untouched ``groups`` collection would lazy-load
@@ -295,9 +293,7 @@ async def create_grouping(
         created_by=user_id,
     )
     for position, item in enumerate(grouping_data.groups):
-        grouping.groups.append(
-            GroupingGroup(label=item.label, position=position)
-        )
+        grouping.groups.append(GroupingGroup(label=item.label, position=position))
 
     db.add(grouping)
     _audit(
@@ -503,7 +499,10 @@ async def set_personnel_groups(
 
     wanted = set(group_ids)
     for membership in list(grouping.memberships):
-        if membership.personnel_id == personnel_id and membership.group_id not in wanted:
+        if (
+            membership.personnel_id == personnel_id
+            and membership.group_id not in wanted
+        ):
             grouping.memberships.remove(membership)
     held = {
         membership.group_id
@@ -585,8 +584,11 @@ async def update_member_state(
 # ============================================================================
 
 
-@router.post("/{grouping_id}/clone", response_model=GroupingResponse,
-             status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{grouping_id}/clone",
+    response_model=GroupingResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def clone_grouping(
     grouping_id: str,
     payload: GroupingCloneRequest,
@@ -640,7 +642,10 @@ async def clone_grouping(
         user_id,
         clone,
         "create",
-        {"cloned_from": source.label, "include_memberships": payload.include_memberships},
+        {
+            "cloned_from": source.label,
+            "include_memberships": payload.include_memberships,
+        },
     )
     try:
         await db.commit()
@@ -656,8 +661,11 @@ async def clone_grouping(
     )
 
 
-@router.post("/copy-from-previous", response_model=GroupingResponse,
-             status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/copy-from-previous",
+    response_model=GroupingResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def copy_grouping_from_previous_nr(
     payload: GroupingCopyRequest,
     user: User = Depends(require_super_admin_user),
@@ -751,9 +759,7 @@ async def copy_grouping_from_previous_nr(
         person.id: person.pers_no
         for person in (
             await db.execute(
-                select(Personnel).where(
-                    Personnel.nominal_roll_id == previous.id
-                )
+                select(Personnel).where(Personnel.nominal_roll_id == previous.id)
             )
         )
         .scalars()
@@ -837,12 +843,8 @@ async def export_grouping_csv(
         .all()
     )
 
-    memberships = (
-        await db.execute(
-            select(GroupingMembership).where(
-                GroupingMembership.grouping_id == grouping.id
-            )
-        )
+    memberships = await db.execute(
+        select(GroupingMembership).where(GroupingMembership.grouping_id == grouping.id)
     )
     group_labels = {group.id: group.label for group in grouping.groups}
     groups_by_person: dict[str, list[str]] = {}
@@ -851,11 +853,9 @@ async def export_grouping_csv(
             group_labels.get(membership.group_id, "?")
         )
 
-    states = (
-        await db.execute(
-            select(GroupingMemberState).where(
-                GroupingMemberState.grouping_id == grouping.id
-            )
+    states = await db.execute(
+        select(GroupingMemberState).where(
+            GroupingMemberState.grouping_id == grouping.id
         )
     )
     state_by_person = {state.personnel_id: state for state in states.scalars()}

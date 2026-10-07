@@ -155,10 +155,7 @@ def require_feature_access(key: str):
             return
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                f"{FEATURE_KEY_LABELS.get(key, key)} is not enabled "
-                f"for your role"
-            ),
+            detail=(f"{FEATURE_KEY_LABELS.get(key, key)} is not enabled for your role"),
         )
 
     return _require_allowed

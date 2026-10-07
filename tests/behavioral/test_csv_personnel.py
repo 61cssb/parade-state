@@ -210,7 +210,9 @@ class TestNominalRollVersioning:
             await db_session.commit()
 
     @pytest.mark.asyncio
-    async def test_nominal_roll_status_transitions(self, db_session, sample_nominal_roll):
+    async def test_nominal_roll_status_transitions(
+        self, db_session, sample_nominal_roll
+    ):
         """Test valid nominal_roll status transitions."""
         nominal_roll = sample_nominal_roll
 
@@ -231,6 +233,7 @@ class TestNominalRollVersioning:
 
             # Verify transition succeeded
             assert nominal_roll.status == to_status
+
 
 class TestColumnMapping:
     """Test column mapping constraints and behavior."""

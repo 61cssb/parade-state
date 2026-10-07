@@ -369,7 +369,9 @@ async def run_checks(base_url: str, args: argparse.Namespace) -> None:
             await page.wait_for_timeout(int(SETTLE_SECONDS * 1000))
             for selector, box in before.items():
                 now = await page.locator(selector).bounding_box()
-                assert now == box, f"layout shifted on expand: {selector}: {box} -> {now}"
+                assert now == box, (
+                    f"layout shifted on expand: {selector}: {box} -> {now}"
+                )
 
             if screenshot and args.screenshot_expanded:
                 await page.screenshot(path=screenshot, full_page=True)
@@ -381,7 +383,9 @@ async def run_checks(base_url: str, args: argparse.Namespace) -> None:
             await page.wait_for_timeout(int(SETTLE_SECONDS * 1000))
             for selector, box in before.items():
                 now = await page.locator(selector).bounding_box()
-                assert now == box, f"layout shifted after collapse: {selector}: {box} -> {now}"
+                assert now == box, (
+                    f"layout shifted after collapse: {selector}: {box} -> {now}"
+                )
 
         if screenshot and not shot_taken:
             await page.screenshot(path=screenshot, full_page=True)
@@ -410,13 +414,27 @@ def parse_args() -> argparse.Namespace:
         default="/nominal-roll",
         help="app path to open (default: %(default)s)",
     )
-    parser.add_argument("--db", type=Path, help="database file (default: throwaway temp db)")
-    parser.add_argument("--fresh", action="store_true", help="delete the db before migrating")
-    parser.add_argument("--no-serve", action="store_true", help="prepare the db and exit")
-    parser.add_argument("--serve-only", action="store_true", help="serve; skip browser checks")
-    parser.add_argument("--port", type=int, default=0, help="port (default: pick a free one)")
-    parser.add_argument("--keep-db", action="store_true", help="keep a temp db afterwards")
-    parser.add_argument("--click", help="selector to click (expand), then click again (collapse)")
+    parser.add_argument(
+        "--db", type=Path, help="database file (default: throwaway temp db)"
+    )
+    parser.add_argument(
+        "--fresh", action="store_true", help="delete the db before migrating"
+    )
+    parser.add_argument(
+        "--no-serve", action="store_true", help="prepare the db and exit"
+    )
+    parser.add_argument(
+        "--serve-only", action="store_true", help="serve; skip browser checks"
+    )
+    parser.add_argument(
+        "--port", type=int, default=0, help="port (default: pick a free one)"
+    )
+    parser.add_argument(
+        "--keep-db", action="store_true", help="keep a temp db afterwards"
+    )
+    parser.add_argument(
+        "--click", help="selector to click (expand), then click again (collapse)"
+    )
     parser.add_argument(
         "--no-shift",
         action="append",

@@ -115,9 +115,7 @@ def _log_remap_counts(bind) -> None:
     """Warn with per-value row counts for both slots before the remap."""
     for column in ("status_am", "status_pm"):
         counts = bind.execute(
-            sa.text(
-                f"SELECT {column}, COUNT(*) FROM attendance GROUP BY {column}"
-            )
+            sa.text(f"SELECT {column}, COUNT(*) FROM attendance GROUP BY {column}")
         ).all()
         for value, count in counts:
             new_status, new_reason = _SLOT_MAP.get(value, ("absent", None))
@@ -165,7 +163,9 @@ def _legacy_status(status: str | None, reason: str | None) -> str:
     """Best-effort legacy slot status for the lossy downgrade."""
     if not status:
         return "absent"
-    return _REVERSE_MAP.get((status, reason), "present" if status == "present" else "absent")
+    return _REVERSE_MAP.get(
+        (status, reason), "present" if status == "present" else "absent"
+    )
 
 
 def upgrade() -> None:
@@ -188,12 +188,16 @@ def upgrade() -> None:
 
     # Step 2: read every legacy row and compute the mapped values
     # (Python-side; rows keyed by the id PK).
-    rows = bind.execute(
-        sa.text(
-            "SELECT id, status_am, remarks_am, status_pm, remarks_pm "
-            "FROM attendance"
+    rows = (
+        bind.execute(
+            sa.text(
+                "SELECT id, status_am, remarks_am, status_pm, remarks_pm "
+                "FROM attendance"
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     mapped: list[dict] = []
     for row in rows:
         status, reason, remarks = _collapse(
@@ -212,9 +216,7 @@ def upgrade() -> None:
         op.drop_column("attendance", "status_am")
         op.drop_column("attendance", "status_pm")
         op.execute("DROP TYPE attendance_status")
-        op.execute(
-            "CREATE TYPE attendance_status AS ENUM ('present', 'absent')"
-        )
+        op.execute("CREATE TYPE attendance_status AS ENUM ('present', 'absent')")
         op.execute(
             "CREATE TYPE attendance_reason AS ENUM "
             "('mc', 'off', 'early_outpro', 'other', 'awol')"
@@ -285,9 +287,11 @@ def downgrade() -> None:
         return
 
     # Read the collapsed values before dropping their columns.
-    rows = bind.execute(
-        sa.text("SELECT id, status, reason, remarks FROM attendance")
-    ).mappings().all()
+    rows = (
+        bind.execute(sa.text("SELECT id, status, reason, remarks FROM attendance"))
+        .mappings()
+        .all()
+    )
     mapped: list[dict] = []
     for row in rows:
         mapped.append(
@@ -305,9 +309,7 @@ def downgrade() -> None:
         op.execute("DROP TYPE attendance_status")
         op.execute("DROP TYPE attendance_reason")
         legacy_values = ", ".join(f"'{v}'" for v in LEGACY_STATUSES)
-        op.execute(
-            f"CREATE TYPE attendance_status AS ENUM ({legacy_values})"
-        )
+        op.execute(f"CREATE TYPE attendance_status AS ENUM ({legacy_values})")
         op.execute(
             "ALTER TABLE attendance ADD COLUMN status_am "
             "attendance_status NOT NULL DEFAULT 'absent'"

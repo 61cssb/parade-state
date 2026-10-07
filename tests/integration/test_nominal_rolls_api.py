@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from parade_state.models.csv_ingestion import NominalRoll
 from tests.test_utils import assert_permission_denied
 
-
 # ============================================================================
 # POST /api/v1/nominal-rolls/{id}/activate-attendance | deactivate-attendance
 # ============================================================================
@@ -19,7 +18,8 @@ from tests.test_utils import assert_permission_denied
 
 @pytest.mark.asyncio
 async def test_activate_attendance_marks_nr_active(
-    client: TestClient, super_admin_token_headers: dict[str, str],
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
     sample_nominal_roll,
 ):
     """Super admin can mark an NR active for attendance."""
@@ -37,8 +37,11 @@ async def test_activate_attendance_marks_nr_active(
 
 @pytest.mark.asyncio
 async def test_activate_attendance_auto_switches(
-    client: TestClient, super_admin_token_headers: dict[str, str],
-    db_session: AsyncSession, sample_nominal_roll, sample_users,
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
+    db_session: AsyncSession,
+    sample_nominal_roll,
+    sample_users,
 ):
     """Activating a second NR deactivates the previously active one."""
     sample_nominal_roll.attendance_active = True
@@ -68,7 +71,8 @@ async def test_activate_attendance_auto_switches(
 
 @pytest.mark.asyncio
 async def test_deactivate_attendance(
-    client: TestClient, super_admin_token_headers: dict[str, str],
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
     sample_nominal_roll,
 ):
     """Deactivate clears the active flag; activation stamp kept as history."""
@@ -89,7 +93,9 @@ async def test_deactivate_attendance(
 
 @pytest.mark.asyncio
 async def test_activate_attendance_requires_super_admin(
-    client: TestClient, admin_token_headers: dict[str, str], sample_nominal_roll,
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_nominal_roll,
 ):
     """Admins cannot toggle attendance activation."""
     response = client.post(
@@ -101,7 +107,8 @@ async def test_activate_attendance_requires_super_admin(
 
 @pytest.mark.asyncio
 async def test_activate_attendance_non_existent_404(
-    client: TestClient, super_admin_token_headers: dict[str, str],
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
 ):
     """404 when activating a non-existent nominal_roll."""
     response = client.post(
@@ -119,7 +126,8 @@ async def test_activate_attendance_non_existent_404(
 
 @pytest.mark.asyncio
 async def test_update_nominal_roll_non_existent_404(
-    client: TestClient, admin_token_headers: dict[str, str],
+    client: TestClient,
+    admin_token_headers: dict[str, str],
 ):
     """404 when updating a non-existent nominal_roll."""
     response = client.patch(
@@ -134,7 +142,9 @@ async def test_update_nominal_roll_non_existent_404(
 
 @pytest.mark.asyncio
 async def test_update_nominal_roll_as_regular_user_forbidden(
-    client: TestClient, user_token_headers: dict[str, str], sample_nominal_roll,
+    client: TestClient,
+    user_token_headers: dict[str, str],
+    sample_nominal_roll,
 ):
     """Regular users cannot update nominal_rolls."""
     assert_permission_denied(
@@ -154,8 +164,10 @@ async def test_update_nominal_roll_as_regular_user_forbidden(
 
 @pytest.mark.asyncio
 async def test_delete_nominal_roll(
-    client: TestClient, super_admin_token_headers: dict[str, str],
-    db_session: AsyncSession, sample_users,
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
+    db_session: AsyncSession,
+    sample_users,
 ):
     """Super admin can delete a nominal_roll (no status gating)."""
     doomed = NominalRoll(
@@ -185,7 +197,8 @@ async def test_delete_nominal_roll(
 
 @pytest.mark.asyncio
 async def test_delete_confirmed_nominal_roll(
-    client: TestClient, super_admin_token_headers: dict[str, str],
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
     sample_nominal_roll,
 ):
     """Super admin can delete the sample nominal_roll."""
@@ -209,7 +222,9 @@ async def test_delete_confirmed_nominal_roll(
 
 @pytest.mark.asyncio
 async def test_delete_nominal_roll_as_admin_forbidden(
-    client: TestClient, admin_token_headers: dict[str, str], sample_nominal_roll,
+    client: TestClient,
+    admin_token_headers: dict[str, str],
+    sample_nominal_roll,
 ):
     """Admins (non-super) cannot delete nominal_rolls."""
     response = client.delete(
@@ -223,7 +238,8 @@ async def test_delete_nominal_roll_as_admin_forbidden(
 
 @pytest.mark.asyncio
 async def test_delete_non_existent_nominal_roll(
-    client: TestClient, super_admin_token_headers: dict[str, str],
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
 ):
     """404 when deleting a non-existent nominal_roll."""
     response = client.delete(
@@ -237,8 +253,10 @@ async def test_delete_non_existent_nominal_roll(
 
 @pytest.mark.asyncio
 async def test_delete_nominal_roll_blocked_by_groupings(
-    client: TestClient, super_admin_token_headers: dict[str, str],
-    sample_nominal_roll, sample_grouping,
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
+    sample_nominal_roll,
+    sample_grouping,
 ):
     """Groupings are RESTRICTed: a roll with groupings cannot be deleted."""
     response = client.delete(
@@ -251,8 +269,10 @@ async def test_delete_nominal_roll_blocked_by_groupings(
 
 @pytest.mark.asyncio
 async def test_delete_nominal_roll_cascades(
-    client: TestClient, super_admin_token_headers: dict[str, str],
-    sample_nominal_roll, sample_attendance,
+    client: TestClient,
+    super_admin_token_headers: dict[str, str],
+    sample_nominal_roll,
+    sample_attendance,
 ):
     """Deleting a roll without groupings cascade-deletes dependent data."""
     nominal_roll_id = str(sample_nominal_roll.id)
@@ -300,8 +320,10 @@ async def _grant_nr_access(
 
 @pytest.mark.asyncio
 async def test_update_nominal_roll_label(
-    client: TestClient, client_as,
-    db_session: AsyncSession, sample_users,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_users,
     admin_subunit_assignment,
 ):
     """Admin can set a label on a nominal roll they hold a grant on."""
@@ -334,8 +356,10 @@ async def test_update_nominal_roll_label(
 
 @pytest.mark.asyncio
 async def test_update_nominal_roll_label_strips_whitespace(
-    client: TestClient, client_as,
-    db_session: AsyncSession, sample_users,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_users,
     admin_subunit_assignment,
 ):
     """Label is stripped before storage."""
@@ -360,8 +384,10 @@ async def test_update_nominal_roll_label_strips_whitespace(
 
 @pytest.mark.asyncio
 async def test_update_nominal_roll_label_duplicate_rejected(
-    client: TestClient, client_as,
-    db_session: AsyncSession, sample_users,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_users,
     admin_subunit_assignment,
 ):
     """Setting a label that's already in use returns 409."""
@@ -392,8 +418,10 @@ async def test_update_nominal_roll_label_duplicate_rejected(
 
 @pytest.mark.asyncio
 async def test_update_nominal_roll_label_empty_rejected(
-    client: TestClient, client_as,
-    db_session: AsyncSession, sample_users,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_users,
     admin_subunit_assignment,
 ):
     """Empty/whitespace label fails schema validation (422)."""
@@ -418,8 +446,10 @@ async def test_update_nominal_roll_label_empty_rejected(
 
 @pytest.mark.asyncio
 async def test_list_nominal_rolls_includes_label(
-    client: TestClient, client_as,
-    db_session: AsyncSession, sample_users,
+    client: TestClient,
+    client_as,
+    db_session: AsyncSession,
+    sample_users,
     admin_subunit_assignment,
 ):
     """List endpoint returns the label field (null when unset)."""
@@ -457,7 +487,10 @@ async def test_list_nominal_rolls_includes_label(
 
 @pytest.mark.asyncio
 async def test_export_csv_columns_and_content(
-    client: TestClient, client_as, sample_nominal_roll, sample_personnel,
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+    sample_personnel,
     admin_subunit_assignment,
 ):
     """Export returns the browser table's columns and personnel values."""
@@ -471,8 +504,16 @@ async def test_export_csv_columns_and_content(
 
     rows = list(csv.reader(io.StringIO(response.text)))
     assert rows[0] == [
-        "Unit", "Sub Unit 1", "Sub Unit 2", "Sub Unit 3",
-        "Category", "Rank", "Full Name", "Pers No", "Inpro Status", "Remarks",
+        "Unit",
+        "Sub Unit 1",
+        "Sub Unit 2",
+        "Sub Unit 3",
+        "Category",
+        "Rank",
+        "Full Name",
+        "Pers No",
+        "Inpro Status",
+        "Remarks",
     ]
     assert len(rows) == 4  # header + all three sample personnel
     by_name = {row[6]: row for row in rows[1:]}
@@ -485,7 +526,10 @@ async def test_export_csv_columns_and_content(
 
 @pytest.mark.asyncio
 async def test_export_csv_honours_view_filters(
-    client: TestClient, client_as, sample_nominal_roll, sample_personnel,
+    client: TestClient,
+    client_as,
+    sample_nominal_roll,
+    sample_personnel,
     admin_subunit_assignment,
 ):
     """Filters applied on the page (category, search) scope the export too."""

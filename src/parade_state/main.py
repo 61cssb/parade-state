@@ -5,7 +5,6 @@ import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -13,9 +12,7 @@ from jinja2 import Environment, FileSystemLoader
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import RedirectResponse
 
-# Load environment variables from .env file
-load_dotenv()
-
+# .env is loaded by the package __init__ before this import.
 from parade_state.admin_routes import router as admin_router
 from parade_state.api import (
     access_control,
@@ -240,12 +237,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tags=["taggings"],
         dependencies=[Depends(require_feature("FEATURE_NOMINALROLL"))],
     )
-    app.include_router(
-        db_restore.router, prefix="/api/v1/admin", tags=["db-restore"]
-    )
-    app.include_router(
-        admin_purge.router, prefix="/api/v1/admin", tags=["admin-purge"]
-    )
+    app.include_router(db_restore.router, prefix="/api/v1/admin", tags=["db-restore"])
+    app.include_router(admin_purge.router, prefix="/api/v1/admin", tags=["admin-purge"])
     app.include_router(
         feature_access.router, prefix="/api/v1/admin", tags=["feature-access"]
     )

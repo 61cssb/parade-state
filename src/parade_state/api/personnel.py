@@ -18,11 +18,11 @@ from parade_state.auth.dependencies import require_admin_user, require_super_adm
 from parade_state.db import get_db_session
 from parade_state.models import (
     PRESENT_LIKE_STATUSES,
+    SOURCE_MANUAL,
     Attendance,
     AuditLog,
     NominalRoll,
     Personnel,
-    SOURCE_MANUAL,
     Tagging,
     TaggingEntry,
     User,
@@ -180,9 +180,7 @@ async def _assert_personnel_in_scope(
     """
     tagging = (
         await db.execute(
-            select(Tagging).where(
-                Tagging.nominal_roll_id == personnel.nominal_roll_id
-            )
+            select(Tagging).where(Tagging.nominal_roll_id == personnel.nominal_roll_id)
         )
     ).scalar_one_or_none()
     await assert_locations_in_scope(
@@ -215,9 +213,7 @@ async def _filter_rows_in_scope(
         if not grants:
             continue
         tagging = (
-            await db.execute(
-                select(Tagging).where(Tagging.nominal_roll_id == nr_id)
-            )
+            await db.execute(select(Tagging).where(Tagging.nominal_roll_id == nr_id))
         ).scalar_one_or_none()
         locations = await resolve_effective_locations(
             db,
@@ -300,9 +296,7 @@ def apply_personnel_filters(query, params: PersonnelListParams):
 
 @router.get("/personnel", response_model=list[PersonnelResponse])
 async def list_personnel(
-    nominal_roll_id: str | None = Query(
-        None, description="Filter by nominal roll ID"
-    ),
+    nominal_roll_id: str | None = Query(None, description="Filter by nominal roll ID"),
     unit: str | None = Query(None, description="Filter by unit"),
     sub_unit_1: str | None = Query(None, description="Filter by sub-unit 1"),
     sub_unit_2: str | None = Query(None, description="Filter by sub-unit 2"),
@@ -357,9 +351,7 @@ async def list_personnel(
     if user.role != "super_admin":
         allowed_nrs: set[str] | None = None
         if params.nominal_roll_id:
-            await assert_nr_accessible(
-                db, user.id, user.role, params.nominal_roll_id
-            )
+            await assert_nr_accessible(db, user.id, user.role, params.nominal_roll_id)
         else:
             # Cross-NR request: restrict to NRs with at least one grant.
             allowed_nrs = await accessible_nr_ids(db, user.id, user.role)
@@ -527,7 +519,7 @@ async def create_personnel(
                 f"Personnel with pers_no {personnel_create.pers_no} "
                 "already exists on this nominal roll"
             ),
-        )
+        ) from None
     await db.refresh(personnel)
 
     return PersonnelResponse(
@@ -576,28 +568,28 @@ async def get_personnel(
     await _assert_personnel_in_scope(db, str(user.id), user.role, personnel)
 
     return PersonnelResponse(
-            id=personnel.id,
-            nominal_roll_id=personnel.nominal_roll_id,
-            pers_no=personnel.pers_no,
-            rank=personnel.rank,
-            category=personnel.category,
-            name=personnel.full_name,
-            unit=personnel.unit,
-            sub_unit_1=personnel.sub_unit_1,
-            sub_unit_2=personnel.sub_unit_2,
-            sub_unit_3=personnel.sub_unit_3,
-            status=personnel.status,
-            inpro_status=personnel.inpro_status,
-            remarks=personnel.remarks,
-            source=personnel.source,
-            created_at=personnel.created_at,
-            updated_at=personnel.updated_at,
-            created_by=personnel.created_by,
-            updated_by=personnel.updated_by,
-        )
-@router.patch(
-    "/personnel/{personnel_id}", response_model=PersonnelResponse
-)
+        id=personnel.id,
+        nominal_roll_id=personnel.nominal_roll_id,
+        pers_no=personnel.pers_no,
+        rank=personnel.rank,
+        category=personnel.category,
+        name=personnel.full_name,
+        unit=personnel.unit,
+        sub_unit_1=personnel.sub_unit_1,
+        sub_unit_2=personnel.sub_unit_2,
+        sub_unit_3=personnel.sub_unit_3,
+        status=personnel.status,
+        inpro_status=personnel.inpro_status,
+        remarks=personnel.remarks,
+        source=personnel.source,
+        created_at=personnel.created_at,
+        updated_at=personnel.updated_at,
+        created_by=personnel.created_by,
+        updated_by=personnel.updated_by,
+    )
+
+
+@router.patch("/personnel/{personnel_id}", response_model=PersonnelResponse)
 async def update_personnel(
     personnel_id: str,
     personnel_update: PersonnelUpdate,
@@ -675,27 +667,21 @@ async def update_personnel(
             detail=(
                 "Only super-admins can change unit or sub-unit 1 "
                 "allocations; admins may reallocate sub-unit 2/3 only "
-                "(forbidden fields: "
-                + ", ".join(sorted(admin_forbidden_remaps))
-                + ")"
+                "(forbidden fields: " + ", ".join(sorted(admin_forbidden_remaps)) + ")"
             ),
         )
 
     # Partition the remaining update into remap (-> tagging) vs direct
     # personnel-column updates (status / inpro_status / remarks).
     remap_updates = {
-        field: value
-        for field, value in update_data.items()
-        if field in _REMAP_FIELDS
+        field: value for field, value in update_data.items() if field in _REMAP_FIELDS
     }
     status_update = update_data.get("status")
     inpro_status_update = update_data.get("inpro_status")
     # Membership check (not `is not None`): an explicit null clears remarks.
     remarks_update_present = "remarks" in update_data
 
-    result = await db.execute(
-        select(Personnel).where(Personnel.id == personnel_id)
-    )
+    result = await db.execute(select(Personnel).where(Personnel.id == personnel_id))
     personnel = result.scalar_one_or_none()
     if not personnel:
         raise HTTPException(
@@ -763,7 +749,7 @@ async def update_personnel(
                 f"Personnel with pers_no {update_data.get('pers_no')} already "
                 "exists on this nominal roll"
             ),
-        )
+        ) from None
     await db.refresh(personnel)
 
     # Compute effective values for the response.

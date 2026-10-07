@@ -117,8 +117,7 @@ async def save_feature_access(
 
     if changes:
         summary = ", ".join(
-            f"{FEATURE_KEY_LABELS.get(key, key)} "
-            f"{'→ on' if change['to'] else '→ off'}"
+            f"{FEATURE_KEY_LABELS.get(key, key)} {'→ on' if change['to'] else '→ off'}"
             for key, change in sorted(changes.items())
         )
         db.add(

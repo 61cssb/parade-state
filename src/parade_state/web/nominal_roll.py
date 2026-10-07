@@ -13,12 +13,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import ColumnElement, func, or_, select
 
+from parade_state.admin_routes import no_permission_response
 from parade_state.api.subunit_access import (
     accessible_nr_ids,
     get_scope_grants,
     in_scope_pids,
 )
-from parade_state.admin_routes import no_permission_response
 from parade_state.auth.admin_dependencies import get_current_user_optional
 from parade_state.db import get_session_maker
 from parade_state.feature_access import feature_allowed
@@ -178,18 +178,28 @@ async def nominal_roll_view(
 
         if not all_rolls:
             return _render(
-                request, current_user,
-                rolls=[], selected=None,
-                units=[], sub_unit_1_options=[], sub_unit_2_options=[],
+                request,
+                current_user,
+                rolls=[],
+                selected=None,
+                units=[],
+                sub_unit_1_options=[],
+                sub_unit_2_options=[],
                 rank_options=[],
-                edit_unit_options=[], edit_sub1_options=[],
-                edit_sub2_options=[], edit_sub3_options=[],
+                edit_unit_options=[],
+                edit_sub1_options=[],
+                edit_sub2_options=[],
+                edit_sub3_options=[],
                 rank_choices=[],
                 inpro_labels=INPRO_STATUS_LABELS,
-                personnel=[], search=search or "",
-                unit=unit or "", sub_unit_1=sub_unit_1 or "",
-                sub_unit_2=sub_unit_2 or "", category=category or "",
-                rank=rank or "", inpro_status=inpro_status or "",
+                personnel=[],
+                search=search or "",
+                unit=unit or "",
+                sub_unit_1=sub_unit_1 or "",
+                sub_unit_2=sub_unit_2 or "",
+                category=category or "",
+                rank=rank or "",
+                inpro_status=inpro_status or "",
                 total_count=0,
             )
 
@@ -207,8 +217,12 @@ async def nominal_roll_view(
 
         base = _base_conditions(str(selected.id))
         filters = _optional_conditions(
-            search=search, unit=unit, sub_unit_1=sub_unit_1,
-            sub_unit_2=sub_unit_2, category=category, rank=rank,
+            search=search,
+            unit=unit,
+            sub_unit_1=sub_unit_1,
+            sub_unit_2=sub_unit_2,
+            category=category,
+            rank=rank,
             inpro_status=inpro_status,
         )
 
@@ -217,17 +231,11 @@ async def nominal_roll_view(
         no_assignments = False
         scoped = current_user.role != "super_admin"
         if scoped:
-            grants = await get_scope_grants(
-                db, str(current_user.id), str(selected.id)
-            )
+            grants = await get_scope_grants(db, str(current_user.id), str(selected.id))
             no_assignments = not grants
 
         # Total matching rows (before limit) for display
-        count_query = (
-            select(func.count())
-            .select_from(Personnel)
-            .where(*base, *filters)
-        )
+        count_query = select(func.count()).select_from(Personnel).where(*base, *filters)
         total_count = (await db.execute(count_query)).scalar_one()
 
         # Fetch personnel ordered by unit, then sub-unit, then rank, then name
@@ -235,8 +243,11 @@ async def nominal_roll_view(
             select(Personnel)
             .where(*base, *filters)
             .order_by(
-                Personnel.unit, Personnel.sub_unit_1, Personnel.sub_unit_2,
-                Personnel.rank, Personnel.full_name,
+                Personnel.unit,
+                Personnel.sub_unit_1,
+                Personnel.sub_unit_2,
+                Personnel.rank,
+                Personnel.full_name,
             )
             .limit(1000)
         )
@@ -246,9 +257,7 @@ async def nominal_roll_view(
         if scoped:
             tagging = (
                 await db.execute(
-                    select(Tagging).where(
-                        Tagging.nominal_roll_id == str(selected.id)
-                    )
+                    select(Tagging).where(Tagging.nominal_roll_id == str(selected.id))
                 )
             ).scalar_one_or_none()
             in_scope = await in_scope_pids(
@@ -259,9 +268,7 @@ async def nominal_roll_view(
                 str(tagging.id) if tagging else None,
                 [str(p.id) for p in personnel],
             )
-            personnel = [
-                p for p in personnel if str(p.id) in (in_scope or set())
-            ]
+            personnel = [p for p in personnel if str(p.id) in (in_scope or set())]
             total_count = len(personnel)
 
         # Cascading dropdowns: each lists values present under the selections
@@ -270,9 +277,8 @@ async def nominal_roll_view(
         # For regular admins every list derives from the in-scope rows only
         # (issue #28) — option lists must not reveal out-of-scope values.
         if scoped:
-            def _row_options(
-                attr: str, **selections: str | None
-            ) -> list[str]:
+
+            def _row_options(attr: str, **selections: str | None) -> list[str]:
                 def matches(p: Personnel) -> bool:
                     checks = {
                         "unit": p.unit,
@@ -301,8 +307,10 @@ async def nominal_roll_view(
             )
             rank_options = _row_options(
                 "rank",
-                unit=unit, sub_unit_1=sub_unit_1,
-                sub_unit_2=sub_unit_2, category=category,
+                unit=unit,
+                sub_unit_1=sub_unit_1,
+                sub_unit_2=sub_unit_2,
+                category=category,
             )
             edit_unit_options = units
             edit_sub1_options = _row_options("sub_unit_1")
@@ -314,40 +322,43 @@ async def nominal_roll_view(
                 db, Personnel.sub_unit_1, _scoped_conditions(base, unit=unit)
             )
             sub_unit_2_options = await _distinct_values(
-                db, Personnel.sub_unit_2,
+                db,
+                Personnel.sub_unit_2,
                 _scoped_conditions(base, unit=unit, sub_unit_1=sub_unit_1),
             )
             rank_options = await _distinct_values(
-                db, Personnel.rank,
+                db,
+                Personnel.rank,
                 _scoped_conditions(
-                    base, unit=unit, sub_unit_1=sub_unit_1,
-                    sub_unit_2=sub_unit_2, category=category,
+                    base,
+                    unit=unit,
+                    sub_unit_1=sub_unit_1,
+                    sub_unit_2=sub_unit_2,
+                    category=category,
                 ),
             )
 
             # Unscoped suggestion lists for the super-admin cell editor
             # (datalist inputs also accept values not present on the NR).
             edit_unit_options = units
-            edit_sub1_options = await _distinct_values(
-                db, Personnel.sub_unit_1, base
-            )
-            edit_sub2_options = await _distinct_values(
-                db, Personnel.sub_unit_2, base
-            )
-            edit_sub3_options = await _distinct_values(
-                db, Personnel.sub_unit_3, base
-            )
+            edit_sub1_options = await _distinct_values(db, Personnel.sub_unit_1, base)
+            edit_sub2_options = await _distinct_values(db, Personnel.sub_unit_2, base)
+            edit_sub3_options = await _distinct_values(db, Personnel.sub_unit_3, base)
 
         # Load the NR's 1:1 tagging entries (overlay). The entry map is
         # keyed by personnel_id; each entry's ``to_*`` values override the
         # personnel's canonical unit/subunit when computing effective values.
         entry_rows = (
-            await db.execute(
-                select(TaggingEntry).where(
-                    TaggingEntry.personnel_id.in_([p.id for p in personnel])
+            (
+                await db.execute(
+                    select(TaggingEntry).where(
+                        TaggingEntry.personnel_id.in_([p.id for p in personnel])
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         entry_by_personnel = {str(e.personnel_id): e for e in entry_rows}
 
     personnel_data = []
@@ -373,7 +384,8 @@ async def nominal_roll_view(
         )
 
     return _render(
-        request, current_user,
+        request,
+        current_user,
         rolls=[
             {
                 "id": str(r.id),

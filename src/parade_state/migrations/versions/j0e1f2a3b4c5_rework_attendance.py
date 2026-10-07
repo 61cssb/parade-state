@@ -67,16 +67,14 @@ def upgrade() -> None:
             ["nominal_rolls.id"],
             ondelete="CASCADE",
         ),
-        sa.ForeignKeyConstraint(
-            ["tagging_id"], ["taggings.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["tagging_id"], ["taggings.id"], ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(["activated_by"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("nominal_roll_id", name="uq_attendance_scope_nominal_roll_id"),
+        sa.UniqueConstraint(
+            "nominal_roll_id", name="uq_attendance_scope_nominal_roll_id"
+        ),
     )
-    op.create_index(
-        "ix_attendance_scope_id", "attendance_scope", ["id"], unique=False
-    )
+    op.create_index("ix_attendance_scope_id", "attendance_scope", ["id"], unique=False)
     op.create_index(
         "ix_attendance_scope_nominal_roll_id",
         "attendance_scope",
@@ -122,17 +120,13 @@ def upgrade() -> None:
         sa.Column("last_edit_at", sa.DateTime(), nullable=True),
         sa.Column("last_edit_by", sa.String(length=36), nullable=True),
         sa.Column("is_retroactive_edit", sa.Boolean(), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["personnel_id"], ["personnel.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["personnel_id"], ["personnel.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
             ["nominal_roll_id"],
             ["nominal_rolls.id"],
             ondelete="CASCADE",
         ),
-        sa.ForeignKeyConstraint(
-            ["tagging_id"], ["taggings.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["tagging_id"], ["taggings.id"], ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(["created_by"], ["users.id"]),
         sa.ForeignKeyConstraint(["updated_by"], ["users.id"]),
         sa.ForeignKeyConstraint(["last_edit_by"], ["users.id"]),
@@ -141,9 +135,7 @@ def upgrade() -> None:
             "personnel_id", "date", name="uq_attendance_personnel_date"
         ),
     )
-    op.create_index(
-        "ix_attendance_id", "attendance", ["id"], unique=False
-    )
+    op.create_index("ix_attendance_id", "attendance", ["id"], unique=False)
     op.create_index(
         "ix_attendance_personnel_id", "attendance", ["personnel_id"], unique=False
     )
@@ -156,9 +148,7 @@ def upgrade() -> None:
     op.create_index(
         "ix_attendance_tagging_id", "attendance", ["tagging_id"], unique=False
     )
-    op.create_index(
-        "ix_attendance_date", "attendance", ["date"], unique=False
-    )
+    op.create_index("ix_attendance_date", "attendance", ["date"], unique=False)
 
     # --- data migration ---
     _migrate_attendance_data(bind)
@@ -189,9 +179,10 @@ def _migrate_attendance_data(bind) -> None:
     import uuid
 
     # Pull all legacy rows joined to session + deployment in one pass.
-    rows = bind.execute(
-        sa.text(
-            """
+    rows = (
+        bind.execute(
+            sa.text(
+                """
             SELECT ar.id, ar.personnel_id, ar.deployment_id, ar.status,
                    ar.remarks, ar.notes_snapshot, ar.unit_snapshot,
                    ar.sub_unit_1_snapshot, ar.sub_unit_2_snapshot,
@@ -203,8 +194,11 @@ def _migrate_attendance_data(bind) -> None:
             LEFT JOIN sessions s ON s.id = ar.session_id
             LEFT JOIN deployments d ON d.id = ar.deployment_id
             """
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
 
     unmapped = 0
     # key: (personnel_id, date) -> merged dict
@@ -419,12 +413,8 @@ def downgrade() -> None:
         sa.Column("last_edit_at", sa.DateTime(), nullable=True),
         sa.Column("last_edit_by", sa.String(length=36), nullable=True),
         sa.Column("is_retroactive_edit", sa.Boolean(), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["session_id"], ["sessions.id"], ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["personnel_id"], ["personnel.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["session_id"], ["sessions.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["personnel_id"], ["personnel.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
             ["deployment_id"], ["deployments.id"], ondelete="CASCADE"
         ),
@@ -438,9 +428,7 @@ def downgrade() -> None:
     )
     # Recreate the indexes the baseline migration's downgrade expects to
     # drop (the upgrade removed them implicitly with the tables).
-    op.create_index(
-        op.f("ix_sessions_id"), "sessions", ["id"], unique=False
-    )
+    op.create_index(op.f("ix_sessions_id"), "sessions", ["id"], unique=False)
     op.create_index(op.f("ix_sessions_date"), "sessions", ["date"], unique=False)
     op.create_index(
         op.f("ix_attendance_records_id"), "attendance_records", ["id"], unique=False
