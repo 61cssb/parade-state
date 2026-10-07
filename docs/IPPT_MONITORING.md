@@ -232,8 +232,21 @@ chase the health screening first — IPPT cannot be booked until it clears.
   `Rank + Name (+ Sub-unit)`, and names contain commas, `S/O`, and
   apostrophes.
 - Sub-unit vocabulary matches the nominal roll, so rows can be matched against
-  the establishment — plan for assisted/fuzzy matching with manual
-  confirmation, since homonyms are possible and rank changes over time.
+  the establishment. The agreed matching rules:
+
+  1. **An existing link is authoritative.** If the `ippt_servicemen` row
+     already carries a `personnel_id`, it is never re-resolved or
+     overwritten.
+  2. **Otherwise, match on normalized full name** against the **active
+     nominal roll**:
+     - **unique name** → matched; store the roll row's `personnel.id`
+       (a `String(36)` UUID)
+     - **name not found** on the roll → unmatched (no link)
+     - **ambiguous** (homonyms — several roll rows share the name) →
+       left unmatched and flagged `manual_review` for a human to resolve
+  3. **Ingest is idempotent.** The same serviceman in a later snapshot
+     resolves to the *existing* `ippt_servicemen` row (never a duplicate),
+     and rule 1 guarantees a resolved `personnel_id` survives re-ingest.
 
 ### 3.3 Snapshot history
 
@@ -255,8 +268,15 @@ it is out of scope (§1.3).
 - Cheap validation guards: `Window close ∈ [0, 366]`; `FIT ∈ [0, 10]`;
   `Sub-unit` ∈ known set; `Unit` = expected unit; flag anything else for
   manual review rather than rejecting the file.
-- Expect all six files per report date; treat a missing file as an alert, not
-  an empty population.
+- **Complete-set rule (agreed):** a report date's snapshot is the **full
+  set of six files**. The upload UI rejects incomplete six-file
+  submissions, and the backend rejects job submissions that lack the full
+  set for a report date — ingestion is **atomic per report date** (all six
+  files land, or none do).
+- Row-level validation failures (guards above) land in a
+  **rejects/quarantine list** for review rather than being silently
+  dropped — a bad row must not take the file (or the report date) down
+  with it, nor vanish without a trace.
 
 ---
 
@@ -317,13 +337,15 @@ create table ippt_servicemen (
     full_name     text         not null,
     unit          varchar(32)  not null,           -- 'DK314' in all samples
     sub_unit      varchar(64)  not null,           -- nominal-roll vocabulary
-    personnel_id  bigint references personnel(id), -- NULL until resolved (§3.2)
+    personnel_id  varchar(36) references personnel(id),
+                  -- NULL until resolved (§3.2); personnel.id is String(36)
     created_at    timestamptz  not null default now(),
     updated_at    timestamptz  not null default now()
 );
 -- No unique natural key: rank/sub-unit drift and homonyms make
 -- (name, sub-unit) a match *hint*, not a constraint. Links to the nominal
--- roll are reviewed before being set (§3.2).
+-- roll follow the §3.2 rules — set automatically on a unique name match,
+-- flagged for manual review when ambiguous, never overwritten once set.
 
 -- One row per ingested report file (provenance + missing-file alerting).
 create table ippt_snapshots (

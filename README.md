@@ -5,8 +5,8 @@ A web application for managing battalion parade state through structured attenda
 ## Features
 
 - CSV-based personnel establishment management
-- Deployment-based personnel remapping and overrides
-- Session-based attendance tracking (AM/PM)
+- Tagging overlays for personnel remapping and overrides
+- Daily attendance tracking (present/absent with reason and remarks)
 - Role-based access control with subunit scoping
 - Mobile-friendly attendance interface
 - Audit trail for all changes
@@ -25,11 +25,11 @@ cp env.example .env
 # - Configure Google OAuth
 # - Set SUPER_ADMIN_EMAIL
 
-# Run database setup (when Alembic is implemented)
-# uv run alembic upgrade head
+# Apply database migrations
+uv run alembic upgrade head
 
 # Start development server
-uv run uvicorn src.parade_state.main:app --reload
+uv run uvicorn parade_state.main:app --reload
 ```
 
 ## Configuration
@@ -54,7 +54,7 @@ This project uses:
 - Python 3.12+
 - FastAPI for the API
 - SQLAlchemy for data persistence
-- NiceGUI for admin interface
+- Jinja2 templates for the admin interface
 - PostgreSQL for production database
 - SQLite for testing
 
@@ -77,15 +77,15 @@ uv run ruff check src/ tests/
 uv run ruff format src/ tests/
 
 # Run development server
-uv run uvicorn src.parade_state.main:app --reload
+uv run uvicorn parade_state.main:app --reload
 ```
 
 ### Testing
 
-- **Coverage:** 93.77% (target: 80%+)
+- **Coverage:** ~62% (enforced gate: 60% via `--cov-fail-under` in `pyproject.toml`)
 - **Test Framework:** pytest with async support
-- **Database:** File-based SQLite for proper test isolation
-- **Static Analysis:** ruff (replacing mypy for better performance)
+- **Database:** File-based SQLite for proper test isolation (optional Postgres via `TEST_DATABASE_URL`)
+- **Static Analysis:** ruff (lint + format)
 - **Test Isolation:** Fresh database per test ensures reproducible results
 
 ## Documentation
@@ -131,12 +131,12 @@ Once running, visit:
 ## Current System Status
 
 ✅ **Production-Ready** with admin + user-facing interface:
-- 512 tests passing (4 skipped, 100% pass rate)
-- 57 API endpoints fully implemented and tested
+- 681 tests passing (4 skipped)
+- 67 API endpoints fully implemented and tested
 - **Admin interface with Jinja2 templates** (Unit Strength report at `/admin`, Upload NR, Taggings, Deferments, Users, Settings, Audit Log, Restore Backup, plus the Grouping browser)
-- **User-facing views** (deployment summary, attendance marking, nominal roll browser)
+- **User-facing views** (grouping view, attendance marking, nominal roll browser)
 - **Host-independent Google OAuth** (works with any domain)
-- Multi-tenant deployment access control
+- Nominal-roll-scoped access control
 - Comprehensive audit trails
 - **Current Phase:** Frontend development — mobile optimization next
 

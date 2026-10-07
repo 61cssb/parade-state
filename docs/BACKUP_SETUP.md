@@ -211,9 +211,11 @@ Full CLI procedure with local-verification steps:
 - **Railway serverless:** keeping the DB always-on avoids cold starts
   but continuously drains the free tier's usage credit. With the
   readiness poll in place, serverless can be re-enabled safely.
-- **Rotating the service-account key:** new JSON → update the
-  `GDRIVE_SERVICE_ACCOUNT_JSON` secret. Old key keeps working until
-  deleted in the console.
+- **Rotating the Drive OAuth token:** the workflow authenticates with the
+  `GDRIVE_OAUTH_TOKEN` secret only (user OAuth from Step 4 — no service
+  account is involved). If uploads start failing with `401` /
+  `invalid_grant` (revoked app, Google password change, or six months
+  unused), re-run `rclone authorize "drive"` and update the secret.
 
 **See also:** [DEPLOYMENT.md](DEPLOYMENT.md) for the backup decision
 record, restore procedure, and disaster recovery plan.

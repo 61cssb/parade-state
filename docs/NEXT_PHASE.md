@@ -1,6 +1,6 @@
 # Roadmap & Open Work
 
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-10-07
 **Status:** In production on Railway (admin-only access), with a separate
 hosted development environment (Issue 15) where test users try changes
 first. Test users (admins) coming on the weekend of 2026-08-22; annual
@@ -16,9 +16,9 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ## Current Snapshot
 
-- **Tests:** 670 SQLite passing (flags-on posture; flags-off gating has
-  dedicated tests). The suite runs against
-  Postgres by setting `TEST_DATABASE_URL` (per-test databases).
+- **Tests:** 681 passed / 4 skipped on the SQLite suite (2026-10-07 run;
+  flags-on posture; flags-off gating has dedicated tests). The suite runs
+  against Postgres by setting `TEST_DATABASE_URL` (per-test databases).
 - **Access model:** `super_admin` + `admin` only. Unknown Google
   sign-ins auto-register as `unrecognised` (no access, no session);
   suspended accounts get 403 at the callback. Promotion happens via
@@ -139,7 +139,10 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
   NR management lives in an expander on its view, grouping management on
   the Grouping page
 - User-facing views — `/grouping`, `/attendance`, `/nominal-roll` —
-  built, but admin-gated pending the viewer role (below)
+  built. `/attendance` and `/nominal-roll` are admin-gated pending the
+  viewer role (below); `/grouping` is readable by **every authenticated
+  role** already (issue-26 groupings: all mutations super-admin-only,
+  enforced server-side at the API)
 
 ---
 
@@ -147,7 +150,13 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ### 1. Mobile optimization (Phase 9E) — next up, for field use during the window
 
-Responsive design for tablets/phones. Original phase plan applies.
+Responsive design for tablets/phones. Note (2026-10-07): the original
+phase plan's basis — a static HTML/JS app with a service worker +
+IndexedDB cache and offline unsaved-state highlighting — was never built
+and has been removed from the design (see SPECIFICATION §1.3 / §6.1).
+What exists is the server-rendered Jinja `/attendance` page with
+per-row server-side autosave (red-edge retry on a failed save), so 9E is
+responsive polish on that page, not an offline frontend.
 
 ### 2. UI test automation, Tier 1 — before the 2026-09-10 window
 
@@ -198,10 +207,11 @@ when real deferment workflows emerge.
 
 ### 8. Viewer role — deferred until regular non-admin users exist
 
-Open `/grouping`, `/attendance`, `/nominal-roll` to a non-admin role.
-Routes and views already exist; the work is the role decision (new
-`viewer` status vs reusing the promoted flow), route gating, nav, and
-attendance permissions (subunit-1 scoping already exists). This
+Open `/attendance` and `/nominal-roll` to a non-admin role (`/grouping`
+is already readable by every authenticated role — see the snapshot
+above). Routes and views already exist; the work is the role decision
+(new `viewer` status vs reusing the promoted flow), route gating, nav,
+and attendance permissions (subunit-1 scoping already exists). This
 season's test users will be admins, so this waits.
 
 ---

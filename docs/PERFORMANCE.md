@@ -151,16 +151,25 @@ async def stream_personnel(db: AsyncSession, batch_size: int = 100):
 
 ### Connection Pooling
 
-**Configure connection pooling for efficient database connections:**
+The engine is built once in `src/parade_state/db/__init__.py` with
+`pool_pre_ping=True` (stale connections are verified before use) and
+`echo=False`. Tests can pass an explicit `poolclass` (e.g. `NullPool`) to
+`init_database` when the engine must not share connections across event
+loops.
+
+**Unimplemented recommendation — pool sizing:** `pool_size`,
+`max_overflow`, and `pool_recycle` are *not* currently configured; the
+engine uses SQLAlchemy's async defaults. If the deployment ever shows
+pool-exhaustion or stale-connection symptoms under load, tuning these is
+the first lever:
 
 ```python
-from sqlalchemy.ext.asyncio import create_async_engine
-
+# NOT currently in the codebase — a recommendation only
 engine = create_async_engine(
     database_url,
     pool_size=5,  # Number of connections to maintain
     max_overflow=10,  # Additional connections under load
-    pool_pre_ping=True,  # Verify connections before using
+    pool_pre_ping=True,  # Verify connections before using (already on)
     pool_recycle=3600,  # Recycle connections after 1 hour
 )
 ```
@@ -222,9 +231,13 @@ result = await db.execute(
 
 ### Caching Strategies
 
-**Cache frequently accessed, rarely changed data:**
+**Suggestion, not an existing pattern:** the codebase currently has no
+response/query caching layer (the only `lru_cache` uses are settings and
+the OAuth client in `config.py` / `auth/oauth.py`). If profiling shows
+hot, rarely-changed lookups, this is the shape to reach for:
 
 ```python
+# NOT currently in the codebase — a suggestion only
 from functools import lru_cache
 
 @lru_cache(maxsize=128)
@@ -307,8 +320,8 @@ result = await db.execute(
 - [ ] No N+1 query problems
 - [ ] Bulk operations used for multiple inserts/updates
 - [ ] Generators used for large datasets
-- [ ] Connection pooling configured
-- [ ] Frequently accessed data cached
+- [ ] Connection pooling: `pool_pre_ping` is on by default (pool sizing is an unimplemented lever — see above)
+- [ ] Caching considered for hot, rarely-changed lookups (no caching layer exists yet — see above)
 - [ ] Performance tests added for critical paths
 - [ ] SQL query logging disabled in production
 

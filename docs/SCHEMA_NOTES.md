@@ -13,23 +13,28 @@ To check whether a user can see a column:
 SELECT
     u.access_level_id,
     al_user.level_order AS user_order,
-    cm.raw_name,
+    cm.original_name,
     al_col.level_order  AS col_order,
     (al_user.level_order >= al_col.level_order) AS can_see
 FROM users u
 JOIN access_levels al_user ON al_user.id = u.access_level_id
-JOIN column_metadata cm ON cm.csv_upload_id = :current_csv_upload_id
-LEFT JOIN access_levels al_col ON al_col.label = cm.sensitivity_label
+JOIN column_metadata cm ON cm.nominal_roll_id = :nominal_roll_id
+LEFT JOIN access_levels al_col ON al_col.id = cm.sensitivity_level_id
 WHERE u.id = :user_id;
 ```
-`null` sensitivity_label on a column → admin-only (no `access_levels` row to join → `al_col.level_order` is null → `>=` fails for all non-admins).
+`null` `sensitivity_level_id` on a column → admin-only (no `access_levels` row to join → `al_col.level_order` is null → `>=` fails for all non-admins).
 
 ---
 
 ## Row visibility query pattern
 
-Write access is scoped per nominal roll by `UserSubunitAssignment` on
-the effective `sub_unit_1` (tagging-overlay-aware; super-admin bypasses):
+Write access is scoped per nominal roll by `UserSubunitAssignment` on the
+effective `(unit, sub_unit_1)` pair (tagging-overlay-aware; super-admin
+bypasses). Each grant column uses the explicit sentinel `*` for a
+wildcard — `(U, *)`, `(U, S)`, `(*, S)` are legal; `(*, *)` is forbidden
+by `ck_user_subunit_assignment_not_both_wildcard` (the whole-roll case
+is expressed per unit, not as a blanket grant). A `null` effective value
+never equals a concrete grant value, so it matches only `*` grants:
 ```sql
 SELECT p.*
 FROM personnel p
@@ -37,9 +42,13 @@ LEFT JOIN tagging_entries te
     ON te.tagging_id = :nr_tagging_id AND te.personnel_id = p.id
 WHERE p.nominal_roll_id = :nominal_roll_id
   AND p.status = 'active'
-  AND COALESCE(te.to_sub_unit_1, p.sub_unit_1) IN (
-      SELECT sub_unit_1 FROM user_subunit_assignments
-      WHERE user_id = :user_id AND nominal_roll_id = :nominal_roll_id
+  AND EXISTS (
+      SELECT 1 FROM user_subunit_assignments usa
+      WHERE usa.user_id = :user_id
+        AND usa.nominal_roll_id = :nominal_roll_id
+        AND (usa.unit = '*' OR usa.unit = COALESCE(te.to_unit, p.unit))
+        AND (usa.sub_unit_1 = '*'
+             OR usa.sub_unit_1 = COALESCE(te.to_sub_unit_1, p.sub_unit_1))
   );
 ```
 
@@ -98,18 +107,18 @@ read or write attendance.
 
 ## Audit log — append-only enforcement
 
-Consider a Postgres trigger or application-level policy to prevent UPDATE/DELETE on `audit_log`. Example trigger:
+Consider a Postgres trigger or application-level policy to prevent UPDATE/DELETE on `audit_logs`. Example trigger:
 
 ```sql
 CREATE OR REPLACE FUNCTION prevent_audit_modification()
 RETURNS TRIGGER AS $$
 BEGIN
-    RAISE EXCEPTION 'audit_log is append-only';
+    RAISE EXCEPTION 'audit_logs is append-only';
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER audit_log_immutable
-BEFORE UPDATE OR DELETE ON audit_log
+CREATE TRIGGER audit_logs_immutable
+BEFORE UPDATE OR DELETE ON audit_logs
 FOR EACH ROW EXECUTE FUNCTION prevent_audit_modification();
 ```
 
@@ -122,7 +131,7 @@ On CSV upload, after parsing headers, check for conflicts:
 SELECT cm.raw_name, cm.canonical_name AS existing_canonical
 FROM column_mappings cm
 WHERE cm.raw_name = ANY(:uploaded_column_names)
-  AND NOT cm.deprecated
+  AND cm.deprecated_at IS NULL
   AND cm.canonical_name != :suggested_canonical_for_that_raw_name;
 ```
 Surface each conflict to the admin with: raw name / existing mapping / new suggested mapping / confirm button.

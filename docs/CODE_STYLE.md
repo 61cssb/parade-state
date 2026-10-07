@@ -158,12 +158,24 @@ def process_session():
 ```
 parade_state/
 ├── api/              # API endpoints (organized by feature)
+├── auth/             # OAuth, session management, auth dependencies
 ├── models/           # Database models
-├── middleware/       # Custom middleware
+├── web/              # User-facing page routes (Jinja2 views)
 ├── utils/            # Utility modules (centralized logic)
-├── db/               # Database configuration
-└── schemas/          # Pydantic schemas
+├── db/               # Database configuration and session management
+├── migrations/       # Alembic migrations
+├── templates/        # Jinja2 templates
+├── feature_access.py # FeatureAccessMiddleware + per-role feature matrix
+├── features.py       # Feature-flag gating helpers
+├── config.py         # Settings (env-driven)
+├── admin_routes.py   # Admin interface routes
+└── main.py           # Application factory
 ```
+
+There is no dedicated `middleware/` package — the custom middleware
+(`FeatureAccessMiddleware`) lives in `feature_access.py`. Pydantic
+request/response schemas live next to the models that use them
+(`models/schemas.py`) rather than in a separate `schemas/` package.
 
 ### **Feature-Based Organization**
 
@@ -369,7 +381,7 @@ Use appropriate HTTP methods and status codes:
 
 **Table Names:**
 - Use `snake_case` (plural for tables)
-- Example: `personnel`, `grouping_user_accesses`
+- Example: `personnel`, `user_subunit_assignments`
 
 **Column Names:**
 - Use `snake_case`
@@ -430,17 +442,29 @@ class Grouping(Base):
 
 The project uses automated tools to enforce these guidelines:
 
-1. **Ruff** - Linting and formatting
+1. **Ruff** - Linting and formatting. The configured rule set
+   (`pyproject.toml`) selects `E`, `W`, `F`, `I`, `B`, `C4`, `UP`,
+   `ARG`, and `SIM` — pycodestyle, Pyflakes, import sorting (isort),
+   bugbear, comprehensions, pyupgrade, unused arguments, and
+   simplification. **Ruff does not enforce type annotations or
+   async-only rules**; those remain manual-review/pyright concerns.
    ```bash
-   ruff check src/     # Check for violations
-   ruff format src/    # Auto-format code
+   uv run ruff check src tests scripts     # Check for violations
+   uv run ruff format src tests scripts    # Auto-format code
    ```
 
 2. **Pre-commit Hooks** - Run before commits
+   ([`.pre-commit-config.yaml`](../.pre-commit-config.yaml), ruff
+   v0.15.12, matching the version resolved in `uv.lock`):
    ```bash
-   ruff check --fix src/  # Auto-fix violations
-   ruff format src/       # Format code
+   ruff --fix             # Lint with autofix (unused imports, sorting, ...)
+   ruff-format            # Format code (not a check-only pass)
    ```
+
+3. **CI** - [.github/workflows/ci.yml](../.github/workflows/ci.yml) is
+   the enforcement point: every PR and push to `main` runs ruff lint,
+   ruff format check, and the full test suite with the coverage gate
+   (`--cov-fail-under`, see [TESTING.md](TESTING.md)).
 
 ### **Common Violations to Watch For**
 
@@ -449,8 +473,8 @@ The project uses automated tools to enforce these guidelines:
 | `import datetime` | Manual review | Use `from parade_state.utils import utc_dt` |
 | `import uuid` | Manual review | Use `from parade_state.utils import ids` |
 | `import os` | Manual review | Use `from parade_state.utils import env` |
-| Missing type annotations | `ruff check` | Add complete type hints |
-| Sync database operations | `ruff check` | Use async/await |
+| Missing type annotations | Manual review / pyright (not ruff) | Add complete type hints |
+| Sync database operations | Manual review (not ruff) | Use async/await |
 
 ---
 
@@ -458,27 +482,17 @@ The project uses automated tools to enforce these guidelines:
 
 ### **Dependency Security**
 
-**Recommended Addition:**
+**In place:**
 - **`pip-audit`** - Automated vulnerability scanning for dependencies
-- Add to CI/CD pipeline for automated security checks
-- Run manually: `pip-audit` to check for known vulnerabilities
+  (part of the `dev` dependency group in `pyproject.toml`)
+- Weekly audit of the production dependency set via
+  [`.github/workflows/pip-audit.yml`](../.github/workflows/pip-audit.yml)
+  (Mondays 03:00 UTC, plus manual dispatch for immediate checks of newly
+  disclosed advisories)
 
-**Benefits:**
-- Automated security vulnerability detection
-- Dependency monitoring for security patches
-- Compliance with security best practices
-
-**Implementation:**
+**Run manually:**
 ```bash
-# Install pip-audit
-uv add --dev pip-audit
-
-# Run security audit
 uv run pip-audit
-
-# CI/CD integration
-- name: Security audit
-  run: uv run pip-audit
 ```
 
 ### **Version Management**

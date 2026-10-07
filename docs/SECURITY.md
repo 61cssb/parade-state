@@ -136,24 +136,35 @@ a spoof regression suite asserting the params have no effect.
 
 ### Implement Role-Based Access Control
 
-**Define clear roles and permissions:**
+**Roles are a database enum on `users.role`** — `super_admin`, `admin`,
+`user` (see `models/access.py`) — not a Python class. Check the string
+value directly:
 
 ```python
-# User roles
-class UserRole:
-    SUPER_ADMIN = "super_admin"  # Full system access
-    ADMIN = "admin"              # Can manage users and most data
-    USER = "user"                # Can record attendance
-
-# Permission checks
-def can_update_personnel(user_role: str) -> bool:
-    """Check if user can update personnel records."""
-    return user_role in ["admin", "super_admin"]
-
-def can_delete_grouping(user_role: str) -> bool:
-    """Check if user can delete groupings."""
-    return user_role == "super_admin"
+# roles as stored: "super_admin" | "admin" | "user"
+if user.role == "super_admin":
+    ...  # unrestricted; bypasses every scope check
 ```
+
+**User-management rules (enforced in `api/users.py`):** any modification
+of a `super_admin` account, promotion **to** `super_admin`, and user
+deletion are super-admin-only — an admin acting on those gets 403.
+
+**Data-scope enforcement is centralized in `api/subunit_access.py`** —
+every scope decision flows through these functions (callers pass the
+session-derived `user_id` / `user_role` since issue 31):
+
+```python
+from parade_state.api import subunit_access
+
+grants = await subunit_access.get_scope_grants(db, user_id, nr_id)
+locations = await subunit_access.resolve_effective_locations(db, pids, tagging_id)
+await subunit_access.assert_nr_accessible(db, user_id, user_role, nr_id)   # raising (write gate)
+locations = await subunit_access.assert_locations_in_scope(...)            # raising (write gate)
+pids_allowed = await subunit_access.in_scope_pids(...)                     # non-raising (read filter)
+```
+
+`super_admin` bypasses every check; everyone else is deny-by-default.
 
 ### Grouping Access Control (issue 26 redesign)
 
@@ -193,34 +204,35 @@ user: User = Depends(require_super_admin_user)
 ```python
 # Personnel/attendance reads and writes gated per NR by scope grants
 # (api/subunit_access.py — the single enforcement seam; callers pass the
-# session-derived user.id / user.role since issue #31 landed)
-async def list_writable_personnel(user_id: str, user_role: str, nominal_roll_id: str):
-    grants = await get_scope_grants(db, user_id, nominal_roll_id)
-    locations = await resolve_effective_locations(db, pids, tagging_id)
-    return [p for p in personnel if grant_matches(grants, *locations[p.id])]
+# session-derived user.id / user.role since issue #31 landed). Read path:
+scoped_pids = await in_scope_pids(
+    db, user_id, user_role, nominal_roll_id, active_tagging_id, all_pids
+)
+# Write path — raises 403 naming the out-of-scope "unit/sub-unit" labels:
+locations = await assert_locations_in_scope(
+    db, user_id, user_role, nominal_roll_id, personnel_ids, active_tagging_id
+)
 ```
 
 ### Subunit Scope Filtering
 
-**Per-nominal-roll access control:**
+**Per-nominal-roll access control** — a grant covers a personnel row when
+it matches the row's *effective* location (tagging overlay remap if
+present, canonical `unit`/`sub_unit_1` otherwise):
 
 ```python
-async def check_subunit_access(
-    user_id: str,
-    nominal_roll_id: str,
-    effective_sub_unit_1: str,
-    db: AsyncSession,
-) -> bool:
-    """Check the user may write rows with this effective sub_unit_1 on this roll."""
+# api/subunit_access.py — the real matching helpers
+grants = await get_scope_grants(db, user_id, nominal_roll_id)
+locations = await resolve_effective_locations(db, personnel_ids, tagging_id)
 
-    # Deny-by-default: no assignments means no write access
-    assignments = await get_user_subunit_assignments(
-        user_id, nominal_roll_id, db
-    )
-    return any(
-        a.sub_unit_1 == effective_sub_unit_1 for a in assignments
-    )
+# Deny-by-default: no grants means no access.
+covered = grant_matches(
+    grants, *locations[personnel_id]
+)  # True when any (unit, sub_unit_1) grant covers the effective location
 ```
+
+Most endpoints should not re-implement this — call
+`in_scope_pids` (reads) or `assert_locations_in_scope` (writes) instead.
 
 ### Access Control Best Practices
 
@@ -295,20 +307,18 @@ real `SESSION_SECRET` (see `Settings.validate()` in `config.py`).
 
 ### Session Expiration
 
-**Implement appropriate session timeouts:**
+**Session lifetimes (as implemented):**
 
-```python
-# Set session expiration
-SESSION_EXPIRY_MINUTES = 60 * 8  # 8 hours
+- **Database session tokens** (`UserSession`) expire after **7 days**
+  (`create_user_session` default `expires_days=7`, `auth/session.py`);
+  validity is checked on every request
+- **Auth cookie** (`session_token`) carries a **24-hour** max-age
+  (`AUTH_COOKIE_MAX_AGE = 86400`, `utils/cookies.py`) — the browser
+  forgets the token long before the server-side session lapses
 
-def is_session_expired(session: UserSession) -> bool:
-    """Check if session has expired."""
-    from parade_state.utils import utc_dt
-
-    if utc_dt.is_expired(session.expires_at):
-        return True
-    return False
-```
+Logout and revocation delete the `UserSession` row
+(`invalidate_session` / `invalidate_user_sessions`), and
+`cleanup_expired_sessions` prunes expired rows.
 
 ### OAuth Security
 
@@ -366,20 +376,11 @@ GOOGLE_CLIENT_SECRET = env.get_required("GOOGLE_CLIENT_SECRET")
 
 ### Rate Limiting
 
-**Implement rate limiting to prevent abuse:**
-
-```python
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
-limiter = Limiter(key_func=get_remote_address)
-
-@app.post("/api/v1/attendance")
-@limiter.limit("10/minute")
-async def record_attendance():
-    """Limit to 10 requests per minute."""
-    pass
-```
+**Not implemented.** There is no rate-limiting middleware (no slowapi or
+equivalent) in the codebase. Authentication sits behind Google OAuth and
+the API is admin-only, which limits abuse surface; if the deployment ever
+becomes a target, a reverse-proxy or gateway-level limiter (or slowapi)
+would be the place to add it.
 
 ### CORS Configuration
 
@@ -470,7 +471,6 @@ raise HTTPException(
 - [ ] Session management is secure (HTTP-only, secure flags)
 - [ ] Error messages don't expose internal details
 - [ ] CORS is properly configured
-- [ ] Rate limiting is implemented where appropriate
 
 ### Code Review Security Checklist
 

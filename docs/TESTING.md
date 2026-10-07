@@ -50,25 +50,41 @@
 ```
 tests/
 ├── conftest.py                 # Shared fixtures and configuration
-├── integration/                # Integration tests
-│   ├── test_api.py
-│   ├── test_attendance_api.py
-│   └── test_*.py
-└── behavioral/                 # Behavioral tests
-    └── test_auth.py
+├── README.md                   # Suite overview for newcomers
+├── test_utils.py               # Utility-module tests (tests/ root)
+├── unit/                       # Unit tests (5 files)
+│   ├── test_config.py
+│   ├── test_db_url.py
+│   ├── test_ids.py
+│   ├── test_ranks.py
+│   └── test_utc_dt.py
+├── behavioral/                 # Behavioral tests (3 files)
+│   ├── test_access_control.py
+│   ├── test_auth.py
+│   └── test_csv_personnel.py
+└── integration/                # Integration tests (31 files)
+    ├── conftest.py             # well_known_users + client_as fixtures
+    ├── test_api.py
+    ├── test_attendance_api.py
+    └── test_*.py
 ```
 
 ### Test Categories
 
-1. **Integration Tests**: Test API endpoints with real database
-   - Use `client` fixture for HTTP requests
-   - Use `db_session` for direct database operations
-   - Test complete request/response cycles
+1. **Unit Tests**: Test pure functions in isolation
+   - `tests/unit/` covers config, DB-URL normalization, ID helpers, ranks, and UTC datetime handling
+   - `tests/test_utils.py` covers the shared utility modules
 
 2. **Behavioral Tests**: Test user workflows and behavior
    - Focus on user interactions
    - Test complex scenarios
    - May use higher-level abstractions
+
+3. **Integration Tests**: Test API endpoints with real database
+   - Use `client` fixture for HTTP requests
+   - Use `db_session` for direct database operations
+   - Test complete request/response cycles
+   - The bulk of the suite (31 files under `tests/integration/`)
 
 ---
 
@@ -117,9 +133,6 @@ uv run pytest -k "personnel"
 
 # Run last failed tests
 uv run pytest --lf
-
-# Run tests multiple times (check for flakiness)
-uv run pytest --count=3 tests/integration/test_personnel_api.py
 ```
 
 ### Test Organization
@@ -153,9 +166,15 @@ uv run pytest -x --pdb
 
 ### Coverage Reports
 
+Coverage is configured in `pyproject.toml` (`addopts`), so a bare
+`uv run pytest` always collects coverage **and enforces the gate**:
+`--cov-fail-under=60` fails the run when coverage drops below 60%. The
+suite currently sits around 62%. Pass `--no-cov` when iterating to skip
+coverage entirely.
+
 ```bash
-# Generate coverage report
-uv run pytest --cov=src/parade_state
+# Generate coverage report (gate enforced: fails under 60%)
+uv run pytest
 
 # Generate HTML coverage report
 uv run pytest --cov=src/parade_state --cov-report=html
@@ -187,6 +206,15 @@ Unset, the suite runs on per-test SQLite files as usual. Run this before
 releases and after any migration change (see `docs/DEPLOYMENT.md` for the
 related migration downgrade/round-trip checks).
 
+### Canonical Callup Fixture
+
+The real callup CSV lives under the gitignored `/fixtures` directory —
+it carries live PII and is never committed to the public repo. The
+acceptance test `test_process_canonical_fixture_acceptance`
+(`tests/integration/test_csv_process_api.py`) skips itself when the
+fixture is absent, so machines without a local copy still get a green
+suite; it only runs where the fixture exists.
+
 ---
 
 ## Database Isolation Strategy
@@ -203,7 +231,7 @@ We use **function-scoped database fixtures** (one database per test) rather than
 
 **Trade-offs**:
 - ⚠️ Slower than session-scoped (creates database per test)
-- ✅ Still fast enough for development (14 seconds for 208 tests)
+- ✅ Still fast enough for development (~3 minutes for the full suite)
 - ✅ Can optimize later if needed
 
 ### The Critical Fix: Database Reinitialization Prevention
@@ -222,8 +250,7 @@ async def lifespan(app: FastAPI):
 
     # Only initialize if not already initialized (prevents test database reset)
     if get_session_maker() is None:
-        database_url = env.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
-        init_database(database_url)
+        init_database(settings.DATABASE_URL)
     yield
 ```
 
@@ -315,12 +342,15 @@ All sample fixtures are function-scoped and use `db_session`:
 
 - `sample_access_levels`: Creates access level records
 - `sample_users`: Creates admin and regular users
-- `sample_nominal_roll`: Creates establishment record
-- `sample_personnel`: Creates personnel records
+- `sample_nominal_roll`: Creates a nominal roll record
+- `sample_personnel`: Creates personnel records on the sample roll
 - `sample_grouping`: Creates a grouping (label + groups) on the sample NR
-- `sample_session`: Creates session record
-- `sample_sessions`: Creates multiple session records
-- `sample_attendance_records`: Creates attendance records
+- `sample_grouping_memberships`: Assigns the sample personnel to the grouping's groups
+- `sample_attendance_scope`: Marks the sample NR as the one active for attendance
+- `sample_attendance`: Creates attendance rows (single session) for the sample personnel
+- `admin_subunit_assignment`: Grants both admin identities scope over the sample roster
+- `admin_token_headers` / `user_token_headers` / `super_admin_token_headers`: Bearer headers backed by a real minted `UserSession`
+- `admin_id`: The sample admin's user ID as a string
 
 **Usage**:
 ```python
@@ -328,6 +358,18 @@ async def test_with_samples(sample_users, sample_grouping):
     admin = sample_users["admin"]
     grouping = sample_grouping
 ```
+
+### Integration-Only Fixtures
+
+Two fixtures live in `tests/integration/conftest.py` and apply only
+under `tests/integration/`:
+
+- `well_known_users` (autouse): Seeds the well-known identity strings
+  (`admin-user-id`, `super-admin-test-id`, `user-id`, ...) as real
+  `users` rows, since Postgres enforces the foreign keys SQLite ignores
+- `client_as`: Factory that authenticates the test client as a user via
+  a session cookie — accepts a well-known ID, a role shorthand
+  (`"admin"`, `"super_admin"`, `"user"`), or a `User` object
 
 ---
 
@@ -637,8 +679,8 @@ uv run pytest tests/integration/ -xvs
 ### Step 5: Verify Isolation
 
 ```bash
-# Run tests multiple times to ensure no interference
-uv run pytest tests/integration/test_feature.py --count=3
+# Run the whole file twice in one session to check for interference
+uv run pytest tests/integration/test_feature.py tests/integration/test_feature.py
 ```
 
 ---
@@ -708,16 +750,16 @@ uv run pytest tests/integration/test_feature.py --count=3
 
 ### Current Status
 
-- **Total Tests**: 208
-- **Passing**: 109 (87%)
-- **Failing**: 16 (13% - authentication issues)
-- **Fixture Errors**: 0 ✅
+- **Passed**: 681
+- **Skipped**: 4 (environment-dependent skips, e.g. the canonical-fixture acceptance test skips where the gitignored `/fixtures` copy is absent)
+- **Failing**: 0 ✅
+- **Coverage**: ~62% (enforced gate: 60% via `--cov-fail-under` in `pyproject.toml`)
 
 ### Execution Time
 
-- **Full Test Suite**: ~21 seconds
+- **Full Test Suite**: ~3 minutes (including coverage collection)
 - **Single Test**: <1 second
-- **Performance**: Acceptable for development
+- **Performance**: Acceptable for development; use `--no-cov -q` and `-k`/`--lf` selection when iterating
 
 ---
 
@@ -729,6 +771,6 @@ uv run pytest tests/integration/test_feature.py --count=3
 
 ---
 
-**Last Updated**: 2026-05-09
+**Last Updated**: 2026-10-07
 **Maintained By**: Development Team
 **Questions**: See Troubleshooting section or ask in team chat

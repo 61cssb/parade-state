@@ -1,7 +1,7 @@
 # Parade State Management System - Technical Specification
 
 **Version:** 1.0  
-**Date:** 2026-05-08  
+**Date:** 2026-05-08 (updated 2026-10-07 to match implemented behavior)  
 **Status:** Implementation Specification  
 
 ---
@@ -29,7 +29,8 @@ The personnel branch currently manages battalion parade state through a manual m
 ```
 Nominal Roll (CAA-pinned, CSV-sourced, read-only; one NR is active for attendance)
  ├── Tagging (1:1 with NR; the overlay of person → subunit remaps; never mutates the NR)
- └── Attendance (one row per personnel/day on the active NR; AM and PM status + remarks)
+ └── Attendance (one row per personnel/day on the active NR; a single session
+     per day — status + optional reason + remarks, issue 33)
 
 Grouping (a labelled set of groups on the NR active for attendance) —
   a separate feature, never interacting with attendance.
@@ -45,21 +46,35 @@ Grouping (a labelled set of groups on the NR active for attendance) —
 
 **In Scope (v1):**
 - CSV ingestion with CAA versioning, column mapping, diff detection
+  *(shipped as the two-step upload→process flow under the fixed
+  header-name contract — the column-mapping and diff-confirmation steps
+  are deferred; see §4.5)*
 - Grouping management: create, clone (same-roll), copy from the previously
   activated roll (cross-roll, re-linked by pers_no)
 - Attendance taking: single daily session, present/absent + optional reason enum, NR-scoped with the 1:1 Tagging overlay applied, active-NR gating
-- Row access control (access level + subunit scope) and column sensitivity control
+- Row access control (access level + subunit scope); column sensitivity
+  control is not implemented (see §5.4)
 - Parade state table view scoped to user access with inline editing
-- Admin UI: enums, users, column sensitivity, column mapping, grouping/tagging/attendance management
-- Mobile-friendly static HTML/JS attendance frontend
-- Service worker + IndexedDB read-only cache (24hr TTL, stale indicator)
-- SSE stale-detection signal on attendance view
+- Admin UI: Jinja2 templates — users, taggings, deferments, CSV upload,
+  audit log, database restore, settings (purge + feature-access matrix);
+  NR management lives in an expander on the NR view, grouping management
+  on the Grouping page *(the planned NiceGUI admin UI was never built;
+  updated 2026-10-07)*
+- Mobile-friendly attendance frontend: the server-rendered Jinja
+  `/attendance` page with per-row autosave (red-edge retry on a failed
+  save). The originally planned static HTML/JS app, the service worker +
+  IndexedDB cache, and the SSE stale-detection endpoint were removed from
+  the design (2026-10-07) — none were ever shipped
 
 **Out of Scope (deferred):**
 - Serviceman self-service access
-- View projections / aggregated dashboards / export
+- View projections / aggregated dashboards / export *(slim CSV exports of
+  the Grouping, NR-browser, and Attendance views shipped under issues
+  26/27; projections and dashboards remain out of scope)*
 - Automated push notifications or HQ reporting
-- Vue SFC refactor of mobile frontend (revisit after MVP)
+- Vue SFC refactor of mobile frontend (revisit after MVP) *(moot in the
+  shipped shape — the mobile surface is the server-rendered `/attendance`
+  page; there is no SFC frontend to refactor)*
 
 ---
 
@@ -424,13 +439,17 @@ Personnel
 - `remarks` stores the **first** `Remarks` CSV column verbatim (duplicate
   `Remarks` headers are ignored after the first); NULL when blank. The CSV
   `Reason` column is read but never stored.
-- **Attendance visibility (interim rule until #33):** the attendance
-  roster/view/dashboard includes personnel with `inpro_status != 'deferred'`
-  — i.e. yet_to_inpro + inproed. Deferred personnel are hidden.
+- **Attendance visibility (issue 33 — replaces the interim hide-deferred
+  rule, which never shipped):** the marking roster is **everyone** on the
+  active NR, deferred included. The Inpro Status column (read-only) and
+  its filter (e.g. hide Deferred) on the marking page are view concerns
+  only: filtering hides rows non-destructively and never deletes or
+  alters the underlying records. The only surface where `deferred`
+  excludes a person is the Unit Strength report's **In** bucket (§3.5.2).
 - **Post-hoc changes are non-destructive:** changing a person's status to
-  `deferred` never deletes or alters existing attendance records — it
-  only hides the person from the attendance view, with no distinct rendering
-  of hidden rows anywhere.
+  `deferred` never deletes or alters existing attendance records — the
+  person stays on the roster (the Inpro filter merely hides the row from
+  the view), with no distinct rendering of filtered rows anywhere.
 - Inline editing in the NR management table (PATCH `/personnel/{id}`;
   enum-invalid values are rejected with 422): super-admins can edit
   `inpro_status` and admins (admin + super_admin) can edit `remarks`;
@@ -824,7 +843,13 @@ ids.
 ### 4.3 Attendance Activation & Editability
 
 > **Removed in issue #4:** the user-managed Session model (open/closed/finalized).
-> AM and PM are now hardcoded. The `/api/v1/sessions/*` routes return 410 Gone.
+> AM and PM were initially hardcoded; issue 33 then removed the AM/PM split
+> entirely — "session" now only means *one attendance row per day* (§2.3).
+> Traces of the old model survive deliberately: `/api/v1/sessions/*` returns
+> 410 Gone so stale clients get a clear signal, and `session` remains an
+> `audit_entity_type` enum value (with the `close` / `finalize` audit
+> actions) because Postgres cannot drop enum values without a type rebuild
+> and retained logs may still carry them.
 >
 > **Removed in the active-NR model:** the per-NR `AttendanceScope` table and
 > the NR confirm/unconfirm workflow. Exactly one NR is active for attendance
@@ -854,6 +879,14 @@ Assignments are managed by super-admin via
 `/api/v1/access-control/{nominal-rolls/{nr_id}/..., users/{user_id}/...}/subunit-assignments`.
 
 ### 4.4 Column Mapping Constraint
+
+> **Deferred (2026-10-07) — not implemented.** The shipped ingestion
+> pipeline does not consult (or write) the `ColumnMapping` table: columns
+> are matched against the fixed header-name contract v2 in
+> `parade_state.utils.csv_constants` (see §4.5). The table itself still
+> exists (and is preserved by the data purge), but nothing reads it.
+> Generalizing to admin-editable mappings is roadmap work ("CSV Step 2"
+> in NEXT_PHASE.md); the constraint below is that deferred design.
 
 **Global Constraint:** Each canonical column name maps from at most ONE raw CSV column name
 
@@ -913,38 +946,38 @@ and ignored (nothing is captured into `extra_fields`).
   560 rows) processes into 397 personnel with 163 No rows skipped and 2
   NULL-`pers_no` rows.
 
+**Shipped pipeline — two steps (updated 2026-10-07).** The original
+3-step design (mapping confirmation → CAA replacement prompt → diff
+confirmation) was never built; steps 2-3 of it are deferred roadmap work
+("CSV Step 2 / Step 3" in NEXT_PHASE.md, see also §4.4). What ships:
+
 ```
-Upload File
+Step 1 — POST /api/v1/csv/upload (super-admin)
+Upload File (.csv, non-empty, ≤ 10 MB — 413 over the cap)
   ↓
-[CsvUpload.status = 'received']
+SHA-256 the raw bytes; hash already stored → return the existing upload
+with is_duplicate=true (dedup; no second row)
   ↓
-Auto-match headers against ColumnMapping
+Decode (UTF-8 with a latin-1 fallback), parse the header row, count
+data lines
   ↓
-[User resolves unmapped required columns & conflicts]
+Store the raw bytes immutably in CsvUpload
+CsvUpload.status = 'received' — and it stays 'received': the mapping/
+diff statuses in the enum are unused by the shipped pipeline
   ↓
-[CsvUpload.status = 'mapping_confirmed']
+Step 2 — POST /api/v1/csv/{upload_id}/process (super-admin;
+"Process into Nominal Roll" in the admin CSV upload view)
+Upload already processed? → 409
   ↓
-Check CAA uniqueness
-  ├─ CAA new → proceed
-  └─ CAA exists (existing Nominal Roll) → prompt admin for replacement
-      ├─ Admin rejects → stop
-      └─ Admin confirms replacement
-          → Archive prior Nominal Roll+related entities
-          → Proceed with new Nominal Roll
+CAA date parsed from the filename (caaYYMMDD token; 400 without one)
   ↓
-Compute diff (current CSV vs prior CSV)
+CAA uniqueness check — an NR with this CAA already exists → 409.
+There is no replacement flow: delete the NR (super-admin) and re-upload
   ↓
-[Admin reviews & confirms diff]
-  ↓
-[CsvUpload.status = 'diff_confirmed']
-  ↓
-[Admin processes the upload into a Nominal Roll ("Process into Nominal Roll"
- in the admin CSV upload view)]
-  ↓
-Create NominalRoll (CAA parsed from the filename, e.g. caaYYMMDD; no status
-workflow — every NR is equal)
 Validate the header against the contract v2 (missing required column,
-incl. blank Unit header → error naming the column)
+incl. blank Unit header → 400 naming the column)
+  ↓
+Create NominalRoll (no status workflow — every NR is equal)
 Filter rows: Callup Decision exactly 'Yes' (case-insensitive) → stored;
 everything else skipped and counted
 Populate Personnel records (core columns; optional Pers → pers_no, blank →
@@ -953,9 +986,16 @@ HK ICT → extra_fields.hk_ict, optional Age(Yr) → extra_fields.age_yr;
 inpro_status defaults to yet_to_inpro)
 Persist ColumnMetadata for the source columns
 Auto-create the NR's empty 1:1 Tagging
-Optionally import taggings from another NR (chosen by the admin; entries
-copied across by `pers_no` match, no-clobber)
+Optionally import taggings from another NR (source_nominal_roll_id;
+entries copied across by `pers_no` match, no-clobber, unmatched source
+personnel surfaced in the response)
+  ↓
+Link CsvUpload.nominal_roll_id; audit-log the NR create
 ```
+
+For convenience, `POST /api/v1/csv/upload?auto_process=true` runs step 2
+immediately after storing; a processing failure is reported via
+`process_error` and the upload remains stored for the manual flow.
 
 ### 4.6 Deferment Inpro-Status Transition (issue 32)
 
@@ -1080,7 +1120,7 @@ changes apply immediately with no restart.
 | User | - | (access_level_id) | Access lookup |
 | AccessLevel | (name), (level_order) | - | Vocab uniqueness |
 | Nominal Roll | (caa) | (caa) | CAA uniqueness; application-level: only one `attendance_active` |
-| ColumnMapping | (canonical_name) among non-deprecated | (canonical_name) | Mapping uniqueness |
+| ColumnMapping | (canonical_name) among non-deprecated | (canonical_name) | Mapping uniqueness (legacy table — not used by the shipped ingestion pipeline, §4.4) |
 | Grouping | (nominal_roll_id, label) | (label), (nominal_roll_id) | Label uniqueness per NR |
 | GroupingGroup | (grouping_id, label) | (grouping_id) | Group enum uniqueness |
 | GroupingMembership | (grouping_id, personnel_id, group_id) | (grouping_id), (group_id), (personnel_id) | Membership dedup |
@@ -1181,8 +1221,11 @@ personnel slipped through deny-by-default).
 
 **User sees personnel row if:**
 - The row's effective (unit, sub_unit_1) matches at least one of the
-  user's grants on that nominal roll, AND
-- User.access_level_id.level_order ≥ ColumnMetadata.sensitivity_level_id.level_order (for each visible column)
+  user's grants on that nominal roll.
+- The original design's second clause — access-level
+  `level_order` ≥ column-sensitivity `level_order` per visible column —
+  was **never implemented** (see §5.4); row visibility is the grant match
+  alone.
 
 `super_admin` bypasses every check. Regular admins are deny-by-default:
 no grants on an NR means no access to it — the NR list omits it, and
@@ -1200,7 +1243,15 @@ super admins.)*
 
 ### 5.4 Column Visibility Rules
 
-**Column visible in UI if:**
+> **Not implemented (2026-10-07).** `ColumnMetadata.sensitivity_level_id`
+> exists on the model, but nothing enforces it: no endpoint returns a
+> per-user column manifest, no view hides columns by access level, and
+> there is no admin UI for assigning sensitivity to columns. Every
+> authenticated viewer of a page sees that page's full column set (row
+> visibility still applies per §5.3). The rules below are the deferred
+> design, kept for when column sensitivity ships.
+
+**Column visible in UI if (deferred design):**
 - ColumnMetadata.sensitivity_level_id = null → admin-only
 - ColumnMetadata.sensitivity_level_id != null → user.access_level_id.level_order ≥ sensitivity_level_id.level_order
 
@@ -1216,28 +1267,49 @@ Admin-defined ordered string labels (e.g. unit, coy, platoon, section). Linear h
 
 ### 6.1 API Design Principles
 
-**Column manifest pattern:** All data endpoints return columns (user-visible column manifest) + rows (objects containing only manifest keys). Clients render headers from manifest; never hardcode column names.
+**Column manifest pattern — not implemented.** The original design had
+all data endpoints return a user-visible `columns` manifest plus `rows`
+keyed to it. Shipped endpoints return plain JSON payloads and the Jinja2
+templates render fixed column sets; no manifest endpoint exists. Kept as
+a design note for a future API-driven client.
 
-**SSE stale detection:** GET /api/v1/events/attendance emits data_changed signal events (no payload data) when any record in the user's scope is modified. Client fetches on user confirmation. 30s keep-alive ping.
+**SSE stale detection — removed (2026-10-07), never shipped.** There is
+no `/api/v1/events/*` route and no event stream of any kind. The
+attendance page is server-rendered and each row PUTs itself on edit
+(autosave, §2.3), so no change signal is needed; reload the page to see
+others' changes.
 
 **Auth:** session cookie (HttpOnly, Secure, SameSite=Strict). Google OAuth via Authlib.
 
-### 6.2 Required Columns (App Config)
+### 6.2 Required Columns (CSV Ingestion Contract)
 
-Declared in app.config.json (deployment-time change, not admin UI):
+> The contract lives in code — `parade_state.utils.csv_constants` (issue
+> 34, shared by the upload endpoint and the demo ingester) — **not** in
+> `app.config.json`. That file is a dead artifact of the original design:
+> nothing reads it, and it is not a config source. It is not
+> admin-editable either; changing the contract is a code change.
 
-| Canonical name | Purpose |
+Required headers (exact name match after stripping surrounding
+whitespace, first occurrence wins; a missing required column — including
+a blank `Unit` header — rejects the process request with an error naming
+the column):
+
+| CSV header | Purpose |
 |---|---|
-| unit | Top-level unit identifier |
-| sub_unit_1 | Subunit level 1 |
-| sub_unit_2 | Subunit level 2 |
-| sub_unit_3 | Subunit level 3 |
-| rank | Display; used to infer `category` |
-| full_name | Display |
-| pers_no | The external personnel number; the cross-roll person identity |
+| Unit | Top-level unit identifier |
+| Sub Unit 1 / Sub Unit 2 / Sub Unit 3 | Subunit levels 1-3 |
+| Rank | Display; used to infer `category` |
+| Full Name | Display |
+| Callup Decision | Strict row filter: only exactly-`Yes` rows are stored; the column itself is never stored |
+| Reason | Read but never stored |
+| Remarks | First `Remarks` column → `personnel.remarks` |
+| ORNS (alias `ORNS Yrs`) | `extra_fields.orns` (int) |
+| HK ICT | `extra_fields.hk_ict` (int) |
 
-**Note:** `pers_no` is imported from the CSV `Pers` column and is the canonical personnel
-identity (see §3.2.1). Blank cells store NULL.
+**Optional headers:** `Pers` → `pers_no` (blank or absent column → NULL;
+the external personnel number and cross-roll person identity, see §3.2.1)
+and `Age(Yr)` → `extra_fields.age_yr` (int). Extra columns are tolerated
+and ignored.
 
 ### 6.3 Grouping Operations
 
@@ -1338,9 +1410,12 @@ extra_fields: Mapped[dict] = mapped_column(JSON, default=dict)
 - Easy debugging: Failures are self-contained
 - Parallel execution ready: Safe to run tests in parallel
 
-**Test Results:**
-- 26/26 tests passing (100% pass rate)
-- 93.77% code coverage (exceeds 80% requirement)
+**Test Results (2026-10-07, SQLite suite):**
+- 681 passed / 4 skipped (flags-on posture; flags-off gating has
+  dedicated tests). The same suite runs against Postgres by setting
+  `TEST_DATABASE_URL` (per-test databases).
+- 62% code coverage (gate: 60%, enforced via `--cov-fail-under` in
+  pyproject.toml)
 
 ### 7.6 Static Analysis Tooling
 
@@ -1357,12 +1432,13 @@ extra_fields: Mapped[dict] = mapped_column(JSON, default=dict)
 | Layer | Choice | Notes |
 |---|---|---|
 | Language | Python 3.12+ | |
-| API framework | FastAPI | Async; OpenAPI generation; SSE via StreamingResponse |
-| Admin UI | NiceGUI | Mounted on FastAPI app at /admin; Quasar components |
-| Mobile UI (MVP) | Static HTML + vanilla JS | Served by FastAPI; no build step |
-| ORM | SQLAlchemy 2.x async | asyncpg driver; shared pool across FastAPI and NiceGUI |
+| API framework | FastAPI | Async; OpenAPI generation |
+| Admin UI | Jinja2 templates | Server-rendered pages under `/admin` (the planned NiceGUI was never built) |
+| Mobile UI (MVP) | Jinja2 template + vanilla JS | The `/attendance` page; per-row autosave against the REST API |
+| ORM | SQLAlchemy 2.x async | asyncpg driver; shared pool across FastAPI and the Jinja2 web routes |
 | Auth | Authlib | Google OAuth 2.0; session middleware |
-| Background jobs | APScheduler AsyncIOScheduler | SQLAlchemy job store (Postgres) for multi-instance safety |
+| Background jobs | None | No scheduler in the process (APScheduler was never built); everything runs in-request |
+| Upload storage | File-based, in the database | Raw CSV bytes persisted verbatim on `CsvUpload.raw_content` (10 MB cap); no filesystem persistence |
 | Database | PostgreSQL 15+ | Production database |
 | Testing Database | SQLite (in-memory) | Complete test isolation |
 | Package management | uv | Fast resolver; pyproject.toml |

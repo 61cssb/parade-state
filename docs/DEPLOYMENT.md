@@ -31,12 +31,23 @@
 - [ ] Monitoring and logging configured
 
 **Application Readiness:**
-- [ ] All tests passing (`uv run pytest`)
+- [ ] All tests passing (`uv run pytest`; the run also enforces the 60% coverage gate)
 - [ ] Database migrations prepared
 - [ ] No hardcoded secrets in code
-- [ ] Dependencies up to date (`uv run pip-audit`)
+- [ ] Dependencies up to date (`uv run pip-audit`; CI also audits the
+      production dependency set weekly via
+      [`.github/workflows/pip-audit.yml`](../.github/workflows/pip-audit.yml))
 - [ ] Performance testing completed
 - [ ] Security review completed
+
+### Continuous Integration
+
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every
+pull request and every push to `main`: ruff lint + format check, then the
+full test suite (file-based SQLite per test, no database service needed)
+with the coverage gate from `pyproject.toml`. A green CI run is the
+baseline for merging; deployment additionally requires the manual checks
+above.
 
 ---
 
@@ -135,7 +146,7 @@ env-var change plus service restart (no deploy).
 |---|---|---|---|---|
 | `FEATURE_DEFERMENTS` | `/admin/deferments` page, `/api/v1/deferments/*`, nav entry | off | `true` | unset (off) |
 | `FEATURE_GROUPING` | `/grouping` page, `/api/v1/groupings/*`, nav entry | off | `true` | unset (off) |
-| `FEATURE_STRENGTH` | Unit Strength report at `/admin`, nav entry | off | `true` | `true` (shipped; unset only to hide) |
+| `FEATURE_STRENGTH` | Unit Strength report at `/admin`, nav entry | off | `true` | unset (off) — enable explicitly |
 | `FEATURE_DISCUSSIONS` | Discussions board: `/admin/discussions` pages, `/api/v1/discussions/*`, nav entry (admins only) | off | `true` | unset (off) |
 | `FEATURE_NOMINALROLL` | Nominal Roll stack: `/nominal-roll` + `/admin/csv-upload` + `/admin/taggings` pages, `/api/v1/nominal-rolls/*` + `/api/v1/csv/*` + `/api/v1/taggings/*`, nav entries | **on** | `true` | `true` (unset = on) |
 | `FEATURE_ATTENDANCE` | `/attendance` page, `/api/v1/attendance/*`, nav entry | **on** | `true` | `true` (unset = on) |
@@ -186,13 +197,13 @@ same normalization as the application engine (`postgresql://` →
 works for both migrations and the app.
 
 **Migration Files Location:**
-```
-src/parade_state/migrations/
-├── versions/
-│   └── bef66a2a675e_add_audit_trail_to_personnel.py
-├── env.py
-└── script.py.mako
-```
+
+`src/parade_state/migrations/` is a standard Alembic directory:
+`versions/` holds one revision script per schema change (the initial
+schema plus every incremental migration since — dozens of files, chained
+by down-revision links), `env.py` wires in the application's
+`DATABASE_URL` normalization, and `script.py.mako` is the template for
+new revisions.
 
 ### Running Migrations
 
@@ -434,9 +445,20 @@ only; see [BACKUP_SETUP.md](BACKUP_SETUP.md).
 **Docker Deployment:**
 
 The repo root ships the production [Dockerfile](../Dockerfile). It installs
-dependencies with uv (pinned, `--frozen --no-dev`), copies the source, and
-runs as an unprivileged user. The start command runs migrations before
-serving:
+dependencies with uv (pinned, `uv sync --frozen --no-dev`), copies the
+source, and runs as an unprivileged user. The container start command runs
+migrations before serving:
+
+```bash
+# as defined in the Dockerfile CMD:
+alembic upgrade head && uvicorn parade_state.main:app --host 0.0.0.0 \
+  --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips=*
+```
+
+`--proxy-headers` (with `--forwarded-allow-ips=*`) lets uvicorn honor the
+platform's `X-Forwarded-Proto` so `request.url.scheme` is https behind the
+edge proxy — required for OAuth redirect URIs and secure cookies. To build
+and run it yourself:
 
 ```bash
 # Build and run (migrations run automatically, then uvicorn on port 8000)
@@ -487,9 +509,12 @@ curl https://your-app.com/health
 ```json
 {
   "status": "healthy",
-  "timestamp": "2026-05-10T12:00:00Z"
+  "version": "0.1.0"
 }
 ```
+
+The response is static — `status` plus the application version
+(`settings.APP_VERSION`); there is no timestamp field.
 
 ### Monitoring Health
 
@@ -582,12 +607,14 @@ git push origin main --force
 
 ### Database Rollback
 
-Verified on fresh PostgreSQL 16: the full chain upgrades cleanly, and
-`alembic downgrade` works for realistic rollback windows (e.g. `downgrade -4`
-then `upgrade head` round-trips). Full `downgrade base` also completes, but
-leaves the native enum types behind (Postgres does not drop types with
-tables) — re-upgrading *that same database* then fails on type creation.
-After a downgrade-to-base, migrate into a fresh database instead.
+Verified against a fresh PostgreSQL server (round-trip checks originally
+ran on 16; the production server is now PostgreSQL 18): the full chain
+upgrades cleanly, and `alembic downgrade` works for realistic rollback
+windows (e.g. `downgrade -4` then `upgrade head` round-trips). Full
+`downgrade base` also completes, but leaves the native enum types behind
+(Postgres does not drop types with tables) — re-upgrading *that same
+database* then fails on type creation. After a downgrade-to-base, migrate
+into a fresh database instead.
 
 **If Migration Failed:**
 ```bash
@@ -710,7 +737,6 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 - [ ] OAuth secrets are rotated regularly
 - [ ] Database backups are encrypted
 - [ ] Access logs are monitored
-- [ ] Rate limiting is configured
 - [ ] CORS is properly configured
 
 ### Security Monitoring

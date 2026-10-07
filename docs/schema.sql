@@ -1,478 +1,642 @@
 -- =============================================================================
--- Parade State Management System
--- PostgreSQL Schema v0.1
+-- Parade State Management System — Schema Reference
 --
--- Design notes:
---   - All timestamps are TIMESTAMPTZ (UTC stored, display in local TZ)
---   - Soft-delete pattern used for enums and column mappings (deprecated flag)
---   - Append-only tables: csv_uploads, audit_log (no UPDATE/DELETE in app code)
---   - JSONB used for extra_fields (non-canonical CSV columns) and audit payloads
---   - access_level_order: higher integer = broader access (unit > coy > platoon)
---   - RLS (Row-Level Security) is enforced in application layer, not Postgres RLS,
---     to keep query logic visible and testable. Postgres RLS may be added later.
+-- This file is documentation, not a migration: it mirrors the SQLAlchemy
+-- models, which are authoritative (src/parade_state/models/*.py, shared
+-- Base in src/parade_state/db/__init__.py). The live schema is applied via
+-- Alembic (src/parade_state/migrations/versions/, head y6f7a8b9c0d1) or
+-- metadata.create_all for fresh dev databases.
+--
+-- Backends: SQLite (aiosqlite) for dev, PostgreSQL (asyncpg) for prod.
+-- Where they differ, both are noted inline. Key conventions:
+--
+--   - Primary keys: VARCHAR(36) app-generated UUID-format strings
+--     (Base.id, default ids.db_default). No UUID columns, no pgcrypto,
+--     no gen_random_uuid(). Every table also carries a non-unique
+--     ix_<table>_id index (inherited from Base).
+--   - Timestamps: naive TIMESTAMP (no time zone), always UTC by
+--     convention (utils/utc_dt.py: ensure_naive(utcnow())). No
+--     TIMESTAMPTZ, no CITEXT.
+--   - Enum columns: native enum types (CREATE TYPE below) on PostgreSQL;
+--     plain VARCHAR columns on SQLite (the enum name is metadata-only,
+--     no CHECK constraint is emitted).
+--   - Defaults marked "(app)" are applied by SQLAlchemy client-side, not
+--     by the database. The only server default in the schema is
+--     user_subunit_assignments.unit ('*').
+--   - extra_fields is JSON — not JSONB, no GIN index.
+--   - ip_address is VARCHAR(45) — plain string, not INET.
+--   - access_levels and users are mutually referential (created_by /
+--     access_level_id). When executing DDL by hand, back-patch one
+--     direction with ALTER TABLE ... ADD FOREIGN KEY.
 -- =============================================================================
 
 
 -- ---------------------------------------------------------------------------
--- Extensions
+-- Enum vocabularies (native types on PostgreSQL; ignored on SQLite)
 -- ---------------------------------------------------------------------------
 
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";   -- gen_random_uuid()
-CREATE EXTENSION IF NOT EXISTS "citext";     -- case-insensitive text for emails
+CREATE TYPE user_status AS ENUM (
+    'pending',        -- legacy value, unused (kept for the DB enum)
+    'active',
+    'suspended',
+    'unrecognised'
+);
+
+CREATE TYPE user_role AS ENUM ('super_admin', 'admin', 'user');
+
+CREATE TYPE attendance_status AS ENUM ('present', 'absent');
+
+CREATE TYPE attendance_reason AS ENUM (
+    'mc', 'off', 'early_outpro', 'other', 'awol'
+);
+
+CREATE TYPE audit_entity_type AS ENUM (
+    'attendance', 'grouping', 'session', 'user', 'csv_upload',
+    'nominal_roll', 'personnel', 'access_level', 'column_mapping',
+    'database', 'discussion_post', 'feature_access'
+);
+
+CREATE TYPE audit_action AS ENUM (
+    'create', 'update', 'delete', 'archive', 'close',
+    'finalize', 'restore', 'attendance_freeze'
+);
+
+CREATE TYPE csv_upload_status AS ENUM (
+    'received', 'mapping_confirmed', 'diff_confirmed', 'failed'
+);
+
+CREATE TYPE column_mapping_status AS ENUM (
+    'auto_detected', 'admin_confirmed', 'deprecated'
+);
+
+CREATE TYPE column_data_type AS ENUM (
+    'string', 'integer', 'date', 'boolean', 'json'
+);
+
+CREATE TYPE personnel_category AS ENUM ('Officer', 'WOSE');
+
+CREATE TYPE personnel_status AS ENUM ('active', 'archived');
+
+CREATE TYPE personnel_inpro_status AS ENUM (
+    'inproed', 'yet_to_inpro', 'deferred'
+);
+
+CREATE TYPE deferment_reason AS ENUM (
+    'Honeymoon', 'Work', 'Full-time studies', 'Other',
+    'Medical Grounds', 'Examination', 'New employment',
+    'Special employment', 'Compassionate', 'Childbirth',
+    'Part-time studies', 'Newly Established Business (Local)'
+);
+
+CREATE TYPE deferment_status AS ENUM (
+    'Approved', 'Withdrawn', 'Rejected', 'To Resubmit',
+    'Time off arrangement', 'Pending action', 'Not called up',
+    'Do not call up'
+);
+
+CREATE TYPE discussion_category AS ENUM ('requests', 'bugs');
+
+CREATE TYPE discussion_post_status AS ENUM (
+    'Open', 'Duplicate', 'Accepted', 'Implemented', 'Closed'
+);
 
 
 -- ---------------------------------------------------------------------------
--- 1. ACCESS LEVELS
---    Admin-defined ordered vocabulary used for both row access scoping
---    and column sensitivity labelling.
---    level_order: higher = broader access. e.g. unit(40) > coy(30) > platoon(20) > section(10)
---    Gaps in ordering are intentional (allows insertion without renumbering).
+-- 1. ACCESS LEVELS — src/parade_state/models/access.py (AccessLevel)
+--    Ordered vocabulary of access scopes, used for user row-access
+--    scoping and column sensitivity labelling.
+--    level_order: higher = broader access (e.g. unit 40 > coy 30).
+--    Gaps are intentional (insert without renumbering).
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE access_levels (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    label           TEXT NOT NULL UNIQUE,          -- e.g. 'unit', 'coy', 'platoon', 'section'
-    level_order     INTEGER NOT NULL UNIQUE,        -- higher = broader access
-    deprecated      BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by      UUID,                           -- FK to users; null for bootstrap
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by      UUID                            -- FK to users; null for bootstrap
+    id              VARCHAR(36) PRIMARY KEY,
+    name            VARCHAR(50) NOT NULL,          -- e.g. 'unit', 'coy', 'platoon', 'section'
+    level_order     INTEGER NOT NULL,              -- higher = broader access
+    created_at      TIMESTAMP NOT NULL,            -- (app) utcnow
+    created_by      VARCHAR(36) REFERENCES users(id),   -- null for bootstrap
+    updated_at      TIMESTAMP NOT NULL,            -- (app) utcnow
+    updated_by      VARCHAR(36) REFERENCES users(id)
 );
 
-COMMENT ON TABLE access_levels IS
-    'Ordered vocabulary of access level labels. Used for user row-access scoping and column sensitivity. '
-    'level_order higher = broader access. Deprecated entries are hidden from UI but retained for FK integrity.';
+CREATE UNIQUE INDEX ix_access_levels_name ON access_levels (name);
+CREATE UNIQUE INDEX ix_access_levels_level_order ON access_levels (level_order);
+CREATE INDEX ix_access_levels_id ON access_levels (id);
 
 
 -- ---------------------------------------------------------------------------
--- 2. SUBUNIT ENUM VALUES
---    Admin-managed valid values for each subunit hierarchy level.
---    Validated at CSV import time.
---    level: 0=unit, 1=sub_unit_1, 2=sub_unit_2, 3=sub_unit_3
--- ---------------------------------------------------------------------------
-
-CREATE TABLE subunit_enum_values (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    level           SMALLINT NOT NULL CHECK (level BETWEEN 0 AND 3),
-    value           TEXT NOT NULL,
-    deprecated      BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by      UUID,
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by      UUID,
-    UNIQUE (level, value)
-);
-
-COMMENT ON TABLE subunit_enum_values IS
-    'Valid values for each subunit hierarchy level (0=unit, 1=sub_unit_1, 2=sub_unit_2, 3=sub_unit_3). '
-    'Validated at CSV import. Deprecated values are retained for FK integrity.';
-
-
--- ---------------------------------------------------------------------------
--- 3. USERS
---    Google OAuth accounts. Preregistered by admin (status=pending).
---    Activated on first sign-in. Access level and scope assigned at preregistration.
+-- 2. USERS — src/parade_state/models/access.py (User)
+--    Google-authenticated accounts. No preregistration state machine:
+--    unknown sign-ins land as status='unrecognised'. No google_sub,
+--    no activated_at, no created_by/updated_by self-FKs.
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE users (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email               CITEXT NOT NULL UNIQUE,
-    display_name        TEXT,                          -- populated from Google profile on first sign-in
-    google_sub          TEXT UNIQUE,                   -- Google subject ID; set on first sign-in
-    role                TEXT NOT NULL DEFAULT 'scoped' CHECK (role IN ('super_admin', 'admin', 'scoped')),
-    status              TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'suspended', 'unrecognised')),
-    access_level_id     UUID REFERENCES access_levels(id),   -- null for admins (they bypass)
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by          UUID REFERENCES users(id),
-    activated_at        TIMESTAMPTZ,
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by          UUID REFERENCES users(id)
+    id                  VARCHAR(36) PRIMARY KEY,
+    email               VARCHAR(255) NOT NULL,     -- plain string, not CITEXT
+    name                VARCHAR(255) NOT NULL,     -- from Google profile
+    status              user_status NOT NULL DEFAULT 'unrecognised',  -- (app)
+    role                user_role NOT NULL DEFAULT 'user',            -- (app)
+    access_level_id     VARCHAR(36) REFERENCES access_levels(id),  -- null = no scope grant
+    first_sign_in_at    TIMESTAMP,
+    last_sign_in_at     TIMESTAMP,
+    created_at          TIMESTAMP NOT NULL,        -- (app) utcnow
+    updated_at          TIMESTAMP NOT NULL         -- (app) utcnow
 );
 
-COMMENT ON TABLE users IS
-    'Google OAuth user accounts. Preregistered by admin (status=pending); activated on first sign-in. '
-    'super_admin bootstrapped via SUPER_ADMIN_EMAIL env var. access_level_id null for admin/super_admin roles.';
-
-COMMENT ON COLUMN users.google_sub IS
-    'Google OAuth subject identifier. Null until first sign-in. Used as authoritative identity after activation.';
+CREATE UNIQUE INDEX ix_users_email ON users (email);
+CREATE INDEX ix_users_id ON users (id);
 
 
 -- ---------------------------------------------------------------------------
--- 4. (REMOVED) USER GROUPING GRANTS / SUBUNIT SCOPE GRANTS
---    The issue 26 groupings redesign removed per-grouping access scoping
---    (the grouping_user_accesses / user_subunit_scopes tables). Grouping
---    mutations are super-admin only; reads are open to every authenticated
---    role. NR-scoped write access lives in user_subunit_assignments.
---    The numbering below is unchanged for stability.
+-- 3. USER SESSIONS — src/parade_state/models/auth_session.py (UserSession)
+--    Server-side auth sessions. token is the natural key; because the
+--    model also inherits Base.id (primary_key=True), the emitted PK is
+--    composite (token, id).
 -- ---------------------------------------------------------------------------
 
-
--- ---------------------------------------------------------------------------
--- 5. (REMOVED — see note above)
--- ---------------------------------------------------------------------------
-
-
--- ---------------------------------------------------------------------------
--- 6. COLUMN MAPPINGS
---    Global mapping table: raw CSV column names → canonical app names.
---    Accumulates across CSV uploads. Admin-editable at any time.
---    Applies to future uploads only; not retroactive.
--- ---------------------------------------------------------------------------
-
-CREATE TABLE column_mappings (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    raw_name        TEXT NOT NULL,                     -- as it appeared in the CSV header
-    canonical_name  TEXT NOT NULL,                     -- app canonical name (matches required_columns config)
-    status          TEXT NOT NULL DEFAULT 'auto_detected'
-                        CHECK (status IN ('auto_detected', 'admin_confirmed', 'deprecated')),
-    deprecated      BOOLEAN NOT NULL DEFAULT FALSE,
-    first_seen_in   UUID,                              -- FK to csv_uploads (informational)
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    confirmed_at    TIMESTAMPTZ,
-    confirmed_by    UUID REFERENCES users(id),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by      UUID REFERENCES users(id)
+CREATE TABLE user_sessions (
+    token               VARCHAR(255) NOT NULL,
+    id                  VARCHAR(36) NOT NULL,
+    user_id             VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    email               VARCHAR(255) NOT NULL,     -- denormalised from users
+    name                VARCHAR(255) NOT NULL,
+    role                VARCHAR(50) NOT NULL,
+    created_at          TIMESTAMP NOT NULL,        -- (app) utcnow
+    expires_at          TIMESTAMP NOT NULL,
+    last_accessed_at    TIMESTAMP NOT NULL,        -- (app) utcnow
+    user_agent          VARCHAR(500),
+    ip_address          VARCHAR(45),
+    PRIMARY KEY (token, id)
 );
 
-CREATE INDEX idx_column_mappings_raw_name ON column_mappings(raw_name) WHERE NOT deprecated;
-
-COMMENT ON TABLE column_mappings IS
-    'Global mapping of CSV raw column names to app canonical names. '
-    'Accumulates over time. Admin-editable. Edits apply to future uploads only. '
-    'Deprecated entries retained for provenance; excluded from active matching.';
+CREATE INDEX ix_user_sessions_user_id ON user_sessions (user_id);
+CREATE INDEX ix_user_sessions_expires_at ON user_sessions (expires_at);
+CREATE INDEX ix_user_sessions_id ON user_sessions (id);
 
 
 -- ---------------------------------------------------------------------------
--- 7. CSV UPLOADS (ESTAB)
---    Immutable after insert. Raw CSV preserved verbatim.
---    Content hash for integrity verification.
---    Identified by CAA (correct-as-at) date.
+-- 4. FEATURE ACCESS — src/parade_state/models/access.py (FeatureAccess)
+--    Role-level feature visibility matrix (issue 37). One row per
+--    (feature, role) explicitly configured. Absent row = enabled
+--    (fail-open); super_admin is never configurable.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE feature_access (
+    id              VARCHAR(36) PRIMARY KEY,
+    feature_key     VARCHAR(50) NOT NULL,
+    role            VARCHAR(20) NOT NULL,
+    enabled         BOOLEAN NOT NULL,              -- (app) default true
+    created_at      TIMESTAMP NOT NULL,            -- (app) utcnow
+    updated_at      TIMESTAMP NOT NULL,            -- (app) utcnow
+    CONSTRAINT uq_feature_access_key_role UNIQUE (feature_key, role)
+);
+
+CREATE INDEX ix_feature_access_id ON feature_access (id);
+
+
+-- ---------------------------------------------------------------------------
+-- 5. USER SUBUNIT ASSIGNMENTS — src/parade_state/models/access.py
+--    (UserSubunitAssignment; issues #4 and #28)
+--    Scope grants: one (unit, sub_unit_1) pair on one nominal roll.
+--    Each column uses the explicit sentinel '*' for a wildcard:
+--      (U, *)  every sub-unit of unit U
+--      (U, S)  exactly U/S
+--      (*, S)  S under any unit (pre-#28 rows via the column default)
+--      (*, *)  forbidden by CHECK — the whole-roll case is expressed
+--              per unit, not as a blanket grant
+--    Deny-by-default: no grant on an NR = no access there.
+--    super_admin bypasses entirely.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE user_subunit_assignments (
+    id                  VARCHAR(36) PRIMARY KEY,
+    user_id             VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    nominal_roll_id     VARCHAR(36) NOT NULL REFERENCES nominal_rolls(id) ON DELETE CASCADE,
+    unit                VARCHAR(255) NOT NULL DEFAULT '*',   -- the only server default
+    sub_unit_1          VARCHAR(255) NOT NULL,
+    created_at          TIMESTAMP NOT NULL,        -- (app) utcnow
+    created_by          VARCHAR(36) NOT NULL REFERENCES users(id),
+    updated_at          TIMESTAMP NOT NULL,        -- (app) utcnow
+    CONSTRAINT uq_user_subunit_assignment UNIQUE (user_id, nominal_roll_id, unit, sub_unit_1),
+    CONSTRAINT ck_user_subunit_assignment_not_both_wildcard
+        CHECK (unit <> '*' OR sub_unit_1 <> '*')
+);
+
+CREATE INDEX ix_user_subunit_assignments_user_id ON user_subunit_assignments (user_id);
+CREATE INDEX ix_user_subunit_assignments_nominal_roll_id ON user_subunit_assignments (nominal_roll_id);
+CREATE INDEX ix_user_subunit_assignments_id ON user_subunit_assignments (id);
+
+
+-- ---------------------------------------------------------------------------
+-- 6. NOMINAL ROLLS — src/parade_state/models/csv_ingestion.py (NominalRoll)
+--    Base personnel roster, sourced from CSV, pinned by CAA date.
+--    Exactly one NR is "active for attendance" at a time
+--    (attendance_active; application-enforced on activate).
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE nominal_rolls (
+    id                      VARCHAR(36) PRIMARY KEY,
+    caa                     DATE NOT NULL,             -- correct-as-at; unique
+    csv_hash                VARCHAR(64) NOT NULL,      -- SHA-256 of source CSV
+    attendance_active       BOOLEAN NOT NULL,          -- (app) default false
+    attendance_activated_at TIMESTAMP,
+    attendance_activated_by VARCHAR(36) REFERENCES users(id),
+    personnel_count         INTEGER NOT NULL,          -- (app) default 0
+    uploaded_at             TIMESTAMP NOT NULL,        -- (app) utcnow
+    uploaded_by             VARCHAR(36) NOT NULL REFERENCES users(id),
+    created_at              TIMESTAMP NOT NULL,        -- (app) utcnow
+    notes                   TEXT,
+    label                   VARCHAR(100),              -- optional display name; unique when set
+    remarks                 TEXT
+);
+
+CREATE UNIQUE INDEX ix_nominal_rolls_caa ON nominal_rolls (caa);
+CREATE UNIQUE INDEX ix_nominal_rolls_label ON nominal_rolls (label);
+CREATE INDEX ix_nominal_rolls_csv_hash ON nominal_rolls (csv_hash);
+CREATE INDEX ix_nominal_rolls_id ON nominal_rolls (id);
+
+
+-- ---------------------------------------------------------------------------
+-- 7. CSV UPLOADS — src/parade_state/models/csv_ingestion.py (CsvUpload)
+--    Immutable, append-only raw CSV storage. sha256_hash dedupes
+--    re-uploads. The pipeline currently only writes status='received'.
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE csv_uploads (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    caa_date        DATE NOT NULL UNIQUE,              -- correct-as-at date; must be unique
-    raw_csv         TEXT NOT NULL,                     -- verbatim CSV text; never modified
-    content_hash    TEXT NOT NULL,                     -- SHA-256 of raw_csv; for integrity checks
-    original_filename TEXT,
-    status          TEXT NOT NULL DEFAULT 'pending_mapping'
-                        CHECK (status IN (
-                            'pending_mapping',         -- awaiting column mapping confirmation
-                            'pending_diff',            -- mapping confirmed; awaiting admin diff review
-                            'confirmed',               -- committed; personnel_snapshots populated
-                            'superseded'               -- a newer CSV has been confirmed
-                        )),
-    row_count       INTEGER,                           -- populated after parse
-    uploaded_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    uploaded_by     UUID NOT NULL REFERENCES users(id),
-    confirmed_at    TIMESTAMPTZ,
-    confirmed_by    UUID REFERENCES users(id)
+    id                    VARCHAR(36) PRIMARY KEY,
+    nominal_roll_id       VARCHAR(36) REFERENCES nominal_rolls(id),  -- null until NR created
+    raw_content           BYTEA NOT NULL,          -- verbatim CSV bytes (SQLite: BLOB)
+    sha256_hash           VARCHAR(64) NOT NULL,    -- unique
+    original_filename     VARCHAR(255),
+    line_count            INTEGER NOT NULL,
+    uploaded_at           TIMESTAMP NOT NULL,      -- (app) utcnow
+    uploaded_by           VARCHAR(36) NOT NULL REFERENCES users(id),
+    mapping_confirmed_at  TIMESTAMP,
+    diff_confirmed_at     TIMESTAMP,
+    created_at            TIMESTAMP NOT NULL,      -- (app) utcnow
+    status                csv_upload_status NOT NULL DEFAULT 'received'  -- (app)
 );
 
-COMMENT ON TABLE csv_uploads IS
-    'Immutable store of raw CSV uploads (estab). Never updated after insert. '
-    'content_hash is SHA-256 of raw_csv for integrity verification. '
-    'status tracks the upload confirmation workflow.';
+CREATE UNIQUE INDEX ix_csv_uploads_sha256_hash ON csv_uploads (sha256_hash);
+CREATE INDEX ix_csv_uploads_id ON csv_uploads (id);
 
 
 -- ---------------------------------------------------------------------------
--- 8. COLUMN METADATA
---    Per-CSV-version record of each column: original name, canonical name,
---    inferred type, and admin-assigned sensitivity label.
---    Sensitivity label is mutable (admin can change at any time; audit logged).
+-- 8. COLUMN MAPPINGS — src/parade_state/models/csv_ingestion.py
+--    (ColumnMapping)
+--    Global mapping: raw CSV column names → canonical app names.
+--    canonical_name is globally unique. Deprecation is a timestamp,
+--    not a boolean flag.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE column_mappings (
+    id              VARCHAR(36) PRIMARY KEY,
+    raw_name        VARCHAR(255) NOT NULL,
+    canonical_name  VARCHAR(255) NOT NULL,         -- globally unique
+    status          column_mapping_status NOT NULL DEFAULT 'auto_detected',  -- (app)
+    created_at      TIMESTAMP NOT NULL,            -- (app) utcnow
+    created_by      VARCHAR(36) REFERENCES users(id),
+    confirmed_at    TIMESTAMP,
+    confirmed_by    VARCHAR(36) REFERENCES users(id),
+    deprecated_at   TIMESTAMP,                     -- null = active mapping
+    notes           TEXT
+);
+
+CREATE UNIQUE INDEX ix_column_mappings_canonical_name ON column_mappings (canonical_name);
+CREATE INDEX ix_column_mappings_raw_name ON column_mappings (raw_name);
+CREATE INDEX ix_column_mappings_id ON column_mappings (id);
+
+
+-- ---------------------------------------------------------------------------
+-- 9. COLUMN METADATA — src/parade_state/models/csv_ingestion.py
+--    (ColumnMetadata)
+--    Per-NR column registry: original headers, canonical mapping,
+--    inferred types, admin-assigned sensitivity level.
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE column_metadata (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    csv_upload_id       UUID NOT NULL REFERENCES csv_uploads(id),
-    raw_name            TEXT NOT NULL,
-    canonical_name      TEXT,                          -- null if not mapped to a canonical name
-    is_required         BOOLEAN NOT NULL DEFAULT FALSE,
-    inferred_type       TEXT CHECK (inferred_type IN ('text', 'integer', 'date', 'boolean', 'numeric')),
-    confirmed_type      TEXT CHECK (confirmed_type IN ('text', 'integer', 'date', 'boolean', 'numeric')),
-    sensitivity_label   TEXT REFERENCES access_levels(label),  -- null = admin-only by default
-    display_order       INTEGER,                       -- column order for table display
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    sensitivity_updated_at  TIMESTAMPTZ,
-    sensitivity_updated_by  UUID REFERENCES users(id),
-    UNIQUE (csv_upload_id, raw_name)
+    id                    VARCHAR(36) PRIMARY KEY,
+    nominal_roll_id       VARCHAR(36) NOT NULL REFERENCES nominal_rolls(id) ON DELETE CASCADE,
+    csv_upload_id         VARCHAR(36) NOT NULL REFERENCES csv_uploads(id) ON DELETE CASCADE,
+    original_name         VARCHAR(255) NOT NULL,   -- as it appeared in the CSV header
+    canonical_name        VARCHAR(255),            -- null if unmapped
+    inferred_type         column_data_type NOT NULL DEFAULT 'string',  -- (app)
+    sensitivity_level_id  VARCHAR(36) REFERENCES access_levels(id),  -- null = admin-only
+    is_required           BOOLEAN NOT NULL,        -- (app) default false
+    created_at            TIMESTAMP NOT NULL,      -- (app) utcnow
+    updated_at            TIMESTAMP NOT NULL,      -- (app) utcnow
+    CONSTRAINT unique_nominal_roll_column UNIQUE (nominal_roll_id, original_name)
 );
 
-COMMENT ON TABLE column_metadata IS
-    'Per-CSV-version column registry. sensitivity_label is mutable (admin-configurable). '
-    'null sensitivity_label = admin-only visibility. '
-    'confirmed_type overrides inferred_type when set.';
+CREATE INDEX ix_column_metadata_id ON column_metadata (id);
 
 
 -- ---------------------------------------------------------------------------
--- 9. PERSONNEL SNAPSHOTS
---    Parsed personnel data per CSV version.
---    Required/canonical columns stored as typed fields.
---    All other columns stored in extra_fields JSONB.
---    Immutable after population (CSV is source of truth).
+-- 10. PERSONNEL — src/parade_state/models/personnel.py (Personnel)
+--     Individual personnel record on a nominal roll (one row per
+--     nominal-roll-person pairing). pers_no is the external personnel
+--     number from the CSV Pers column — the cross-roll person identity;
+--     NULL when the CSV row omitted it, never an empty string.
+--     extra_fields holds all non-canonical CSV columns (pers_no is
+--     never stored there). source: NULL = CSV row, 'manual' =
+--     super-admin "Add Serviceman" creation.
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE personnel_snapshots (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    csv_upload_id   UUID NOT NULL REFERENCES csv_uploads(id),
-    short_id        TEXT NOT NULL,                     -- 8-char base62 cross-estab person identity (shared across estabs for the same person)
-    unit            TEXT NOT NULL,
-    sub_unit_1      TEXT,
-    sub_unit_2      TEXT,
-    sub_unit_3      TEXT,
-    rank            TEXT,
-    full_name       TEXT NOT NULL,
-    extra_fields    JSONB NOT NULL DEFAULT '{}',       -- all non-canonical columns (pers_no is NEVER stored here)
-    archived        BOOLEAN NOT NULL DEFAULT FALSE,    -- true for leavers on new CSV import
-    archived_at     TIMESTAMPTZ,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (csv_upload_id, short_id)
+CREATE TABLE personnel (
+    id              VARCHAR(36) PRIMARY KEY,
+    nominal_roll_id VARCHAR(36) NOT NULL REFERENCES nominal_rolls(id) ON DELETE CASCADE,
+    pers_no         VARCHAR(20),                   -- external canonical id; nullable
+    rank            VARCHAR(50) NOT NULL,
+    category        personnel_category NOT NULL,
+    full_name       VARCHAR(255) NOT NULL,
+    unit            VARCHAR(255) NOT NULL,
+    sub_unit_1      VARCHAR(255),
+    sub_unit_2      VARCHAR(255),
+    sub_unit_3      VARCHAR(255),
+    extra_fields    JSON NOT NULL,                 -- (app) default {}; SQLite: TEXT
+    status          personnel_status NOT NULL DEFAULT 'active',      -- (app)
+    inpro_status    personnel_inpro_status NOT NULL DEFAULT 'yet_to_inpro',  -- (app)
+    remarks         TEXT,
+    source          VARCHAR(16),                   -- null = CSV, 'manual' = UI-added
+    created_at      TIMESTAMP NOT NULL,            -- (app) utcnow
+    created_by      VARCHAR(36) NOT NULL REFERENCES users(id),
+    updated_at      TIMESTAMP,
+    updated_by      VARCHAR(36) REFERENCES users(id),
+    CONSTRAINT uq_personnel_nominal_roll_pers_no UNIQUE (nominal_roll_id, pers_no)
 );
 
-CREATE INDEX idx_personnel_snapshots_short_id ON personnel_snapshots(short_id);
-CREATE INDEX idx_personnel_snapshots_csv_upload ON personnel_snapshots(csv_upload_id) WHERE NOT archived;
-CREATE INDEX idx_personnel_snapshots_subunit ON personnel_snapshots(csv_upload_id, unit, sub_unit_1, sub_unit_2, sub_unit_3);
-CREATE INDEX idx_personnel_extra_fields ON personnel_snapshots USING gin(extra_fields);
-
-COMMENT ON TABLE personnel_snapshots IS
-    'Parsed personnel data per CSV version. Immutable after population. '
-    'extra_fields holds all columns not mapped to a required canonical field. '
-    'short_id is the cross-estab person key (minted by the application, matched by name+rank). '
-    'archived=true for leavers (present in prior estab, absent in new).';
+CREATE INDEX ix_personnel_nominal_roll_id ON personnel (nominal_roll_id);
+CREATE INDEX ix_personnel_pers_no ON personnel (pers_no);
+CREATE INDEX ix_personnel_rank ON personnel (rank);
+CREATE INDEX ix_personnel_category ON personnel (category);
+CREATE INDEX ix_personnel_full_name ON personnel (full_name);
+CREATE INDEX ix_personnel_unit ON personnel (unit);
+CREATE INDEX ix_personnel_status ON personnel (status);
+CREATE INDEX ix_personnel_inpro_status ON personnel (inpro_status);
+CREATE INDEX ix_personnel_updated_at ON personnel (updated_at);
+CREATE INDEX ix_personnel_id ON personnel (id);
 
 
 -- ---------------------------------------------------------------------------
--- 10. GROUPINGS (issue 26 redesign)
---     A labelled set of groups (closed string vocabulary) based on a
---     nominal roll. Servicemen on the roll hold memberships in the groups
---     plus a per-grouping checkbox and free-text remarks. Groupings never
---     read or write attendance. The multiple_membership / allow_ungrouped
---     flags are immutable after creation. Groupings are reachable only via
---     the nominal roll active for attendance.
+-- 11. TAGGINGS + TAGGING ENTRIES — src/parade_state/models/tagging.py
+--     The single overlay of person → subunit remappings on a nominal
+--     roll (1:1, auto-created on ingestion, cascades with the NR).
+--     Taggings never mutate the underlying NR; downstream consumers
+--     (attendance / groupings / NR browser) apply the overlay to render
+--     effective structure. from_* is an optional snapshot of the
+--     person's canonical subunit; to_* is the remap target (to_unit
+--     always required). One remap per person per tagging.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE taggings (
+    id              VARCHAR(36) PRIMARY KEY,
+    label           VARCHAR(100),                  -- optional, informational
+    nominal_roll_id VARCHAR(36) NOT NULL REFERENCES nominal_rolls(id) ON DELETE CASCADE,
+    remarks         TEXT,
+    created_at      TIMESTAMP NOT NULL,            -- (app) utcnow
+    created_by      VARCHAR(36) NOT NULL REFERENCES users(id),
+    updated_at      TIMESTAMP,
+    updated_by      VARCHAR(36) REFERENCES users(id),
+    CONSTRAINT uq_taggings_nominal_roll_id UNIQUE (nominal_roll_id)  -- 1:1 with NR
+);
+
+CREATE UNIQUE INDEX ix_taggings_nominal_roll_id ON taggings (nominal_roll_id);
+CREATE INDEX ix_taggings_label ON taggings (label);
+CREATE INDEX ix_taggings_updated_at ON taggings (updated_at);
+CREATE INDEX ix_taggings_id ON taggings (id);
+
+CREATE TABLE tagging_entries (
+    id              VARCHAR(36) PRIMARY KEY,
+    tagging_id      VARCHAR(36) NOT NULL REFERENCES taggings(id) ON DELETE CASCADE,
+    personnel_id    VARCHAR(36) NOT NULL REFERENCES personnel(id) ON DELETE CASCADE,
+    from_unit       VARCHAR(255),
+    from_sub_unit_1 VARCHAR(255),
+    from_sub_unit_2 VARCHAR(255),
+    from_sub_unit_3 VARCHAR(255),
+    to_unit         VARCHAR(255) NOT NULL,
+    to_sub_unit_1   VARCHAR(255),
+    to_sub_unit_2   VARCHAR(255),
+    to_sub_unit_3   VARCHAR(255),
+    created_at      TIMESTAMP NOT NULL,            -- (app) utcnow
+    CONSTRAINT uq_tagging_entry_person UNIQUE (tagging_id, personnel_id)
+);
+
+CREATE INDEX ix_tagging_entries_tagging_id ON tagging_entries (tagging_id);
+CREATE INDEX ix_tagging_entries_personnel_id ON tagging_entries (personnel_id);
+CREATE INDEX ix_tagging_entries_id ON tagging_entries (id);
+
+
+-- ---------------------------------------------------------------------------
+-- 12. ATTENDANCE — src/parade_state/models/attendance.py (Attendance,
+--     AttendanceFreeze; issues 33/35)
+--     Taken once daily against the NR active for attendance, always
+--     with its tagging overlay applied. One row per (personnel, date);
+--     no session table, no grouping coupling. reason never feeds
+--     present/absent aggregation — status only.
+--     attendance_freezes: row presence = the (NR, date) is frozen
+--     (super-admin-writable, read-only for admins); unfreezing deletes
+--     the row.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE attendance (
+    id                   VARCHAR(36) PRIMARY KEY,
+    personnel_id         VARCHAR(36) NOT NULL REFERENCES personnel(id) ON DELETE CASCADE,
+    nominal_roll_id      VARCHAR(36) NOT NULL REFERENCES nominal_rolls(id) ON DELETE CASCADE,
+    date                 DATE NOT NULL,
+    status               attendance_status NOT NULL DEFAULT 'absent',  -- (app)
+    reason               attendance_reason,            -- nullable; classifies remarks only
+    remarks              TEXT,
+    notes_snapshot       TEXT,                         -- roster snapshot at write time
+    unit_snapshot        VARCHAR(255),
+    sub_unit_1_snapshot  VARCHAR(255),
+    sub_unit_2_snapshot  VARCHAR(255),
+    sub_unit_3_snapshot  VARCHAR(255),
+    created_at           TIMESTAMP NOT NULL,           -- (app) utcnow
+    created_by           VARCHAR(36) NOT NULL REFERENCES users(id),
+    updated_at           TIMESTAMP NOT NULL,           -- (app) utcnow
+    updated_by           VARCHAR(36) NOT NULL REFERENCES users(id),
+    last_edit_at         TIMESTAMP,
+    last_edit_by         VARCHAR(36) REFERENCES users(id),
+    is_retroactive_edit  BOOLEAN NOT NULL,             -- (app) default false
+    CONSTRAINT uq_attendance_personnel_date UNIQUE (personnel_id, date)
+);
+
+CREATE INDEX ix_attendance_personnel_id ON attendance (personnel_id);
+CREATE INDEX ix_attendance_nominal_roll_id ON attendance (nominal_roll_id);
+CREATE INDEX ix_attendance_date ON attendance (date);
+CREATE INDEX ix_attendance_id ON attendance (id);
+
+CREATE TABLE attendance_freezes (
+    id              VARCHAR(36) PRIMARY KEY,
+    nominal_roll_id VARCHAR(36) NOT NULL REFERENCES nominal_rolls(id) ON DELETE CASCADE,
+    date            DATE NOT NULL,
+    created_at      TIMESTAMP NOT NULL,            -- (app) utcnow
+    created_by      VARCHAR(36) NOT NULL REFERENCES users(id),
+    CONSTRAINT uq_attendance_freezes_nr_date UNIQUE (nominal_roll_id, date)
+);
+
+CREATE INDEX ix_attendance_freezes_nominal_roll_id ON attendance_freezes (nominal_roll_id);
+CREATE INDEX ix_attendance_freezes_date ON attendance_freezes (date);
+CREATE INDEX ix_attendance_freezes_id ON attendance_freezes (id);
+
+
+-- ---------------------------------------------------------------------------
+-- 13. DEFERMENTS — src/parade_state/models/deferments.py (Deferment)
+--     Deferment requests linked to personnel rows. rank_name and
+--     sub_unit are snapshotted at creation so the record stays accurate
+--     if the personnel row is later edited or the NR is superseded.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE deferments (
+    id              VARCHAR(36) PRIMARY KEY,
+    personnel_id    VARCHAR(36) NOT NULL REFERENCES personnel(id) ON DELETE CASCADE,
+    rank_name       VARCHAR(255) NOT NULL,         -- snapshot
+    sub_unit        VARCHAR(255),                  -- snapshot
+    reason          deferment_reason NOT NULL,
+    status          deferment_status NOT NULL DEFAULT 'Pending action',  -- (app)
+    remarks         TEXT,
+    oc_updates      TEXT,
+    created_at      TIMESTAMP NOT NULL,            -- (app) utcnow
+    created_by      VARCHAR(36) NOT NULL REFERENCES users(id),
+    updated_at      TIMESTAMP,
+    updated_by      VARCHAR(36) REFERENCES users(id)
+);
+
+CREATE INDEX ix_deferments_personnel_id ON deferments (personnel_id);
+CREATE INDEX ix_deferments_status ON deferments (status);
+CREATE INDEX ix_deferments_updated_at ON deferments (updated_at);
+CREATE INDEX ix_deferments_id ON deferments (id);
+
+
+-- ---------------------------------------------------------------------------
+-- 14. GROUPINGS — src/parade_state/models/grouping.py (issue 26 redesign)
+--     A Grouping is a labelled, closed vocabulary of groups
+--     (grouping_groups) on one nominal roll. Servicemen hold
+--     memberships plus a per-grouping checkbox/remarks row
+--     (grouping_member_state). Groupings never read or write
+--     attendance. multiple_membership / allow_ungrouped are immutable
+--     after creation; the single-membership and no-ungrouped rules are
+--     application-enforced (not expressible as plain constraints).
+--     groupings.nominal_roll_id is FK RESTRICT: deleting an NR with
+--     groupings is refused. Labels are unique per roll, not globally.
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE groupings (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                  VARCHAR(36) PRIMARY KEY,
     label               VARCHAR(100) NOT NULL,
-    nominal_roll_id     UUID NOT NULL REFERENCES nominal_rolls(id) ON DELETE RESTRICT,
-    multiple_membership BOOLEAN NOT NULL DEFAULT FALSE,  -- a serviceman may hold several groups
-    allow_ungrouped     BOOLEAN NOT NULL DEFAULT TRUE,   -- a serviceman may hold no group
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by          UUID NOT NULL REFERENCES users(id),
+    nominal_roll_id     VARCHAR(36) NOT NULL REFERENCES nominal_rolls(id) ON DELETE RESTRICT,
+    multiple_membership BOOLEAN NOT NULL,          -- (app) default false
+    allow_ungrouped     BOOLEAN NOT NULL,          -- (app) default true
+    created_at          TIMESTAMP NOT NULL,        -- (app) utcnow
+    created_by          VARCHAR(36) NOT NULL REFERENCES users(id),
     CONSTRAINT uq_groupings_nr_label UNIQUE (nominal_roll_id, label)
 );
 
-CREATE INDEX idx_groupings_label ON groupings(label);
-CREATE INDEX idx_groupings_nominal_roll ON groupings(nominal_roll_id);
-
-COMMENT ON TABLE groupings IS
-    'Labelled set of groups per nominal roll (issue 26 redesign). Labels are unique per roll, '
-    'not globally, so a copy from a previous roll may keep its label. '
-    'Flags are immutable after creation; recreate or clone to change them. '
-    'Groupings never interact with attendance.';
-
--- ---------------------------------------------------------------------------
--- 11. GROUPING GROUPS
---     One group enum within a grouping. position is the manual display
---     order. Memberships reference the row: a rename propagates to every
---     member; a delete cascades their memberships away.
--- ---------------------------------------------------------------------------
+CREATE INDEX ix_groupings_label ON groupings (label);
+CREATE INDEX ix_groupings_nominal_roll_id ON groupings (nominal_roll_id);
+CREATE INDEX ix_groupings_id ON groupings (id);
 
 CREATE TABLE grouping_groups (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    grouping_id     UUID NOT NULL REFERENCES groupings(id) ON DELETE CASCADE,
+    id              VARCHAR(36) PRIMARY KEY,
+    grouping_id     VARCHAR(36) NOT NULL REFERENCES groupings(id) ON DELETE CASCADE,
     label           VARCHAR(100) NOT NULL,
-    position        INTEGER NOT NULL DEFAULT 0,
+    position        INTEGER NOT NULL,              -- (app) default 0; manual display order
     CONSTRAINT uq_grouping_group_label UNIQUE (grouping_id, label)
 );
 
-CREATE INDEX idx_grouping_groups_grouping ON grouping_groups(grouping_id);
-
-COMMENT ON TABLE grouping_groups IS
-    'Group enums within a grouping. Label unique per grouping; position is the '
-    'manual display order (edit-dialog up/down controls).';
-
--- ---------------------------------------------------------------------------
--- 12. GROUPING MEMBERSHIPS + MEMBER STATE
---     Membership: one row per (grouping, personnel, group). The
---     single-membership and no-ungrouped rules are application-enforced
---     (at most one group per serviceman when multiple_membership=false;
---     at least one when allow_ungrouped=false).
---     Member state: one row per (grouping, personnel) — checkbox and
---     free-text remarks whose semantics are left to each unit.
--- ---------------------------------------------------------------------------
+CREATE INDEX ix_grouping_groups_grouping_id ON grouping_groups (grouping_id);
+CREATE INDEX ix_grouping_groups_id ON grouping_groups (id);
 
 CREATE TABLE grouping_memberships (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    grouping_id     UUID NOT NULL REFERENCES groupings(id) ON DELETE CASCADE,
-    group_id        UUID NOT NULL REFERENCES grouping_groups(id) ON DELETE CASCADE,
-    personnel_id    UUID NOT NULL REFERENCES personnel(id) ON DELETE CASCADE,
+    id              VARCHAR(36) PRIMARY KEY,
+    grouping_id     VARCHAR(36) NOT NULL REFERENCES groupings(id) ON DELETE CASCADE,
+    group_id        VARCHAR(36) NOT NULL REFERENCES grouping_groups(id) ON DELETE CASCADE,
+    personnel_id    VARCHAR(36) NOT NULL REFERENCES personnel(id) ON DELETE CASCADE,
     CONSTRAINT uq_grouping_membership UNIQUE (grouping_id, personnel_id, group_id)
 );
 
-CREATE INDEX idx_grouping_memberships_grouping ON grouping_memberships(grouping_id);
-CREATE INDEX idx_grouping_memberships_group ON grouping_memberships(group_id);
-CREATE INDEX idx_grouping_memberships_personnel ON grouping_memberships(personnel_id);
+CREATE INDEX ix_grouping_memberships_grouping_id ON grouping_memberships (grouping_id);
+CREATE INDEX ix_grouping_memberships_group_id ON grouping_memberships (group_id);
+CREATE INDEX ix_grouping_memberships_personnel_id ON grouping_memberships (personnel_id);
+CREATE INDEX ix_grouping_memberships_id ON grouping_memberships (id);
 
 CREATE TABLE grouping_member_state (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    grouping_id     UUID NOT NULL REFERENCES groupings(id) ON DELETE CASCADE,
-    personnel_id    UUID NOT NULL REFERENCES personnel(id) ON DELETE CASCADE,
-    checkbox        BOOLEAN NOT NULL DEFAULT FALSE,
+    id              VARCHAR(36) PRIMARY KEY,
+    grouping_id     VARCHAR(36) NOT NULL REFERENCES groupings(id) ON DELETE CASCADE,
+    personnel_id    VARCHAR(36) NOT NULL REFERENCES personnel(id) ON DELETE CASCADE,
+    checkbox        BOOLEAN NOT NULL,              -- (app) default false
     remarks         TEXT,
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by      UUID NOT NULL REFERENCES users(id),
+    updated_at      TIMESTAMP NOT NULL,            -- (app) utcnow
+    updated_by      VARCHAR(36) NOT NULL REFERENCES users(id),
     CONSTRAINT uq_grouping_member_state UNIQUE (grouping_id, personnel_id)
 );
 
-CREATE INDEX idx_grouping_member_state_grouping ON grouping_member_state(grouping_id);
-CREATE INDEX idx_grouping_member_state_personnel ON grouping_member_state(personnel_id);
-
-COMMENT ON TABLE grouping_member_state IS
-    'Per-serviceman checkbox and remarks within a grouping — one row per '
-    '(grouping, personnel), independent of how many groups they hold. '
-    'Field semantics intentionally unspecified; standardisation is per unit.';
+CREATE INDEX ix_grouping_member_state_grouping_id ON grouping_member_state (grouping_id);
+CREATE INDEX ix_grouping_member_state_personnel_id ON grouping_member_state (personnel_id);
+CREATE INDEX ix_grouping_member_state_id ON grouping_member_state (id);
 
 
 -- ---------------------------------------------------------------------------
--- 13. SESSIONS
---     AM/PM attendance windows. Explicitly opened by admin.
---     May be created in advance (for a draft or active grouping).
---     On creation, notes are snapshotted into attendance records.
+-- 15. DISCUSSIONS — src/parade_state/models/discussions.py (issue 24)
+--     In-app board: admins/super-admins post requests/bugs items and
+--     discuss them in markdown comments. Super-admins triage posts
+--     (status). Visible to admins only, never regular users.
+--     edited_at flips from NULL on the author's first edit and then
+--     tracks the last edit; full edit history is intentionally not kept.
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE sessions (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    grouping_id     UUID NOT NULL REFERENCES groupings(id),
-    session_date    DATE NOT NULL,
-    session_type    TEXT NOT NULL CHECK (session_type IN ('AM', 'PM')),
-    status          TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by      UUID NOT NULL REFERENCES users(id),
-    closed_at       TIMESTAMPTZ,
-    closed_by       UUID REFERENCES users(id),
-    UNIQUE (grouping_id, session_date, session_type)
+CREATE TABLE discussion_posts (
+    id              VARCHAR(36) PRIMARY KEY,
+    title           VARCHAR(200) NOT NULL,
+    body            TEXT NOT NULL,
+    author_id       VARCHAR(36) NOT NULL REFERENCES users(id),
+    category        discussion_category NOT NULL,
+    status          discussion_post_status NOT NULL DEFAULT 'Open',  -- (app)
+    created_at      TIMESTAMP NOT NULL,            -- (app) utcnow
+    edited_at       TIMESTAMP
 );
 
-COMMENT ON TABLE sessions IS
-    'AM/PM attendance windows, explicitly admin-opened. May be created in advance. '
-    'On creation, current grouping_notes are snapshotted into all attendance records for this session. '
-    'Unique constraint prevents duplicate AM/PM sessions per grouping per day.';
+CREATE INDEX ix_discussion_posts_author_id ON discussion_posts (author_id);
+CREATE INDEX ix_discussion_posts_category ON discussion_posts (category);
+CREATE INDEX ix_discussion_posts_status ON discussion_posts (status);
+CREATE INDEX ix_discussion_posts_id ON discussion_posts (id);
 
-
--- ---------------------------------------------------------------------------
--- 14. ATTENDANCE RECORDS
---     One record per personnel per session.
---     Stores status, remarks (session-scoped), and a notes snapshot.
---     Also stores a unit+subunit snapshot (roster assignment at time of
---     write). NOTE: this section predates the NR/AM-PM attendance model and
---     the issue 26 groupings redesign — attendance has no grouping coupling.
--- ---------------------------------------------------------------------------
-
-CREATE TABLE attendance_records (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id          UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    grouping_id         UUID NOT NULL REFERENCES groupings(id),
-    personnel_id        UUID NOT NULL REFERENCES personnel_snapshots(id),
-
-    -- Attendance data
-    status              TEXT NOT NULL DEFAULT 'absent' CHECK (status IN ('present', 'absent')),
-    remarks             TEXT NOT NULL DEFAULT '',      -- session-scoped; not carried forward
-
-    -- Notes snapshot (grouping-level notes at time of this write)
-    notes_snapshot      TEXT NOT NULL DEFAULT '',
-
-    -- Unit+subunit snapshot (grouping assignment at time of write, within validity period)
-    unit_snapshot       TEXT,
-    sub_unit_1_snapshot TEXT,
-    sub_unit_2_snapshot TEXT,
-    sub_unit_3_snapshot TEXT,
-
-    -- Audit
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by          UUID REFERENCES users(id),
-    snapshot_taken_at   TIMESTAMPTZ,                   -- when unit+subunit snapshot was last written
-
-    UNIQUE (session_id, personnel_id)
+CREATE TABLE discussion_comments (
+    id              VARCHAR(36) PRIMARY KEY,
+    post_id         VARCHAR(36) NOT NULL REFERENCES discussion_posts(id) ON DELETE CASCADE,
+    author_id       VARCHAR(36) NOT NULL REFERENCES users(id),
+    body            TEXT NOT NULL,
+    created_at      TIMESTAMP NOT NULL,            -- (app) utcnow
+    edited_at       TIMESTAMP
 );
 
-CREATE INDEX idx_attendance_session ON attendance_records(session_id);
-CREATE INDEX idx_attendance_personnel ON attendance_records(personnel_id);
-CREATE INDEX idx_attendance_grouping ON attendance_records(grouping_id);
-
-COMMENT ON TABLE attendance_records IS
-    'One record per personnel per session. '
-    'notes_snapshot: copy of grouping_notes.notes_text at time of this write (updated on every write). '
-    'unit+subunit snapshots: updated only when NOW() is within the session grouping validity range. '
-    'Retroactive admin edits outside validity range may update status/remarks/notes_snapshot '
-    'but must NOT update unit/sub_unit snapshots.';
-
-COMMENT ON COLUMN attendance_records.snapshot_taken_at IS
-    'Timestamp when unit+subunit snapshot was last written. '
-    'If null, snapshot was never taken (session created but no attendance yet recorded during valid period).';
+CREATE INDEX ix_discussion_comments_post_id ON discussion_comments (post_id);
+CREATE INDEX ix_discussion_comments_author_id ON discussion_comments (author_id);
+CREATE INDEX ix_discussion_comments_id ON discussion_comments (id);
 
 
 -- ---------------------------------------------------------------------------
--- 15. AUDIT LOG
---     Append-only. Records all writes: attendance, admin config, access changes,
---     CSV uploads, sign-in events.
---     Admin-only access.
+-- 16. AUDIT LOGS — src/parade_state/models/audit.py (AuditLog)
+--     Sequential append-only log of all system changes. user_id null
+--     for system/background actions. changes holds a diff (null when
+--     not applicable); description is always present. ip_address is a
+--     plain string, not INET.
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE audit_log (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    actor_id        UUID REFERENCES users(id),         -- null for system/background job actions
-    actor_email     TEXT,                              -- denormalised; preserved even if user is deleted
-    action          TEXT NOT NULL,                     -- e.g. 'attendance.update', 'grouping.activate'
-    entity_type     TEXT NOT NULL,                     -- e.g. 'attendance_record', 'grouping'
-    entity_id       UUID,
-    payload         JSONB NOT NULL DEFAULT '{}',       -- before/after values or relevant context
-    ip_address      INET,
-    occurred_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE TABLE audit_logs (
+    id              VARCHAR(36) PRIMARY KEY,
+    timestamp       TIMESTAMP NOT NULL,            -- (app) utcnow
+    user_id         VARCHAR(36) REFERENCES users(id),
+    entity_type     audit_entity_type NOT NULL,
+    entity_id       VARCHAR(36) NOT NULL,
+    action          audit_action NOT NULL,
+    changes         TEXT,
+    description     TEXT NOT NULL,
+    ip_address      VARCHAR(45)
 );
 
-CREATE INDEX idx_audit_log_entity ON audit_log(entity_type, entity_id);
-CREATE INDEX idx_audit_log_actor ON audit_log(actor_id);
-CREATE INDEX idx_audit_log_occurred ON audit_log(occurred_at DESC);
-
-COMMENT ON TABLE audit_log IS
-    'Append-only audit trail. No UPDATE or DELETE permitted in application code. '
-    'actor_email denormalised to preserve history if user account is removed. '
-    'payload stores relevant before/after context as JSONB.';
-
-
--- ---------------------------------------------------------------------------
--- 16. APP SETTINGS
---     Key-value store for runtime-mutable app settings managed via admin UI.
---     Non-sensitive only. Sensitive config (credentials, super-admin) lives in env vars.
--- ---------------------------------------------------------------------------
-
-CREATE TABLE app_settings (
-    key             TEXT PRIMARY KEY,
-    value           TEXT NOT NULL,
-    description     TEXT,
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by      UUID REFERENCES users(id)
-);
-
-COMMENT ON TABLE app_settings IS
-    'Runtime app settings managed via admin UI. '
-    'Sensitive config (DB credentials, OAuth secrets, SUPER_ADMIN_EMAIL) must be in env vars, not here.';
-
-
--- ---------------------------------------------------------------------------
--- FOREIGN KEY BACK-PATCHES
---    Some FKs could not be declared inline due to forward references.
--- ---------------------------------------------------------------------------
-
-ALTER TABLE access_levels
-    ADD CONSTRAINT fk_access_levels_created_by FOREIGN KEY (created_by) REFERENCES users(id),
-    ADD CONSTRAINT fk_access_levels_updated_by FOREIGN KEY (updated_by) REFERENCES users(id);
-
-ALTER TABLE subunit_enum_values
-    ADD CONSTRAINT fk_subunit_enum_created_by FOREIGN KEY (created_by) REFERENCES users(id),
-    ADD CONSTRAINT fk_subunit_enum_updated_by FOREIGN KEY (updated_by) REFERENCES users(id);
-
-ALTER TABLE column_mappings
-    ADD CONSTRAINT fk_column_mappings_first_seen FOREIGN KEY (first_seen_in) REFERENCES csv_uploads(id);
+CREATE INDEX ix_audit_logs_timestamp ON audit_logs (timestamp);
+CREATE INDEX ix_audit_logs_entity_type ON audit_logs (entity_type);
+CREATE INDEX ix_audit_logs_entity_id ON audit_logs (entity_id);
+CREATE INDEX ix_audit_logs_id ON audit_logs (id);
