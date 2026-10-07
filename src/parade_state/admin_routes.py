@@ -20,7 +20,6 @@ from parade_state.models import (
     Deferment,
     DiscussionComment,
     DiscussionPost,
-    Grouping,
     NominalRoll,
     PRESENT_LIKE_STATUSES,
     Personnel,
@@ -33,7 +32,8 @@ from parade_state.utils import markdown, utc_dt
 
 router = APIRouter()
 
-# Audit log filter dropdown options (mirrors AuditLog model enum values)
+# Audit log filter dropdown options (mirrors AuditLog model enum values,
+# including values no longer written — retained logs may still carry them)
 AUDIT_ENTITY_TYPES = [
     "attendance",
     "grouping",
@@ -44,9 +44,20 @@ AUDIT_ENTITY_TYPES = [
     "personnel",
     "access_level",
     "column_mapping",
+    "database",
     "discussion_post",
+    "feature_access",
 ]
-AUDIT_ACTIONS = ["create", "update", "delete", "archive", "close", "finalize"]
+AUDIT_ACTIONS = [
+    "create",
+    "update",
+    "delete",
+    "archive",
+    "close",
+    "finalize",
+    "restore",
+    "attendance_freeze",
+]
 
 # Deferment filter dropdown options (mirrors Deferment model enums)
 DEFERMENT_REASONS = [

@@ -2,9 +2,9 @@
 
 An in-app board where admins and super-admins post ``requests`` / ``bugs``
 items and discuss them in markdown comments. Super-admins triage each post
-(status: Open / Duplicate / Accepted / Implemented) and may recategorize
-it. Visible to admins only — never to regular users — and hidden entirely
-while ``FEATURE_DISCUSSIONS`` is off.
+(status: Open / Duplicate / Accepted / Implemented / Closed) and may
+recategorize it. Visible to admins only — never to regular users — and
+hidden entirely while ``FEATURE_DISCUSSIONS`` is off.
 """
 
 from typing import TYPE_CHECKING

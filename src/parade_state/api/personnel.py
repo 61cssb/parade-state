@@ -707,9 +707,9 @@ async def update_personnel(
     await _assert_personnel_in_scope(db, user_id, user.role, personnel)
 
     # Apply status / inpro_status / remarks directly to the personnel row
-    # (still allowed). Setting inpro_status to "deferred" only hides the
-    # person from the attendance roster (until #33) — existing attendance
-    # records are never touched.
+    # (still allowed). Setting inpro_status to "deferred" does not remove
+    # the person from the attendance roster (issue 33: everyone on the NR
+    # is listed) — existing attendance records are never touched.
     if status_update is not None:
         personnel.status = status_update
         personnel.updated_at = utc_dt.db_utcnow()

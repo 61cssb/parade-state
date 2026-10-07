@@ -11,8 +11,9 @@ from ..db import Base
 
 # In-processing lifecycle statuses (issue 32). Stored vocabulary is
 # snake_case (attendance convention); UI labels live in
-# INPRO_STATUS_LABELS. Only "deferred" personnel are hidden from the
-# attendance roster (interim rule until #33); everyone else appears.
+# INPRO_STATUS_LABELS. Everyone on the NR appears on the attendance
+# roster (issue 33); "deferred" only excludes a person from Unit
+# Strength's In count.
 INPRO_STATUSES: tuple[str, ...] = (
     "inproed",
     "yet_to_inpro",
