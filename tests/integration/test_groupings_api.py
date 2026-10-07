@@ -194,6 +194,28 @@ async def test_get_grouping_on_non_active_nr_404(
     assert response.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_reads_open_to_every_authenticated_role(
+    client: TestClient, client_as, sample_grouping, sample_attendance_scope,
+):
+    # A regular user-role session can read list/detail/export — the
+    # grouping page renders for every role, so its API reads must too.
+    client = await client_as("user")
+    assert client.get(f"{BASE}/").status_code == 200
+    assert client.get(f"{BASE}/{sample_grouping.id}").status_code == 200
+    assert (
+        client.get(f"{BASE}/{sample_grouping.id}/export").status_code == 200
+    )
+
+
+@pytest.mark.asyncio
+async def test_reads_require_authentication(
+    client: TestClient, sample_grouping, sample_attendance_scope,
+):
+    assert client.get(f"{BASE}/").status_code == 401
+    assert client.get(f"{BASE}/{sample_grouping.id}").status_code == 401
+
+
 # ============================================================================
 # Patch — label, group set, flag immutability
 # ============================================================================

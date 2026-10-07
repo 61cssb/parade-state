@@ -21,7 +21,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from parade_state.auth.dependencies import require_admin_user, require_super_admin_user
+from parade_state.auth.dependencies import (
+    require_authenticated_user,
+    require_super_admin_user,
+)
 from parade_state.db import get_db_session
 from parade_state.models import (
     AuditLog,
@@ -325,7 +328,7 @@ async def create_grouping(
 
 @router.get("/", response_model=list[GroupingResponse])
 async def list_groupings(
-    user: User = Depends(require_admin_user),
+    user: User = Depends(require_authenticated_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List the groupings on the attendance-active NR."""
@@ -354,7 +357,7 @@ async def list_groupings(
 @router.get("/{grouping_id}", response_model=GroupingResponse)
 async def get_grouping(
     grouping_id: str,
-    user: User = Depends(require_admin_user),
+    user: User = Depends(require_authenticated_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get one grouping on the attendance-active NR."""
@@ -804,7 +807,7 @@ async def copy_grouping_from_previous_nr(
 @router.get("/{grouping_id}/export")
 async def export_grouping_csv(
     grouping_id: str,
-    user: User = Depends(require_admin_user),
+    user: User = Depends(require_authenticated_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Export the grouping table exactly as displayed.
