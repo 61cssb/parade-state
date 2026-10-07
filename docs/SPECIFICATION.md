@@ -317,7 +317,10 @@ User
 
 **Constraints:**
 - email is unique
-- Super-admin cannot be revoked via UI; bootstrapped via env var
+- Super-admin accounts are manageable by super-admins only: promotion to
+  `super_admin`, any edit/suspension/demotion of a `super_admin`, and
+  deletion are super-admin-only (403 otherwise); super-admins may demote
+  other super-admins. The first super-admin is bootstrapped via env var
 - Non-admin users must have access_level_id set
 
 #### 3.1.3 Grouping access scoping (removed)
@@ -1097,7 +1100,7 @@ changes apply immediately with no restart.
 **Super-Admin:**
 - Bootstrapped via SUPER_ADMIN_EMAIL env var
 - Auto-granted on first Google sign-in
-- Cannot be revoked via UI
+- Only another super-admin can modify or remove a super-admin account
 
 **App Admin:**
 - Granted by super-admin
@@ -1149,6 +1152,11 @@ The system is admin-only: only `super_admin` and `admin` accounts can sign in an
 2. A super-admin promotes `unrecognised` users to `admin` (and `active`) via `/admin/users`; the user can then sign in normally. Promotion to `super_admin`/`admin` automatically sets `status=active` for `unrecognised` (or legacy `pending`) accounts; explicitly suspended accounts stay suspended.
 3. A super-admin may also pre-provision an account via the Add User form on `/admin/users` (`POST /api/v1/users`): the row is created `active` with the chosen role (email lowercased to match the Google sign-in), so the person's first sign-in works immediately without the unrecognised holding state.
 4. Admin may suspend at any time (403 at sign-in). Suspension immediately invalidates active sessions.
+5. User edits: admins may update non-super-admin accounts (name, status,
+   access level, role) via `PATCH /api/v1/users/{id}`. Promotion to
+   `super_admin` and any change to a `super_admin` account — including
+   demotion and suspension — is super-admin-only; super-admins may demote
+   other super-admins. Deletion is super-admin-only.
 
 ### 5.3 Row Visibility Rules
 

@@ -209,6 +209,45 @@ async def test_update_user_role_as_regular_admin(client: TestClient, test_db):
 
 
 @pytest.mark.asyncio
+async def test_admin_cannot_modify_super_admin(client: TestClient, test_db):
+    """A plain admin gets 403 for any edit of a super-admin account."""
+    _, admin_session = await create_test_user_and_session(test_db, role="admin")
+    super_admin, _ = await create_test_user_and_session(test_db, role="super_admin")
+
+    headers = {"Authorization": f"Bearer {admin_session.token}"}
+    # Demotion, suspension, and even a plain name edit are all 403.
+    response = client.patch(
+        f"/api/v1/users/{super_admin.id}", json={"role": "admin"}, headers=headers
+    )
+    assert response.status_code == 403
+    response = client.patch(
+        f"/api/v1/users/{super_admin.id}",
+        json={"status": "suspended"},
+        headers=headers,
+    )
+    assert response.status_code == 403
+    response = client.patch(
+        f"/api/v1/users/{super_admin.id}", json={"name": "X"}, headers=headers
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_super_admin_may_demote_super_admin(client: TestClient, test_db):
+    """Super-admins may demote other super-admins (spec §5.2 rule 5)."""
+    _, super_session = await create_test_user_and_session(test_db, role="super_admin")
+    other_super, _ = await create_test_user_and_session(test_db, role="super_admin")
+
+    headers = {"Authorization": f"Bearer {super_session.token}"}
+    response = client.patch(
+        f"/api/v1/users/{other_super.id}", json={"role": "admin"}, headers=headers
+    )
+
+    assert response.status_code == 200
+    assert response.json()["role"] == "admin"
+
+
+@pytest.mark.asyncio
 async def test_delete_user_as_super_admin(client: TestClient, test_db):
     """Test deleting user as super admin."""
     _, super_admin_session = await create_test_user_and_session(
