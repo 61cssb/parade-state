@@ -225,14 +225,18 @@ dashboard (`/ippt/dashboard` — tiers labelled by months before window
 close, colour-coded filter tabs: 3 = red/most urgent, 6 = orange,
 9 = yellow), per-person window pages
 (`/ippt/window/{personnel_id}`), and the super-admin upload page
-(`/ippt/upload`). Production deployments force-disable the flag with a
-warning — it cannot appear on Railway even if the env var is set; when
-the feature is cleared for Railway, remove that guard in
-`config.Settings`. Remaining: decide ship/no-ship after local use, then
-(manual-review editor, Ship / drop) — and flip the flag story from
-"force-disabled in production" to normal env-var gating.
+(`/ippt/upload`). Enabled on the Railway development environment
+2026-10-08; the Railway production environment force-disables the flag
+with a warning (guard keys on `RAILWAY_ENVIRONMENT=production` in
+`config.Settings`). Remaining: decide ship/no-ship for production after
+dev usage, then (manual-review editor, Ship / drop) — production enablement
+would mean deleting the RAILWAY_ENVIRONMENT guard.
 
 #### 9a. IPPT multi-snapshot hardening — decided 2026-10-08, scoped for a fresh session
+
+Flag status: `FEATURE_IPPT=true` on the Railway development environment
+since 2026-10-08 (guard reworked to block only the Railway production
+target).
 
 Review of multi-snapshot handling (two monthly snapshots now in hand)
 settled the following, decided with the unit's admin:

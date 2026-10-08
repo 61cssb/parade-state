@@ -119,7 +119,7 @@ DEBUG=false
 # FEATURE_GROUPING=false
 # FEATURE_STRENGTH=false
 # FEATURE_DISCUSSIONS=false
-# FEATURE_IPPT=false  # local-testing-only; production force-disables it
+# FEATURE_IPPT=false  # dev sets true; the Railway production target force-disables it
 
 # Optional: environment-identifier banner — a thin amber strip fixed at
 # the top of every page (login screen included) showing this text. Set
@@ -149,7 +149,7 @@ env-var change plus service restart (no deploy).
 | `FEATURE_GROUPING` | `/grouping` page, `/api/v1/groupings/*`, nav entry | off | `true` | unset (off) |
 | `FEATURE_STRENGTH` | Unit Strength report at `/admin`, nav entry | off | `true` | unset (off) — enable explicitly |
 | `FEATURE_DISCUSSIONS` | Discussions board: `/admin/discussions` pages, `/api/v1/discussions/*`, nav entry (admins only) | off | `true` | unset (off) |
-| `FEATURE_IPPT` | IPPT monitoring: `/ippt/dashboard` + `/ippt/window/*` pages, `/ippt/upload` (super-admin), `/api/v1/ippt/*`, nav entry | off | **local only** (`true` in a local `.env`) | **never** — force-disabled with a warning even when set (local-testing-only; see `config.Settings`) |
+| `FEATURE_IPPT` | IPPT monitoring: `/ippt/dashboard` + `/ippt/window/*` pages, `/ippt/upload` (super-admin), `/api/v1/ippt/*`, nav entry | off | `true` (enabled 2026-10-08) | **never** — force-disabled with a warning even when set (guard keys on `RAILWAY_ENVIRONMENT=production`; see `config.Settings`) |
 | `FEATURE_NOMINALROLL` | Nominal Roll stack: `/nominal-roll` + `/admin/csv-upload` + `/admin/taggings` pages, `/api/v1/nominal-rolls/*` + `/api/v1/csv/*` + `/api/v1/taggings/*`, nav entries | **on** | `true` | `true` (unset = on) |
 | `FEATURE_ATTENDANCE` | `/attendance` page, `/api/v1/attendance/*`, nav entry | **on** | `true` | `true` (unset = on) |
 

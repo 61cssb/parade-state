@@ -125,10 +125,11 @@ def test_feature_ippt_enables_in_development(monkeypatch):
     assert Settings().FEATURE_IPPT is True
 
 
-def test_feature_ippt_force_disabled_in_production(production_env, monkeypatch, caplog):
-    # Local-testing-only feature (until further notice): a production
-    # deployment — including both Railway environments, which detect as
-    # production — can never enable it, no matter what the env var says.
+def test_feature_ippt_force_disabled_on_railway_production(monkeypatch, caplog):
+    # The Railway production environment can never enable the flag: the
+    # guard keys on the platform-injected RAILWAY_ENVIRONMENT.
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
     monkeypatch.setenv("FEATURE_IPPT", "true")
     with caplog.at_level("WARNING"):
         settings = Settings()
@@ -136,13 +137,18 @@ def test_feature_ippt_force_disabled_in_production(production_env, monkeypatch, 
     assert any("FEATURE_IPPT" in record.message for record in caplog.records)
 
 
-def test_feature_ippt_force_disabled_when_railway_detected(monkeypatch):
-    # No explicit ENVIRONMENT, but Railway's injected ids mean production.
-    monkeypatch.delenv("ENVIRONMENT", raising=False)
-    monkeypatch.setenv("RAILWAY_PROJECT_ID", "proj")
-    monkeypatch.setenv("RAILWAY_SERVICE_ID", "svc")
+def test_feature_ippt_enabled_on_railway_development(monkeypatch):
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "development")
     monkeypatch.setenv("FEATURE_IPPT", "true")
-    assert Settings().FEATURE_IPPT is False
+    assert Settings().FEATURE_IPPT is True
+
+
+def test_feature_ippt_opt_in_honoured_outside_railway(monkeypatch):
+    # Non-Railway production-style runs key the guard on nothing: an
+    # explicit opt-in is honoured (the Railway prod target is the hazard).
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("FEATURE_IPPT", "true")
+    assert Settings().FEATURE_IPPT is True
 
 
 def test_other_feature_flags_unaffected_by_ippt_guard(production_env, monkeypatch):
