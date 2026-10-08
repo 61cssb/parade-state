@@ -600,6 +600,7 @@
             {% set vis_strength = request.app.state.settings.FEATURE_STRENGTH and (user.role == 'super_admin' or fa.get(user.role, {}).get('strength', true)) %}
             {% set vis_grouping = request.app.state.settings.FEATURE_GROUPING and (user.role == 'super_admin' or fa.get(user.role, {}).get('grouping', true)) %}
             {% set vis_discussions = request.app.state.settings.FEATURE_DISCUSSIONS and (user.role == 'super_admin' or fa.get(user.role, {}).get('discussions', true)) %}
+            {% set vis_ippt = request.app.state.settings.FEATURE_IPPT %}
             {% if vis_upload_nr %}
             <a href="/admin/csv-upload" title="Upload NR"
                class="{% if active_page == 'csv-upload' %}active{% endif %}">
@@ -638,6 +639,12 @@
             <a href="/grouping" title="Grouping"
                class="{% if active_page == 'grouping' %}active{% endif %}">
                 <span class="icon">📊</span><span>Grouping</span>
+            </a>
+            {% endif %}
+            {% if vis_ippt %}
+            <a href="/ippt/dashboard" title="IPPT Monitoring"
+               class="{% if active_page == 'ippt' %}active{% endif %}">
+                <span class="icon">🏃</span><span>IPPT</span>
             </a>
             {% endif %}
             {% if vis_discussions %}

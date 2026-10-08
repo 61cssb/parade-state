@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+{% block title %}IPPT Monitoring - Parade State{% endblock %}
+{% block page_title %}IPPT Monitoring{% endblock %}
+{% block content %}
+<style>
+    /* Compaction for the dashboard top so the first data row lands above
+       the mobile fold; desktop keeps the roomier layout. */
+    .ippt-stat { flex: 1; min-width: 140px; margin: 0; }
+    .ippt-stat-num { font-size: 1.6rem; font-weight: 700; }
+    .ippt-stat-label { color: #6b7280; font-size: 0.85rem; }
+    .ippt-tab { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0.9rem; border-radius: 999px; text-decoration: none; font-size: 0.875rem; }
+    .ippt-tab-count { border-radius: 999px; padding: 0 0.45rem; }
+    .ippt-tab-short { display: none; }
+    .ippt-section-title { margin: 0; }
+    .ippt-sub { font-weight: 400; color: #6b7280; font-size: 0.8rem; margin-left: 0.35rem; }
+    .ippt-stale { color: #9ca3af; font-size: 0.7rem; display: inline-block; }
+
+    @media (max-width: 640px) {
+        .ippt-stats { gap: 0.5rem !important; margin-bottom: 0.75rem !important; }
+        .ippt-stat { min-width: 0; padding: 0.6rem 0.5rem; }
+        .ippt-stat-num { font-size: 1.15rem; }
+        .ippt-stat-label { font-size: 0.7rem; }
+        .ippt-tabs { gap: 0.35rem !important; margin-bottom: 0.6rem !important; }
+        .ippt-tab { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+        .ippt-tab-full { display: none; }
+        .ippt-tab-short { display: inline; }
+        .ippt-section { padding: 0.75rem !important; }
+        .ippt-section-title { font-size: 1rem; }
+        .ippt-sub { display: none; }
+    }
+</style>
+
+<p style="color: #6b7280; margin-bottom: 0.5rem;">
+    Latest observation per serviceman from the monthly IPPT/NS FIT reports.
+    {% if user.role == 'super_admin' %}
+    Upload a six-file snapshot at <a href="/ippt/upload">IPPT Upload</a>.
+    {% endif %}
+</p>
+
+{# Data-quality status line: secondary counts kept out of the summary
+   boxes so the mobile view stays to the three headline numbers. #}
+<p style="color: #6b7280; font-size: 0.8rem; margin: 0 0 0.75rem;">
+    Latest CAA <strong style="color: #374151;">{{ dashboard.summary.latest_report_date or '&mdash;' }}</strong>
+    &middot; {{ dashboard.summary.match.matched }} matched to NR
+    ({{ dashboard.summary.match.unmatched }} not in nominal roll, {{ dashboard.summary.match.ambiguous }} ambiguous)
+    &middot; <span {% if dashboard.summary.quarantined %}style="color: #d97706;"{% endif %}>{{ dashboard.summary.quarantined }} quarantined rows</span>
+</p>
+
+<div class="ippt-stats" style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
+    <div class="card ippt-stat">
+        <div class="ippt-stat-num">{{ dashboard.summary.total }}</div>
+        <div class="ippt-stat-label">tracked servicemen</div>
+    </div>
+    <div class="card ippt-stat">
+        <div class="ippt-stat-num" style="color: #16a34a;">{{ dashboard.summary.fulfilled }}</div>
+        <div class="ippt-stat-label">obligation fulfilled</div>
+    </div>
+    <div class="card ippt-stat">
+        <div class="ippt-stat-num" style="color: #dc2626;">{{ dashboard.summary.highlighted }}</div>
+        <div class="ippt-stat-label">highlighted (3/6/9 before close)</div>
+    </div>
+</div>
+
+{# Tier filter tabs: most-urgent first, colour-coded (3 = red, 6 = orange,
+   9 = yellow). Tabs are links (?tier=) so filtering works without JS;
+   phones show the short "Nm" label to keep all three on one line. #}
+<div class="ippt-tabs" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+    {% for band in tier_order %}
+    {% set c = tier_colours[band] %}
+    {% if band == active_tier %}
+    <a class="ippt-tab" href="/ippt/dashboard?tier={{ band }}"
+       style="font-weight: 600; background: {{ c.solid }}; color: #ffffff; border: 1px solid {{ c.solid }};">
+        <span class="ippt-tab-full">{{ tier_titles[band] }}</span>
+        <span class="ippt-tab-short" title="{{ tier_titles[band] }}">{{ tier_titles[band][:1] }}m</span>
+        <span class="ippt-tab-count" style="background: rgba(255,255,255,0.25);">{{ dashboard.tiers[band]|length }}</span>
+    </a>
+    {% else %}
+    <a class="ippt-tab" href="/ippt/dashboard?tier={{ band }}"
+       style="font-weight: 500; background: {{ c.tint }}; color: {{ c.text }}; border: 1px solid {{ c.solid }}40;">
+        <span class="ippt-tab-full">{{ tier_titles[band] }}</span>
+        <span class="ippt-tab-short" title="{{ tier_titles[band] }}">{{ tier_titles[band][:1] }}m</span>
+        <span class="ippt-tab-count" style="background: {{ c.solid }}22;">{{ dashboard.tiers[band]|length }}</span>
+    </a>
+    {% endif %}
+    {% endfor %}
+</div>
+
+{% set band = active_tier %}
+{% set entries = dashboard.tiers[band] %}
+{% set c = tier_colours[band] %}
+<div class="card ippt-section" style="border-top: 3px solid {{ c.solid }};">
+    <h3 class="ippt-section-title" style="color: {{ c.text }};">{{ tier_titles[band] }}
+        <span style="display: inline-block; background: {{ c.tint }}; color: {{ c.text }}; border-radius: 999px; padding: 0.1rem 0.6rem; font-size: 0.8rem; vertical-align: middle;">{{ entries|length }}</span>
+        <span class="ippt-sub">{{ tier_subtitles[band] }}</span>
+    </h3>
+    {% if entries %}
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 0.75rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.4rem 0.5rem;">Rank</th>
+                    <th style="padding: 0.4rem 0.5rem;">Name</th>
+                    <th style="padding: 0.4rem 0.5rem;">Sub-unit</th>
+                    <th style="padding: 0.4rem 0.5rem;">State</th>
+                    <th style="padding: 0.4rem 0.5rem;">Booked</th>
+                    <th style="padding: 0.4rem 0.5rem;">FFI</th>
+                    <th style="padding: 0.4rem 0.5rem;">Window ends</th>
+                    <th style="padding: 0.4rem 0.5rem;">Days left</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in entries %}
+                <tr style="border-bottom: 1px solid #f3f4f6;{% if e.stale %} opacity: 0.55;{% endif %}">
+                    <td style="padding: 0.4rem 0.5rem;">{{ e.rank }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">
+                        {% if e.personnel_id %}
+                        <a href="/ippt/window/{{ e.personnel_id }}">{{ e.full_name }}</a>
+                        {% else %}{{ e.full_name }}{% endif %}
+                        {% if e.stale %}
+                        <span class="ippt-stale" title="No observation in the latest snapshot — values are as of this report date">last seen {{ e.report_date }}</span>
+                        {% endif %}
+                        {% if e.match_status == 'ambiguous' %}
+                        <span title="Homonyms on the nominal roll — needs manual review" style="color: #d97706; font-size: 0.75rem;">⚠ ambiguous</span>
+                        {% elif e.match_status == 'unmatched' %}
+                        <span title="No matching name on the attendance-active nominal roll" style="color: #9ca3af; font-size: 0.75rem;">not in nominal roll</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ e.sub_unit }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ e.state_label }}{% if e.fit_sessions %} ({{ e.fit_sessions }} FIT){% endif %}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{% if e.booked is none %}-{% elif e.booked %}<span style="color: #16a34a;">Yes</span>{% else %}<span style="color: #dc2626;">No</span>{% endif %}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{% if e.ffi == 'pending' %}<span style="color: #d97706;">Pending</span>{% elif e.ffi %}{{ e.ffi|capitalize }}{% else %}-{% endif %}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ e.window_end or '-' }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{% if e.days_to_close is not none %}{% if e.days_to_close <= 14 %}<strong style="color: #dc2626;">{{ e.days_to_close }}</strong>{% else %}{{ e.days_to_close }}{% endif %}{% else %}-{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: #6b7280; margin-top: 0.5rem;">Nobody is highlighted in this tier.</p>
+    {% endif %}
+</div>
+
+{% set ontrack = [] %}
+{% for e in dashboard.servicemen %}
+{% if not e.highlighted and not e.fulfilled %}{% if ontrack.append(e) %}{% endif %}{% endif %}
+{% endfor %}
+<div class="card">
+    <h3>On track / not yet tiered
+        <span style="display: inline-block; background: #f0fdf4; color: #16a34a; border-radius: 999px; padding: 0.1rem 0.6rem; font-size: 0.8rem; vertical-align: middle;">{{ ontrack|length }}</span>
+    </h3>
+    {% if ontrack %}
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 0.75rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.4rem 0.5rem;">Rank</th>
+                    <th style="padding: 0.4rem 0.5rem;">Name</th>
+                    <th style="padding: 0.4rem 0.5rem;">Sub-unit</th>
+                    <th style="padding: 0.4rem 0.5rem;">State</th>
+                    <th style="padding: 0.4rem 0.5rem;">Window ends</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in ontrack %}
+                <tr style="border-bottom: 1px solid #f3f4f6;{% if e.stale %} opacity: 0.55;{% endif %}">
+                    <td style="padding: 0.4rem 0.5rem;">{{ e.rank }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">
+                        {% if e.personnel_id %}<a href="/ippt/window/{{ e.personnel_id }}">{{ e.full_name }}</a>{% else %}{{ e.full_name }}{% endif %}
+                        {% if e.stale %}<span class="ippt-stale">last seen {{ e.report_date }}</span>{% endif %}
+                    </td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ e.sub_unit }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ e.state_label }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ e.window_end or '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: #6b7280; margin-top: 0.5rem;">Everyone unfulfilled is highlighted in a tier above.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>Fulfilled / waived
+        <span style="display: inline-block; background: #f0fdf4; color: #16a34a; border-radius: 999px; padding: 0.1rem 0.6rem; font-size: 0.8rem; vertical-align: middle;">{{ dashboard.fulfilled|length }}</span>
+    </h3>
+    {% if dashboard.fulfilled %}
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 0.75rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.4rem 0.5rem;">Rank</th>
+                    <th style="padding: 0.4rem 0.5rem;">Name</th>
+                    <th style="padding: 0.4rem 0.5rem;">Sub-unit</th>
+                    <th style="padding: 0.4rem 0.5rem;">How</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in dashboard.fulfilled %}
+                <tr style="border-bottom: 1px solid #f3f4f6;{% if e.stale %} opacity: 0.55;{% endif %}">
+                    <td style="padding: 0.4rem 0.5rem;">{{ e.rank }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">
+                        {% if e.personnel_id %}<a href="/ippt/window/{{ e.personnel_id }}">{{ e.full_name }}</a>{% else %}{{ e.full_name }}{% endif %}
+                        {% if e.stale %}<span class="ippt-stale">last seen {{ e.report_date }}</span>{% endif %}
+                    </td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ e.sub_unit }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ e.state_label }}{% if e.ippt_status %} ({{ e.ippt_status }}){% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: #6b7280; margin-top: 0.5rem;">No snapshots ingested yet.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>Snapshot history</h3>
+    {% if history %}
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 0.75rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.4rem 0.5rem;">Report date</th>
+                    <th style="padding: 0.4rem 0.5rem;">Files</th>
+                    <th style="padding: 0.4rem 0.5rem;">Rows</th>
+                    <th style="padding: 0.4rem 0.5rem;">Quarantined</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for day in history %}
+                <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 0.4rem 0.5rem;">{{ day.report_date }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ day.files|length }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{% set total = namespace(n=0) %}{% for f in day.files %}{% set total.n = total.n + f.row_count %}{% endfor %}{{ total.n }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{% set q = namespace(n=0) %}{% for f in day.files %}{% set q.n = q.n + f.quarantined %}{% endfor %}{{ q.n }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: #6b7280; margin-top: 0.5rem;">No snapshots ingested yet
+        {% if user.role == 'super_admin' %} — <a href="/ippt/upload">upload the six reports</a>{% endif %}.</p>
+    {% endif %}
+</div>
+{% endblock %}

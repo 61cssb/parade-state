@@ -9,6 +9,7 @@ tests/
 ├── unit/              # Isolated unit tests for individual functions/modules
 ├── integration/       # API endpoint tests with full stack
 ├── behavioral/        # Domain logic and business rule tests
+├── e2e/               # Playwright browser tests against a real server (marker: e2e)
 ├── conftest.py        # Shared pytest fixtures and configuration
 └── README.md          # This file
 ```
@@ -87,6 +88,9 @@ pytest tests/integration/
 
 # Only behavioral tests
 pytest tests/behavioral/
+
+# E2E browser tests (Playwright is not a dev dependency; system Chrome is used)
+uv run --with playwright pytest tests/e2e -m e2e
 ```
 
 ### Run Specific Test Files

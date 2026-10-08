@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}IPPT Upload - Parade State Admin{% endblock %}
+{% block page_title %}IPPT Upload{% endblock %}
+{% block content %}
+<p style="color: #6b7280; margin-bottom: 1.5rem;">
+    Upload the monthly IPPT/NS FIT monitoring reports. A snapshot is the
+    <strong>full set of six files</strong> for one report date — the upload is
+    atomic per date (all six land, or none do). Re-uploading a report date
+    replaces its previous ingest. Filenames must be canonical:
+    <code>{REPORT}_{STATE}_{YYYYMMDD}.csv</code> (e.g.
+    <code>IPPT_COMPLETED_20260911.csv</code>); each file may be either CSV
+    or Excel (<code>.xlsx</code>) and the set may mix the two formats.
+</p>
+
+<div class="card">
+    <h3>Upload the six reports</h3>
+    <p style="color: #6b7280; font-size: 0.85rem; margin-top: 0.5rem;">
+        Required files (each as <code>.csv</code> or <code>.xlsx</code>):
+        <code>IPPT_COMPLETED_*</code>, <code>IPPT_FAILED_*</code>,
+        <code>IPPT_NOT_ATTEMPTED_*</code>, <code>NSFIT_COMPLETED_*</code>,
+        <code>NSFIT_IN_PROGRESS_*</code>, <code>NSFIT_NOT_STARTED_*</code>
+        — all with the same <code>YYYYMMDD</code> date. Columns are matched by
+        header name; rows that fail validation are quarantined, not dropped.
+    </p>
+    <div style="margin-top: 1rem;">
+        <input type="file" id="ipptFiles" accept=".csv,.xlsx" multiple style="margin-bottom: 1rem;">
+        <button class="btn btn-primary" id="uploadBtn" onclick="uploadSnapshot()">Upload snapshot</button>
+    </div>
+    <div id="uploadStatus" style="margin-top: 1rem; font-size: 0.875rem;"></div>
+    <div id="uploadResult" style="margin-top: 1rem;"></div>
+</div>
+
+<div class="card">
+    <h3>Ingested snapshots</h3>
+    {% if history %}
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 0.75rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.4rem 0.5rem;">Report date</th>
+                    <th style="padding: 0.4rem 0.5rem;">File</th>
+                    <th style="padding: 0.4rem 0.5rem;">Rows</th>
+                    <th style="padding: 0.4rem 0.5rem;">Quarantined</th>
+                    <th style="padding: 0.4rem 0.5rem;">Ingested</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for day in history %}
+                {% for f in day.files %}
+                <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 0.4rem 0.5rem;">{% if loop.first %}{{ day.report_date }}{% endif %}</td>
+                    <td style="padding: 0.4rem 0.5rem;"><code>{{ f.file_kind }}</code></td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ f.row_count }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{% if f.quarantined %}<span style="color: #d97706;">{{ f.quarantined }}</span>{% else %}0{% endif %}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ f.ingested_at }}</td>
+                </tr>
+                {% endfor %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: #6b7280; margin-top: 0.5rem;">Nothing ingested yet.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>Quarantined rows
+        {% if quarantine %}
+        <span style="display: inline-block; background: #fffbeb; color: #d97706; border-radius: 999px; padding: 0.1rem 0.6rem; font-size: 0.8rem; vertical-align: middle;">{{ quarantine|length }}</span>
+        {% endif %}
+    </h3>
+    <p style="color: #6b7280; font-size: 0.85rem; margin-top: 0.5rem;">
+        Rows that failed validation or derived to an unrecognized state.
+        They are kept here for review instead of silently vanishing;
+        re-ingesting a report date after fixing the source clears its entries.
+    </p>
+    {% if quarantine %}
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 0.75rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.4rem 0.5rem;">Report date</th>
+                    <th style="padding: 0.4rem 0.5rem;">File</th>
+                    <th style="padding: 0.4rem 0.5rem;">Line</th>
+                    <th style="padding: 0.4rem 0.5rem;">Reason</th>
+                    <th style="padding: 0.4rem 0.5rem;">Raw row</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for q in quarantine %}
+                <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 0.4rem 0.5rem;">{{ q.report_date }}</td>
+                    <td style="padding: 0.4rem 0.5rem;"><code>{{ q.file_kind }}</code></td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ q.line_number }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ q.reason }}</td>
+                    <td style="padding: 0.4rem 0.5rem;"><code style="font-size: 0.75rem;">{{ q.raw_row }}</code></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: #6b7280; margin-top: 0.5rem;">Nothing quarantined — every ingested row parsed cleanly.</p>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const IPPT_KIND_RE = /^(IPPT|NSFIT)_(COMPLETED|FAILED|NOT_ATTEMPTED|IN_PROGRESS|NOT_STARTED)_(\d{8})\.(csv|xlsx)$/i;
+const REQUIRED_KINDS = [
+    'ippt_completed', 'ippt_failed', 'ippt_not_attempted',
+    'nsfit_completed', 'nsfit_in_progress', 'nsfit_not_started',
+];
+
+function kindOf(filename) {
+    const name = filename.split(/[\\/]/).pop();
+    const m = name.match(IPPT_KIND_RE);
+    if (!m) return null;
+    return (m[1] + '_' + m[2]).toLowerCase();
+}
+
+async function uploadSnapshot() {
+    const input = document.getElementById('ipptFiles');
+    const statusEl = document.getElementById('uploadStatus');
+    const resultEl = document.getElementById('uploadResult');
+    statusEl.textContent = '';
+    resultEl.innerHTML = '';
+
+    const files = Array.from(input.files || []);
+    if (files.length !== 6) {
+        statusEl.innerHTML = '<span style="color: #dc2626;">Select exactly the six report files (got ' + files.length + ').</span>';
+        return;
+    }
+    const kinds = files.map(f => kindOf(f.name));
+    if (kinds.some(k => k === null)) {
+        statusEl.innerHTML = '<span style="color: #dc2626;">Every filename must match {REPORT}_{STATE}_{YYYYMMDD}.csv or .xlsx — check: ' +
+            files.filter((f, i) => kinds[i] === null).map(f => f.name).join(', ') + '</span>';
+        return;
+    }
+    if (new Set(kinds).size !== 6 || kinds.some(k => !REQUIRED_KINDS.includes(k))) {
+        statusEl.innerHTML = '<span style="color: #dc2626;">The six files must be one of each report type. Got: ' + kinds.join(', ') + '</span>';
+        return;
+    }
+
+    const body = new FormData();
+    for (const f of files) body.append('files', f, f.name);
+
+    const btn = document.getElementById('uploadBtn');
+    btn.disabled = true;
+    statusEl.innerHTML = '<span style="color: #6b7280;">Uploading&hellip;</span>';
+    try {
+        const response = await fetch('/api/v1/ippt/snapshots', {
+            method: 'POST',
+            credentials: 'same-origin',
+            body: body,
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            statusEl.innerHTML = '<span style="color: #dc2626;">Rejected: ' + (data.detail || response.statusText) + '</span>';
+            return;
+        }
+        statusEl.innerHTML = '<span style="color: #16a34a;">Snapshot ' + data.report_date + ' ingested' +
+            (data.replaced ? ' (replaced the previous ingest of this date)' : '') + '.</span>';
+        let html = '<div class="card"><h3>Ingest result — ' + data.report_date + '</h3>' +
+            '<p style="color: #6b7280; font-size: 0.85rem;">' + data.total_rows + ' rows, ' +
+            data.quarantined + ' quarantined; matched ' + data.match.matched + ', not in nominal roll ' +
+            data.match.unmatched + ', ambiguous ' + data.match.ambiguous + '.</p><ul style="margin-top: 0.5rem;">';
+        for (const [kind, counts] of Object.entries(data.per_kind)) {
+            html += '<li><code>' + kind + '</code>: ' + counts.rows + ' rows' +
+                (counts.quarantined ? ' (<span style="color: #d97706;">' + counts.quarantined + ' quarantined</span>)' : '') + '</li>';
+        }
+        html += '</ul><a href="/ippt/dashboard">Open the dashboard &rarr;</a></div>';
+        resultEl.innerHTML = html;
+        input.value = '';
+    } catch (err) {
+        statusEl.innerHTML = '<span style="color: #dc2626;">Upload failed: ' + err + '</span>';
+    } finally {
+        btn.disabled = false;
+    }
+}
+</script>
+{% endblock %}

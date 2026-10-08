@@ -30,6 +30,19 @@ from .grouping import (
     GroupingMembership,
     GroupingMemberState,
 )
+from .ippt import (
+    FFI_STATUSES,
+    FILE_KINDS,
+    MATCH_STATUSES,
+    OBSERVATION_STATES,
+    STATE_LABELS,
+    IpptHealthScreening,
+    IpptQuarantinedRow,
+    IpptServiceman,
+    IpptSnapshot,
+    IpptStateObservation,
+    IpptWindow,
+)
 from .personnel import (
     INPRO_STATUS_LABELS,
     INPRO_STATUSES,
@@ -68,4 +81,15 @@ __all__ = [
     "SOURCE_MANUAL",
     "Tagging",
     "TaggingEntry",
+    "FILE_KINDS",
+    "FFI_STATUSES",
+    "MATCH_STATUSES",
+    "OBSERVATION_STATES",
+    "STATE_LABELS",
+    "IpptHealthScreening",
+    "IpptQuarantinedRow",
+    "IpptServiceman",
+    "IpptSnapshot",
+    "IpptStateObservation",
+    "IpptWindow",
 ]

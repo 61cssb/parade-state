@@ -19,6 +19,7 @@ import parade_state.models.csv_ingestion  # noqa: F401
 import parade_state.models.deferments  # noqa: F401
 import parade_state.models.discussions  # noqa: F401
 import parade_state.models.grouping  # noqa: F401
+import parade_state.models.ippt  # noqa: F401
 import parade_state.models.personnel  # noqa: F401
 import parade_state.models.tagging  # noqa: F401
 from parade_state.auth.session import create_user_session
@@ -68,6 +69,7 @@ def feature_flags_enabled(monkeypatch):
             "FEATURE_GROUPING",
             "FEATURE_STRENGTH",
             "FEATURE_DISCUSSIONS",
+            "FEATURE_IPPT",
         ):
             monkeypatch.setattr(settings_obj, flag, True)
 

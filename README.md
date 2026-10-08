@@ -115,7 +115,7 @@ uv run uvicorn parade_state.main:app --reload
 
 **Planning & History:**
 - **[docs/NEXT_PHASE.md](docs/NEXT_PHASE.md)** - Roadmap and implementation status
-- **[docs/IPPT_MONITORING.md](docs/IPPT_MONITORING.md)** - IPPT policy requirements and monitoring report schema (dashboard not yet built)
+- **[docs/IPPT_MONITORING.md](docs/IPPT_MONITORING.md)** - IPPT policy requirements and monitoring report schema (implemented behind `FEATURE_IPPT`, local-testing-only — production force-disables it)
 - **[tests/README.md](tests/README.md)** - Testing organization and patterns
 
 **Historical Documents:**

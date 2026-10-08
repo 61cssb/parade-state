@@ -1,11 +1,26 @@
 # IPPT Monitoring — Requirements & Report Schema
 
+> **Status (2026-10-08): implemented, local-testing-only.** The §6 schema,
+> §6.2 state enum, §3.2 matching, §4 ingestion rules, and §6.4 tiers are
+> now live behind `FEATURE_IPPT` (`/ippt/dashboard`,
+> `/ippt/window/{personnel_id}`, `/ippt/upload`), force-disabled in
+> production until the feature is cleared for Railway. §6's SQL views are
+> realized as Python queries (`parade_state/services/ippt.py`) so SQLite
+> and PostgreSQL behave identically; the manual-review linking editor
+> (§3.2 ambiguous rows) remains deferred.
+>
+> **Tier labelling (2026-10-08, per the unit):** the dashboard labels the
+> §6.4 bands by **months before window close** — "3 months before window
+> close" (red) is the most urgent, "6 months" (orange) next, "9 months"
+> (yellow) least — instead of months-into-window. The timeline partition
+> and highlight criteria are unchanged (elapsed ≥ 9 months ⇔ ≤ 3 before
+> close); the dashboard renders the three tiers as colour-coded filter
+> tabs rather than stacked lists.
+
 Preparatory reference for the planned IPPT monitoring dashboard. The policy
 rules in §1 come from the unit's IPPT requirements; the report schemas in §2–§4
 were derived from the sample reports in `fixtures/ippt/` (snapshot dated
 2026-09-11). Semantics marked **[confirmed]** were clarified with the unit.
-**No IPPT feature is implemented yet** — this document exists so the dashboard
-work can start from an agreed model.
 
 ---
 
@@ -71,7 +86,10 @@ decidable at/after window close.
 
 Files are named `{REPORT}_{STATE}_{YYYYMMDD}.csv`, e.g.
 `IPPT_COMPLETED_20260911.csv`. The date suffix is the report generation date;
-all relative values (notably `Window close`) are relative to it.
+all relative values (notably `Window close`) are relative to it. The upload
+also accepts the same reports as Excel workbooks (`.xlsx`, first worksheet,
+same header row and columns — numeric cells are read as numbers); the six
+files of one snapshot may mix the two formats.
 
 | Prefix | Population |
 |---|---|

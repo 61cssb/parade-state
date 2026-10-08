@@ -26,6 +26,7 @@ from parade_state.api import (
     discussions,
     feature_access,
     groupings,
+    ippt,
     nominal_rolls,
     personnel,
     sessions,
@@ -43,6 +44,7 @@ from parade_state.features import FeatureDisabledError, feature_label, require_f
 from parade_state.web.attendance import router as web_attendance_router
 from parade_state.web.auth import router as web_auth_router
 from parade_state.web.grouping import router as web_grouping_router
+from parade_state.web.ippt import router as web_ippt_router
 from parade_state.web.nominal_roll import router as web_nominal_roll_router
 
 logger = logging.getLogger(__name__)
@@ -158,6 +160,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tags=["web-nominal-roll"],
         dependencies=[Depends(require_feature("FEATURE_NOMINALROLL"))],
     )
+    # IPPT monitoring (local-testing-only: FEATURE_IPPT is force-disabled
+    # in production, see config.Settings).
+    app.include_router(
+        web_ippt_router,
+        tags=["web-ippt"],
+        dependencies=[Depends(require_feature("FEATURE_IPPT"))],
+    )
 
     # Admin interface routes
     app.include_router(admin_router, tags=["admin"])
@@ -236,6 +245,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         prefix="/api/v1/taggings",
         tags=["taggings"],
         dependencies=[Depends(require_feature("FEATURE_NOMINALROLL"))],
+    )
+    app.include_router(
+        ippt.router,
+        prefix="/api/v1/ippt",
+        tags=["ippt"],
+        dependencies=[Depends(require_feature("FEATURE_IPPT"))],
     )
     app.include_router(db_restore.router, prefix="/api/v1/admin", tags=["db-restore"])
     app.include_router(admin_purge.router, prefix="/api/v1/admin", tags=["admin-purge"])
