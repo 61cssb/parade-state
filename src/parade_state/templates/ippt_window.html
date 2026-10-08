@@ -25,6 +25,13 @@
         &middot; <span style="color: #9ca3af;">not in nominal roll (NR) — no matching name on the attendance-active NR</span>
         {% endif %}
     </p>
+    {% if detail.serviceman.excluded %}
+    <p style="background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 8px; color: #6b7280; font-size: 0.85rem; margin: 0.75rem 0 0; padding: 0.5rem 0.75rem;">
+        This serviceman has been <strong>removed from tracking</strong>{% if detail.serviceman.exclusion_reason %} — {{ detail.serviceman.exclusion_reason }}{% endif %}.
+        He no longer appears on the dashboard; the history below is retained.
+        Re-include him from the <a href="/ippt/upload">IPPT Upload</a> page.
+    </p>
+    {% endif %}
 </div>
 
 {% if detail.latest %}

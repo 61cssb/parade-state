@@ -13,6 +13,21 @@ existing personnel link is never re-resolved while the Personnel row
 still exists; unique name hits on the attendance-active roll link
 automatically, homonyms are flagged ``ambiguous`` (display-only for
 now), misses stay ``unmatched`` and are retried on later ingests.
+Servicemen excluded from tracking (decided 2026-10-08) keep their rows
+but are hidden from the read models; a snapshot that shows them again
+surfaces them in the upload response for re-inclusion.
+
+Ingest order never matters (decided 2026-10-08): display identity
+(rank/sub-unit) comes from the latest observation rather than the
+spine's last-written values, and every ingest ends with a recompute
+pass over ALL snapshots in report-date order that re-derives the
+order-dependent derivations — COMPLETED-row window backfills and
+screening ``screened_on`` dates — so backfilling an old month cannot
+leave NULL window links or lost screening dates behind. A derived
+window that overlaps (±45 days) but disagrees with an existing window
+of the same serviceman is still ingested, but records a consistency
+warning in the upload response (§6.1's cheap consistency check) instead
+of silently looking like a rollover.
 
 The read models fold the observations into the dashboard landing state
 (latest observation per serviceman) and the escalation tiers of §6.4 —
@@ -22,7 +37,7 @@ views are PostgreSQL prose, not DDL this app ships).
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 from sqlalchemy import delete, func, select
@@ -60,6 +75,13 @@ class IngestError(ValueError):
     dates, or an unusable file) — nothing lands (§4 atomicity)."""
 
 
+#: A derived window this many days from an existing window of the same
+#: serviceman (but not equal) is the same window with inconsistent
+#: close data, not a rollover — rollovers jump ~1 year (§6.1's cheap
+#: consistency check). Still ingested; recorded as a warning.
+WINDOW_CONSISTENCY_TOLERANCE_DAYS = 45
+
+
 @dataclass
 class IngestResult:
     report_date: date
@@ -67,6 +89,8 @@ class IngestResult:
     per_kind: dict[str, dict[str, int]]
     match_counts: dict[str, int]
     quarantined_total: int
+    window_warnings: list[dict] = field(default_factory=list)
+    excluded_reappeared: list[dict] = field(default_factory=list)
 
     @property
     def total_rows(self) -> int:
@@ -148,13 +172,15 @@ async def ingest_snapshot(
 
     match_counts = {"matched": 0, "unmatched": 0, "ambiguous": 0}
     quarantined_total = 0
+    window_warnings: list[dict] = []
+    excluded_reappeared: list[dict] = []
     seen_servicemen: set[int] = set()
     match_counted: set[int] = set()
 
     # Deterministic order: outstanding files first, so a COMPLETED row's
     # window backfill can also fall back to a same-date outstanding row
-    # if a unit ever issues those together (otherwise backfill reads
-    # strictly earlier report dates).
+    # if a unit ever issues those together (otherwise the post-ingest
+    # recompute pass derives the link from any snapshot's data).
     order = {kind: index for index, kind in enumerate(FILE_KINDS)}
     parsed_files.sort(key=lambda parsed: order[parsed.file_kind])
 
@@ -204,7 +230,31 @@ async def ingest_snapshot(
                 continue
             seen_servicemen.add(serviceman.id)
 
-            window_id = await _resolve_window(db, serviceman.id, row, report_date)
+            if serviceman.excluded:
+                # Remove-from-tracking keeps ingesting (rows retained);
+                # the reappeared-excluded person is surfaced so the
+                # super-admin can re-include them (decided 2026-10-08).
+                excluded_reappeared.append(
+                    {
+                        "serviceman_id": serviceman.id,
+                        "full_name": serviceman.full_name,
+                        "exclusion_reason": serviceman.exclusion_reason,
+                    }
+                )
+
+            window_id, window_warning = await _resolve_window(
+                db, serviceman, row, report_date
+            )
+            if window_warning is not None:
+                window_warnings.append(
+                    {
+                        "serviceman_id": serviceman.id,
+                        "full_name": serviceman.full_name,
+                        "report_date": report_date.isoformat(),
+                        "existing_window_end": window_warning[0].isoformat(),
+                        "derived_window_end": window_warning[1].isoformat(),
+                    }
+                )
             db.add(
                 IpptStateObservation(
                     snapshot_id=snapshot.id,
@@ -225,6 +275,11 @@ async def ingest_snapshot(
             if row.ffi is not None:
                 await _record_screening(db, serviceman.id, report_date, row.ffi)
 
+    # Order-independent derivations: replay ALL snapshots in report-date
+    # order so backfilled months link windows and gain screening dates no
+    # matter when their snapshot was uploaded (decided 2026-10-08).
+    await recompute_derivations(db)
+
     result = IngestResult(
         report_date=report_date,
         replaced=replaced,
@@ -237,13 +292,18 @@ async def ingest_snapshot(
         },
         match_counts=match_counts,
         quarantined_total=quarantined_total,
+        window_warnings=window_warnings,
+        excluded_reappeared=excluded_reappeared,
     )
     logger.info(
-        "IPPT snapshot %s ingested: %d rows, %d quarantined%s",
+        "IPPT snapshot %s ingested: %d rows, %d quarantined%s, "
+        "%d window warnings, %d excluded reappeared",
         report_date.isoformat(),
         result.total_rows,
         quarantined_total,
         " (replaced previous ingest)" if replaced else "",
+        len(window_warnings),
+        len(excluded_reappeared),
     )
     return result
 
@@ -337,62 +397,90 @@ async def _match_personnel(db: AsyncSession, norm_name: str) -> tuple[str | None
 
 async def _resolve_window(
     db: AsyncSession,
-    serviceman_id: int,
+    serviceman: IpptServiceman,
     row: IpptReportRow,
     report_date: date,
-) -> int | None:
+) -> tuple[int | None, tuple[date, date] | None]:
     """Window id for an observation: derived from ``Window close`` for
-    outstanding rows, backfilled from the preceding open window for
-    ``*_COMPLETED`` rows (§6.1)."""
+    outstanding rows, backfilled from the serviceman's covering window
+    for ``*_COMPLETED`` rows (§6.1).
+
+    Returns ``(window_id, warning)``. ``warning`` is a
+    ``(existing_window_end, derived_window_end)`` pair when the derived
+    window overlaps (±45 days) but disagrees with an existing window of
+    the same serviceman — the same window with inconsistent close data,
+    not a rollover (rollovers jump ~1 year). The row is still ingested;
+    the caller surfaces the warning in the upload response.
+    """
     if row.window_close_days is not None:
         window_start, window_end = window_dates(report_date, row.window_close_days)
+        others = (
+            (
+                await db.execute(
+                    select(IpptWindow).where(
+                        IpptWindow.serviceman_id == serviceman.id,
+                        IpptWindow.window_end != window_end,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        warning: tuple[date, date] | None = None
+        for candidate in sorted(others, key=lambda w: w.window_end):
+            if (
+                abs((candidate.window_end - window_end).days)
+                <= WINDOW_CONSISTENCY_TOLERANCE_DAYS
+            ):
+                warning = (candidate.window_end, window_end)
+                break
+
         window = (
             await db.execute(
                 select(IpptWindow).where(
-                    IpptWindow.serviceman_id == serviceman_id,
+                    IpptWindow.serviceman_id == serviceman.id,
                     IpptWindow.window_end == window_end,
                 )
             )
         ).scalar_one_or_none()
         if window is None:
             window = IpptWindow(
-                serviceman_id=serviceman_id,
+                serviceman_id=serviceman.id,
                 window_end=window_end,
                 window_start=window_start,
             )
             db.add(window)
             await db.flush()
-        return window.id
+        return window.id, warning
 
     # Completed rows carry no window close: backfill from the serviceman's
-    # most recent earlier observation whose window is still open here.
+    # window covering this report date, when one is already known (the
+    # post-ingest recompute pass re-derives this over ALL snapshots, so a
+    # window defined only by a later-ingested snapshot still links up).
     return (
-        await db.execute(
-            select(IpptWindow.id)
-            .join(
-                IpptStateObservation,
-                IpptStateObservation.window_id == IpptWindow.id,
+        (
+            await db.execute(
+                select(IpptWindow.id)
+                .where(
+                    IpptWindow.serviceman_id == serviceman.id,
+                    IpptWindow.window_start <= report_date,
+                    IpptWindow.window_end >= report_date,
+                )
+                .order_by(IpptWindow.window_start.desc())
+                .limit(1)
             )
-            .join(
-                IpptSnapshot,
-                IpptStateObservation.snapshot_id == IpptSnapshot.id,
-            )
-            .where(
-                IpptStateObservation.serviceman_id == serviceman_id,
-                IpptSnapshot.report_date < report_date,
-                IpptWindow.window_end >= report_date,
-            )
-            .order_by(IpptSnapshot.report_date.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
+        ).scalar_one_or_none(),
+        None,
+    )
 
 
 async def _record_screening(
     db: AsyncSession, serviceman_id: int, observed_on: date, status: str
 ) -> None:
-    """Upsert the FFI screening observation; approximate ``screened_on``
-    as the first 'fit' report date after a 'pending' (§6.1)."""
+    """Upsert the FFI screening observation. ``screened_on`` is NOT set
+    here — it is a derived value owned by :func:`recompute_derivations`,
+    which runs after every ingest and re-derives it from the full
+    screening history regardless of ingest order (§6.1)."""
     screening = (
         await db.execute(
             select(IpptHealthScreening).where(
@@ -411,18 +499,79 @@ async def _record_screening(
     else:  # re-ingest of this date
         screening.status = status
 
-    if status == "fit" and screening.screened_on is None:
-        prior_pending = (
+
+async def recompute_derivations(db: AsyncSession) -> None:
+    """Re-derive the order-dependent ingest derivations over ALL
+    snapshots, replaying in report-date order (decided 2026-10-08).
+
+    - ``*_COMPLETED`` observations (no ``window_close_days``) re-link to
+      the serviceman's window covering their report date, so a backfilled
+      old month links up even when the defining outstanding row arrived
+      in a later-ingested snapshot or a later report date, and same-date
+      COMPLETED+outstanding pairs link regardless of file order. Stays
+      NULL only when no known window covers the date.
+    - ``ippt_health_screenings.screened_on`` is re-derived as the
+      ``observed_on`` of each 'fit' row with a strictly-earlier 'pending'
+      row — the pending→fit flip (§6.1) — so the flip date survives any
+      ingest order.
+
+    Runs inside the ingest transaction (before the caller commits).
+    """
+    windows = (await db.execute(select(IpptWindow))).scalars().all()
+    by_serviceman: dict[int, list[IpptWindow]] = {}
+    for window in windows:
+        by_serviceman.setdefault(window.serviceman_id, []).append(window)
+    for window_list in by_serviceman.values():
+        window_list.sort(key=lambda w: (w.window_start, w.window_end))
+
+    completed_rows = (
+        await db.execute(
+            select(IpptStateObservation, IpptSnapshot.report_date)
+            .join(IpptSnapshot, IpptStateObservation.snapshot_id == IpptSnapshot.id)
+            .where(IpptStateObservation.window_close_days.is_(None))
+            .order_by(IpptSnapshot.report_date, IpptStateObservation.id)
+        )
+    ).all()
+    for observation, report_date in completed_rows:
+        covering = [
+            window
+            for window in by_serviceman.get(observation.serviceman_id, [])
+            if window.window_start <= report_date <= window.window_end
+        ]
+        # Latest window_start wins (windows of one serviceman do not
+        # legitimately overlap; ties mean inconsistent data — item 3 warns).
+        relinked = covering[-1] if covering else None
+        linked_id = relinked.id if relinked is not None else None
+        if observation.window_id != linked_id:
+            observation.window_id = linked_id
+
+    screenings = (
+        (
             await db.execute(
-                select(IpptHealthScreening.id).where(
-                    IpptHealthScreening.serviceman_id == serviceman_id,
-                    IpptHealthScreening.status == "pending",
-                    IpptHealthScreening.observed_on < observed_on,
+                select(IpptHealthScreening).order_by(
+                    IpptHealthScreening.serviceman_id,
+                    IpptHealthScreening.observed_on,
                 )
             )
-        ).first()
-        if prior_pending is not None:
-            screening.screened_on = observed_on
+        )
+        .scalars()
+        .all()
+    )
+    pending_seen = False
+    current_serviceman: int | None = None
+    for screening in screenings:
+        if screening.serviceman_id != current_serviceman:
+            current_serviceman = screening.serviceman_id
+            pending_seen = False
+        expected = (
+            screening.observed_on
+            if (screening.status == "fit" and pending_seen)
+            else None
+        )
+        if screening.screened_on != expected:
+            screening.screened_on = expected
+        if screening.status == "pending":
+            pending_seen = True
 
 
 # ============================================================================
@@ -484,7 +633,14 @@ class ServicemanState:
 
 async def latest_states(db: AsyncSession) -> list[ServicemanState]:
     """The dashboard landing state: latest observation per serviceman
-    (§6.3 ``ippt_current_state``) with the §6.4 tier assignment."""
+    (§6.3 ``ippt_current_state``) with the §6.4 tier assignment.
+
+    Servicemen removed from tracking (``excluded``) are hidden here —
+    the dashboard and tier views never show them (decided 2026-10-08).
+    Display identity (rank, sub-unit) comes from the latest observation,
+    not the spine's last-written values, so which snapshot arrived first
+    never changes what the dashboard shows.
+    """
     rows = (
         await db.execute(
             select(
@@ -498,6 +654,7 @@ async def latest_states(db: AsyncSession) -> list[ServicemanState]:
                 IpptServiceman, IpptStateObservation.serviceman_id == IpptServiceman.id
             )
             .outerjoin(IpptWindow, IpptStateObservation.window_id == IpptWindow.id)
+            .where(IpptServiceman.excluded.is_(False))
         )
     ).all()
 
@@ -575,9 +732,9 @@ async def latest_states(db: AsyncSession) -> list[ServicemanState]:
                 personnel_id=(
                     serviceman.personnel_id if match_status == "matched" else None
                 ),
-                rank=serviceman.rank,
+                rank=observation.rank,
                 full_name=serviceman.full_name,
-                sub_unit=serviceman.sub_unit,
+                sub_unit=observation.sub_unit,
                 match_status=match_status,
                 state=observation.state,
                 state_label=STATE_LABELS[observation.state],
@@ -646,6 +803,7 @@ async def dashboard_data(db: AsyncSession) -> dict:
             ),
             "match": match_counts,
             "quarantined": quarantined_total,
+            "excluded": await excluded_count(db),
             "report_dates": await report_date_count(db),
             "latest_report_date": await latest_report_date(db),
         },
@@ -725,6 +883,65 @@ async def quarantined_rows(db: AsyncSession) -> list[dict]:
     ]
 
 
+async def set_tracking_exclusion(
+    db: AsyncSession,
+    serviceman_id: int,
+    excluded: bool,
+    reason: str | None = None,
+) -> IpptServiceman | None:
+    """Remove-from-tracking / re-include (decided 2026-10-08).
+
+    Sets ``excluded`` (+ ``exclusion_reason`` when excluding; clearing on
+    re-inclusion). Rows and their history are always retained, and a
+    later snapshot showing the person again does NOT lift the exclusion —
+    it surfaces them in the upload response instead. Returns the updated
+    spine row, or ``None`` for an unknown id.
+    """
+    serviceman = await db.get(IpptServiceman, serviceman_id)
+    if serviceman is None:
+        return None
+    serviceman.excluded = excluded
+    serviceman.exclusion_reason = reason if excluded else None
+    serviceman.updated_at = utc_dt.ensure_naive(utc_dt.utcnow())
+    await db.flush()
+    return serviceman
+
+
+async def excluded_servicemen(db: AsyncSession) -> list[dict]:
+    """Rows removed from tracking, for the upload page's review panel."""
+    rows = (
+        (
+            await db.execute(
+                select(IpptServiceman)
+                .where(IpptServiceman.excluded.is_(True))
+                .order_by(IpptServiceman.full_name)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        {
+            "serviceman_id": serviceman.id,
+            "rank": serviceman.rank,
+            "full_name": serviceman.full_name,
+            "exclusion_reason": serviceman.exclusion_reason,
+        }
+        for serviceman in rows
+    ]
+
+
+async def excluded_count(db: AsyncSession) -> int:
+    """How many spine rows are currently removed from tracking."""
+    return (
+        await db.scalar(
+            select(func.count())
+            .select_from(IpptServiceman)
+            .where(IpptServiceman.excluded.is_(True))
+        )
+    ) or 0
+
+
 async def window_detail(db: AsyncSession, personnel_id: str) -> dict | None:
     """Per-personnel window view (§3.3 trajectory): latest state, the
     full observation history oldest → newest, screening history, and the
@@ -762,7 +979,9 @@ async def window_detail(db: AsyncSession, personnel_id: str) -> dict | None:
         return None
 
     trajectory = []
+    latest_observation: IpptStateObservation | None = None
     for observation, report_date, window in observations:
+        latest_observation = observation  # rows arrive oldest → newest
         trajectory.append(
             {
                 "report_date": report_date.isoformat(),
@@ -797,14 +1016,20 @@ async def window_detail(db: AsyncSession, personnel_id: str) -> dict | None:
     )
 
     serviceman = servicemen[0]
+    # Display identity follows the latest observation, like the dashboard
+    # (item 2 of the 2026-10-08 hardening); the spine row additionally
+    # carries the tracking-exclusion state (item 1).
+    identity = latest_observation if latest_observation is not None else serviceman
     return {
         "serviceman": {
             "id": serviceman.id,
-            "rank": serviceman.rank,
+            "rank": identity.rank,
             "full_name": serviceman.full_name,
             "unit": serviceman.unit,
-            "sub_unit": serviceman.sub_unit,
+            "sub_unit": identity.sub_unit,
             "match_status": serviceman.match_status,
+            "excluded": serviceman.excluded,
+            "exclusion_reason": serviceman.exclusion_reason,
         },
         "personnel": (
             {

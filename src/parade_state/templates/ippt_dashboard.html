@@ -14,6 +14,8 @@
     .ippt-section-title { margin: 0; }
     .ippt-sub { font-weight: 400; color: #6b7280; font-size: 0.8rem; margin-left: 0.35rem; }
     .ippt-stale { color: #9ca3af; font-size: 0.7rem; display: inline-block; }
+    .ippt-action { background: none; border: 1px solid #d1d5db; border-radius: 6px; color: #6b7280; cursor: pointer; font-size: 0.7rem; padding: 0.1rem 0.45rem; white-space: nowrap; }
+    .ippt-action:hover { border-color: #dc2626; color: #dc2626; }
 
     @media (max-width: 640px) {
         .ippt-stats { gap: 0.5rem !important; margin-bottom: 0.75rem !important; }
@@ -27,6 +29,7 @@
         .ippt-section { padding: 0.75rem !important; }
         .ippt-section-title { font-size: 1rem; }
         .ippt-sub { display: none; }
+        .ippt-action { font-size: 0.65rem; padding: 0.15rem 0.4rem; }
     }
 </style>
 
@@ -44,6 +47,9 @@
     &middot; {{ dashboard.summary.match.matched }} matched to NR
     ({{ dashboard.summary.match.unmatched }} not in nominal roll, {{ dashboard.summary.match.ambiguous }} ambiguous)
     &middot; <span {% if dashboard.summary.quarantined %}style="color: #d97706;"{% endif %}>{{ dashboard.summary.quarantined }} quarantined rows</span>
+    {% if dashboard.summary.excluded %}
+    &middot; {{ dashboard.summary.excluded }} removed from tracking
+    {% endif %}
 </p>
 
 <div class="ippt-stats" style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
@@ -106,6 +112,7 @@
                     <th style="padding: 0.4rem 0.5rem;">FFI</th>
                     <th style="padding: 0.4rem 0.5rem;">Window ends</th>
                     <th style="padding: 0.4rem 0.5rem;">Days left</th>
+                    {% if user.role == 'super_admin' %}<th style="padding: 0.4rem 0.5rem;"></th>{% endif %}
                 </tr>
             </thead>
             <tbody>
@@ -131,6 +138,7 @@
                     <td style="padding: 0.4rem 0.5rem;">{% if e.ffi == 'pending' %}<span style="color: #d97706;">Pending</span>{% elif e.ffi %}{{ e.ffi|capitalize }}{% else %}-{% endif %}</td>
                     <td style="padding: 0.4rem 0.5rem;">{{ e.window_end or '-' }}</td>
                     <td style="padding: 0.4rem 0.5rem;">{% if e.days_to_close is not none %}{% if e.days_to_close <= 14 %}<strong style="color: #dc2626;">{{ e.days_to_close }}</strong>{% else %}{{ e.days_to_close }}{% endif %}{% else %}-{% endif %}</td>
+                    {% if user.role == 'super_admin' %}<td style="padding: 0.4rem 0.5rem;"><button class="ippt-action" data-name="{{ e.full_name|e }}" data-id="{{ e.serviceman_id }}" onclick="openExclude(this)" title="Remove this serviceman from IPPT tracking">Remove</button></td>{% endif %}
                 </tr>
                 {% endfor %}
             </tbody>
@@ -159,6 +167,7 @@
                     <th style="padding: 0.4rem 0.5rem;">Sub-unit</th>
                     <th style="padding: 0.4rem 0.5rem;">State</th>
                     <th style="padding: 0.4rem 0.5rem;">Window ends</th>
+                    {% if user.role == 'super_admin' %}<th style="padding: 0.4rem 0.5rem;"></th>{% endif %}
                 </tr>
             </thead>
             <tbody>
@@ -172,6 +181,7 @@
                     <td style="padding: 0.4rem 0.5rem;">{{ e.sub_unit }}</td>
                     <td style="padding: 0.4rem 0.5rem;">{{ e.state_label }}</td>
                     <td style="padding: 0.4rem 0.5rem;">{{ e.window_end or '-' }}</td>
+                    {% if user.role == 'super_admin' %}<td style="padding: 0.4rem 0.5rem;"><button class="ippt-action" data-name="{{ e.full_name|e }}" data-id="{{ e.serviceman_id }}" onclick="openExclude(this)" title="Remove this serviceman from IPPT tracking">Remove</button></td>{% endif %}
                 </tr>
                 {% endfor %}
             </tbody>
@@ -195,6 +205,7 @@
                     <th style="padding: 0.4rem 0.5rem;">Name</th>
                     <th style="padding: 0.4rem 0.5rem;">Sub-unit</th>
                     <th style="padding: 0.4rem 0.5rem;">How</th>
+                    {% if user.role == 'super_admin' %}<th style="padding: 0.4rem 0.5rem;"></th>{% endif %}
                 </tr>
             </thead>
             <tbody>
@@ -207,6 +218,7 @@
                     </td>
                     <td style="padding: 0.4rem 0.5rem;">{{ e.sub_unit }}</td>
                     <td style="padding: 0.4rem 0.5rem;">{{ e.state_label }}{% if e.ippt_status %} ({{ e.ippt_status }}){% endif %}</td>
+                    {% if user.role == 'super_admin' %}<td style="padding: 0.4rem 0.5rem;"><button class="ippt-action" data-name="{{ e.full_name|e }}" data-id="{{ e.serviceman_id }}" onclick="openExclude(this)" title="Remove this serviceman from IPPT tracking">Remove</button></td>{% endif %}
                 </tr>
                 {% endfor %}
             </tbody>
@@ -247,4 +259,72 @@
         {% if user.role == 'super_admin' %} — <a href="/ippt/upload">upload the six reports</a>{% endif %}.</p>
     {% endif %}
 </div>
+
+{% if user.role == 'super_admin' %}
+<dialog id="excludeDialog" style="border: 1px solid #e5e7eb; border-radius: 10px; padding: 1.25rem; max-width: 24rem; width: 90vw;">
+    <h3 style="margin: 0 0 0.5rem;">Remove from tracking</h3>
+    <p id="excludeName" style="color: #374151; margin: 0 0 0.25rem;"></p>
+    <p style="color: #6b7280; font-size: 0.8rem; margin: 0 0 0.75rem;">
+        The serviceman disappears from this dashboard and its tiers. Rows and
+        history are kept; if a later snapshot shows him again, the upload
+        response will surface him for re-inclusion.
+    </p>
+    <label for="excludeReason" style="font-size: 0.85rem; color: #374151;">Reason (required)</label>
+    <textarea id="excludeReason" rows="3" style="width: 100%; margin-top: 0.25rem; box-sizing: border-box;" placeholder="e.g. ORD, transferred out of the unit, not IPPT-eligible"></textarea>
+    <p id="excludeError" style="color: #dc2626; font-size: 0.8rem; margin: 0.25rem 0 0; display: none;"></p>
+    <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.75rem;">
+        <button class="btn" style="border: 1px solid #d1d5db; background: #fff;" onclick="document.getElementById('excludeDialog').close()">Cancel</button>
+        <button class="btn btn-primary" id="excludeSubmit" onclick="submitExclude()">Remove</button>
+    </div>
+</dialog>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if user.role == 'super_admin' %}
+<script>
+let excludeId = null;
+
+function openExclude(btn) {
+    excludeId = btn.dataset.id;
+    document.getElementById('excludeName').textContent = btn.dataset.name;
+    document.getElementById('excludeReason').value = '';
+    const err = document.getElementById('excludeError');
+    err.style.display = 'none';
+    document.getElementById('excludeDialog').showModal();
+}
+
+async function submitExclude() {
+    const reason = document.getElementById('excludeReason').value.trim();
+    const err = document.getElementById('excludeError');
+    if (!reason) {
+        err.textContent = 'A reason is required.';
+        err.style.display = 'block';
+        return;
+    }
+    const btn = document.getElementById('excludeSubmit');
+    btn.disabled = true;
+    try {
+        const response = await fetch('/api/v1/ippt/servicemen/' + excludeId + '/exclusion', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({reason: reason}),
+        });
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            err.textContent = data.detail || ('Rejected (' + response.status + ').');
+            err.style.display = 'block';
+            return;
+        }
+        location.reload();
+    } catch (err2) {
+        err.textContent = 'Request failed: ' + err2;
+        err.style.display = 'block';
+    } finally {
+        btn.disabled = false;
+    }
+}
+</script>
+{% endif %}
 {% endblock %}

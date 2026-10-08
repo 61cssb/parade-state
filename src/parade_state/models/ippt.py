@@ -28,6 +28,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -88,9 +89,15 @@ class IpptServiceman(Base):
     """Identity spine: one row per serviceman seen in any report (§6.1).
 
     No unique natural key: rank/sub-unit drift and homonyms make
-    (name, sub-unit) a match hint, not a constraint. ``full_name_norm``
+    (name, sub-unit) a match *hint*, not a constraint. ``full_name_norm``
     (uppercased, whitespace-collapsed) keys the idempotent re-ingest
     lookup and the personnel matching of §3.2.
+
+    ``excluded`` removes a serviceman from the dashboard/tier views
+    (remove-from-tracking, decided 2026-10-08): rows are retained, the
+    exclusion is audit-logged, and a later snapshot that shows the person
+    again surfaces them in the upload response for re-inclusion — it
+    never lifts the exclusion by itself.
     """
 
     __tablename__ = "ippt_servicemen"
@@ -119,6 +126,10 @@ class IpptServiceman(Base):
         ),
         nullable=True,
     )
+    excluded: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
+    exclusion_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[utc_dt.datetime] = mapped_column(
         default=lambda: utc_dt.ensure_naive(utc_dt.utcnow())
     )

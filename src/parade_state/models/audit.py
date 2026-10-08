@@ -34,6 +34,7 @@ class AuditLog(Base):
             "discussion_post",
             "feature_access",
             "ippt_snapshot",
+            "ippt_serviceman",
             name="audit_entity_type",
         ),
         index=True,

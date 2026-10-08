@@ -2,6 +2,10 @@
 {% block title %}IPPT Upload - Parade State Admin{% endblock %}
 {% block page_title %}IPPT Upload{% endblock %}
 {% block content %}
+<style>
+    .ippt-action { background: none; border: 1px solid #d1d5db; border-radius: 6px; color: #6b7280; cursor: pointer; font-size: 0.75rem; padding: 0.15rem 0.55rem; white-space: nowrap; }
+    .ippt-action:hover { border-color: #16a34a; color: #16a34a; }
+</style>
 <p style="color: #6b7280; margin-bottom: 1.5rem;">
     Upload the monthly IPPT/NS FIT monitoring reports. A snapshot is the
     <strong>full set of six files</strong> for one report date — the upload is
@@ -29,6 +33,46 @@
     </div>
     <div id="uploadStatus" style="margin-top: 1rem; font-size: 0.875rem;"></div>
     <div id="uploadResult" style="margin-top: 1rem;"></div>
+</div>
+
+<div class="card" id="excludedCard">
+    <h3>Removed from tracking
+        {% if excluded %}
+        <span style="display: inline-block; background: #f3f4f6; color: #6b7280; border-radius: 999px; padding: 0.1rem 0.6rem; font-size: 0.8rem; vertical-align: middle;">{{ excluded|length }}</span>
+        {% endif %}
+    </h3>
+    <p style="color: #6b7280; font-size: 0.85rem; margin-top: 0.5rem;">
+        Servicemen hidden from the dashboard and its tiers (rows and history
+        are kept). Re-including restores them; ingesting a snapshot that
+        shows an excluded serviceman again surfaces him in the upload result
+        above — it never re-includes automatically.
+    </p>
+    {% if excluded %}
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 0.75rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.4rem 0.5rem;">Rank</th>
+                    <th style="padding: 0.4rem 0.5rem;">Name</th>
+                    <th style="padding: 0.4rem 0.5rem;">Reason</th>
+                    <th style="padding: 0.4rem 0.5rem;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in excluded %}
+                <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 0.4rem 0.5rem;">{{ s.rank }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ s.full_name }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ s.exclusion_reason }}</td>
+                    <td style="padding: 0.4rem 0.5rem;"><button class="ippt-action" data-id="{{ s.serviceman_id }}" onclick="reinclude(this)" title="Put this serviceman back on the dashboard">Re-include</button></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: #6b7280; margin-top: 0.5rem;">Everyone seen in the reports is currently tracked.</p>
+    {% endif %}
 </div>
 
 <div class="card">
@@ -172,12 +216,71 @@ async function uploadSnapshot() {
             html += '<li><code>' + kind + '</code>: ' + counts.rows + ' rows' +
                 (counts.quarantined ? ' (<span style="color: #d97706;">' + counts.quarantined + ' quarantined</span>)' : '') + '</li>';
         }
-        html += '</ul><a href="/ippt/dashboard">Open the dashboard &rarr;</a></div>';
+        html += '</ul>';
+        if (data.window_warnings && data.window_warnings.length) {
+            html += '<div style="background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 0.6rem 0.8rem; margin-top: 0.75rem; font-size: 0.85rem;">' +
+                '<strong style="color: #b45309;">Window consistency warnings (' + data.window_warnings.length + ')</strong>' +
+                '<ul style="margin: 0.4rem 0 0;">';
+            for (const w of data.window_warnings) {
+                html += '<li><strong>' + w.full_name + '</strong>: report ' + w.report_date +
+                    ' derives a window ending ' + w.derived_window_end + ', but a window ending ' +
+                    w.existing_window_end + ' already exists (within 45 days). This looks like the ' +
+                    'same window with inconsistent close data, not a rollover — both windows are now ' +
+                    'recorded; check the source report.</li>';
+            }
+            html += '</ul></div>';
+        }
+        if (data.excluded_reappeared && data.excluded_reappeared.length) {
+            html += '<div style="background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 8px; padding: 0.6rem 0.8rem; margin-top: 0.75rem; font-size: 0.85rem;">' +
+                '<strong>Removed from tracking, seen again in this snapshot (' + data.excluded_reappeared.length + ')</strong>' +
+                '<p style="color: #6b7280; margin: 0.25rem 0 0;">They stay hidden from the dashboard. Re-include them here if their removal no longer applies:</p><ul style="margin: 0.4rem 0 0;">';
+            for (const s of data.excluded_reappeared) {
+                html += '<li data-reappeared="' + s.serviceman_id + '"><strong>' + s.full_name + '</strong>' +
+                    (s.exclusion_reason ? ' — removed: ' + s.exclusion_reason : '') +
+                    ' <button class="ippt-action" data-id="' + s.serviceman_id + '" onclick="reinclude(this)">Re-include</button></li>';
+            }
+            html += '</ul></div>';
+        }
+        html += '<a href="/ippt/dashboard">Open the dashboard &rarr;</a></div>';
         resultEl.innerHTML = html;
         input.value = '';
     } catch (err) {
         statusEl.innerHTML = '<span style="color: #dc2626;">Upload failed: ' + err + '</span>';
     } finally {
+        btn.disabled = false;
+    }
+}
+
+async function reinclude(btn) {
+    const id = btn.dataset.id;
+    btn.disabled = true;
+    try {
+        const response = await fetch('/api/v1/ippt/servicemen/' + id + '/exclusion', {
+            method: 'DELETE',
+            credentials: 'same-origin',
+        });
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            alert(data.detail || ('Re-include failed (' + response.status + ').'));
+            btn.disabled = false;
+            return;
+        }
+        // Drop the row/li this button belonged to; the "Removed from
+        // tracking" card row (if rendered) goes too.
+        const container = btn.closest('li, tr');
+        if (container) container.remove();
+        const card = document.getElementById('excludedCard');
+        if (card && !card.querySelector('tbody tr')) {
+            const empty = document.createElement('p');
+            empty.style.color = '#6b7280';
+            empty.style.marginTop = '0.5rem';
+            empty.textContent = 'Everyone seen in the reports is currently tracked.';
+            const table = card.querySelector('.table-wrap');
+            if (table) table.remove();
+            card.appendChild(empty);
+        }
+    } catch (err) {
+        alert('Re-include failed: ' + err);
         btn.disabled = false;
     }
 }

@@ -48,6 +48,8 @@ AUDIT_ENTITY_TYPES = [
     "database",
     "discussion_post",
     "feature_access",
+    "ippt_snapshot",
+    "ippt_serviceman",
 ]
 AUDIT_ACTIONS = [
     "create",
