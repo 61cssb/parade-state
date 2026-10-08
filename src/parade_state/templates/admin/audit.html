@@ -23,7 +23,7 @@
             <option value="{{ a }}" {% if action == a %}selected{% endif %}>{{ a }}</option>
             {% endfor %}
         </select>
-        <input type="text" name="target_user_id" value="{{ target_user_id }}" placeholder="Filter by user ID"
+        <input type="text" name="target_user_id" value="{{ target_user_id }}" placeholder="Filter by actor user ID (who did it)"
                style="flex: 1; min-width: 200px; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
         <button type="submit" class="btn btn-primary">Filter</button>
         <a href="/admin/audit" class="btn" style="background: #e5e7eb; color: #374151; padding: 0.5rem 1rem; border-radius: 0.25rem; text-decoration: none;">Clear</a>
