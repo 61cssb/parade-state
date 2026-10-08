@@ -322,10 +322,11 @@ For detailed guidance on specific topics, refer to these documents:
 
 ## Session handoff — 2026-10-08 (IPPT monitoring)
 
-- **IPPT monitoring** is live behind `FEATURE_IPPT`: local-testing-only until
-  further notice — the flag force-disables in production (`config.Settings`),
-  and it is deliberately **not set** on either Railway environment. Scope,
-  decisions, and next steps: [docs/NEXT_PHASE.md](docs/NEXT_PHASE.md) §9/§9a.
+- **IPPT monitoring** is live behind `FEATURE_IPPT`: enabled on the Railway
+  development environment (2026-10-08); the Railway production environment
+  force-disables the flag (`config.Settings`, keyed on
+  `RAILWAY_ENVIRONMENT=production`). Scope, decisions, and next steps:
+  [docs/NEXT_PHASE.md](docs/NEXT_PHASE.md) §9/§9a.
 - **Railway**: production deploys `main`; development tracks season branch
   `20261008`. Machine-local operational notes (Railway quirks, incident
   postmortem, migration-verification rule) are **agent memory only** —

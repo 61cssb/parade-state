@@ -109,17 +109,18 @@ class Settings:
             "FEATURE_DISCUSSIONS", default=False
         )
 
-        # IPPT monitoring: local-testing-only until further notice. In
-        # addition to the default-off flag, a production deployment (both
-        # Railway environments detect as production) can never enable it —
-        # the flag is force-disabled below with a warning, so setting the
-        # env var on Railway cannot ship the feature by accident. When the
-        # feature is cleared for Railway, remove that guard.
+        # IPPT monitoring: enabled per environment via the flag (the Railway
+        # development environment opts in). The Railway production
+        # environment can never enable it — the flag is force-disabled there
+        # with a warning, keyed on the platform-injected
+        # RAILWAY_ENVIRONMENT so the block does not depend on our own vars.
         self.FEATURE_IPPT: bool = env.get_bool("FEATURE_IPPT", default=False)
-        if self.FEATURE_IPPT and self.ENVIRONMENT == PRODUCTION:
+        if self.FEATURE_IPPT and (
+            (env.get("RAILWAY_ENVIRONMENT") or "").strip().lower() == "production"
+        ):
             logger.warning(
-                "FEATURE_IPPT is local-testing-only — ignoring it in the "
-                "production environment (Railway cannot enable it)."
+                "FEATURE_IPPT is not available on the Railway production "
+                "environment — ignoring it."
             )
             self.FEATURE_IPPT = False
 
