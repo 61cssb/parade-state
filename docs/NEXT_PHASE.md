@@ -265,8 +265,9 @@ settled the following, decided with the unit's admin:
   trigger's checkSuites gate passes vacuously; add the season branch
   (`20261008`, or a `2026*` pattern) to `ci.yml`'s `push.branches`.
   Development now tracks branch `20261008` (r20260825 was deleted after
-  its merge); production tracks `main`. Post-merge crash postmortem and
-  the migration-parity rule: docs/DEPLOYMENT.md › "Railway ops notes".
+  its merge); production tracks `main`. Durable rule from the 2026-10-08
+  deploy incident: run the local/pg.sh Postgres-parity pass (pytest +
+  migration roundtrip) before merging any migration.
 
 ---
 
