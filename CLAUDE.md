@@ -317,3 +317,26 @@ For detailed guidance on specific topics, refer to these documents:
 **Contributing:** When adding new development patterns, update this document to share knowledge with the team.
 
 **See Also:** [docs/TESTING.md](docs/TESTING.md) for testing patterns and [docs/CODE_STYLE.md](docs/CODE_STYLE.md) for code style conventions.
+
+---
+
+## Session handoff — 2026-10-08 (IPPT monitoring)
+
+- **IPPT monitoring** is live behind `FEATURE_IPPT`: local-testing-only until
+  further notice — the flag force-disables in production (`config.Settings`),
+  and it is deliberately **not set** on either Railway environment. Scope,
+  decisions, and next steps: [docs/NEXT_PHASE.md](docs/NEXT_PHASE.md) §9/§9a.
+- **Next session's decided scope** (see §9a for detail): remove-from-tracking
+  (exclusion flag + reason + audit), ingest order never matters (identity from
+  latest observation + post-ingest recompute pass), window-consistency guard
+  (±45 days overlap with a different end warns instead of silently rolling
+  over). Watch items: manual-link editor, FFI vintage stamp (dropped — revisit
+  only if it confuses people).
+- **Railway**: production deploys `main`; **development deploys season branch
+  `20261008`** (replaces the deleted `r20260825`), with "Wait for CI" enabled.
+  Ops quirks and the migration-verification rule:
+  [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) › "Railway ops notes".
+- **Rule learned the hard way (2026-10-08 prod crash):** run the
+  `local/pg.sh` Postgres-parity pass (pytest + migration roundtrip) before
+  merging ANY migration — SQLite-only verification missed a pg_catalog typo
+  that crashed the production deploy.

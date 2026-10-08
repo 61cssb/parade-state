@@ -926,3 +926,32 @@ then spot-check data via the admin UI.
 - [ARCHITECTURE.md](ARCHITECTURE.md) for system architecture
 - [IMPLEMENTATION.md](IMPLEMENTATION.md) for implementation details
 - [PERFORMANCE.md](PERFORMANCE.md) for performance optimization
+
+---
+
+## Railway ops notes (2026-10-08)
+
+- **Season branches.** Development tracks a dated season branch (currently
+  `20261008`, previously `r20260825`), production tracks `main`. When a
+  season branch is deleted after its merge, the dev environment's trigger
+  dangles ("Connected branch does not exist") — create the next dated branch
+  from `main` and repoint the trigger (dashboard › Settings › Branch
+  connected to development).
+- **Switching the branch via CLI is a no-op** (railway 4.43.0:
+  `railway environment edit --service-config ... source.repo.branch` exits 0
+  without writing). Use the dashboard, or the GraphQL API:
+  `deploymentTriggerUpdate(id, input: { branch })` on the trigger returned by
+  `environment(id) { deploymentTriggers { edges { node { id branch checkSuites
+  } } } }` at `backboard.railway.app/graphql/v2` (auth: `user.accessToken`
+  from `~/.railway/config.json`).
+- **"Wait for CI" (`checkSuites`) is only as real as CI's trigger filter.**
+  CI runs on pushes to `main` and on PRs — not on season-branch pushes, so
+  the gate currently passes vacuously. To make it bite, add the season branch
+  to `ci.yml`'s `push.branches`.
+- **Never merge a migration without the Postgres-parity pass.** The IPPT
+  migration shipped with a SQLite-only verification and crashed the
+  production deploy on a `pg_catalog` typo (`t.typid` — the precedent's
+  `e.enumtypid` is correct). Before ANY migration merges:
+  `local/pg.sh roundtrip` and `local/pg.sh pytest` (needs Docker; the two
+  commands also catch enum-widening and dialect drift). A failed migration
+  rolls back cleanly (one transaction), so recovery is: fix, merge, redeploy.

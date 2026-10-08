@@ -260,6 +260,13 @@ settled the following, decided with the unit's admin:
   rows (the real remedy for name-variant duplicates); NR-replacement
   link fallout self-heals at next ingest; reports now accepted in .xlsx
   as well as .csv (parser reads the first worksheet; openpyxl dep).
+- **Add to next session:** make "Wait for CI" real for the season branch —
+  CI currently triggers on pushes to `main` and PRs only, so the dev
+  trigger's checkSuites gate passes vacuously; add the season branch
+  (`20261008`, or a `2026*` pattern) to `ci.yml`'s `push.branches`.
+  Development now tracks branch `20261008` (r20260825 was deleted after
+  its merge); production tracks `main`. Post-merge crash postmortem and
+  the migration-parity rule: docs/DEPLOYMENT.md › "Railway ops notes".
 
 ---
 
