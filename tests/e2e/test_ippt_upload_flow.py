@@ -136,9 +136,7 @@ def test_remove_from_tracking_flow(page, e2e_server):
     assert name in page.inner_text("#excludedCard")
     assert "E2E exclusion check" in page.inner_text("#excludedCard")
     page.click("#excludedCard .ippt-action")
-    page.wait_for_selector(
-        "text=Everyone seen in the reports is currently tracked."
-    )
+    page.wait_for_selector("text=Everyone seen in the reports is currently tracked.")
 
     # Re-included: back on the dashboard, and the counter is gone (the
     # status line only mentions removals while any exist).
