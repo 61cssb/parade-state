@@ -40,7 +40,7 @@ def _existing_enum_values(bind, type_name: str) -> set[str]:
         for row in bind.execute(
             sa.text(
                 "SELECT e.enumlabel FROM pg_enum e "
-                "JOIN pg_type t ON t.oid = t.typid "
+                "JOIN pg_type t ON t.oid = e.enumtypid "
                 "WHERE t.typname = :type_name"
             ),
             {"type_name": type_name},
