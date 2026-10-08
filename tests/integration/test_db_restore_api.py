@@ -215,18 +215,28 @@ async def test_restore_older_dump_runs_post_restore_migration(
     from the package location did not exist in the image (wheel install),
     and alembic's config error printed to stdout — surfacing as a 500
     with a blank detail. The upgrade now runs in-process.
+
+    The dump is taken after a real ``alembic downgrade -1`` so its schema
+    genuinely matches the older stamp. Per-test databases are
+    create_all-built from the current models, so merely stamping the
+    parent version over that schema would collide at the upgrade
+    (DuplicateTable on the first create_table) instead of exercising it.
     """
-    from alembic.script import ScriptDirectory
+    import asyncio
+
+    from alembic import command
+    from alembic.config import Config
     from sqlalchemy import text as sa_text
 
     from parade_state import db
     from parade_state.db.restore import _app_head_revision, _migrations_dir
+    from parade_state.utils import env as env_util
 
     head = _app_head_revision()
-    script = ScriptDirectory(str(_migrations_dir()))
-    parent = script.get_revision(head).down_revision
-    assert isinstance(parent, str)  # head is never the base revision
 
+    # Per-test databases are built via create_all (no alembic_version):
+    # stamp head, then genuinely downgrade one revision so the dump's
+    # schema matches its (older) version stamp.
     await db_session.execute(
         sa_text(
             "CREATE TABLE IF NOT EXISTS alembic_version "
@@ -236,12 +246,22 @@ async def test_restore_older_dump_runs_post_restore_migration(
     await db_session.execute(sa_text("DELETE FROM alembic_version"))
     await db_session.execute(
         sa_text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
-        {"v": parent},
+        {"v": head},
     )
     await db_session.commit()
 
+    database_url = _current_test_db_url()
+
+    def _downgrade_one() -> None:
+        config = Config()
+        config.set_main_option("script_location", str(_migrations_dir()))
+        with env_util.override("DATABASE_URL", database_url):
+            command.downgrade(config, "-1")
+
+    await asyncio.to_thread(_downgrade_one)
+
     current_db = db._engine.url.database
-    dump = _dump_database(_current_test_db_url())
+    dump = _dump_database(database_url)
 
     response = client.post(
         RESTORE_URL,
