@@ -249,21 +249,27 @@ settled the following, decided with the unit's admin:
   vintage stamp was prototyped and dropped — it only rendered in a narrow
   Family-B-after-Family-C case and the row's last-seen badge already
   dates it; revisit if it confuses people in practice.
-- **Next session:** (1) remove-from-tracking — exclusion flag + reason on
-  `ippt_servicemen` (migration), per-row super-admin button with reason
-  (accounting), audit-logged, rows retained and re-includable if the
-  person reappears in a later snapshot (surfaced in the upload response);
-  (2) ingest order never matters — display identity from the latest
-  observation, plus a post-ingest recompute pass over all snapshots in
-  date order re-deriving COMPLETED-window backfills and screening
-  `screened_on`; (3) window-consistency guard — a derived window
-  overlapping an existing one (±45 days) with a different end warns in
-  the upload response + upload page instead of silently becoming a
-  rollover (spec §6.1's cheap consistency check).
+- **Shipped (same session, branch `feat/ippt-multi-snapshot-hardening`):**
+  the three decided hardening items. (1) remove-from-tracking —
+  `ippt_servicemen.excluded` + `exclusion_reason` (migration
+  `a8b9c0d1e2f3`), per-row super-admin Remove button with required
+  reason on the dashboard, exclusion/re-inclusion audit-logged
+  (`ippt_serviceman` entity type), rows retained, and an excluded person
+  reappearing in a later snapshot surfaced in the upload response + the
+  upload page's "Removed from tracking" panel for re-inclusion (never
+  auto-re-included); (2) ingest order never matters — display identity
+  from the latest observation, and a post-ingest recompute pass over all
+  snapshots in date order re-deriving COMPLETED-window backfills and
+  screening `screened_on`; (3) window-consistency guard — a derived
+  window overlapping an existing one (±45 days) with a different end
+  warns in the upload response + upload page result panel + ingest audit
+  entry instead of silently becoming a rollover (spec §6.1's cheap
+  consistency check).
 - **Watch items (no build):** manual-link editor for unmatched/ambiguous
-  rows (the real remedy for name-variant duplicates); NR-replacement
-  link fallout self-heals at next ingest; reports now accepted in .xlsx
-  as well as .csv (parser reads the first worksheet; openpyxl dep).
+  rows (the real remedy for name-variant duplicates) — stays a watch
+  item, deferred again on 2026-10-08; NR-replacement link fallout
+  self-heals at next ingest; reports now accepted in .xlsx as well as
+  .csv (parser reads the first worksheet; openpyxl dep).
 - **Add to next session:** make "Wait for CI" real for the season branch —
   CI currently triggers on pushes to `main` and PRs only, so the dev
   trigger's checkSuites gate passes vacuously; add the season branch

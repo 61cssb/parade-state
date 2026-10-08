@@ -7,7 +7,31 @@
 > production until the feature is cleared for Railway. §6's SQL views are
 > realized as Python queries (`parade_state/services/ippt.py`) so SQLite
 > and PostgreSQL behave identically; the manual-review linking editor
-> (§3.2 ambiguous rows) remains deferred.
+> (§3.2 ambiguous rows) remains deferred — it stays a watch item
+> (§9a), the name-variant duplicate remedy it would provide is not built.
+>
+> **Multi-snapshot hardening (2026-10-08, decided with the unit's
+> admin):** (1) **remove-from-tracking** — `ippt_servicemen.excluded` +
+> `exclusion_reason` (migration `a8b9c0d1e2f3`); a per-row super-admin
+> Remove button (with required reason) hides a serviceman from the
+> dashboard and tier views while rows and history are retained; exclusion
+> and re-inclusion are audit-logged (`ippt_serviceman`), and a later
+> snapshot that shows an excluded serviceman again surfaces him in the
+> upload response (and on the upload page's "Removed from tracking"
+> panel) for re-inclusion — it never lifts the exclusion automatically.
+> (2) **Ingest order never matters** — dashboard/window display identity
+> (rank, sub-unit) comes from the latest observation rather than the
+> spine's last-written values, and every ingest ends with a recompute
+> pass over ALL snapshots in report-date order re-deriving
+> COMPLETED-row window backfills (covering-window rule) and screening
+> `screened_on` dates (pending→fit flip), so backfilling an old month
+> cannot leave NULL window links or lost screening dates. (3)
+> **Window-consistency guard (§6.1's cheap check)** — a derived window
+> that overlaps an existing window of the same serviceman (window_end
+> within ±45 days) but ends differently is still ingested, but recorded
+> as a consistency warning in the upload response, on the upload page's
+> result panel, and in the ingest audit entry, instead of silently
+> looking like a rollover.
 >
 > **Tier labelling (2026-10-08, per the unit):** the dashboard labels the
 > §6.4 bands by **months before window close** — "3 months before window
