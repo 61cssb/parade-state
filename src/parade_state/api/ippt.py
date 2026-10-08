@@ -1,4 +1,5 @@
-"""IPPT monitoring API endpoints (local-testing-only feature; FEATURE_IPPT).
+"""IPPT monitoring API endpoints (FEATURE_IPPT-gated; the Railway
+production environment force-disables the flag, see config.Settings).
 
 - ``POST /api/v1/ippt/snapshots`` (super-admin): ingest the six-file
   report snapshot for one report date — atomic per date, replace-on-

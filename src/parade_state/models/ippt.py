@@ -7,8 +7,9 @@ the reports don't contain (no per-attempt results, no per-session
 dates, §6.5). One ingest = one report date = the full six-file snapshot,
 atomic per report date (§4).
 
-These tables are part of the IPPT feature, which is local-testing-only
-(FEATURE_IPPT; config force-disables it in production).
+These tables are part of the IPPT feature, gated behind `FEATURE_IPPT`
+(local runs and the Railway development environment opt in; the Railway
+production environment force-disables the flag, see config.Settings).
 
 Dialect notes: primary keys are bigserial on PostgreSQL and plain
 integer rowids on SQLite (``BigInteger().with_variant(Integer,

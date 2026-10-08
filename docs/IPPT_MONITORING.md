@@ -1,14 +1,30 @@
 # IPPT Monitoring — Requirements & Report Schema
 
-> **Status (2026-10-08): implemented, local-testing-only.** The §6 schema,
-> §6.2 state enum, §3.2 matching, §4 ingestion rules, and §6.4 tiers are
-> now live behind `FEATURE_IPPT` (`/ippt/dashboard`,
-> `/ippt/window/{personnel_id}`, `/ippt/upload`), force-disabled in
-> production until the feature is cleared for Railway. §6's SQL views are
-> realized as Python queries (`parade_state/services/ippt.py`) so SQLite
-> and PostgreSQL behave identically; the manual-review linking editor
-> (§3.2 ambiguous rows) remains deferred — it stays a watch item
-> (§9a), the name-variant duplicate remedy it would provide is not built.
+> **Status (2026-10-08): implemented and enabled on the Railway
+> development environment.** The §6 schema, §6.2 state enum, §3.2
+> matching, §4 ingestion rules, and §6.4 tiers are live behind
+> `FEATURE_IPPT` (`/ippt/dashboard`, `/ippt/window/{personnel_id}`,
+> `/ippt/upload`): local runs and the Railway development environment
+> opt in via the env var; the Railway **production** environment can
+> never enable it (`config.Settings` force-disables the flag there,
+> keyed on `RAILWAY_ENVIRONMENT=production`). Production enablement is
+> the still-open ship/no-ship decision (docs/NEXT_PHASE.md §9). §6's
+> SQL views are realized as Python queries
+> (`parade_state/services/ippt.py`) so SQLite and PostgreSQL behave
+> identically; the manual-review linking editor (§3.2 ambiguous rows)
+> remains deferred — it stays a watch item (§9a), the name-variant
+> duplicate remedy it would provide is not built.
+>
+> **Local manual verification:** the two canonical fixture months in
+> `fixtures/ippt/` (gitignored) drive a full pass — apply migrations to
+> a copy of `experiments/ippt_to_dashboard/ippt_demo.db`
+> (`DATABASE_URL=sqlite+aiosqlite:///<copy> uv run alembic upgrade head`;
+> the runner does not migrate), then
+> `uv run python -m experiments.runner <copy> --port 8010` (port 8000
+> is often taken), sign in at `/auth/dev-login`, and upload one
+> six-file snapshot per report date, oldest first. The e2e suite
+> (`uv run --with playwright pytest tests/e2e -m e2e`) covers the same
+> flow headlessly.
 >
 > **Multi-snapshot hardening (2026-10-08, decided with the unit's
 > admin):** (1) **remove-from-tracking** — `ippt_servicemen.excluded` +
@@ -41,7 +57,8 @@
 > close); the dashboard renders the three tiers as colour-coded filter
 > tabs rather than stacked lists.
 
-Preparatory reference for the planned IPPT monitoring dashboard. The policy
+Requirements and report-schema reference for the IPPT monitoring
+dashboard (built — see the status above). The policy
 rules in §1 come from the unit's IPPT requirements; the report schemas in §2–§4
 were derived from the sample reports in `fixtures/ippt/` (snapshot dated
 2026-09-11). Semantics marked **[confirmed]** were clarified with the unit.
@@ -285,7 +302,8 @@ chase the health screening first — IPPT cannot be booked until it clears.
        (a `String(36)` UUID)
      - **name not found** on the roll → unmatched (no link)
      - **ambiguous** (homonyms — several roll rows share the name) →
-       left unmatched and flagged `manual_review` for a human to resolve
+       left unmatched and flagged `ambiguous` (`match_status`; display-only
+       until the manual-link editor is built — a watch item, §9a)
   3. **Ingest is idempotent.** The same serviceman in a later snapshot
      resolves to the *existing* `ippt_servicemen` row (never a duplicate),
      and rule 1 guarantees a resolved `personnel_id` survives re-ingest.
@@ -360,7 +378,7 @@ it is out of scope (§1.3).
 
 ---
 
-## 6. Proposed common tracking schema (design — not yet implemented)
+## 6. Common tracking schema (implemented — see `src/parade_state/models/ippt.py` + `services/ippt.py`)
 
 The six reports are projections of one underlying state machine, so the
 common schema stores **what the source actually provides — periodic state
@@ -410,12 +428,18 @@ create table ippt_windows (
     window_start  date   not null,       -- birthday: (window_end + 1 day) − 1 year
     unique (serviceman_id, window_end)
 );
--- Successive snapshots of the same window must agree on window_end — a
--- cheap consistency check during ingest. A change of window_end for a
--- serviceman = window rollover, which is how FAILED → mandatory NS FIT
+-- Successive snapshots of the same window must agree on window_end —
+-- implemented (2026-10-08 hardening) as a consistency warning: a derived
+-- window_end within ±45 days of, but different from, an existing window
+-- of the same serviceman is the same window with inconsistent close
+-- data, not a rollover; the row still ingests and the warning surfaces
+-- in the upload response/audit. A change of window_end beyond that
+-- tolerance = window rollover, which is how FAILED → mandatory NS FIT
 -- transitions are recognised. *_COMPLETED rows carry no window close:
--- their observations keep window_id NULL, backfilled at ingest from the
--- serviceman's preceding outstanding observation when one exists.
+-- their window_id is derived by covering-window rule (the window whose
+-- window_start ≤ report_date ≤ window_end) and re-derived by the
+-- post-ingest recompute pass over ALL snapshots in report-date order,
+-- so ingest order never matters (§ status header).
 
 -- The trajectory spine: one row per serviceman per snapshot.
 create table ippt_state_observations (
@@ -449,9 +473,11 @@ create table ippt_health_screenings (
 );
 -- Mirrors observations.ffi as first-class history so reminder logic can
 -- chase 'pending' transitions without scanning the observation log. The
--- reports carry no explicit screening date, so `screened_on` is
--- approximated at ingest as the report_date of the first snapshot showing
--- 'fit' after a 'pending'; the §6.4 tier logic keys off it.
+-- reports carry no explicit screening date, so `screened_on` is derived
+-- as the report_date of the first snapshot showing 'fit' after a
+-- 'pending'. It is owned by the post-ingest recompute pass (replayed
+-- over ALL snapshots in report-date order), so the flip date survives
+-- any ingest order.
 ```
 
 ### 6.2 Unified `state` enum

@@ -214,7 +214,7 @@ above). Routes and views already exist; the work is the role decision
 and attendance permissions (subunit-1 scoping already exists). This
 season's test users will be admins, so this waits.
 
-### 9. IPPT monitoring — built, local-testing-only until further notice
+### 9. IPPT monitoring — built; dev-enabled, production blocked
 
 The full feature (docs/IPPT_MONITORING.md §6) is implemented behind
 `FEATURE_IPPT`: six-file snapshot ingest (atomic per report date,
@@ -293,13 +293,22 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
-- **2026-10-08:** IPPT monitoring built (local-only): `FEATURE_IPPT`
+- **2026-10-08:** IPPT multi-snapshot hardening (PR #90, also pushed to
+  season branch `20261008`): remove-from-tracking (exclusion flag +
+  reason + audit, migration `a8b9c0d1e2f3`), ingest order never matters
+  (display identity from latest observation + post-ingest recompute
+  pass), ±45-day window-consistency guard; e2e suite fixed for
+  multi-month fixtures; PG-only restore test fixed to downgrade before
+  dumping. Manual-link editor stays a watch item (§9a).
+
+- **2026-10-08:** IPPT monitoring built: `FEATURE_IPPT`
   flags the whole stack (6 tables migration `z7g8h9i0j1k2`; ingest
   service; `/ippt/dashboard`, `/ippt/window/{personnel_id}`,
   `/ippt/upload`; quarantine list; purge covers the ippt tables);
-  production force-disables the flag (config warning) so it cannot ship
-  to Railway until explicitly cleared; Playwright E2E suite debuts in
-  `tests/e2e/` (fresh DB per test, system Chrome)
+  Playwright E2E suite debuts in
+  `tests/e2e/` (fresh DB per test, system Chrome); enabled on the
+  Railway development environment later the same day (production stays
+  force-disabled)
 
 - **2026-08-27:** Inpro status super-admin-only (Issue 39, admin trial
   rule): `PATCH /api/v1/personnel/{id}` 403s `inpro_status` for

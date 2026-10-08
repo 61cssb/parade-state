@@ -287,6 +287,13 @@ AttendanceFreeze (one row per frozen NR/day)
 
 ## 3. Data Model Specification
 
+> **Scope note (2026-10-08):** the six `ippt_*` monitoring tables
+> (FEATURE_IPPT) are deliberately **not** repeated here — their schema,
+> derivation rules, and state machine are specified in
+> [docs/IPPT_MONITORING.md](IPPT_MONITORING.md) §6 and modeled in
+> `src/parade_state/models/ippt.py`. Everything below covers the core
+> parade-state domain.
+
 ### 3.1 Authentication & Access Control
 
 #### 3.1.1 AccessLevel
