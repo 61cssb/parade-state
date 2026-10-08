@@ -42,7 +42,10 @@ addopts = [
     "--cov=src/parade_state",
     "--cov-report=term-missing",
     "--cov-report=html:htmlcov",
-    "--cov-fail-under=60",
+    # No --cov-fail-under here: coverage is still collected on every run,
+    # but the 60% gate is passed explicitly in CI. Gating locally broke
+    # every subset run (single file, -k, one directory), which is most of
+    # what a debugging session runs.
 ]
 asyncio_mode = "auto"
 markers = [

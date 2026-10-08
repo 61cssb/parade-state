@@ -1,8 +1,9 @@
 # CI: lint and test every push and pull request.
 #
 # The suite runs on file-based SQLite per test (tests/conftest.py); no
-# database service is required. Coverage gate lives in pyproject.toml
-# (--cov-fail-under, currently 60%).
+# database service is required. The 60% coverage gate is passed here (not
+# in pyproject addopts) so local subset runs — which always measure far
+# below the gate — don't fail spuriously.
 name: CI
 
 on:
@@ -48,7 +49,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Run test suite
-        run: uv run pytest -q
+        run: uv run pytest -q --cov-fail-under=60
 
       - name: Upload coverage report
         if: always()

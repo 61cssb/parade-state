@@ -230,7 +230,7 @@ result = await db.execute(select(User).where(User.id == user_id))
 # Run all tests
 uv run pytest
 
-# Run specific test file
+# Run specific test file (coverage collected, never gated locally)
 uv run pytest tests/integration/test_personnel_api.py
 
 # Run specific test
@@ -247,7 +247,16 @@ uv run pytest --no-cov
 
 # Run tests matching pattern
 uv run pytest -k "personnel"
+
+# E2E browser tests (real uvicorn server + system Chrome) — for
+# regressions that only exist in a browser: JS fetch/error handling,
+# inline selects/forms. API-level TestClient tests cannot see these.
+uv run --with playwright pytest tests/e2e -m e2e
 ```
+
+Coverage: the 60% gate is enforced **in CI only** (`ci.yml` passes
+`--cov-fail-under=60`); local subset runs measure far below the
+whole-suite number by design and are not gated.
 
 **For more testing options and detailed guidance, see [docs/TESTING.md](docs/TESTING.md)**
 
