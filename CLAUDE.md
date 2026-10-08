@@ -49,7 +49,7 @@
 ### 📋 Planning & Status
 
 - **[docs/NEXT_PHASE.md](docs/NEXT_PHASE.md)** - Roadmap, current status, and implementation history
-- **[docs/IPPT_MONITORING.md](docs/IPPT_MONITORING.md)** - IPPT policy requirements and monitoring report schema (dashboard not yet built)
+- **[docs/IPPT_MONITORING.md](docs/IPPT_MONITORING.md)** - IPPT policy requirements and monitoring report schema (implemented behind `FEATURE_IPPT`, local-testing-only — production force-disables it)
 - **[tests/README.md](tests/README.md)** - Testing organization and quick reference
 
 ### 📖 Historical Documents

@@ -24,6 +24,7 @@ dependencies = [
     "aiosqlite>=0.19.0",
     "python-dotenv>=1.2.2",
     "markdown2>=2.5",
+    "openpyxl>=3.1.5",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -44,6 +45,9 @@ addopts = [
     "--cov-fail-under=60",
 ]
 asyncio_mode = "auto"
+markers = [
+    "e2e: end-to-end browser tests (Playwright + real uvicorn server; run with: uv run --with playwright pytest tests/e2e -m e2e)",
+]
 
 [tool.coverage.run]
 source = ["src/parade_state"]

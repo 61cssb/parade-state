@@ -7,9 +7,12 @@ does) so misconfiguration fails at boot instead of silently running with
 known-to-the-world secrets.
 """
 
+import logging
 from functools import lru_cache
 
 from parade_state.utils import env
+
+logger = logging.getLogger(__name__)
 
 DEVELOPMENT = "development"
 PRODUCTION = "production"
@@ -105,6 +108,20 @@ class Settings:
         self.FEATURE_DISCUSSIONS: bool = env.get_bool(
             "FEATURE_DISCUSSIONS", default=False
         )
+
+        # IPPT monitoring: local-testing-only until further notice. In
+        # addition to the default-off flag, a production deployment (both
+        # Railway environments detect as production) can never enable it —
+        # the flag is force-disabled below with a warning, so setting the
+        # env var on Railway cannot ship the feature by accident. When the
+        # feature is cleared for Railway, remove that guard.
+        self.FEATURE_IPPT: bool = env.get_bool("FEATURE_IPPT", default=False)
+        if self.FEATURE_IPPT and self.ENVIRONMENT == PRODUCTION:
+            logger.warning(
+                "FEATURE_IPPT is local-testing-only — ignoring it in the "
+                "production environment (Railway cannot enable it)."
+            )
+            self.FEATURE_IPPT = False
 
         # Kill switches for the two shipped core features (issue 23): the
         # inverse of the flags above — default ON, so a missing env var can

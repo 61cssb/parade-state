@@ -214,6 +214,53 @@ above). Routes and views already exist; the work is the role decision
 and attendance permissions (subunit-1 scoping already exists). This
 season's test users will be admins, so this waits.
 
+### 9. IPPT monitoring — built, local-testing-only until further notice
+
+The full feature (docs/IPPT_MONITORING.md §6) is implemented behind
+`FEATURE_IPPT`: six-file snapshot ingest (atomic per report date,
+replace-on-re-ingest, quarantined-row reject list), the identity spine
+with name-matching against the attendance-active roll (manual-review
+editor deferred), birthday-anchored windows, the escalation
+dashboard (`/ippt/dashboard` — tiers labelled by months before window
+close, colour-coded filter tabs: 3 = red/most urgent, 6 = orange,
+9 = yellow), per-person window pages
+(`/ippt/window/{personnel_id}`), and the super-admin upload page
+(`/ippt/upload`). Production deployments force-disable the flag with a
+warning — it cannot appear on Railway even if the env var is set; when
+the feature is cleared for Railway, remove that guard in
+`config.Settings`. Remaining: decide ship/no-ship after local use, then
+(manual-review editor, Ship / drop) — and flip the flag story from
+"force-disabled in production" to normal env-var gating.
+
+#### 9a. IPPT multi-snapshot hardening — decided 2026-10-08, scoped for a fresh session
+
+Review of multi-snapshot handling (two monthly snapshots now in hand)
+settled the following, decided with the unit's admin:
+
+- **Shipped same-day:** staleness display — dashboard rows whose latest
+  observation predates the newest snapshot get a "last seen <date>" badge
+  and dimmed styling (keep tracking everyone; nothing disappears); a
+  dangling personnel link (roll replaced since last ingest) now displays
+  as "not in nominal roll" instead of silently claiming matched. An FFI
+  vintage stamp was prototyped and dropped — it only rendered in a narrow
+  Family-B-after-Family-C case and the row's last-seen badge already
+  dates it; revisit if it confuses people in practice.
+- **Next session:** (1) remove-from-tracking — exclusion flag + reason on
+  `ippt_servicemen` (migration), per-row super-admin button with reason
+  (accounting), audit-logged, rows retained and re-includable if the
+  person reappears in a later snapshot (surfaced in the upload response);
+  (2) ingest order never matters — display identity from the latest
+  observation, plus a post-ingest recompute pass over all snapshots in
+  date order re-deriving COMPLETED-window backfills and screening
+  `screened_on`; (3) window-consistency guard — a derived window
+  overlapping an existing one (±45 days) with a different end warns in
+  the upload response + upload page instead of silently becoming a
+  rollover (spec §6.1's cheap consistency check).
+- **Watch items (no build):** manual-link editor for unmatched/ambiguous
+  rows (the real remedy for name-variant duplicates); NR-replacement
+  link fallout self-heals at next ingest; reports now accepted in .xlsx
+  as well as .csv (parser reads the first worksheet; openpyxl dep).
+
 ---
 
 ## Pending Decisions
@@ -227,6 +274,14 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 ---
 
 ## Recent History (one line each; git log is authoritative)
+
+- **2026-10-08:** IPPT monitoring built (local-only): `FEATURE_IPPT`
+  flags the whole stack (6 tables migration `z7g8h9i0j1k2`; ingest
+  service; `/ippt/dashboard`, `/ippt/window/{personnel_id}`,
+  `/ippt/upload`; quarantine list; purge covers the ippt tables);
+  production force-disables the flag (config warning) so it cannot ship
+  to Railway until explicitly cleared; Playwright E2E suite debuts in
+  `tests/e2e/` (fresh DB per test, system Chrome)
 
 - **2026-08-27:** Inpro status super-admin-only (Issue 39, admin trial
   rule): `PATCH /api/v1/personnel/{id}` 403s `inpro_status` for

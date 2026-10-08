@@ -36,6 +36,7 @@ FEATURE_LABELS = {
     "FEATURE_GROUPING": "Grouping",
     "FEATURE_STRENGTH": "Unit Strength",
     "FEATURE_DISCUSSIONS": "Discussions",
+    "FEATURE_IPPT": "IPPT",
     "FEATURE_NOMINALROLL": "Nominal Roll",
     "FEATURE_ATTENDANCE": "Attendance",
 }

@@ -26,6 +26,12 @@ from parade_state.models import (
     GroupingGroup,
     GroupingMembership,
     GroupingMemberState,
+    IpptHealthScreening,
+    IpptQuarantinedRow,
+    IpptServiceman,
+    IpptSnapshot,
+    IpptStateObservation,
+    IpptWindow,
     NominalRoll,
     Personnel,
     Tagging,
@@ -41,8 +47,17 @@ CONFIRMATION_WORD = "PURGE"
 
 # Deletion order: children before parents, so FK constraints are satisfied
 # on every dialect regardless of their ON DELETE behavior. NominalRoll goes
-# last; CsvUpload must precede it (its FK has no ON DELETE action).
+# last; CsvUpload must precede it (its FK has no ON DELETE action). The IPPT
+# tables lead the list: the spine references Personnel (SET NULL on delete,
+# but a purge means the rows go too), so servicemen must be deleted before
+# Personnel regardless.
 PURGE_TABLES: tuple[type, ...] = (
+    IpptStateObservation,
+    IpptHealthScreening,
+    IpptQuarantinedRow,
+    IpptWindow,
+    IpptSnapshot,
+    IpptServiceman,
     Attendance,
     Deferment,
     TaggingEntry,
