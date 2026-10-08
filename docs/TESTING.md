@@ -166,15 +166,18 @@ uv run pytest -x --pdb
 
 ### Coverage Reports
 
-Coverage is configured in `pyproject.toml` (`addopts`), so a bare
-`uv run pytest` always collects coverage **and enforces the gate**:
-`--cov-fail-under=60` fails the run when coverage drops below 60%. The
-suite currently sits around 62%. Pass `--no-cov` when iterating to skip
-coverage entirely.
+Coverage is configured in `pyproject.toml` (`addopts`), so every run
+collects coverage and writes `htmlcov/` — but the 60% gate is **enforced
+only in CI** (`ci.yml` passes `--cov-fail-under=60`). Local subset runs
+(single file, `-k`, one directory) measure far below the whole-suite
+number by design, so gating them would fail spuriously.
 
 ```bash
-# Generate coverage report (gate enforced: fails under 60%)
-uv run pytest
+# Subset runs just work (coverage collected, not gated)
+uv run pytest tests/integration/test_personnel_api.py
+
+# Check the gate the way CI does (full suite)
+uv run pytest -q --cov-fail-under=60
 
 # Generate HTML coverage report
 uv run pytest --cov=src/parade_state --cov-report=html
@@ -183,6 +186,26 @@ uv run pytest --cov=src/parade_state --cov-report=html
 open htmlcov/index.html  # On macOS
 xdg-open htmlcov/index.html  # On Linux
 ```
+
+### E2E Browser Tests
+
+`tests/e2e/` drives system Chrome (via Playwright) against a real
+uvicorn server on a freshly migrated + seeded database — one server and
+DB per test, so runs are repeatable. Authentication is a minted session
+cookie injected into the browser context (the real auth cookie is
+HttpOnly, so tests cannot and do not go through Google OAuth).
+
+```bash
+uv run --with playwright pytest tests/e2e -m e2e
+```
+
+Playwright is deliberately not a dev dependency; the invocation above
+adds it ephemerally. The directory skips itself when Playwright or a
+launchable Chrome/Chromium is missing. Use these tests for regressions
+that only surface in a real browser (JS fetch/error handling, rendered
+selects and forms) — API-level TestClient tests cannot catch them (a
+failed-save UI bug shipped precisely because only the API side was
+tested).
 
 ### Running the Suite Against PostgreSQL
 

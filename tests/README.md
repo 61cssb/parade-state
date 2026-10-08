@@ -377,12 +377,16 @@ async def test_async_function():
 
 ## 🎯 Coverage Requirements
 
-### Minimum Coverage: 80%
+### Minimum Coverage: 60% (enforced in CI)
 
-The project requires 80% code coverage. Check coverage with:
+Coverage is collected on every run (`addopts` in `pyproject.toml`), but
+the 60% gate is enforced only in CI (`ci.yml` passes
+`--cov-fail-under=60`) — local subset runs (single file, `-k`) measure
+far below the whole-suite number by design and are not gated. To check
+the gate locally the way CI does:
 
 ```bash
-pytest --cov=src/parade_state --cov-report=term-missing
+pytest -q --cov-fail-under=60
 ```
 
 ### Coverage Goals by Component
