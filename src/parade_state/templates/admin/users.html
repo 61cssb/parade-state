@@ -5,6 +5,8 @@
 {% block page_title %}Users{% endblock %}
 
 {% block content %}
+<div id="statusMessage" style="margin-bottom: 1rem;"></div>
+
 {% if user.role == 'super_admin' %}
 <div class="card" style="margin-bottom: 1rem;">
     <h3 style="margin: 0 0 0.75rem 0; font-size: 1rem;">Add User</h3>
@@ -66,11 +68,12 @@
             </thead>
             <tbody>
                 {% for u in users %}
-                <tr style="border-bottom: 1px solid #e5e7eb;" data-user-id="{{ u.id }}">
+                <tr style="border-bottom: 1px solid #e5e7eb;" data-user-id="{{ u.id }}"
+                    data-role="{{ u.role }}" data-status="{{ u.status }}">
                     <td style="padding: 0.5rem;">{{ u.name }}</td>
                     <td style="padding: 0.5rem;">{{ u.email }}</td>
                     <td style="padding: 0.5rem;">
-                        <select onchange="updateUser('{{ u.id }}', 'role', this.value)"
+                        <select class="role-select" onchange="updateUser('{{ u.id }}', 'role', this.value)"
                                 style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
                             <option value="user" {% if u.role == 'user' %}selected{% endif %}>User</option>
                             <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>Admin</option>
@@ -78,7 +81,7 @@
                         </select>
                     </td>
                     <td style="padding: 0.5rem;">
-                        <select onchange="updateUser('{{ u.id }}', 'status', this.value)"
+                        <select class="status-select" onchange="updateUser('{{ u.id }}', 'status', this.value)"
                                 style="padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem;">
                             <option value="active" {% if u.status == 'active' %}selected{% endif %}>Active</option>
                             <option value="pending" {% if u.status == 'pending' %}selected{% endif %}>Pending</option>
@@ -150,7 +153,6 @@
     {% endif %}
 </div>
 
-<div id="statusMessage" style="margin-top: 1rem;"></div>
 {% endblock %}
 
 {% block scripts %}
@@ -206,10 +208,31 @@
             } else {
                 const data = await response.json();
                 showStatus('Update failed: ' + (data.detail || 'Unknown error'), 'error');
-                location.reload();
+                resyncUserRow(userId);
             }
         } catch (error) {
-            showStatus('Network error: ' + error.message, 'error');
+            // A select that keeps an unsaved value lies about what the API
+            // stored (this is how a failed role change masqueraded as the
+            // wrong role having been created) — snap the row back to the
+            // server-rendered truth.
+            showStatus('Network error: ' + error.message + ' — change not saved.', 'error');
+            resyncUserRow(userId);
+        }
+    }
+
+    function resyncUserRow(userId) {
+        const row = document.querySelector('tr[data-user-id="' + userId + '"]');
+        if (!row) {
+            location.reload();
+            return;
+        }
+        const roleSel = row.querySelector('.role-select');
+        const statusSel = row.querySelector('.status-select');
+        if (roleSel) {
+            roleSel.value = row.dataset.role;
+        }
+        if (statusSel) {
+            statusSel.value = row.dataset.status;
         }
     }
 
