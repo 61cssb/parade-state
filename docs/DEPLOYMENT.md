@@ -417,7 +417,10 @@ retrying.
 users). The first sign-in matching `SUPER_ADMIN_EMAIL` bootstraps as
 super_admin; pre-provision everyone else (active, correct role) at
 `/admin/users` before their first sign-in, otherwise they are created as
-`unrecognised`.
+`unrecognised`. The variable is read only at sign-in for unknown emails —
+changing it later never rewrites an existing row's role (manage roles at
+`/admin/users`), so a stored role can only come from the audit-logged
+create/update paths.
 
 **Refreshing development from a production dump** (when prod-realistic data
 is wanted — read-realistic, write-isolated):
@@ -698,6 +701,29 @@ uv sync
 # Clear Python cache
 find . -type d -name __pycache__ -exec rm -rf {} +
 ```
+
+### Inspecting a Deployed Environment
+
+When a report can't be reproduced locally, check the live data before
+theorizing — UI screenshots can show client-side state that was never
+saved (a failed inline edit that the page didn't revert looks identical
+to a wrong value in the DB):
+
+- **Database rows are ground truth.** Reach the Postgres instance through
+  `railway ssh` into the app service (its container has `asyncpg` and
+  `DATABASE_URL`) and run read-only queries. Machine-specific connection
+  setup lives in the gitignored `local/AGENT_MEMORY.md` ops runbook, if
+  present on your machine.
+- **Railway HTTP request logs have very short retention** (minutes, not
+  hours) — do not count on them for a post-mortem of something that
+  happened earlier in the day. Application audit entries (`audit_logs`
+  table, `/admin/audit` page) are the durable activity record: every
+  write API writes one, so "action X happened with no audit row" means X
+  never reached the API.
+- **The audit log distinguishes actor from subject:** each row's
+  `user_id` is who performed the action; `entity_type`/`entity_id` is
+  what was acted on. The audit page's "Filter by user ID" filters the
+  actor.
 
 ### Performance Issues
 

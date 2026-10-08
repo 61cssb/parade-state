@@ -9,7 +9,21 @@ from ..db import Base
 
 
 class AuditLog(Base):
-    """Sequential append-only log of all system changes."""
+    """Sequential append-only log of all system changes.
+
+    Two distinct parties appear in every row — conflating them makes the
+    log unreadable when investigating (e.g. "who created this user?" vs
+    "what happened to this user?"):
+
+    - ``user_id`` — the **actor**: who performed the action (the admin
+      signed in at the time); null for system-originated rows. This is
+      also what the audit page's "Filter by user ID" matches.
+    - ``entity_type``/``entity_id`` — the **subject**: what was acted on
+      (may be the actor's own row, e.g. a self-suspension).
+
+    ``description`` is free text and the authoritative record for update
+    actions ("name: 'a' -> 'b'"); there is no structured diff beyond it.
+    """
 
     __tablename__ = "audit_logs"
 
