@@ -160,8 +160,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tags=["web-nominal-roll"],
         dependencies=[Depends(require_feature("FEATURE_NOMINALROLL"))],
     )
-    # IPPT monitoring (local-testing-only: FEATURE_IPPT is force-disabled
-    # in production, see config.Settings).
+    # IPPT monitoring (enabled per environment via FEATURE_IPPT; the
+    # Railway production environment force-disables the flag, see
+    # config.Settings).
     app.include_router(
         web_ippt_router,
         tags=["web-ippt"],

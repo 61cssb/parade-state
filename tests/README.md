@@ -71,6 +71,26 @@ tests/
 - Testing system state management
 - When you need to verify system invariants
 
+### 🌐 E2E Tests (`e2e/`)
+
+**Purpose:** Drive a real browser (system Chrome via Playwright) against
+a real uvicorn server for page-level acceptance that HTML/string tests
+cannot pin — client-side validation, dialogs, rendered layout.
+
+**Run:** `uv run --with playwright pytest tests/e2e -m e2e` (Playwright
+is deliberately not a dev dependency; the directory skips itself when
+it is not importable or no Chrome can launch). Every test gets a freshly
+migrated + seeded database and its own server on a free port, so runs
+are freely repeatable (`tests/e2e/conftest.py`).
+
+**IPPT fixture contract:** the IPPT e2e tests ingest the canonical
+reports from gitignored `fixtures/ippt/`, grouped into one six-file
+snapshot **per report date** (the upload rejects anything that is not
+exactly six files). If you add a fixture month, all six
+`{REPORT}_{STATE}_{YYYYMMDD}` files for that date must be present, or
+the grouping (and the tests) break — this bit when the 2026-10-08
+fixtures landed.
+
 ## 🚀 Running Tests
 
 ### Run All Tests

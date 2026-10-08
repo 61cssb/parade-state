@@ -1,19 +1,26 @@
-"""IPPT monitoring API endpoints (local-testing-only feature; FEATURE_IPPT).
+"""IPPT monitoring API endpoints (FEATURE_IPPT-gated; the Railway
+production environment force-disables the flag, see config.Settings).
 
 - ``POST /api/v1/ippt/snapshots`` (super-admin): ingest the six-file
   report snapshot for one report date — atomic per date, replace-on-
-  re-ingest, row-level rejects quarantined (docs/IPPT_MONITORING.md §4).
+  re-ingest, row-level rejects quarantined (docs/IPPT_MONITORING.md §4);
+  the response reports window-consistency warnings and excluded
+  servicemen who reappeared (decided 2026-10-08).
 - ``GET /api/v1/ippt/dashboard`` (admin+): latest state per serviceman,
   3/6/9-month tier highlights, and summary counts.
 - ``GET /api/v1/ippt/snapshots`` (admin+): per-date ingest history.
 - ``GET /api/v1/ippt/quarantine`` (admin+): the reject list for review.
 - ``GET /api/v1/ippt/window/{personnel_id}`` (admin+): one person's
   window, trajectory, and screening history.
+- ``POST``/``DELETE /api/v1/ippt/servicemen/{serviceman_id}/exclusion``
+  (super-admin): remove-from-tracking with a reason, and re-include —
+  both audit-logged (decided 2026-10-08).
 """
 
 import json
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.auth.dependencies import require_admin_user, require_super_admin_user
@@ -23,6 +30,12 @@ from parade_state.services import ippt as ippt_service
 from parade_state.services.ippt import IngestError
 
 router = APIRouter()
+
+
+class ExclusionRequest(BaseModel):
+    """Why a serviceman is being removed from tracking (required)."""
+
+    reason: str
 
 
 @router.post("/snapshots")
@@ -43,7 +56,9 @@ async def upload_snapshots(
     report date replaces its previous ingest.
     Row-level validation failures do not reject the file — they land in
     the quarantine list, reported here and reviewable at
-    ``GET /api/v1/ippt/quarantine``.
+    ``GET /api/v1/ippt/quarantine``. Window-consistency warnings and
+    reappeared excluded servicemen are reported here too (decided
+    2026-10-08) — the rows themselves ingest normally.
     """
     payloads: list[tuple[str, bytes]] = []
     for upload in files:
@@ -71,6 +86,10 @@ async def upload_snapshots(
                     "rows": result.total_rows,
                     "quarantined": result.quarantined_total,
                     "match": result.match_counts,
+                    "window_warnings": result.window_warnings,
+                    "excluded_reappeared": [
+                        entry["full_name"] for entry in result.excluded_reappeared
+                    ],
                 }
             ),
         )
@@ -84,6 +103,96 @@ async def upload_snapshots(
         "quarantined": result.quarantined_total,
         "per_kind": result.per_kind,
         "match": result.match_counts,
+        "window_warnings": result.window_warnings,
+        "excluded_reappeared": result.excluded_reappeared,
+    }
+
+
+@router.post("/servicemen/{serviceman_id}/exclusion")
+async def exclude_serviceman(
+    serviceman_id: int,
+    body: ExclusionRequest,
+    user: User = Depends(require_super_admin_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Remove a serviceman from tracking (super-admin-only), with a
+    required reason. Rows and history are retained; the dashboard and
+    tier views hide the person, and a later snapshot that shows them
+    again surfaces them in the upload response. Audit-logged."""
+    reason = body.reason.strip()
+    if not reason:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A reason is required to remove a serviceman from tracking",
+        )
+    serviceman = await ippt_service.set_tracking_exclusion(
+        db, serviceman_id, excluded=True, reason=reason
+    )
+    if serviceman is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No such IPPT serviceman",
+        )
+    db.add(
+        AuditLog(
+            user_id=str(user.id),
+            entity_type="ippt_serviceman",
+            entity_id=str(serviceman.id),
+            action="update",
+            changes=None,
+            description=json.dumps(
+                {
+                    "action": "exclude",
+                    "full_name": serviceman.full_name,
+                    "reason": reason,
+                }
+            ),
+        )
+    )
+    await db.commit()
+    return {
+        "serviceman_id": serviceman.id,
+        "excluded": True,
+        "exclusion_reason": reason,
+    }
+
+
+@router.delete("/servicemen/{serviceman_id}/exclusion")
+async def reinclude_serviceman(
+    serviceman_id: int,
+    user: User = Depends(require_super_admin_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Re-include a serviceman previously removed from tracking
+    (super-admin-only, audit-logged)."""
+    serviceman = await ippt_service.set_tracking_exclusion(
+        db, serviceman_id, excluded=False
+    )
+    if serviceman is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No such IPPT serviceman",
+        )
+    db.add(
+        AuditLog(
+            user_id=str(user.id),
+            entity_type="ippt_serviceman",
+            entity_id=str(serviceman.id),
+            action="update",
+            changes=None,
+            description=json.dumps(
+                {
+                    "action": "include",
+                    "full_name": serviceman.full_name,
+                }
+            ),
+        )
+    )
+    await db.commit()
+    return {
+        "serviceman_id": serviceman.id,
+        "excluded": False,
+        "exclusion_reason": None,
     }
 
 

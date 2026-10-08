@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from parade_state.api.admin_purge import PURGE_TABLES
 from parade_state.models import (
     AuditLog,
+    IpptHealthScreening,
     IpptServiceman,
     IpptSnapshot,
     IpptStateObservation,
@@ -698,6 +699,383 @@ async def test_canonical_fixtures_end_to_end(client_as, db_session):
         assert kent["state"] == "failed_can_reattempt"
         assert kent["window_end"] == "2026-09-23"
     assert json.dumps(detail)  # serializable
+
+
+# ============================================================================
+# Remove-from-tracking (decided 2026-10-08)
+# ============================================================================
+
+
+async def test_exclusion_hides_serviceman_and_audits(client_as, db_session):
+    await _seed_active_roll(db_session, ["EXCLUDED PERSON", "KEPT PERSON"])
+    client = await client_as("super_admin")
+    rows = {
+        "ippt_failed": [
+            "CPL   ,EXCLUDED PERSON,DK314,BN HQ,4,Fail,-,-,-",
+            "SGT   ,KEPT PERSON,DK314,BN HQ,300,Fail,-,-,-",
+        ],
+    }
+    assert (
+        client.post(
+            "/api/v1/ippt/snapshots",
+            files=_multipart(_synthetic_snapshot("2026-09-11", rows)),
+        ).status_code
+        == 200
+    )
+    dashboard = client.get("/api/v1/ippt/dashboard").json()
+    target = next(
+        e for e in dashboard["servicemen"] if e["full_name"] == "EXCLUDED PERSON"
+    )
+    serviceman_id = target["serviceman_id"]
+
+    # Plain admins cannot exclude. (client_as re-authenticates the one
+    # shared test client, so sign back in as the super-admin afterwards.)
+    admin = await client_as("admin")
+    assert (
+        admin.post(
+            f"/api/v1/ippt/servicemen/{serviceman_id}/exclusion",
+            json={"reason": "ORD"},
+        ).status_code
+        == 403
+    )
+    client = await client_as("super_admin")
+    assert (
+        client.post(
+            f"/api/v1/ippt/servicemen/{serviceman_id}/exclusion",
+            json={"reason": "   "},
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/api/v1/ippt/servicemen/999999/exclusion",
+            json={"reason": "ORD"},
+        ).status_code
+        == 404
+    )
+
+    response = client.post(
+        f"/api/v1/ippt/servicemen/{serviceman_id}/exclusion",
+        json={"reason": "ORD — left the unit"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "serviceman_id": serviceman_id,
+        "excluded": True,
+        "exclusion_reason": "ORD — left the unit",
+    }
+
+    serviceman = await db_session.get(IpptServiceman, serviceman_id)
+    assert serviceman.excluded is True
+    assert serviceman.exclusion_reason == "ORD — left the unit"
+
+    # Hidden from the dashboard and every count; the other person stays.
+    dashboard = client.get("/api/v1/ippt/dashboard").json()
+    assert dashboard["summary"]["total"] == 1
+    assert dashboard["summary"]["excluded"] == 1
+    assert all(e["full_name"] != "EXCLUDED PERSON" for e in dashboard["servicemen"])
+
+    audit = (
+        await db_session.execute(
+            select(AuditLog).where(AuditLog.entity_type == "ippt_serviceman")
+        )
+    ).scalar_one()
+    assert audit.entity_id == str(serviceman_id)
+    assert "exclude" in audit.description
+    assert "ORD" in audit.description
+
+
+async def test_excluded_reappear_and_reinclude(client_as, db_session):
+    await _seed_active_roll(db_session, ["REAPPEARED PERSON"])
+    client = await client_as("super_admin")
+    rows = {"ippt_failed": ["CPL   ,REAPPEARED PERSON,DK314,BN HQ,12,Fail,-,-,-"]}
+    assert (
+        client.post(
+            "/api/v1/ippt/snapshots",
+            files=_multipart(_synthetic_snapshot("2026-09-11", rows)),
+        ).status_code
+        == 200
+    )
+    serviceman = (await db_session.execute(select(IpptServiceman))).scalar_one()
+    assert (
+        client.post(
+            f"/api/v1/ippt/servicemen/{serviceman.id}/exclusion",
+            json={"reason": "posted out"},
+        ).status_code
+        == 200
+    )
+
+    # A later snapshot showing him again: the row still ingests (history
+    # is kept), the response surfaces him, the dashboard stays hidden.
+    october = _synthetic_snapshot(
+        "2026-10-08",
+        {"ippt_failed": ["CPL   ,REAPPEARED PERSON,DK314,BN HQ,350,Fail,-,-,-"]},
+    )
+    response = client.post("/api/v1/ippt/snapshots", files=_multipart(october))
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["excluded_reappeared"] == [
+        {
+            "serviceman_id": serviceman.id,
+            "full_name": "REAPPEARED PERSON",
+            "exclusion_reason": "posted out",
+        }
+    ]
+    observations = (
+        (await db_session.execute(select(IpptStateObservation))).scalars().all()
+    )
+    assert len(observations) == 2  # September + October rows retained
+    assert client.get("/api/v1/ippt/dashboard").json()["summary"]["total"] == 0
+
+    # Re-ingest of the same date also surfaces him; exclusion survives.
+    response = client.post("/api/v1/ippt/snapshots", files=_multipart(october))
+    assert response.json()["replaced"] is True
+    assert len(response.json()["excluded_reappeared"]) == 1
+    await db_session.refresh(serviceman)
+    assert serviceman.excluded is True
+
+    # Re-inclusion restores the dashboard view and is audit-logged too.
+    assert (
+        client.delete(f"/api/v1/ippt/servicemen/{serviceman.id}/exclusion").status_code
+        == 200
+    )
+    await db_session.refresh(serviceman)
+    assert serviceman.excluded is False
+    assert serviceman.exclusion_reason is None
+    dashboard = client.get("/api/v1/ippt/dashboard").json()
+    assert dashboard["summary"]["total"] == 1
+    audits = (
+        (
+            await db_session.execute(
+                select(AuditLog).where(AuditLog.entity_type == "ippt_serviceman")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    descriptions = [audit.description for audit in audits]
+    assert sum("exclude" in description for description in descriptions) == 1
+    assert (
+        sum('"action": "include"' in description for description in descriptions) == 1
+    )
+
+
+# ============================================================================
+# Ingest order never matters (decided 2026-10-08)
+# ============================================================================
+
+
+async def test_completed_backfill_survives_late_window_definition(
+    client_as, db_session
+):
+    """The window's defining outstanding row arriving in a LATER-ingested
+    snapshot must not leave the earlier COMPLETED row with a NULL link."""
+    await _seed_active_roll(db_session, ["LATE WINDOW PERSON"])
+    client = await client_as("super_admin")
+
+    # September first: he COMPLETED — no window is known yet anywhere.
+    september = _synthetic_snapshot(
+        "2026-09-11",
+        {"ippt_completed": ["CPL   ,LATE WINDOW PERSON,DK314,BN HQ,Pass,-"]},
+    )
+    assert (
+        client.post("/api/v1/ippt/snapshots", files=_multipart(september)).status_code
+        == 200
+    )
+    completed = (
+        (
+            await db_session.execute(
+                select(IpptStateObservation).where(
+                    IpptStateObservation.state == "met_award"
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert completed.window_id is None  # honest at this point
+
+    # July second: the outstanding row defines the window that covers the
+    # September COMPLETED row (2026-07-01 + 84 days = 2026-09-23).
+    july = _synthetic_snapshot(
+        "2026-07-01",
+        {"ippt_failed": ["CPL   ,LATE WINDOW PERSON,DK314,BN HQ,84,Fail,-,-,-"]},
+    )
+    assert (
+        client.post("/api/v1/ippt/snapshots", files=_multipart(july)).status_code == 200
+    )
+
+    windows = (await db_session.execute(select(IpptWindow))).scalars().all()
+    assert len(windows) == 1
+    assert windows[0].window_end == date(2026, 9, 23)
+    await db_session.refresh(completed)
+    assert completed.window_id == windows[0].id  # recompute pass linked it
+
+
+async def test_screened_on_survives_backfill_order(client_as, db_session):
+    """The pending→fit flip must date the screening even when the 'fit'
+    snapshot is ingested before the 'pending' one."""
+    await _seed_active_roll(db_session, ["FFI ORDER PERSON"])
+    client = await client_as("super_admin")
+
+    october = _synthetic_snapshot(
+        "2026-10-08",
+        {"ippt_not_attempted": ["PTE   ,FFI ORDER PERSON,DK314,BN HQ,40,No,Fit,-,-"]},
+    )
+    assert (
+        client.post("/api/v1/ippt/snapshots", files=_multipart(october)).status_code
+        == 200
+    )
+    screenings = {
+        screening.observed_on: screening
+        for screening in (
+            (await db_session.execute(select(IpptHealthScreening))).scalars().all()
+        )
+    }
+    assert screenings[date(2026, 10, 8)].status == "fit"
+    assert screenings[date(2026, 10, 8)].screened_on is None  # no pending known yet
+
+    september = _synthetic_snapshot(
+        "2026-09-11",
+        {
+            "ippt_not_attempted": [
+                "PTE   ,FFI ORDER PERSON,DK314,BN HQ,60,No,Pending,-,-"
+            ]
+        },
+    )
+    assert (
+        client.post("/api/v1/ippt/snapshots", files=_multipart(september)).status_code
+        == 200
+    )
+
+    await db_session.refresh(screenings[date(2026, 10, 8)])
+    assert screenings[date(2026, 10, 8)].screened_on == date(2026, 10, 8)
+
+
+async def test_display_identity_follows_latest_observation(client_as, db_session):
+    """Rank/sub-unit display comes from the latest observation, never the
+    spine's last-written values — re-ingesting the OLDER month last must
+    not drag the dashboard back to stale identity."""
+    await _seed_active_roll(db_session, ["DRIFT PERSON"])
+    client = await client_as("super_admin")
+
+    september = _synthetic_snapshot(
+        "2026-09-11",
+        {"ippt_failed": ["SGT   ,DRIFT PERSON,DK314,BN HQ,12,Fail,-,-,-"]},
+    )
+    assert (
+        client.post("/api/v1/ippt/snapshots", files=_multipart(september)).status_code
+        == 200
+    )
+    october = _synthetic_snapshot(
+        "2026-10-08",
+        {"ippt_failed": ["PTE   ,DRIFT PERSON,DK314,MEDICAL COY,350,Fail,-,-,-"]},
+    )
+    assert (
+        client.post("/api/v1/ippt/snapshots", files=_multipart(october)).status_code
+        == 200
+    )
+    # Re-upload September (replace): the spine is last written with the
+    # September values, but the latest observation stays October's.
+    assert (
+        client.post("/api/v1/ippt/snapshots", files=_multipart(september)).status_code
+        == 200
+    )
+
+    dashboard = client.get("/api/v1/ippt/dashboard").json()
+    entry = next(e for e in dashboard["servicemen"] if e["full_name"] == "DRIFT PERSON")
+    assert entry["report_date"] == "2026-10-08"
+    assert entry["rank"] == "PTE"
+    assert entry["sub_unit"] == "MEDICAL COY"
+
+
+# ============================================================================
+# Window-consistency guard (decided 2026-10-08; §6.1 cheap check)
+# ============================================================================
+
+
+async def test_window_overlap_with_different_end_warns(client_as, db_session):
+    await _seed_active_roll(db_session, ["WARNING PERSON"])
+    client = await client_as("super_admin")
+
+    september = _synthetic_snapshot(
+        "2026-09-11",
+        {"ippt_failed": ["CPL   ,WARNING PERSON,DK314,BN HQ,12,Fail,-,-,-"]},
+    )  # window ends 2026-09-23
+    assert (
+        client.post("/api/v1/ippt/snapshots", files=_multipart(september)).status_code
+        == 200
+    )
+
+    # A later report deriving an end 17 days away: same window with
+    # inconsistent close data, not a rollover — warn, still ingest.
+    inconsistent = _synthetic_snapshot(
+        "2026-09-20",
+        {"ippt_failed": ["CPL   ,WARNING PERSON,DK314,BN HQ,20,Fail,-,-,-"]},
+    )  # window ends 2026-10-10
+    response = client.post("/api/v1/ippt/snapshots", files=_multipart(inconsistent))
+    assert response.status_code == 200
+    serviceman = (
+        (
+            await db_session.execute(
+                select(IpptServiceman).where(
+                    IpptServiceman.full_name == "WARNING PERSON"
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert response.json()["window_warnings"] == [
+        {
+            "serviceman_id": serviceman.id,
+            "full_name": "WARNING PERSON",
+            "report_date": "2026-09-20",
+            "existing_window_end": "2026-09-23",
+            "derived_window_end": "2026-10-10",
+        }
+    ]
+    assert len((await db_session.execute(select(IpptWindow))).scalars().all()) == 2
+    assert (
+        len((await db_session.execute(select(IpptStateObservation))).scalars().all())
+        == 2
+    )
+
+
+async def test_window_rollover_and_agreement_do_not_warn(client_as, db_session):
+    await _seed_active_roll(db_session, ["ROLLOVER PERSON"])
+    client = await client_as("super_admin")
+
+    september = _synthetic_snapshot(
+        "2026-09-11",
+        {"ippt_failed": ["CPL   ,ROLLOVER PERSON,DK314,BN HQ,12,Fail,-,-,-"]},
+    )  # ends 2026-09-23
+    assert (
+        client.post("/api/v1/ippt/snapshots", files=_multipart(september)).status_code
+        == 200
+    )
+
+    # Same window reported again with an equal end: silent reuse.
+    agreeing = _synthetic_snapshot(
+        "2026-09-20",
+        {"ippt_failed": ["CPL   ,ROLLOVER PERSON,DK314,BN HQ,3,Fail,-,-,-"]},
+    )  # ends 2026-09-23 again
+    response = client.post("/api/v1/ippt/snapshots", files=_multipart(agreeing))
+    assert response.json()["window_warnings"] == []
+    assert len((await db_session.execute(select(IpptWindow))).scalars().all()) == 1
+
+    # A genuine rollover (~1 year jump) is silent too.
+    rollover = _synthetic_snapshot(
+        "2026-10-08",
+        {
+            "ippt_not_attempted": [
+                "CPL   ,ROLLOVER PERSON,DK314,MEDICAL COY,350,No,NA,-,-"
+            ]
+        },
+    )  # ends 2027-09-23
+    response = client.post("/api/v1/ippt/snapshots", files=_multipart(rollover))
+    assert response.json()["window_warnings"] == []
+    assert len((await db_session.execute(select(IpptWindow))).scalars().all()) == 2
 
 
 # ============================================================================

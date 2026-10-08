@@ -250,3 +250,71 @@ class TestIpptPages:
         assert "2026-09-11" in page.text
         assert "Quarantined rows" in page.text
         assert "outside [0, 366]" in page.text
+
+    async def test_remove_from_tracking_ui_flow(
+        self, client: TestClient, db_session: AsyncSession
+    ):
+        """Exclusion hides the dashboard row (super-admin button only),
+        lists the person on the upload page for re-inclusion, keeps the
+        window page's retained history, and reverses cleanly."""
+        await _seed_roll_with_match(db_session)
+        sa = await _make_user(db_session, "super_admin", "sa-exclude@example.com")
+        admin = await _make_user(db_session, "admin", "admin-exclude@example.com")
+        await _sign_in(client, db_session, sa)
+
+        rows = {"ippt_failed": ["CPL   ,MATCHED PERSON,DK314,BN HQ,4,Fail,-,-,-"]}
+        assert (
+            client.post("/api/v1/ippt/snapshots", files=_upload_files(rows)).status_code
+            == 200
+        )
+
+        # Super-admin sees the per-row Remove button and the reason dialog;
+        # plain admins see neither.
+        assert "openExclude" in client.get("/ippt/dashboard").text
+        assert "excludeDialog" in client.get("/ippt/dashboard").text
+        await _sign_in(client, db_session, admin)
+        admin_view = client.get("/ippt/dashboard").text
+        assert "openExclude" not in admin_view
+        assert "excludeDialog" not in admin_view
+
+        await _sign_in(client, db_session, sa)
+        payload = client.get("/api/v1/ippt/dashboard").json()
+        target = next(
+            e for e in payload["servicemen"] if e["full_name"] == "MATCHED PERSON"
+        )
+        serviceman_id = target["serviceman_id"]
+        assert (
+            client.post(
+                f"/api/v1/ippt/servicemen/{serviceman_id}/exclusion",
+                json={"reason": "ORD — left the unit"},
+            ).status_code
+            == 200
+        )
+
+        # Hidden from the dashboard; the status line counts the exclusion.
+        body = client.get("/ippt/dashboard").text
+        assert "MATCHED PERSON" not in body
+        assert "1 removed from tracking" in body
+
+        # The upload page lists him with his reason for re-inclusion.
+        upload = client.get("/ippt/upload").text
+        assert "Removed from tracking" in upload
+        assert "MATCHED PERSON" in upload
+        assert "ORD — left the unit" in upload
+
+        # The window page retains the history, with the exclusion notice.
+        window_page = client.get(f"/ippt/window/{target['personnel_id']}")
+        assert window_page.status_code == 200
+        assert "removed from tracking" in window_page.text
+        assert "Trajectory" in window_page.text
+
+        # Re-inclusion restores the dashboard row and empties the list.
+        assert (
+            client.delete(
+                f"/api/v1/ippt/servicemen/{serviceman_id}/exclusion"
+            ).status_code
+            == 200
+        )
+        assert "MATCHED PERSON" in client.get("/ippt/dashboard").text
+        upload = client.get("/ippt/upload").text
+        assert "Everyone seen in the reports is currently tracked." in upload

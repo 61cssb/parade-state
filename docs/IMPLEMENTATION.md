@@ -680,6 +680,13 @@ GET /api/v1/personnel/{id}/attendance-history?date_from=xxx&date_to=xxx
 
 ## 4. Database Implementation
 
+> **Scope note (2026-10-08):** the `ippt_*` tables of the IPPT
+> monitoring feature (FEATURE_IPPT) live outside this guide's database
+> section — see [docs/IPPT_MONITORING.md](IPPT_MONITORING.md) §6,
+> `src/parade_state/models/ippt.py`, and
+> `src/parade_state/migrations/versions/z7g8h9i0j1k2_add_ippt_monitoring.py`
+> (+ `a8b9c0d1e2f3`).
+
 ### 4.1 Database Choice Rationale
 
 **Production: PostgreSQL**

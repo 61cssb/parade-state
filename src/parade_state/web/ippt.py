@@ -1,4 +1,5 @@
-"""User-facing IPPT monitoring pages (local-testing-only; FEATURE_IPPT).
+"""User-facing IPPT monitoring pages (FEATURE_IPPT-gated; the Railway
+production environment force-disables the flag, see config.Settings).
 
 - ``/ippt/dashboard`` — escalation view over all personnel: colour-coded
   top-bar tabs filter the three tiers (3 months before window close =
@@ -123,6 +124,7 @@ async def ippt_upload(request: Request):
     async with session_maker() as db:
         history = await ippt_service.snapshot_history(db)
         quarantine = await ippt_service.quarantined_rows(db)
+        excluded = await ippt_service.excluded_servicemen(db)
 
     env = _get_templates(request)
     template = env.get_template("ippt_upload.html")
@@ -133,6 +135,7 @@ async def ippt_upload(request: Request):
             active_page="ippt",
             history=history,
             quarantine=quarantine,
+            excluded=excluded,
         )
     )
 

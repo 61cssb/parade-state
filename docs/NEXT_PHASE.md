@@ -214,7 +214,7 @@ above). Routes and views already exist; the work is the role decision
 and attendance permissions (subunit-1 scoping already exists). This
 season's test users will be admins, so this waits.
 
-### 9. IPPT monitoring — built, local-testing-only until further notice
+### 9. IPPT monitoring — built; dev-enabled, production blocked
 
 The full feature (docs/IPPT_MONITORING.md §6) is implemented behind
 `FEATURE_IPPT`: six-file snapshot ingest (atomic per report date,
@@ -249,21 +249,27 @@ settled the following, decided with the unit's admin:
   vintage stamp was prototyped and dropped — it only rendered in a narrow
   Family-B-after-Family-C case and the row's last-seen badge already
   dates it; revisit if it confuses people in practice.
-- **Next session:** (1) remove-from-tracking — exclusion flag + reason on
-  `ippt_servicemen` (migration), per-row super-admin button with reason
-  (accounting), audit-logged, rows retained and re-includable if the
-  person reappears in a later snapshot (surfaced in the upload response);
-  (2) ingest order never matters — display identity from the latest
-  observation, plus a post-ingest recompute pass over all snapshots in
-  date order re-deriving COMPLETED-window backfills and screening
-  `screened_on`; (3) window-consistency guard — a derived window
-  overlapping an existing one (±45 days) with a different end warns in
-  the upload response + upload page instead of silently becoming a
-  rollover (spec §6.1's cheap consistency check).
+- **Shipped (same session, branch `feat/ippt-multi-snapshot-hardening`):**
+  the three decided hardening items. (1) remove-from-tracking —
+  `ippt_servicemen.excluded` + `exclusion_reason` (migration
+  `a8b9c0d1e2f3`), per-row super-admin Remove button with required
+  reason on the dashboard, exclusion/re-inclusion audit-logged
+  (`ippt_serviceman` entity type), rows retained, and an excluded person
+  reappearing in a later snapshot surfaced in the upload response + the
+  upload page's "Removed from tracking" panel for re-inclusion (never
+  auto-re-included); (2) ingest order never matters — display identity
+  from the latest observation, and a post-ingest recompute pass over all
+  snapshots in date order re-deriving COMPLETED-window backfills and
+  screening `screened_on`; (3) window-consistency guard — a derived
+  window overlapping an existing one (±45 days) with a different end
+  warns in the upload response + upload page result panel + ingest audit
+  entry instead of silently becoming a rollover (spec §6.1's cheap
+  consistency check).
 - **Watch items (no build):** manual-link editor for unmatched/ambiguous
-  rows (the real remedy for name-variant duplicates); NR-replacement
-  link fallout self-heals at next ingest; reports now accepted in .xlsx
-  as well as .csv (parser reads the first worksheet; openpyxl dep).
+  rows (the real remedy for name-variant duplicates) — stays a watch
+  item, deferred again on 2026-10-08; NR-replacement link fallout
+  self-heals at next ingest; reports now accepted in .xlsx as well as
+  .csv (parser reads the first worksheet; openpyxl dep).
 - **Add to next session:** make "Wait for CI" real for the season branch —
   CI currently triggers on pushes to `main` and PRs only, so the dev
   trigger's checkSuites gate passes vacuously; add the season branch
@@ -287,13 +293,22 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
-- **2026-10-08:** IPPT monitoring built (local-only): `FEATURE_IPPT`
+- **2026-10-08:** IPPT multi-snapshot hardening (PR #90, also pushed to
+  season branch `20261008`): remove-from-tracking (exclusion flag +
+  reason + audit, migration `a8b9c0d1e2f3`), ingest order never matters
+  (display identity from latest observation + post-ingest recompute
+  pass), ±45-day window-consistency guard; e2e suite fixed for
+  multi-month fixtures; PG-only restore test fixed to downgrade before
+  dumping. Manual-link editor stays a watch item (§9a).
+
+- **2026-10-08:** IPPT monitoring built: `FEATURE_IPPT`
   flags the whole stack (6 tables migration `z7g8h9i0j1k2`; ingest
   service; `/ippt/dashboard`, `/ippt/window/{personnel_id}`,
   `/ippt/upload`; quarantine list; purge covers the ippt tables);
-  production force-disables the flag (config warning) so it cannot ship
-  to Railway until explicitly cleared; Playwright E2E suite debuts in
-  `tests/e2e/` (fresh DB per test, system Chrome)
+  Playwright E2E suite debuts in
+  `tests/e2e/` (fresh DB per test, system Chrome); enabled on the
+  Railway development environment later the same day (production stays
+  force-disabled)
 
 - **2026-08-27:** Inpro status super-admin-only (Issue 39, admin trial
   rule): `PATCH /api/v1/personnel/{id}` 403s `inpro_status` for
