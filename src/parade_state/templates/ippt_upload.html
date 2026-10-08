@@ -6,7 +6,8 @@
     Upload the monthly IPPT/NS FIT monitoring reports. A snapshot is the
     <strong>full set of six files</strong> for one report date — the upload is
     atomic per date (all six land, or none do). Re-uploading a report date
-    replaces its previous ingest. Filenames must be canonical:
+    replaces its previous ingest. The six reports are exported from the
+    <strong>OneNS</strong> app. Filenames must be canonical:
     <code>{REPORT}_{STATE}_{YYYYMMDD}.csv</code> (e.g.
     <code>IPPT_COMPLETED_20260911.csv</code>); each file may be either CSV
     or Excel (<code>.xlsx</code>) and the set may mix the two formats.
