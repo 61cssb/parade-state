@@ -1,6 +1,6 @@
 # Roadmap & Open Work
 
-**Last Updated:** 2026-10-07
+**Last Updated:** 2026-10-11
 **Status:** In production on Railway (admin-only access), with a separate
 hosted development environment (Issue 15) where test users try changes
 first. Test users (admins) coming on the weekend of 2026-08-22; annual
@@ -270,14 +270,10 @@ settled the following, decided with the unit's admin:
   item, deferred again on 2026-10-08; NR-replacement link fallout
   self-heals at next ingest; reports now accepted in .xlsx as well as
   .csv (parser reads the first worksheet; openpyxl dep).
-- **Add to next session:** make "Wait for CI" real for the season branch —
-  CI currently triggers on pushes to `main` and PRs only, so the dev
-  trigger's checkSuites gate passes vacuously; add the season branch
-  (`20261008`, or a `2026*` pattern) to `ci.yml`'s `push.branches`.
-  Development now tracks branch `20261008` (r20260825 was deleted after
-  its merge); production tracks `main`. Durable rule from the 2026-10-08
-  deploy incident: run the local/pg.sh Postgres-parity pass (pytest +
-  migration roundtrip) before merging any migration.
+- Durable rule from the 2026-10-08 deploy incident: run the
+  local/pg.sh Postgres-parity pass (pytest + migration roundtrip)
+  before merging any migration. Development tracks branch `20261008`
+  (r20260825 was deleted after its merge); production tracks `main`.
 
 ---
 
@@ -292,6 +288,11 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 ---
 
 ## Recent History (one line each; git log is authoritative)
+
+- **2026-10-11:** CI now triggers on pushes to season branches
+  (`2026*` added to `ci.yml` `push.branches`; PR #91): the dev
+  deployment trigger's "Wait for CI" (`checkSuites`) gate is now real —
+  pushes to `20261008` produce a check suite Railway actually waits on.
 
 - **2026-10-08:** IPPT multi-snapshot hardening (PR #90, also pushed to
   season branch `20261008`): remove-from-tracking (exclusion flag +
