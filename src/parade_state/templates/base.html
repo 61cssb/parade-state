@@ -554,6 +554,13 @@
             .container select,
             .container textarea {
                 font-size: 16px !important;
+                /* A <select> cannot shrink below its longest option, so
+                   long option text (roll labels, filenames) used to push
+                   pages past the phone viewport; min-width:0 releases the
+                   flex-item automatic minimum that normally enforces
+                   it. */
+                max-width: 100%;
+                min-width: 0;
             }
         }
 
