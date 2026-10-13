@@ -5,6 +5,11 @@
 <style>
     .ippt-action { background: none; border: 1px solid #d1d5db; border-radius: 6px; color: #6b7280; cursor: pointer; font-size: 0.75rem; padding: 0.15rem 0.55rem; white-space: nowrap; }
     .ippt-action:hover { border-color: #16a34a; color: #16a34a; }
+    /* Phones: match the 44px touch-target minimum the base sheet gives
+       .btn (matches the dashboard's Remove button). */
+    @media (max-width: 640px) {
+        .ippt-action { min-height: 44px; min-width: 44px; }
+    }
 </style>
 <p style="color: #6b7280; margin-bottom: 1.5rem;">
     Upload the monthly IPPT/NS FIT monitoring reports. A snapshot is the

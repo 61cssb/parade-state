@@ -37,6 +37,23 @@
         }
     }
 
+    /* A <select> cannot shrink below its longest option, so the roll
+       selector's "CAA … — N pers (active for attendance)" text used to
+       push the whole page past the phone viewport (page-level sideways
+       scroll). Phones only: let each filter group shrink to the form,
+       release the select's flex-item automatic minimum, and cap it at
+       its group's width — desktop keeps its natural sizing. */
+    @media (max-width: 767px) {
+        .filters-form > div {
+            min-width: 0;
+        }
+
+        .filters-form select {
+            max-width: 100%;
+            min-width: 0;
+        }
+    }
+
     /* Copy Remarks modal (issue 20). */
     .modal-overlay {
         position: fixed;
@@ -86,7 +103,7 @@
 
 {% if nominal_rolls %}
 <div class="card">
-    <form method="get" action="/attendance" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+    <form method="get" action="/attendance" class="filters-form" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
         <div style="display: flex; gap: 0.5rem; align-items: center;">
             <label for="nominal_roll_id" style="font-weight: bold;">Nominal Roll:</label>
             <select name="nominal_roll_id" id="nominal_roll_id" onchange="this.form.submit()"

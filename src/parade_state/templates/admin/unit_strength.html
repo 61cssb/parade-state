@@ -65,6 +65,28 @@
         font-weight: 600;
         color: #374151;
     }
+    /* Keep the row label visible while the 13-column table is scrolled
+       sideways inside .table-wrap (phones). Sticky cells need an opaque
+       background matching their row style, or scrolled cells show
+       through; inert on desktop where the table never overflows. */
+    .strength-table th:first-child,
+    .strength-table td:first-child {
+        position: sticky;
+        left: 0;
+        z-index: 1;
+    }
+    .strength-table thead th:first-child {
+        background-color: #f9fafb;
+    }
+    .strength-table td:first-child {
+        background-color: #ffffff;
+    }
+    .strength-table .str-section td:first-child {
+        background-color: #f3f4f6;
+    }
+    .strength-table .str-subtotal td:first-child {
+        background-color: #f9fafb;
+    }
     .strength-table .group-h {
         text-align: center;
     }
