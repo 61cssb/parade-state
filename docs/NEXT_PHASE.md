@@ -1,6 +1,6 @@
 # Roadmap & Open Work
 
-**Last Updated:** 2026-10-11
+**Last Updated:** 2026-10-13
 **Status:** In production on Railway (admin-only access), with a separate
 hosted development environment (Issue 15) where test users try changes
 first. Test users (admins) coming on the weekend of 2026-08-22; annual
@@ -148,15 +148,30 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ## Prioritized Open Work
 
-### 1. Mobile optimization (Phase 9E) — next up, for field use during the window
+### 1. Mobile optimization (Phase 9E) — shipped 2026-10-13 (PR #92)
 
-Responsive design for tablets/phones. Note (2026-10-07): the original
-phase plan's basis — a static HTML/JS app with a service worker +
-IndexedDB cache and offline unsaved-state highlighting — was never built
-and has been removed from the design (see SPECIFICATION §1.3 / §6.1).
-What exists is the server-rendered Jinja `/attendance` page with
-per-row server-side autosave (red-edge retry on a failed save), so 9E is
-responsive polish on that page, not an offline frontend.
+Full-app mobile audit (all 22 templates; 10 pages rendered at 360px
+via the seeded visual-check harness on the IPPT demo DB) found the
+tier-A patterns (scrollable tables, touch-friendly controls, the
+attendance group-header layout) holding everywhere except three
+defects, all fixed in PR #92:
+
+- The attendance roll selector's `<select>` pushed the whole page
+  past the phone viewport (a select cannot shrink below its longest
+  option) — phones now release the flex minimum and cap the select;
+  base sheet gains the same guard for every page. Media-scoped, so
+  desktop sizing is pixel-unchanged (verified by A/B).
+- The Settings feature-access matrix crushed into three ~90px
+  columns on phones — under 640px each row stacks into a labelled
+  block with ~21px checkboxes.
+- IPPT Remove/Re-include buttons rendered at 53×18px — now the
+  base sheet's 44px touch-target minimum.
+- Unit Strength gained a sticky first column so sub-unit names stay
+  pinned while the 13-column report scrolls sideways on a phone.
+
+Deliberately left out: hiding columns on the Nominal Roll browser —
+its staged-edit JS and suggestion panels make CSS column-hiding
+risky, and phone editing there is rare. Revisit on field feedback.
 
 ### 2. UI test automation, Tier 1 — before the 2026-09-10 window
 
@@ -288,6 +303,14 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 ---
 
 ## Recent History (one line each; git log is authoritative)
+
+- **2026-10-13:** Phase 9E shipped (PR #92, cherry-picked to season
+  branch `20261008` as c4e7d1a): mobile audit of all 22 templates with
+  10 pages rendered at 360px; fixes — attendance page overflow
+  (roll-selector select flex-min), Settings feature-access matrix
+  stacked under 640px, IPPT 44px touch targets, Unit Strength sticky
+  first column. NR-browser column hiding deliberately skipped (staged-
+  edit JS makes CSS hiding risky; revisit on field feedback).
 
 - **2026-10-11:** CI now triggers on pushes to season branches
   (`2026*` added to `ci.yml` `push.branches`; PR #91): the dev
