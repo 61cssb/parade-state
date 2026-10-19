@@ -306,6 +306,17 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-10-19:** IPPT dashboard XLSX export (PR #94): "Export XLSX"
+  in the filter bar → `GET /ippt/dashboard/export.xlsx` (admin+), five
+  tabs (3/6/9 months, On track, Fulfilled); always the full dataset —
+  the on-screen filters never reach the download — cell text mirrors
+  the page (FIT/award parentheticals, Yes/No/− booked, Pending/Fit/NA),
+  "Window ends" written as real Excel dates. Pure builder in
+  `utils/ippt_export.py`. Same day: the match badge ("not in nominal
+  roll" / "⚠ ambiguous") made `display:block` so it renders on its own
+  line under the name instead of wrapping mid-phrase beside it
+  (PR #95).
+
 - **2026-10-19:** IPPT dashboard filter/sort views (PR #93): GET bar
   under the tier tabs — `?subunit`/`?state`/`?booked`/`?ffi` filter
   every roster section (tier view, on-track, fulfilled), `?sort=`
