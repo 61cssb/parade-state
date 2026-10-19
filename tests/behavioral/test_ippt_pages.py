@@ -359,6 +359,95 @@ class TestIpptPages:
         assert 'name="ffi"' in admin_view and '"ippt-clear"' in admin_view
         assert "ALPHA PERSON" in admin_view
 
+    async def test_dashboard_xlsx_export(
+        self, client: TestClient, db_session: AsyncSession
+    ):
+        """The export link downloads a five-tab workbook of the FULL
+        dataset — the on-screen filters never reach it (decided
+        2026-10-19). Admin+; anonymous callers are sent to login."""
+        import io
+
+        from openpyxl import load_workbook
+
+        await _seed_roll_with_match(db_session)
+        sa = await _make_user(db_session, "super_admin", "sa-export@example.com")
+        await _sign_in(client, db_session, sa)
+
+        rows = {
+            "ippt_completed": ["LTA   ,DELTA PERSON,DK314,ALPHA WING,Pass,3"],
+            "ippt_not_attempted": [
+                "PTE   ,ALPHA PERSON,DK314,BN HQ,280,Yes,Pending,-,-",
+                "PTE   ,ECHO PERSON,DK314,BN HQ,275,Yes,Fit,-,-",
+            ],
+            "nsfit_in_progress": ["CPL   ,CHARLIE PERSON,DK314,BN HQ,150,2,-,-,-"],
+        }
+        assert (
+            client.post("/api/v1/ippt/snapshots", files=_upload_files(rows)).status_code
+            == 200
+        )
+
+        page = client.get("/ippt/dashboard")
+        assert 'href="/ippt/dashboard/export.xlsx"' in page.text
+
+        # Anonymous callers go to login like the dashboard page does.
+        client.cookies.clear()
+        redirect = client.get(
+            "/ippt/dashboard/export.xlsx", follow_redirects=False
+        )
+        assert redirect.status_code == 302
+        assert redirect.headers["location"] == "/auth/login"
+
+        await _sign_in(client, db_session, sa)
+        response = client.get("/ippt/dashboard/export.xlsx")
+        assert response.status_code == 200
+        assert (
+            response.headers["content-type"]
+            == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        assert response.headers["content-disposition"].startswith(
+            "attachment; filename=ippt_dashboard_"
+        )
+
+        book = load_workbook(io.BytesIO(response.content))
+        assert book.sheetnames == [
+            "3 months",
+            "6 months",
+            "9 months",
+            "On track",
+            "Fulfilled",
+        ]
+
+        def names_in(title: str) -> list[str]:
+            return [
+                row[1] for row in book[title].iter_rows(min_row=2, values_only=True)
+            ]
+
+        # Tab membership mirrors the API: ALPHA (280 days ≈ 9 months,
+        # unbooked-with-pending-screening) sits in tier_9, CHARLIE's
+        # mandatory FIT in progress is chased in tier_6, ECHO is booked
+        # with a fit screening (on track), DELTA is fulfilled.
+        assert names_in("3 months") == []
+        assert names_in("6 months") == ["CHARLIE PERSON"]
+        assert names_in("9 months") == ["ALPHA PERSON"]
+        assert names_in("On track") == ["ECHO PERSON"]
+        assert names_in("Fulfilled") == ["DELTA PERSON"]
+
+        # Query params are ignored: the export is always the full dataset.
+        filtered = client.get(
+            "/ippt/dashboard/export.xlsx",
+            params={"subunit": "ALPHA WING", "sort": "state"},
+        )
+        filtered_book = load_workbook(io.BytesIO(filtered.content))
+        assert [
+            row[1]
+            for row in filtered_book["Fulfilled"].iter_rows(min_row=2, values_only=True)
+        ] == ["DELTA PERSON"]
+
+        # Plain admins get the same download.
+        admin = await _make_user(db_session, "admin", "admin-export@example.com")
+        await _sign_in(client, db_session, admin)
+        assert client.get("/ippt/dashboard/export.xlsx").status_code == 200
+
     async def test_upload_page_lists_history_and_quarantine(
         self, client: TestClient, db_session: AsyncSession
     ):

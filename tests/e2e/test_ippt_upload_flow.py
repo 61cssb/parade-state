@@ -13,6 +13,7 @@ The database is rebuilt per test (see conftest), so repeated runs and
 re-uploads always start from the same state.
 """
 
+import io
 from pathlib import Path
 
 import pytest
@@ -181,3 +182,55 @@ def test_reinclude_from_upload_result_panel(page, e2e_server):
     page.goto(f"{e2e_server}/ippt/dashboard")
     page.wait_for_selector("text=LEW EE KENT")
     assert "removed from tracking" not in page.content()
+
+
+def test_export_xlsx_button_downloads_full_workbook(page, e2e_server):
+    """The Export XLSX button (decided 2026-10-19) downloads a five-tab
+    workbook of the FULL dataset: real browser download, dashboard tab
+    order, and — with a state filter active on screen — the export still
+    carries the servicemen the filter hides."""
+    from datetime import datetime
+
+    from openpyxl import load_workbook
+
+    snapshots = _fixture_snapshots()
+    if not snapshots:
+        pytest.skip("canonical IPPT fixtures not present — /fixtures is gitignored")
+
+    _upload(page, e2e_server, snapshots[0])
+
+    # A state filter narrows the on-screen tier view...
+    page.goto(f"{e2e_server}/ippt/dashboard?tier=tier_3&state=ippt_not_attempted")
+    page.wait_for_selector("text=Export XLSX")
+    assert "of" in page.inner_text(".ippt-section-title")  # "N of M" badge
+
+    with page.expect_download() as download_info:
+        page.click("text=Export XLSX")
+    download = download_info.value
+    assert download.suggested_filename.startswith("ippt_dashboard_")
+
+    # openpyxl needs a real extension or a stream — the download lands in
+    # an extensionless temp path, so hand it the bytes.
+    book = load_workbook(io.BytesIO(Path(download.path()).read_bytes()))
+    assert book.sheetnames == [
+        "3 months",
+        "6 months",
+        "9 months",
+        "On track",
+        "Fulfilled",
+    ]
+
+    tier3 = book["3 months"]
+    assert [cell.value for cell in tier3[1]][:4] == [
+        "Rank",
+        "Name",
+        "Sub-unit",
+        "State",
+    ]
+    names = [row[1] for row in tier3.iter_rows(min_row=2, values_only=True)]
+    assert "LEW EE KENT" in names  # ...but the export ignores the filter
+
+    # "Window ends" is a real date cell; "Days left" a real number.
+    first = next(tier3.iter_rows(min_row=2, values_only=True))
+    assert isinstance(first[6], datetime)
+    assert isinstance(first[7], int)

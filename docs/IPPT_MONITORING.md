@@ -67,6 +67,17 @@
 > somebody; the tier tabs carry the current filter too, so their counts
 > show each tier's filtered size (the unfiltered tier sizes when
 > nothing is filtered).
+>
+> **XLSX export (2026-10-19):** an "Export XLSX" button in the filter
+> bar downloads the dashboard as a five-tab workbook — 3/6/9 months
+> (Rank/Name/Sub-unit/State/Booked/FFI/Window ends/Days left), On track
+> (Rank/Name/Sub-unit/State/Window ends) and Fulfilled
+> (Rank/Name/Sub-unit/How). Always the full dataset in base
+> most-urgent-first order — the on-screen filters never reach the
+> download. Cell text mirrors the page (FIT/award parentheticals,
+> Yes/No/− booked, Pending/Fit/NA screening, ``-`` blanks) except
+> "Window ends", written as a real Excel date so the workbook sorts and
+> filters natively. ``GET /ippt/dashboard/export.xlsx``, admin+.
 
 Requirements and report-schema reference for the IPPT monitoring
 dashboard (built — see the status above). The policy
