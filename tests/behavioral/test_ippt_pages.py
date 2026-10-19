@@ -391,9 +391,7 @@ class TestIpptPages:
 
         # Anonymous callers go to login like the dashboard page does.
         client.cookies.clear()
-        redirect = client.get(
-            "/ippt/dashboard/export.xlsx", follow_redirects=False
-        )
+        redirect = client.get("/ippt/dashboard/export.xlsx", follow_redirects=False)
         assert redirect.status_code == 302
         assert redirect.headers["location"] == "/auth/login"
 
