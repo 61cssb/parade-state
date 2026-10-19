@@ -17,9 +17,13 @@
     .ippt-match { display: block; font-size: 0.75rem; }
     .ippt-action { background: none; border: 1px solid #d1d5db; border-radius: 6px; color: #6b7280; cursor: pointer; font-size: 0.7rem; padding: 0.1rem 0.45rem; white-space: nowrap; }
     .ippt-action:hover { border-color: #dc2626; color: #dc2626; }
-    .ippt-filters select { padding: 0.45rem 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; font-size: 0.85rem; max-width: 100%; }
+    /* Selects share the filter line with the Export button: they grow
+       evenly to fill the row instead of pushing the button to wrap.
+       The 180px floor keeps the longest label ("Sort — most urgent
+       first") unclipped; narrower views wrap, as before. */
+    .ippt-filters select { flex: 1 1 180px; min-width: 0; padding: 0.45rem 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; font-size: 0.85rem; max-width: 100%; }
     .ippt-clear { font-size: 0.85rem; color: #374151; background: #e5e7eb; border-radius: 6px; padding: 0.45rem 0.75rem; text-decoration: none; white-space: nowrap; }
-    .ippt-export { background: #eff6ff; color: #1d4ed8; }
+    .ippt-export { display: inline-flex; align-items: center; text-decoration: none; white-space: nowrap; }
 
     @media (max-width: 640px) {
         .ippt-stats { gap: 0.5rem !important; margin-bottom: 0.75rem !important; }
@@ -32,7 +36,7 @@
         .ippt-tab-short { display: inline; }
         .ippt-filters { gap: 0.35rem !important; }
         .ippt-filters select { min-height: 44px; padding: 0.35rem 0.5rem; }
-        .ippt-clear, .ippt-export { display: inline-flex; align-items: center; min-height: 44px; }
+        .ippt-clear { display: inline-flex; align-items: center; min-height: 44px; }
         .ippt-section { padding: 0.75rem !important; }
         .ippt-section-title { font-size: 1rem; }
         .ippt-sub { display: none; }
@@ -140,7 +144,7 @@
     {# The export always carries the full dataset — the filters on screen
        are a viewing aid and do not reach the download. #}
     {% if total_count %}
-    <a class="ippt-clear ippt-export" href="/ippt/dashboard/export.xlsx" download
+    <a class="btn btn-primary ippt-export" href="/ippt/dashboard/export.xlsx" download
        title="Download the full dashboard (all five sections) as an Excel workbook — filters on screen are not applied">Export XLSX</a>
     {% endif %}
     {% if filters_active %}
