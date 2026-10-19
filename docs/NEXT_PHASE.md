@@ -1,6 +1,6 @@
 # Roadmap & Open Work
 
-**Last Updated:** 2026-10-13
+**Last Updated:** 2026-10-19
 **Status:** In production on Railway (admin-only access), with a separate
 hosted development environment (Issue 15) where test users try changes
 first. Test users (admins) coming on the weekend of 2026-08-22; annual
@@ -238,7 +238,9 @@ with name-matching against the attendance-active roll (manual-review
 editor deferred), birthday-anchored windows, the escalation
 dashboard (`/ippt/dashboard` — tiers labelled by months before window
 close, colour-coded filter tabs: 3 = red/most urgent, 6 = orange,
-9 = yellow), per-person window pages
+9 = yellow; GET filter/sort bar over every roster section — sub-unit,
+state, booked, FFI; sort by sub-unit / state / window end / days left,
+PR #93), per-person window pages
 (`/ippt/window/{personnel_id}`), and the super-admin upload page
 (`/ippt/upload`). Enabled on the Railway development environment
 2026-10-08; the Railway production environment force-disables the flag
@@ -303,6 +305,15 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 ---
 
 ## Recent History (one line each; git log is authoritative)
+
+- **2026-10-19:** IPPT dashboard filter/sort views (PR #93): GET bar
+  under the tier tabs — `?subunit`/`?state`/`?booked`/`?ffi` filter
+  every roster section (tier view, on-track, fulfilled), `?sort=`
+  re-orders them (subunit / state / window_end / days_left); shareable
+  URLs, unknown values fall back like `?tier=`, tab counts double as
+  filtered facet counts while a filter is active. Helpers
+  `filter_states`/`sort_states` in `services/ippt.py`. Season branch
+  `20261008` not yet synced — dev-deploy decision pending.
 
 - **2026-10-13:** Phase 9E shipped (PR #92, cherry-picked to season
   branch `20261008` as c4e7d1a): mobile audit of all 22 templates with
