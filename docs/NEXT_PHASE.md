@@ -312,8 +312,10 @@ Defer until CSV Step 3 (diff confirmation) forces it.
   re-orders them (subunit / state / window_end / days_left); shareable
   URLs, unknown values fall back like `?tier=`, tab counts double as
   filtered facet counts while a filter is active. Helpers
-  `filter_states`/`sort_states` in `services/ippt.py`. Season branch
-  `20261008` not yet synced — dev-deploy decision pending.
+  `filter_states`/`sort_states` in `services/ippt.py`. Same day: season
+  branch `20261019` cut from `main` and the Railway development
+  trigger repointed to it (deploy SUCCESS; previous `20261008` now
+  superseded — delete after any final check).
 
 - **2026-10-13:** Phase 9E shipped (PR #92, cherry-picked to season
   branch `20261008` as c4e7d1a): mobile audit of all 22 templates with
