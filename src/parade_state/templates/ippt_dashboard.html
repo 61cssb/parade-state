@@ -14,6 +14,7 @@
     .ippt-section-title { margin: 0; }
     .ippt-sub { font-weight: 400; color: #6b7280; font-size: 0.8rem; margin-left: 0.35rem; }
     .ippt-stale { color: #9ca3af; font-size: 0.7rem; display: inline-block; }
+    .ippt-match { display: block; font-size: 0.75rem; }
     .ippt-action { background: none; border: 1px solid #d1d5db; border-radius: 6px; color: #6b7280; cursor: pointer; font-size: 0.7rem; padding: 0.1rem 0.45rem; white-space: nowrap; }
     .ippt-action:hover { border-color: #dc2626; color: #dc2626; }
     .ippt-filters select { padding: 0.45rem 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; font-size: 0.85rem; max-width: 100%; }
@@ -184,9 +185,9 @@
                         <span class="ippt-stale" title="No observation in the latest snapshot — values are as of this report date">last seen {{ e.report_date }}</span>
                         {% endif %}
                         {% if e.match_status == 'ambiguous' %}
-                        <span title="Homonyms on the nominal roll — needs manual review" style="color: #d97706; font-size: 0.75rem;">⚠ ambiguous</span>
+                        <span class="ippt-match" title="Homonyms on the nominal roll — needs manual review" style="color: #d97706;">⚠ ambiguous</span>
                         {% elif e.match_status == 'unmatched' %}
-                        <span title="No matching name on the attendance-active nominal roll" style="color: #9ca3af; font-size: 0.75rem;">not in nominal roll</span>
+                        <span class="ippt-match" title="No matching name on the attendance-active nominal roll" style="color: #9ca3af;">not in nominal roll</span>
                         {% endif %}
                     </td>
                     <td style="padding: 0.4rem 0.5rem;">{{ e.sub_unit }}</td>

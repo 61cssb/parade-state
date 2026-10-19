@@ -166,7 +166,7 @@ class TestIpptPages:
         body = dashboard.text
         # The 4-day-window person renders on the default (most urgent) tab.
         assert "MATCHED PERSON" in body
-        assert "not in nominal roll" in body  # match-quality badge
+        assert "not in nominal roll" in body  # match-quality status line
         assert "most urgent" in body  # default tab = 3 months before close
         assert "Snapshot history" in body
         assert "2026-09-11" in body
@@ -179,6 +179,9 @@ class TestIpptPages:
         assert tier9_view.status_code == 200
         assert "least urgent" in tier9_view.text
         assert "UNMATCHED PERSON" in tier9_view.text
+        # The match badge is display:block — it sits on its own line under
+        # the name instead of wrapping mid-phrase beside it.
+        assert '<span class="ippt-match"' in tier9_view.text
         # Unknown values fall back to the default (most urgent) tab.
         fallback = client.get("/ippt/dashboard?tier=bogus")
         assert "most urgent" in fallback.text
