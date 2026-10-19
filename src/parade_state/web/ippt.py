@@ -4,12 +4,16 @@ production environment force-disables the flag, see config.Settings).
 - ``/ippt/dashboard`` — escalation view over all personnel: colour-coded
   top-bar tabs filter the three tiers (3 months before window close =
   red/most urgent, 6 = orange, 9 = yellow), plus the fulfilled set,
-  snapshot history, and match-quality counts. Admin+.
+  snapshot history, and match-quality counts. A GET filter/sort bar
+  narrows and orders every roster section by sub-unit, state, booked and
+  FFI (all plain query params, so each view is a shareable URL). Admin+.
 - ``/ippt/window/{personnel_id}`` — one person's window, trajectory and
   screening history (linked from the dashboard's roster rows). Admin+.
 - ``/ippt/upload`` — the six-file snapshot upload, super-admin-only
   (plain admins get the in-page no-access message, like Taggings).
 """
+
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -43,19 +47,86 @@ TIER_COLOURS = {
 
 
 @router.get("/ippt/dashboard", response_class=HTMLResponse)
-async def ippt_dashboard(request: Request, tier: str | None = None):
-    """Render the IPPT monitoring dashboard (``?tier=`` selects the tab)."""
+async def ippt_dashboard(
+    request: Request,
+    tier: str | None = None,
+    subunit: str | None = None,
+    state: str | None = None,
+    booked: str | None = None,
+    ffi: str | None = None,
+    sort: str | None = None,
+):
+    """Render the IPPT monitoring dashboard (``?tier=`` selects the tab;
+    ``?subunit=``/``?state=``/``?booked=``/``?ffi=`` filter and ``?sort=``
+    re-orders every roster section)."""
     current_user = await get_current_admin_user_optional(request)
     if not current_user:
         return RedirectResponse(url="/auth/login", status_code=302)
 
-    # Tab filter: unknown values fall back to the most urgent tier.
+    # View params: unknown values fall back to the defaults (most urgent
+    # tier, base order, no filtering) — same contract as ?tier=. The
+    # subunit/state params additionally validate against the observed
+    # option lists once the data is loaded.
     active_tier = tier if tier in TIER_SECTION_ORDER else TIER_SECTION_ORDER[0]
+    active_sort = sort if sort in ippt_service.SORT_KEYS else "urgency"
+    active_booked = booked if booked in ippt_service.BOOKED_FILTERS else None
+    active_ffi = ffi if ffi in ippt_service.FFI_FILTERS else None
 
     session_maker = get_session_maker()
     async with session_maker() as db:
         dashboard = await ippt_service.dashboard_data(db)
         history = await ippt_service.snapshot_history(db)
+
+    servicemen = dashboard["servicemen"]
+    subunit_options = sorted({e["sub_unit"] for e in servicemen if e["sub_unit"]})
+    state_options = sorted(
+        {(e["state"], e["state_label"]) for e in servicemen},
+        key=lambda pair: pair[1],
+    )
+    active_subunit = subunit if subunit in subunit_options else None
+    active_state = state if state in dict(state_options) else None
+
+    def view(entries: list[dict]) -> list[dict]:
+        """One roster section through the current filter + sort."""
+        return ippt_service.sort_states(
+            ippt_service.filter_states(
+                entries,
+                subunit=active_subunit,
+                state=active_state,
+                booked=active_booked,
+                ffi=active_ffi,
+            ),
+            active_sort,
+        )
+
+    # Section badges show the filtered count, with the unfiltered total
+    # alongside whenever a filter hides somebody ("2 of 5").
+    tier_totals = {band: len(entries) for band, entries in dashboard["tiers"].items()}
+    ontrack_total = sum(
+        1 for e in servicemen if not e["highlighted"] and not e["fulfilled"]
+    )
+    fulfilled_total = len(dashboard["fulfilled"])
+    dashboard["tiers"] = {
+        band: view(entries) for band, entries in dashboard["tiers"].items()
+    }
+    dashboard["fulfilled"] = view(dashboard["fulfilled"])
+    filtered_servicemen = view(servicemen)
+    ontrack = [
+        e for e in filtered_servicemen if not e["highlighted"] and not e["fulfilled"]
+    ]
+    filters_active = bool(active_subunit or active_state or active_booked or active_ffi)
+
+    # Tier tabs keep the current filter + sort params (switching tabs must
+    # not drop the view); the default sort stays out of the URLs.
+    preserve = [
+        ("subunit", active_subunit),
+        ("state", active_state),
+        ("booked", active_booked),
+        ("ffi", active_ffi),
+        ("sort", active_sort if active_sort != "urgency" else None),
+    ]
+    carried = urlencode([(key, value) for key, value in preserve if value])
+    query_suffix = f"&{carried}" if carried else ""
 
     env = _get_templates(request)
     template = env.get_template("ippt_dashboard.html")
@@ -71,6 +142,21 @@ async def ippt_dashboard(request: Request, tier: str | None = None):
             tier_colours=TIER_COLOURS,
             active_tier=active_tier,
             history=history,
+            subunit_options=subunit_options,
+            state_options=state_options,
+            active_subunit=active_subunit,
+            active_state=active_state,
+            active_booked=active_booked,
+            active_ffi=active_ffi,
+            active_sort=active_sort,
+            filters_active=filters_active,
+            ontrack=ontrack,
+            shown_count=len(filtered_servicemen),
+            total_count=len(servicemen),
+            tier_totals=tier_totals,
+            ontrack_total=ontrack_total,
+            fulfilled_total=fulfilled_total,
+            query_suffix=query_suffix,
         )
     )
 

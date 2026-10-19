@@ -56,6 +56,17 @@
 > and highlight criteria are unchanged (elapsed ≥ 9 months ⇔ ≤ 3 before
 > close); the dashboard renders the three tiers as colour-coded filter
 > tabs rather than stacked lists.
+>
+> **Filter / sort views (2026-10-19):** a GET bar under the tabs filters
+> every roster section (tier view, on-track, fulfilled) by sub-unit,
+> state, booked (yes/no/not stated) and FFI (pending/fit/NA/not
+> recorded), and sorts by sub-unit, state, window end or days left —
+> plain query params, so each view is a shareable URL; unknown values
+> fall back to no filtering, like ``?tier=``. Section badges show the
+> filtered count "of" the unfiltered total while a filter hides
+> somebody; the tier tabs carry the current filter too, so their counts
+> show each tier's filtered size (the unfiltered tier sizes when
+> nothing is filtered).
 
 Requirements and report-schema reference for the IPPT monitoring
 dashboard (built — see the status above). The policy
