@@ -7,22 +7,27 @@ production environment force-disables the flag, see config.Settings).
   snapshot history, and match-quality counts. A GET filter/sort bar
   narrows and orders every roster section by sub-unit, state, booked and
   FFI (all plain query params, so each view is a shareable URL). Admin+.
+- ``/ippt/dashboard/export.xlsx`` — the dashboard as a five-tab Excel
+  workbook (3/6/9 months, on track, fulfilled), always the full dataset
+  regardless of the on-screen filters (decided 2026-10-19). Admin+.
 - ``/ippt/window/{personnel_id}`` — one person's window, trajectory and
   screening history (linked from the dashboard's roster rows). Admin+.
 - ``/ippt/upload`` — the six-file snapshot upload, super-admin-only
   (plain admins get the in-page no-access message, like Taggings).
 """
 
+import io
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from jinja2 import Environment, FileSystemLoader
 
 from parade_state.admin_routes import no_permission_response
 from parade_state.auth.admin_dependencies import get_current_admin_user_optional
 from parade_state.db import get_session_maker
 from parade_state.services import ippt as ippt_service
+from parade_state.utils import ippt_export, utc_dt
 
 router = APIRouter()
 
@@ -158,6 +163,31 @@ async def ippt_dashboard(
             fulfilled_total=fulfilled_total,
             query_suffix=query_suffix,
         )
+    )
+
+
+@router.get("/ippt/dashboard/export.xlsx")
+async def ippt_dashboard_export(request: Request):
+    """Download the dashboard as a five-tab XLSX workbook (admin+).
+
+    Always the full dataset in base order — the on-screen filter/sort
+    params do not apply (decided 2026-10-19)."""
+    current_user = await get_current_admin_user_optional(request)
+    if not current_user:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    session_maker = get_session_maker()
+    async with session_maker() as db:
+        dashboard = await ippt_service.dashboard_data(db)
+
+    payload = ippt_export.build_dashboard_workbook(dashboard)
+    filename = f"ippt_dashboard_{utc_dt.utcnow().strftime('%Y%m%d')}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(payload),
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 

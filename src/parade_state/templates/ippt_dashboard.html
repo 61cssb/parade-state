@@ -18,6 +18,7 @@
     .ippt-action:hover { border-color: #dc2626; color: #dc2626; }
     .ippt-filters select { padding: 0.45rem 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; font-size: 0.85rem; max-width: 100%; }
     .ippt-clear { font-size: 0.85rem; color: #374151; background: #e5e7eb; border-radius: 6px; padding: 0.45rem 0.75rem; text-decoration: none; white-space: nowrap; }
+    .ippt-export { background: #eff6ff; color: #1d4ed8; }
 
     @media (max-width: 640px) {
         .ippt-stats { gap: 0.5rem !important; margin-bottom: 0.75rem !important; }
@@ -30,7 +31,7 @@
         .ippt-tab-short { display: inline; }
         .ippt-filters { gap: 0.35rem !important; }
         .ippt-filters select { min-height: 44px; padding: 0.35rem 0.5rem; }
-        .ippt-clear { display: inline-flex; align-items: center; min-height: 44px; }
+        .ippt-clear, .ippt-export { display: inline-flex; align-items: center; min-height: 44px; }
         .ippt-section { padding: 0.75rem !important; }
         .ippt-section-title { font-size: 1rem; }
         .ippt-sub { display: none; }
@@ -135,6 +136,12 @@
         <option value="window_end" {% if active_sort == 'window_end' %}selected{% endif %}>Sort — window end</option>
         <option value="days_left" {% if active_sort == 'days_left' %}selected{% endif %}>Sort — days left</option>
     </select>
+    {# The export always carries the full dataset — the filters on screen
+       are a viewing aid and do not reach the download. #}
+    {% if total_count %}
+    <a class="ippt-clear ippt-export" href="/ippt/dashboard/export.xlsx" download
+       title="Download the full dashboard (all five sections) as an Excel workbook — filters on screen are not applied">Export XLSX</a>
+    {% endif %}
     {% if filters_active %}
     <a class="ippt-clear" href="/ippt/dashboard?tier={{ active_tier }}">Clear</a>
     <span style="color: #6b7280; font-size: 0.8rem;">Showing {{ shown_count }} of {{ total_count }} servicemen</span>
