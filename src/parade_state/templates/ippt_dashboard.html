@@ -16,6 +16,8 @@
     .ippt-stale { color: #9ca3af; font-size: 0.7rem; display: inline-block; }
     .ippt-action { background: none; border: 1px solid #d1d5db; border-radius: 6px; color: #6b7280; cursor: pointer; font-size: 0.7rem; padding: 0.1rem 0.45rem; white-space: nowrap; }
     .ippt-action:hover { border-color: #dc2626; color: #dc2626; }
+    .ippt-filters select { padding: 0.45rem 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; font-size: 0.85rem; max-width: 100%; }
+    .ippt-clear { font-size: 0.85rem; color: #374151; background: #e5e7eb; border-radius: 6px; padding: 0.45rem 0.75rem; text-decoration: none; white-space: nowrap; }
 
     @media (max-width: 640px) {
         .ippt-stats { gap: 0.5rem !important; margin-bottom: 0.75rem !important; }
@@ -26,6 +28,9 @@
         .ippt-tab { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
         .ippt-tab-full { display: none; }
         .ippt-tab-short { display: inline; }
+        .ippt-filters { gap: 0.35rem !important; }
+        .ippt-filters select { min-height: 44px; padding: 0.35rem 0.5rem; }
+        .ippt-clear { display: inline-flex; align-items: center; min-height: 44px; }
         .ippt-section { padding: 0.75rem !important; }
         .ippt-section-title { font-size: 1rem; }
         .ippt-sub { display: none; }
@@ -74,14 +79,14 @@
     {% for band in tier_order %}
     {% set c = tier_colours[band] %}
     {% if band == active_tier %}
-    <a class="ippt-tab" href="/ippt/dashboard?tier={{ band }}"
+    <a class="ippt-tab" href="/ippt/dashboard?tier={{ band }}{{ query_suffix }}"
        style="font-weight: 600; background: {{ c.solid }}; color: #ffffff; border: 1px solid {{ c.solid }};">
         <span class="ippt-tab-full">{{ tier_titles[band] }}</span>
         <span class="ippt-tab-short" title="{{ tier_titles[band] }}">{{ tier_titles[band][:1] }}m</span>
         <span class="ippt-tab-count" style="background: rgba(255,255,255,0.25);">{{ dashboard.tiers[band]|length }}</span>
     </a>
     {% else %}
-    <a class="ippt-tab" href="/ippt/dashboard?tier={{ band }}"
+    <a class="ippt-tab" href="/ippt/dashboard?tier={{ band }}{{ query_suffix }}"
        style="font-weight: 500; background: {{ c.tint }}; color: {{ c.text }}; border: 1px solid {{ c.solid }}40;">
         <span class="ippt-tab-full">{{ tier_titles[band] }}</span>
         <span class="ippt-tab-short" title="{{ tier_titles[band] }}">{{ tier_titles[band][:1] }}m</span>
@@ -91,12 +96,57 @@
     {% endfor %}
 </div>
 
+{# Filter / sort bar: a plain GET form (submit-on-change selects, like
+   the nominal roll filters) — every view is a shareable URL and works
+   without JS. The hidden tier keeps the active tab across changes; the
+   tabs carry these params back so switching tabs never drops the view. #}
+<form class="ippt-filters" method="get" action="/ippt/dashboard"
+      style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem;">
+    <input type="hidden" name="tier" value="{{ active_tier }}">
+    <select name="subunit" onchange="this.form.submit()" title="Filter by sub-unit">
+        <option value="">All sub-units</option>
+        {% for s in subunit_options %}
+        <option value="{{ s }}" {% if active_subunit == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+    </select>
+    <select name="state" onchange="this.form.submit()" title="Filter by obligation state">
+        <option value="">All states</option>
+        {% for state_key, state_label in state_options %}
+        <option value="{{ state_key }}" {% if active_state == state_key %}selected{% endif %}>{{ state_label }}</option>
+        {% endfor %}
+    </select>
+    <select name="booked" onchange="this.form.submit()" title="Filter by booked status">
+        <option value="">Booked — all</option>
+        <option value="yes" {% if active_booked == 'yes' %}selected{% endif %}>Booked — yes</option>
+        <option value="no" {% if active_booked == 'no' %}selected{% endif %}>Booked — no</option>
+        <option value="unknown" {% if active_booked == 'unknown' %}selected{% endif %}>Booked — not stated</option>
+    </select>
+    <select name="ffi" onchange="this.form.submit()" title="Filter by FFI health screening">
+        <option value="">FFI — all</option>
+        <option value="pending" {% if active_ffi == 'pending' %}selected{% endif %}>FFI — pending</option>
+        <option value="fit" {% if active_ffi == 'fit' %}selected{% endif %}>FFI — fit</option>
+        <option value="na" {% if active_ffi == 'na' %}selected{% endif %}>FFI — NA</option>
+        <option value="none" {% if active_ffi == 'none' %}selected{% endif %}>FFI — not recorded</option>
+    </select>
+    <select name="sort" onchange="this.form.submit()" title="Sort every roster section">
+        <option value="urgency" {% if active_sort == 'urgency' %}selected{% endif %}>Sort — most urgent first</option>
+        <option value="subunit" {% if active_sort == 'subunit' %}selected{% endif %}>Sort — sub-unit</option>
+        <option value="state" {% if active_sort == 'state' %}selected{% endif %}>Sort — state</option>
+        <option value="window_end" {% if active_sort == 'window_end' %}selected{% endif %}>Sort — window end</option>
+        <option value="days_left" {% if active_sort == 'days_left' %}selected{% endif %}>Sort — days left</option>
+    </select>
+    {% if filters_active %}
+    <a class="ippt-clear" href="/ippt/dashboard?tier={{ active_tier }}">Clear</a>
+    <span style="color: #6b7280; font-size: 0.8rem;">Showing {{ shown_count }} of {{ total_count }} servicemen</span>
+    {% endif %}
+</form>
+
 {% set band = active_tier %}
 {% set entries = dashboard.tiers[band] %}
 {% set c = tier_colours[band] %}
 <div class="card ippt-section" style="border-top: 3px solid {{ c.solid }};">
     <h3 class="ippt-section-title" style="color: {{ c.text }};">{{ tier_titles[band] }}
-        <span style="display: inline-block; background: {{ c.tint }}; color: {{ c.text }}; border-radius: 999px; padding: 0.1rem 0.6rem; font-size: 0.8rem; vertical-align: middle;">{{ entries|length }}</span>
+        <span style="display: inline-block; background: {{ c.tint }}; color: {{ c.text }}; border-radius: 999px; padding: 0.1rem 0.6rem; font-size: 0.8rem; vertical-align: middle;">{{ entries|length }}{% if filters_active and tier_totals[band] != entries|length %} of {{ tier_totals[band] }}{% endif %}</span>
         <span class="ippt-sub">{{ tier_subtitles[band] }}</span>
     </h3>
     {% if entries %}
@@ -144,18 +194,18 @@
             </tbody>
         </table>
     </div>
+    {% elif filters_active %}
+    <p style="color: #6b7280; margin-top: 0.5rem;">Nobody matches the current filters in this tier.</p>
     {% else %}
     <p style="color: #6b7280; margin-top: 0.5rem;">Nobody is highlighted in this tier.</p>
     {% endif %}
 </div>
 
-{% set ontrack = [] %}
-{% for e in dashboard.servicemen %}
-{% if not e.highlighted and not e.fulfilled %}{% if ontrack.append(e) %}{% endif %}{% endif %}
-{% endfor %}
+{# "On track" comes from the route: the not-highlighted, unfulfilled
+   subset of the filtered + sorted view. #}
 <div class="card">
     <h3>On track / not yet tiered
-        <span style="display: inline-block; background: #f0fdf4; color: #16a34a; border-radius: 999px; padding: 0.1rem 0.6rem; font-size: 0.8rem; vertical-align: middle;">{{ ontrack|length }}</span>
+        <span style="display: inline-block; background: #f0fdf4; color: #16a34a; border-radius: 999px; padding: 0.1rem 0.6rem; font-size: 0.8rem; vertical-align: middle;">{{ ontrack|length }}{% if filters_active and ontrack_total != ontrack|length %} of {{ ontrack_total }}{% endif %}</span>
     </h3>
     {% if ontrack %}
     <div class="table-wrap">
@@ -187,6 +237,8 @@
             </tbody>
         </table>
     </div>
+    {% elif filters_active %}
+    <p style="color: #6b7280; margin-top: 0.5rem;">No on-track servicemen match the current filters.</p>
     {% else %}
     <p style="color: #6b7280; margin-top: 0.5rem;">Everyone unfulfilled is highlighted in a tier above.</p>
     {% endif %}
@@ -194,7 +246,7 @@
 
 <div class="card">
     <h3>Fulfilled / waived
-        <span style="display: inline-block; background: #f0fdf4; color: #16a34a; border-radius: 999px; padding: 0.1rem 0.6rem; font-size: 0.8rem; vertical-align: middle;">{{ dashboard.fulfilled|length }}</span>
+        <span style="display: inline-block; background: #f0fdf4; color: #16a34a; border-radius: 999px; padding: 0.1rem 0.6rem; font-size: 0.8rem; vertical-align: middle;">{{ dashboard.fulfilled|length }}{% if filters_active and fulfilled_total != dashboard.fulfilled|length %} of {{ fulfilled_total }}{% endif %}</span>
     </h3>
     {% if dashboard.fulfilled %}
     <div class="table-wrap">
@@ -224,6 +276,8 @@
             </tbody>
         </table>
     </div>
+    {% elif filters_active %}
+    <p style="color: #6b7280; margin-top: 0.5rem;">No fulfilled servicemen match the current filters.</p>
     {% else %}
     <p style="color: #6b7280; margin-top: 0.5rem;">No snapshots ingested yet.</p>
     {% endif %}

@@ -810,6 +810,94 @@ async def dashboard_data(db: AsyncSession) -> dict:
     }
 
 
+# ============================================================================
+# Dashboard filter / sort views
+# ============================================================================
+
+#: Sort keys accepted by :func:`sort_states` — the dashboard's ``?sort=``
+#: vocabulary. ``urgency`` (the default) and ``days_left`` both order by
+#: days to window close, soonest first; ``urgency`` is kept as the
+#: explicit name for the base roster order.
+SORT_KEYS: tuple[str, ...] = (
+    "urgency",
+    "subunit",
+    "state",
+    "window_end",
+    "days_left",
+)
+
+#: ``?booked=`` values → the booked tri-state each selects (``unknown``
+#: = the observation carried no Booked Status, i.e. ``None``).
+BOOKED_FILTERS: dict[str, bool | None] = {
+    "yes": True,
+    "no": False,
+    "unknown": None,
+}
+
+#: ``?ffi=`` values; ``none`` = no known FFI value (only Family C files
+#: carry the screening column, so the latest known value may predate the
+#: latest observation).
+FFI_FILTERS: tuple[str, ...] = ("pending", "fit", "na", "none")
+
+# Entries without a window (or days-to-close) sort after everyone who
+# has one, on every key — same sentinel as _display_order.
+_NO_WINDOW = 10_000
+
+
+def filter_states(
+    entries: list[dict],
+    *,
+    subunit: str | None = None,
+    state: str | None = None,
+    booked: str | None = None,
+    ffi: str | None = None,
+) -> list[dict]:
+    """The dashboard filter views: keep the entries matching every given
+    filter (AND). Values arrive pre-validated by the route (unknown →
+    ``None`` = no filtering), so each non-``None`` value is a plain
+    equality match — ``booked="unknown"`` selects ``None`` and
+    ``ffi="none"`` selects entries with no known FFI value."""
+    kept = entries
+    if subunit:
+        kept = [entry for entry in kept if entry["sub_unit"] == subunit]
+    if state:
+        kept = [entry for entry in kept if entry["state"] == state]
+    if booked in BOOKED_FILTERS:
+        wanted = BOOKED_FILTERS[booked]
+        kept = [entry for entry in kept if entry["booked"] is wanted]
+    if ffi in FFI_FILTERS:
+        kept = [
+            entry
+            for entry in kept
+            if (entry["ffi"] is None if ffi == "none" else entry["ffi"] == ffi)
+        ]
+    return kept
+
+
+def sort_states(entries: list[dict], key: str = "urgency") -> list[dict]:
+    """Re-order a dashboard view (``?sort=``). Every key sorts ascending
+    with the serviceman's name as the tiebreaker; entries without the
+    sorted-on value (no window yet) go last. Returns a new list — the
+    input is left in its base (most-urgent-first) order."""
+    ordered = list(entries)
+    if key == "subunit":
+        ordered.sort(key=lambda e: (e["sub_unit"], e["full_name"]))
+    elif key == "state":
+        ordered.sort(key=lambda e: (e["state_label"], e["full_name"]))
+    elif key == "window_end":
+        ordered.sort(key=lambda e: (e["window_end"] or "9999-12-31", e["full_name"]))
+    elif key == "days_left":
+        ordered.sort(key=_days_left_key)
+    else:  # urgency (default): the base roster order
+        ordered.sort(key=_days_left_key)
+    return ordered
+
+
+def _days_left_key(entry: dict) -> tuple:
+    days = entry["days_to_close"]
+    return (days if days is not None else _NO_WINDOW, entry["full_name"])
+
+
 async def snapshot_history(db: AsyncSession) -> list[dict]:
     """Per-report-date ingest history with per-file row/quarantine counts."""
     snapshots = (

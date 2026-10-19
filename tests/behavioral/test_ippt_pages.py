@@ -226,6 +226,139 @@ class TestIpptPages:
         assert "Attempted — failed (can re-attempt)" in page.text
         assert "Health screening (FFI)" in page.text
 
+    async def test_dashboard_filter_and_sort_views(
+        self, client: TestClient, db_session: AsyncSession
+    ):
+        """The filter/sort bar narrows and orders every roster section via
+        GET params: subunit, state, booked, FFI; sort by subunit, state,
+        window end, days left. Unknown values fall back to no filtering
+        (same contract as ?tier=), filters survive a tab switch, and the
+        Clear link / showing-count only appear while a filter is active."""
+        await _seed_roll_with_match(db_session)
+        sa = await _make_user(db_session, "super_admin", "sa-views@example.com")
+        await _sign_in(client, db_session, sa)
+
+        rows = {
+            "ippt_completed": ["LTA   ,DELTA PERSON,DK314,ALPHA WING,Pass,3"],
+            "ippt_not_attempted": [
+                # 280 days ≈ 9 months to close → the least urgent tier.
+                "PTE   ,ALPHA PERSON,DK314,BN HQ,280,Yes,Pending,-,-",
+                "PTE   ,BRAVO PERSON,DK314,ALPHA WING,290,No,NA,-,-",
+                "PTE   ,ECHO PERSON,DK314,BN HQ,275,Yes,Fit,-,-",
+            ],
+            "nsfit_in_progress": ["CPL   ,CHARLIE PERSON,DK314,BN HQ,150,2,-,-,-"],
+        }
+        assert (
+            client.post("/api/v1/ippt/snapshots", files=_upload_files(rows)).status_code
+            == 200
+        )
+
+        # Shape check via the API: ALPHA/BRAVO highlighted in the least
+        # urgent tier, ECHO booked with a fit screening (on track), DELTA
+        # fulfilled.
+        payload = client.get("/api/v1/ippt/dashboard").json()
+        by_name = {e["full_name"]: e for e in payload["servicemen"]}
+        assert by_name["ALPHA PERSON"]["tier"] == "tier_9"
+        assert by_name["BRAVO PERSON"]["tier"] == "tier_9"
+        assert by_name["ECHO PERSON"]["highlighted"] is False
+        assert by_name["DELTA PERSON"]["fulfilled"] is True
+
+        # The bar renders the observed option lists; nothing is active by
+        # default, so no Clear link and no showing-count.
+        page = client.get("/ippt/dashboard")
+        assert 'name="subunit"' in page.text and "ALPHA WING" in page.text
+        assert "All sub-units" in page.text
+        assert 'name="sort"' in page.text and "Sort — window end" in page.text
+        assert '"ippt-clear"' not in page.text
+
+        # Subunit filter reaches every section: BRAVO (tier 9) and DELTA
+        # (fulfilled) stay, the BN HQ people go; badges show "of total".
+        alpha_wing = client.get(
+            "/ippt/dashboard", params={"tier": "tier_9", "subunit": "ALPHA WING"}
+        )
+        assert alpha_wing.status_code == 200
+        body = alpha_wing.text
+        assert "BRAVO PERSON" in body and "DELTA PERSON" in body
+        assert "ALPHA PERSON" not in body
+        assert "CHARLIE PERSON" not in body and "ECHO PERSON" not in body
+        assert "Showing 2 of 5 servicemen" in body
+        assert "1 of 2</span>" in body  # tier_9 badge: filtered of unfiltered
+        # Tab switches keep the filter.
+        assert "?tier=tier_6&subunit=ALPHA+WING" in body
+        # A tier that is empty even unfiltered says so under the filter.
+        tier3_view = client.get(
+            "/ippt/dashboard", params={"tier": "tier_3", "subunit": "ALPHA WING"}
+        ).text
+        assert "Nobody matches the current filters in this tier." in tier3_view
+
+        # State, booked, and FFI filters. The active tier tab decides
+        # which tier section renders, so these pin the tab that shows the
+        # people under test (on-track and fulfilled render on every tab).
+        not_attempted = client.get(
+            "/ippt/dashboard", params={"tier": "tier_9", "state": "ippt_not_attempted"}
+        ).text
+        assert "ALPHA PERSON" in not_attempted
+        assert "BRAVO PERSON" in not_attempted and "ECHO PERSON" in not_attempted
+        assert "CHARLIE PERSON" not in not_attempted
+        assert "DELTA PERSON" not in not_attempted
+
+        booked_yes = client.get(
+            "/ippt/dashboard", params={"tier": "tier_9", "booked": "yes"}
+        ).text
+        assert "ALPHA PERSON" in booked_yes and "ECHO PERSON" in booked_yes
+        assert "BRAVO PERSON" not in booked_yes
+        booked_no = client.get(
+            "/ippt/dashboard", params={"tier": "tier_9", "booked": "no"}
+        ).text
+        assert "BRAVO PERSON" in booked_no and "ALPHA PERSON" not in booked_no
+
+        ffi_pending = client.get(
+            "/ippt/dashboard", params={"tier": "tier_9", "ffi": "pending"}
+        ).text
+        assert "ALPHA PERSON" in ffi_pending and "BRAVO PERSON" not in ffi_pending
+        ffi_none = client.get(
+            "/ippt/dashboard", params={"tier": "tier_6", "ffi": "none"}
+        ).text
+        assert "CHARLIE PERSON" in ffi_none and "DELTA PERSON" in ffi_none
+        assert "ALPHA PERSON" not in ffi_none
+
+        # Sort keys: the tier_9 default order is days-left (ALPHA's 280
+        # before BRAVO's 290); subunit flips them (ALPHA WING < BN HQ),
+        # window end keeps window order.
+        default9 = client.get("/ippt/dashboard", params={"tier": "tier_9"}).text
+        assert default9.index("ALPHA PERSON") < default9.index("BRAVO PERSON")
+        by_subunit = client.get(
+            "/ippt/dashboard", params={"tier": "tier_9", "sort": "subunit"}
+        ).text
+        assert by_subunit.index("BRAVO PERSON") < by_subunit.index("ALPHA PERSON")
+        by_window = client.get(
+            "/ippt/dashboard", params={"tier": "tier_9", "sort": "window_end"}
+        ).text
+        assert by_window.index("ALPHA PERSON") < by_window.index("BRAVO PERSON")
+        by_days = client.get(
+            "/ippt/dashboard", params={"tier": "tier_9", "sort": "days_left"}
+        ).text
+        assert by_days.index("ALPHA PERSON") < by_days.index("BRAVO PERSON")
+
+        # Unknown values fall back to no filtering — and then nothing is
+        # "active", so no Clear link either.
+        bogus = client.get(
+            "/ippt/dashboard",
+            params={"tier": "tier_9", "subunit": "NOPE", "booked": "bogus"},
+        ).text
+        assert "ALPHA PERSON" in bogus
+        assert '"ippt-clear"' not in bogus
+
+        # Plain admins get the bar too (only the Remove buttons are
+        # super-admin-only).
+        admin = await _make_user(db_session, "admin", "admin-views@example.com")
+        await _sign_in(client, db_session, admin)
+        admin_view = client.get(
+            "/ippt/dashboard", params={"tier": "tier_9", "ffi": "pending"}
+        ).text
+        assert 'name="ffi"' in admin_view and '"ippt-clear"' in admin_view
+        assert "ALPHA PERSON" in admin_view
+
     async def test_upload_page_lists_history_and_quarantine(
         self, client: TestClient, db_session: AsyncSession
     ):
