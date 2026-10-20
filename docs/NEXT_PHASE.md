@@ -325,8 +325,11 @@ Defer until CSV Step 3 (diff confirmation) forces it.
   filtered facet counts while a filter is active. Helpers
   `filter_states`/`sort_states` in `services/ippt.py`. Same day: season
   branch `20261019` cut from `main` and the Railway development
-  trigger repointed to it (deploy SUCCESS; previous `20261008` now
-  superseded — delete after any final check).
+  trigger repointed to it (deploy SUCCESS). Superseded `20261008`
+  (content ⊆ main, all commits duplicated) deleted 2026-10-20 with
+  JS's sign-off, along with merged leftovers `fix/ci-season-branch-trigger`
+  (PR #91) and `feat/mobile-9e-fixes` (PR #92); only `main` +
+  `20261019` remain.
 
 - **2026-10-13:** Phase 9E shipped (PR #92, cherry-picked to season
   branch `20261008` as c4e7d1a): mobile audit of all 22 templates with
