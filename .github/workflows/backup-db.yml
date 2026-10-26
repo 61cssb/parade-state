@@ -120,9 +120,25 @@ jobs:
           # Run pg_dump where the database is; stream the archive back over
           # the (SSH-encrypted) channel. "$DATABASE_URL" must expand on the
           # REMOTE side - hence single quotes here.
-          ssh $SSH_OPTS -i ~/.ssh/railway_ci "$SSH_USER@ssh.railway.com" \
-            -- 'pg_dump "$DATABASE_URL" --format=custom --no-owner --no-privileges' \
-            > backup.dump
+          # Retry: runner egress flakes happen (2026-10-26: one dispatch
+          # timed out on connect 10ms after the readiness check succeeded);
+          # a nightly job must absorb those. A failed attempt may leave a
+          # partial file - remove it before retrying.
+          for attempt in 1 2 3; do
+            rm -f backup.dump
+            if ssh $SSH_OPTS -i ~/.ssh/railway_ci "$SSH_USER@ssh.railway.com" \
+                 -- 'pg_dump "$DATABASE_URL" --format=custom --no-owner --no-privileges' \
+                 > backup.dump; then
+              echo "dump succeeded (attempt $attempt)"
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::pg_dump failed after 3 attempts (SSH connect/transfer)"
+              exit 1
+            fi
+            echo "dump attempt $attempt failed (likely transient); retrying in 20s"
+            sleep 20
+          done
           test -s backup.dump
           # Sanity line for the log: confirms a live, reachable database
           ssh $SSH_OPTS -i ~/.ssh/railway_ci "$SSH_USER@ssh.railway.com" \
