@@ -426,10 +426,11 @@ create/update paths.
 is wanted — read-realistic, write-isolated):
 
 ```bash
-# 1. Dump production via its public TCP proxy (client must be PG 18+)
-pg_dump -Fc \
-  "postgresql://postgres:<password>@shinkansen.proxy.rlwy.net:48032/railway?sslmode=require" \
-  -f prod.dump
+# 1. Dump production via Railway SSH (runs pg_dump in the prod app
+#    container, which reaches Postgres on the private network)
+ssh -i ~/.ssh/railway_ci_backup <prod-grant-uuid>@ssh.railway.com -- \
+  'pg_dump "$DATABASE_URL" --format=custom --no-owner --no-privileges' \
+  > prod.dump
 
 # 2. Restore into development via the admin UI: sign in on the development
 #    domain as super_admin → admin "Restore Backup" page
@@ -441,9 +442,10 @@ pg_dump -Fc \
 Warning: this copies real PII onto the development database and wipes
 whatever dev data existed — coordinate with test users first.
 
-**Never point at development:** the nightly backup workflow
-(`RAILWAY_PUBLIC_DATABASE_URL` secret) targets production's public proxy
-only; see [BACKUP_SETUP.md](BACKUP_SETUP.md).
+**Never point at development:** the nightly backup workflow pins the
+*production* SSH grant UUID (`SSH_USER` in the workflow — grant UUIDs are
+environment-pinned, so a wrong-env dump is impossible by construction);
+see [BACKUP_SETUP.md](BACKUP_SETUP.md).
 
 ### Other Platforms
 
@@ -789,9 +791,12 @@ to a wrong value in the DB):
 ### Decision
 
 Backups run as a **GitHub Actions scheduled job** ([`.github/workflows/backup-db.yml`](../.github/workflows/backup-db.yml)):
-daily `pg_dump` (custom format) over Railway's public TCP proxy → **age public-key
-encryption** → upload to a **Google Drive** folder owned by the designated
-super-admin → 30-day retention sweep.
+daily `pg_dump` (custom format) executed inside the production app
+container over Railway SSH (the database has no public endpoint — Railway
+retired public TCP proxies in 2026-10, which also killed the original
+public-proxy approach) → **age public-key encryption** → upload to a
+**Google Drive** folder owned by the designated super-admin → 30-day
+retention sweep.
 
 Why this setup:
 
@@ -813,7 +818,9 @@ version rules) and a troubleshooting table — lives in
 
 Summary of what it provisions:
 
-- Railway public TCP proxy → GitHub secret `RAILWAY_PUBLIC_DATABASE_URL`
+- SSH keypair registered with Railway (`railway ssh keys add --workspace`)
+  → private half in GitHub secret `RAILWAY_SSH_KEY`; the workflow pins the
+  production grant UUID
 - age keypair → secret `AGE_PUBLIC_KEY` (private key in the super-admin's
   password manager — the only way to restore)
 - Google Drive OAuth token from `rclone authorize "drive"` run by the
@@ -898,9 +905,10 @@ then spot-check data via the admin UI.
    that predates the damage.
 2. **Restore** using the procedure above (backup age is at most ~24 h).
 3. **Verify:** `/health`, admin UI spot checks, monitor logs for errors.
-4. **Post-incident:** if the database URL changed, update
-   `RAILWAY_PUBLIC_DATABASE_URL` (and Railway variable references) to match
-   the new database.
+4. **Post-incident:** if the database or app service changed, regenerate
+   the SSH grant UUID (`railway ssh config --dry-run`, see
+   [BACKUP_SETUP.md](BACKUP_SETUP.md) Step 1) and update `SSH_USER` in the
+   backup workflow; Railway variable references update in the dashboard.
 
 ---
 

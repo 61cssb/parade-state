@@ -14,13 +14,21 @@ promote more via `/admin/users`.
 ## What you are building
 
 ```
-Railway Postgres (PG18, public TCP proxy)
+Railway Postgres (private network only — never publicly exposed)
   └─ nightly GitHub Actions job ("Database backup")
-       ├─ pg_dump (custom format)
+       ├─ ssh <grant-uuid>@ssh.railway.com → app container
+       │    └─ pg_dump (custom format), streamed back over the SSH channel
        ├─ age-encrypt with the super-admin's PUBLIC key
        └─ rclone upload → Google Drive folder owned by the super-admin
             └─ 30-day retention sweep
 ```
+
+> **History:** the original setup (2026-08-19) reached Postgres through a
+> Railway *public TCP proxy* URL. Railway retired public TCP proxies in
+> 2026-10 (the API no longer allows creating them, and existing proxies
+> were removed platform-side — the 2026-10-22..25 backup outage), so the
+> pipeline now execs `pg_dump` inside the app container over Railway SSH.
+> Per house standard, the database is never given a public endpoint again.
 
 Decisions and rationale: see [DEPLOYMENT.md](DEPLOYMENT.md) → *Backup
 Strategy*. Restore procedure: [DEPLOYMENT.md](DEPLOYMENT.md) → *Restore
@@ -35,31 +43,62 @@ Procedure*.
 
 ---
 
-## Step 1 — Railway: enable the public TCP proxy
+## Step 1 — Railway: register the CI SSH key
 
-The Postgres service's internal URL is only reachable inside Railway.
+The database is reachable only on Railway's private network. The backup job
+reaches it by SSH-ing into the **app** container (which has `DATABASE_URL`
+and ships PostgreSQL client 18) and running `pg_dump` there. Auth is an SSH
+key registered with Railway — no database credential ever reaches GitHub.
 
-1. Railway dashboard → project `parade-state` → service **Postgres** →
-   Settings → Networking → **Public TCP Proxy** → enable
-2. A `DATABASE_PUBLIC_URL` variable appears on the service (also visible
-   via `railway variables --service Postgres`). It looks like
-   `postgresql://postgres:<password>@<host>:<port>/railway`
+1. Generate a dedicated keypair (do **not** reuse a personal key):
 
-**Append `?sslmode=require`** — Railway omits it, and backups should
-never cross the internet unencrypted. The final value:
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.ssh/railway_ci_backup -N "" \
+     -C "github-ci-backup@parade-state"
+   ```
 
-```
-postgresql://postgres:<password>@<host>:<port>/railway?sslmode=require
-```
+2. Register the public half as a **workspace-owned** key (the right tier
+   for shared/CI credentials — revocable without touching personal keys):
 
-> ⚠️ **Pitfall (hit during setup):** the secret must be this *complete
-> URL*. Pasting only `host:port` makes `pg_dump` fail immediately.
+   ```bash
+   railway ssh keys add --workspace -k ~/.ssh/railway_ci_backup.pub \
+     -n github-ci-backup-parade-state
+   ```
 
-Sanity check from any machine with `psql`:
+3. Get the SSH *grant UUID* for the app service in the **production**
+   environment. The UUID is environment-pinned — generate it against the
+   exact environment you mean to hit (dev has a different UUID):
 
-```bash
-psql "<full URL>" -tAc "SELECT version();"
-```
+   ```bash
+   railway ssh config --dry-run --path /dev/null \
+     -p 92d80df3-6565-4ca3-8a00-1bb44ef2898b \
+     -s 1ea09699-73a7-4ad3-abdf-799a53a9afa5 \
+     -e e6250e41-8967-43da-a1b7-ba5d51b4bc8b --alias tmp
+   # → User <grant-uuid>   (the workflow's SSH_USER value)
+   ```
+
+4. Put the **private** half in the repo secret `RAILWAY_SSH_KEY`:
+
+   ```bash
+   gh secret set RAILWAY_SSH_KEY < ~/.ssh/railway_ci_backup
+   ```
+
+5. Sanity check — this should stream a valid dump from production:
+
+   ```bash
+   ssh -i ~/.ssh/railway_ci_backup \
+     <grant-uuid>@ssh.railway.com -- \
+     'pg_dump "$DATABASE_URL" --format=custom --no-owner --no-privileges' \
+     > /tmp/check.dump
+   pg_restore --list /tmp/check.dump | head   # TOC prints = dump is sound
+   rm /tmp/check.dump
+   ```
+
+> ⚠️ **Pitfall (by design):** the grant UUID is *not* a secret — it
+> authenticates nothing without a registered key — but it IS
+> environment-specific. Double-check you took the production UUID; a
+> backup of the dev database would succeed silently while backing up the
+> wrong data.
 
 ## Step 2 — GitHub Actions: secrets and variable
 
@@ -67,10 +106,13 @@ Settings → Secrets and variables → Actions.
 
 | Name | Kind | Value |
 |---|---|---|
-| `RAILWAY_PUBLIC_DATABASE_URL` | **Secret** | full URL from Step 1 |
+| `RAILWAY_SSH_KEY` | **Secret** | private half of the CI keypair from Step 1 |
 | `AGE_PUBLIC_KEY` | **Secret** | `age1...` public key from Step 3 |
 | `GDRIVE_OAUTH_TOKEN` | **Secret** | token JSON from Step 4 |
 | `GDRIVE_ROOT_FOLDER_ID` | **Variable** ⚠️ | folder ID from Step 5 |
+
+> The old `RAILWAY_PUBLIC_DATABASE_URL` secret is obsolete (Railway
+> retired public TCP proxies) — delete it if it still exists.
 
 > ⚠️ **Pitfall (hit during setup):** `GDRIVE_ROOT_FOLDER_ID` must be a
 > repository **variable** (Variables tab), not a secret. The workflow
@@ -191,14 +233,17 @@ Full CLI procedure with local-verification steps:
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `pg_dump: connection ... failed` immediately | Secret holds only `host:port` | Replace with the full `postgresql://` URL |
-| Connection works locally, fails in Actions | `sslmode` missing/typo'd in the URL | Append `?sslmode=require` |
+| `Permission denied (publickey)` in the readiness or dump step | The key in `RAILWAY_SSH_KEY` is no longer registered (`railway ssh keys list`), was removed, or the secret holds the wrong half | Re-register or regenerate per Step 1; re-set the secret with the private half |
+| `HOST KEY VERIFICATION FAILED` | ssh.railway.com rotated its host key (rare; verify out-of-band first — a mismatch can also mean interception) | Confirm the new key via `ssh-keyscan -t ed25519 ssh.railway.com` against Railway's published fingerprint, then update the pinned line in the workflow |
+| `Permission denied` with a valid key + `User ... not found` style error | The grant UUID changed (Railway rotates grants on service/env changes) | Re-run the Step 1 `railway ssh config --dry-run` and update `SSH_USER` in the workflow |
+| `pg_dump: command not found` (remote) | The app image no longer ships PostgreSQL client 18 | Restore the client in the Docker image (keep it same-major-or-newer than the server) |
+| `pg_dump: server version mismatch` (remote) | Server major newer than the client in the app image | Bump the PostgreSQL client in the app image — pg_dump runs remotely now, so this is an app-image fix, not a workflow fix |
+| Connection works locally, fails in Actions | (pre-2026-10 proxy era: missing `sslmode`) Obsolete — the dump no longer leaves Railway; treat any new failure as an SSH/auth issue above | — |
 | Job env shows `ROOT_FOLDER:` empty; upload misbehaves | Folder ID filed as a **secret**, not variable | Delete secret; re-add under the Variables tab |
 | Upload: `403 ... storageQuotaExceeded ... Service Accounts do not have storage quota` | Auth set up as a service account — Google no longer allows SAs to own My Drive files on consumer accounts | Use the user-OAuth token from Step 4 (`GDRIVE_OAUTH_TOKEN`) |
 | Upload: `401` / `invalid_grant` | The OAuth refresh token was revoked (app removed in Google Account settings, Google password change, or six months unused) | Re-run `rclone authorize "drive"`, update `GDRIVE_OAUTH_TOKEN` |
 | Upload: `invalid character 't' looking for beginning of object key string` | A JSON secret corrupted in transit — historically by interpolating the secret directly into a shell script (its double quotes broke quoting); the workflow now passes secrets via `env:` and validates before use | If it recurs, the pasted secret itself is bad — re-copy the full JSON from `rclone authorize` |
 | `FATAL: the database system is starting up` | Postgres cold-starting (serverless) or restarting | The workflow now polls up to 2 min; if it persists, the DB is crash-looping — check Railway |
-| `pg_dump: server version mismatch` | Server major newer than the client (server is PostgreSQL 18; the runner's preinstalled client 16 shadows the installed 18 unless `/usr/lib/postgresql/18/bin` is first on `PATH`) | Workflow already handles this; if Railway upgrades the server major again, bump `postgresql-client-NN` **and** the PATH line in the workflow |
 | `rclone: command not found` | Runner image no longer preinstalls rclone | Workflow already installs it |
 | No scheduled runs happening | GitHub disables schedules after **60 days without repo activity** | Push any commit or run a manual dispatch — especially before the annual intensive-use window |
 

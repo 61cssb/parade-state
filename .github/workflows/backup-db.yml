@@ -1,21 +1,31 @@
 # Daily encrypted PostgreSQL backup to Google Drive.
 #
-# Pipeline: pg_dump (custom format) -> age public-key encryption ->
-# rclone upload to the shared Drive folder -> 30-day retention sweep.
+# Pipeline: pg_dump (custom format, executed inside the app container over
+# Railway SSH) -> age public-key encryption -> rclone upload to the shared
+# Drive folder -> 30-day retention sweep.
+#
+# The dump runs where the database already is: `ssh <grant-uuid>@
+# ssh.railway.com` execs in the parade-state app container, whose
+# DATABASE_URL points at Postgres over Railway's private network. The
+# database is therefore never exposed publicly. (This replaced the old
+# RAILWAY_PUBLIC_DATABASE_URL secret in 2026-10 — Railway retired public
+# TCP proxies entirely, and per house standard the DB is never given a
+# public endpoint again. See docs/BACKUP_SETUP.md and
+# ~/sysinfo/PROTOCOLS.md §"Railway DB access — SSH streaming".)
 #
 # Required secrets (setup guide: docs/BACKUP_SETUP.md):
-#   RAILWAY_PUBLIC_DATABASE_URL  Railway Postgres public TCP proxy URL
-#                                (starts with postgresql://, includes
-#                                sslmode=require; internal URL won't work
-#                                from outside Railway)
-#   AGE_PUBLIC_KEY               age X25519 recipient (public key). The
-#                                matching private key (identity file) stays
-#                                with the super-admin - GitHub never sees it.
-#   GDRIVE_OAUTH_TOKEN           Token JSON printed by
-#                                `rclone authorize "drive"` run by the
-#                                super-admin - uploads are owned by their
-#                                Google account (service accounts can no
-#                                longer own My Drive files)
+#   RAILWAY_SSH_KEY    Private half of an SSH key registered with Railway
+#                      (`railway ssh keys add --workspace -k <pub>`); the
+#                      public half authenticates against ssh.railway.com.
+#                      Revoke/rotate via `railway ssh keys remove`.
+#   AGE_PUBLIC_KEY     age X25519 recipient (public key). The
+#                      matching private key (identity file) stays
+#                      with the super-admin - GitHub never sees it.
+#   GDRIVE_OAUTH_TOKEN Token JSON printed by
+#                      `rclone authorize "drive"` run by the
+#                      super-admin - uploads are owned by their
+#                      Google account (service accounts can no
+#                      longer own My Drive files)
 #
 # Required repository variable:
 #   GDRIVE_ROOT_FOLDER_ID        Drive folder ID (super-admin's Drive) to
@@ -43,7 +53,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      DB_URL: ${{ secrets.RAILWAY_PUBLIC_DATABASE_URL }}
+      # Railway SSH grant for the parade-state app service in the
+      # PRODUCTION environment. Generated with:
+      #   railway ssh config --dry-run -p 92d80df3-6565-4ca3-8a00-1bb44ef2898b \
+      #     -s 1ea09699-73a7-4ad3-abdf-799a53a9afa5 \
+      #     -e e6250e41-8967-43da-a1b7-ba5d51b4bc8b --alias tmp
+      # The UUID is environment-pinned (the dev environment has a different
+      # one) and is not a secret: it authenticates nothing without a key
+      # registered via `railway ssh keys`. If auth starts failing with
+      # "Permission denied (publickey)", re-generate and compare.
+      SSH_USER: 85f79351-bb97-43bc-a1fb-8a8b5f9be0bd
+      SSH_OPTS: >-
+        -o BatchMode=yes -o IdentitiesOnly=yes
+        -o StrictHostKeyChecking=yes
+        -o ServerAliveInterval=30 -o ConnectTimeout=15
       ROOT_FOLDER: ${{ vars.GDRIVE_ROOT_FOLDER_ID }}
       # Google no longer lets service accounts own files in a personal
       # My Drive (403 storageQuotaExceeded), so auth is the super-admin's
@@ -54,44 +77,56 @@ jobs:
       RCLONE_CONFIG_GDRIVE_SCOPE: drive
       RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.GDRIVE_OAUTH_TOKEN }}
     steps:
-      - name: Install postgresql client and age
+      - name: Install rclone and age
         run: |
-          # PGDG repo: the Railway server is PostgreSQL 18, and pg_dump must
-          # be same-major-or-newer; Ubuntu's default only carries 16
-          sudo install -d /usr/share/postgresql-common/pgdg
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends postgresql-client-18
-          # The runner image preinstalls pg_dump 16 at /usr/bin/pg_dump and
-          # the PGDG package does not take over the symlink; put 18 first
-          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
           # rclone is NOT preinstalled on the current runner image
           curl -fsSL https://rclone.org/install.sh | sudo bash
           curl -sSfL https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-amd64.tar.gz \
             | sudo tar xz -C /usr/local/bin --strip-components=1 age/age age/age-keygen
+          # No postgresql client needed on the runner: pg_dump executes in
+          # the app container (which ships client 18) over SSH.
+
+      - name: Set up SSH key and pinned host key
+        env:
+          SSH_KEY: ${{ secrets.RAILWAY_SSH_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/railway_ci
+          chmod 600 ~/.ssh/railway_ci
+          # ssh.railway.com host key, pinned (re-verify with
+          # `ssh-keyscan -t ed25519 ssh.railway.com` if Railway ever
+          # rotates it; a mismatch means STOP, not update blindly)
+          printf '%s\n' 'ssh.railway.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ8X3z81/tuP7CvmK3ZqWgwEvHUR6b04oi2lQJGld2C1' > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
 
       - name: Wait for database readiness
         run: |
-          # Tolerates Railway cold starts (serverless), restarts, and
-          # deploys: poll for up to ~2 minutes before attempting the dump
-          for attempt in $(seq 1 12); do
-            if pg_isready -d "$DB_URL" --timeout=5 >/dev/null 2>&1; then
+          # Tolerates Railway restarts/deploys: poll pg_isready in the app
+          # container (which reaches Postgres over the private network)
+          for attempt in $(seq 1 6); do
+            if ssh $SSH_OPTS -i ~/.ssh/railway_ci "$SSH_USER@ssh.railway.com" \
+                 -- 'pg_isready -d "$DATABASE_URL" --timeout=5' >/dev/null 2>&1; then
               echo "database ready (attempt $attempt)"
               exit 0
             fi
-            echo "not ready yet (attempt $attempt/12); retrying in 10s"
-            sleep 10
+            echo "not ready yet (attempt $attempt/6); retrying in 20s"
+            sleep 20
           done
-          echo "::error::database not reachable after 2 minutes"
+          echo "::error::database not reachable after ~2 minutes"
           exit 1
 
       - name: Dump database
         run: |
-          pg_dump "$DB_URL" --format=custom --no-owner --no-privileges --file=backup.dump
+          # Run pg_dump where the database is; stream the archive back over
+          # the (SSH-encrypted) channel. "$DATABASE_URL" must expand on the
+          # REMOTE side - hence single quotes here.
+          ssh $SSH_OPTS -i ~/.ssh/railway_ci "$SSH_USER@ssh.railway.com" \
+            -- 'pg_dump "$DATABASE_URL" --format=custom --no-owner --no-privileges' \
+            > backup.dump
           test -s backup.dump
+          # Sanity line for the log: confirms a live, reachable database
+          ssh $SSH_OPTS -i ~/.ssh/railway_ci "$SSH_USER@ssh.railway.com" \
+            -- 'psql "$DATABASE_URL" -tAc "select version()"' || true
 
       - name: Encrypt dump
         env:
@@ -118,4 +153,4 @@ jobs:
 
       - name: Cleanup workspace
         if: always()
-        run: rm -f backup.dump "$BACKUP_FILE"
+        run: rm -f backup.dump "$BACKUP_FILE" ~/.ssh/railway_ci
