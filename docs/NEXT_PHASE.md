@@ -310,6 +310,16 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-11-03:** IPPT All Tabs workbook upload (PR #99): OneNS's
+  `All_Tabs_Export_YYYYMMDD.xlsx` accepted as a single-file snapshot —
+  six tabs ↔ six file kinds, tab-checked client-side (zip read via
+  DecompressionStream) + server-side; flattened All Tabs `.csv`
+  rejected; `-`+0-session domain call → `ippt_not_attempted`
+  (§2.4). Same day: season branch `20261103` cut from `main` (at this
+  merge) and the Railway development trigger repointed to it — deploy
+  SUCCESS + /health 200. Supersedes `20261019` (content ⊆ main; delete
+  on next cleanup with sign-off).
+
 - **2026-10-19:** IPPT dashboard XLSX export (PR #94): "Export XLSX"
   in the filter bar → `GET /ippt/dashboard/export.xlsx` (admin+), five
   tabs (3/6/9 months, On track, Fulfilled); always the full dataset —
