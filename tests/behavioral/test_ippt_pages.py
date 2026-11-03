@@ -135,7 +135,7 @@ class TestIpptPages:
         await _sign_in(client, db_session, sa)
         page = client.get("/ippt/upload")
         assert page.status_code == 200
-        assert "Upload the six reports" in page.text
+        assert "Upload the reports" in page.text
         assert "Quarantined rows" in page.text
 
         await _sign_in(client, db_session, admin)

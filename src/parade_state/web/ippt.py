@@ -12,7 +12,8 @@ production environment force-disables the flag, see config.Settings).
   regardless of the on-screen filters (decided 2026-10-19). Admin+.
 - ``/ippt/window/{personnel_id}`` — one person's window, trajectory and
   screening history (linked from the dashboard's roster rows). Admin+.
-- ``/ippt/upload`` — the six-file snapshot upload, super-admin-only
+- ``/ippt/upload`` — the snapshot upload (six canonical files or the
+  single All Tabs workbook), super-admin-only
   (plain admins get the in-page no-access message, like Taggings).
 """
 
@@ -229,7 +230,7 @@ async def ippt_window(request: Request, personnel_id: str):
 
 @router.get("/ippt/upload", response_class=HTMLResponse)
 async def ippt_upload(request: Request):
-    """Render the six-file snapshot upload page (super-admin-only)."""
+    """Render the snapshot upload page (super-admin-only)."""
     current_user = await get_current_admin_user_optional(request)
     if not current_user:
         return RedirectResponse(url="/auth/login", status_code=302)

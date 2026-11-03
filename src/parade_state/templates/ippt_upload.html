@@ -13,19 +13,24 @@
 </style>
 <p style="color: #6b7280; margin-bottom: 1.5rem;">
     Upload the monthly IPPT/NS FIT monitoring reports. A snapshot is the
-    <strong>full set of six files</strong> for one report date — the upload is
+    <strong>full set of six reports</strong> for one report date — the upload is
     atomic per date (all six land, or none do). Re-uploading a report date
-    replaces its previous ingest. The six reports are exported from the
-    <strong>OneNS</strong> app. Filenames must be canonical:
+    replaces its previous ingest. The reports are exported from the
+    <strong>OneNS</strong> app in either of two forms: the single
+    <strong>All Tabs workbook</strong> (<code>All_Tabs_Export_YYYYMMDD.xlsx</code>,
+    one tab per report) or the six separate files with canonical names
     <code>{REPORT}_{STATE}_{YYYYMMDD}.csv</code> (e.g.
     <code>IPPT_COMPLETED_20260911.csv</code>); each file may be either CSV
     or Excel (<code>.xlsx</code>) and the set may mix the two formats.
+    The All Tabs <em>CSV</em> export is not accepted — it flattens the tabs,
+    losing which report each row came from.
 </p>
 
 <div class="card">
-    <h3>Upload the six reports</h3>
+    <h3>Upload the reports</h3>
     <p style="color: #6b7280; font-size: 0.85rem; margin-top: 0.5rem;">
-        Required files (each as <code>.csv</code> or <code>.xlsx</code>):
+        Either the single All Tabs workbook <code>All_Tabs_Export_YYYYMMDD.xlsx</code>
+        (tabs are checked as soon as you select it), or all six files —
         <code>IPPT_COMPLETED_*</code>, <code>IPPT_FAILED_*</code>,
         <code>IPPT_NOT_ATTEMPTED_*</code>, <code>NSFIT_COMPLETED_*</code>,
         <code>NSFIT_IN_PROGRESS_*</code>, <code>NSFIT_NOT_STARTED_*</code>
@@ -159,17 +164,120 @@
 {% block scripts %}
 <script>
 const IPPT_KIND_RE = /^(IPPT|NSFIT)_(COMPLETED|FAILED|NOT_ATTEMPTED|IN_PROGRESS|NOT_STARTED)_(\d{8})\.(csv|xlsx)$/i;
+const ALL_TABS_RE = /^All_Tabs_Export_(\d{8})\.xlsx$/i;
 const REQUIRED_KINDS = [
     'ippt_completed', 'ippt_failed', 'ippt_not_attempted',
     'nsfit_completed', 'nsfit_in_progress', 'nsfit_not_started',
 ];
+const REQUIRED_TABS = [
+    '(IPPT) Not Started', '(IPPT) Failed or FIT', '(IPPT) Passed or Completed',
+    '(NSFIT) Not Started', '(NSFIT) In Progress', '(NSFIT) Completed',
+];
+
+function baseName(name) {
+    return name.split(/[\\/]/).pop();
+}
 
 function kindOf(filename) {
-    const name = filename.split(/[\\/]/).pop();
-    const m = name.match(IPPT_KIND_RE);
+    const m = baseName(filename).match(IPPT_KIND_RE);
     if (!m) return null;
     return (m[1] + '_' + m[2]).toLowerCase();
 }
+
+// Reads the sheet names straight out of the .xlsx zip — find
+// xl/workbook.xml in the central directory and inflate it. No library;
+// every modern browser ships DecompressionStream. Returns null when the
+// peek is not possible (older browser, unexpected zip layout): the
+// server validates the tabs anyway, so a failed peek never blocks.
+async function missingAllTabsTabs(file) {
+    if (typeof DecompressionStream === 'undefined') return null;
+    try {
+        const buf = new Uint8Array(await file.arrayBuffer());
+        const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+        let eocd = -1;
+        for (let i = buf.length - 22; i >= Math.max(0, buf.length - 22 - 65557); i--) {
+            if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+        }
+        if (eocd < 0) return null;
+        const count = dv.getUint16(eocd + 10, true);
+        let ptr = dv.getUint32(eocd + 16, true);
+        const decoder = new TextDecoder();
+        for (let n = 0; n < count; n++) {
+            if (dv.getUint32(ptr, true) !== 0x02014b50) return null;
+            const method = dv.getUint16(ptr + 10, true);
+            const csize = dv.getUint32(ptr + 20, true);
+            const nameLen = dv.getUint16(ptr + 28, true);
+            const extraLen = dv.getUint16(ptr + 30, true);
+            const commentLen = dv.getUint16(ptr + 32, true);
+            const offset = dv.getUint32(ptr + 42, true);
+            const name = decoder.decode(buf.subarray(ptr + 46, ptr + 46 + nameLen));
+            ptr += 46 + nameLen + extraLen + commentLen;
+            if (name !== 'xl/workbook.xml') continue;
+            const start = offset + 30 + dv.getUint16(offset + 26, true) + dv.getUint16(offset + 28, true);
+            const data = buf.subarray(start, start + csize);
+            let xmlText;
+            if (method === 0) {
+                xmlText = decoder.decode(data);
+            } else if (method === 8) {
+                const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+                xmlText = await new Response(stream).text();
+            } else {
+                return null;
+            }
+            const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+            const norm = s => s.replace(/\s+/g, ' ').toLowerCase();
+            const have = new Set(
+                Array.from(doc.getElementsByTagName('sheet'))
+                    .map(el => norm(el.getAttribute('name') || ''))
+            );
+            return REQUIRED_TABS.filter(tab => !have.has(norm(tab)));
+        }
+        return null;
+    } catch (err) {
+        return null;
+    }
+}
+
+// Which upload mode the selection is, and whether it is complete.
+// Returns {mode: 'workbook'} | {mode: 'six'} | {error: string}.
+async function validateSelection(files) {
+    if (!files.length) {
+        return { error: 'Select the six report files, or the single All Tabs workbook.' };
+    }
+    if (files.some(f => ALL_TABS_RE.test(baseName(f.name)))) {
+        if (files.length !== 1) {
+            return { error: 'The All Tabs workbook replaces the six-file set — upload it on its own (got ' + files.length + ' files).' };
+        }
+        const missing = await missingAllTabsTabs(files[0]);
+        if (missing && missing.length) {
+            return { error: 'The workbook is missing tab(s): ' + missing.join(', ') + ' — re-export it with all six tabs.' };
+        }
+        return { mode: 'workbook' };
+    }
+    const kinds = files.map(f => kindOf(f.name));
+    if (kinds.some(k => k === null)) {
+        return { error: 'Every filename must match {REPORT}_{STATE}_{YYYYMMDD}.csv or .xlsx (or upload the single All_Tabs_Export_YYYYMMDD.xlsx workbook) — check: ' +
+            files.filter((f, i) => kinds[i] === null).map(f => f.name).join(', ') };
+    }
+    if (files.length !== 6 || new Set(kinds).size !== 6 || kinds.some(k => !REQUIRED_KINDS.includes(k))) {
+        return { error: 'Select exactly the six report files, or the single All Tabs workbook (got ' + files.length + ' of one each: ' + kinds.join(', ') + ').' };
+    }
+    return { mode: 'six' };
+}
+
+document.getElementById('ipptFiles').addEventListener('change', async (event) => {
+    const statusEl = document.getElementById('uploadStatus');
+    statusEl.innerHTML = '';
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    const verdict = await validateSelection(files);
+    if (verdict.error) {
+        statusEl.innerHTML = '<span style="color: #dc2626;">' + verdict.error + '</span>';
+        return;
+    }
+    statusEl.innerHTML = '<span style="color: #16a34a;">' +
+        (verdict.mode === 'workbook' ? 'All Tabs workbook detected — 6/6 tabs present.' : 'Six-file set detected.') + '</span>';
+});
 
 async function uploadSnapshot() {
     const input = document.getElementById('ipptFiles');
@@ -178,29 +286,22 @@ async function uploadSnapshot() {
     statusEl.textContent = '';
     resultEl.innerHTML = '';
 
-    const files = Array.from(input.files || []);
-    if (files.length !== 6) {
-        statusEl.innerHTML = '<span style="color: #dc2626;">Select exactly the six report files (got ' + files.length + ').</span>';
-        return;
-    }
-    const kinds = files.map(f => kindOf(f.name));
-    if (kinds.some(k => k === null)) {
-        statusEl.innerHTML = '<span style="color: #dc2626;">Every filename must match {REPORT}_{STATE}_{YYYYMMDD}.csv or .xlsx — check: ' +
-            files.filter((f, i) => kinds[i] === null).map(f => f.name).join(', ') + '</span>';
-        return;
-    }
-    if (new Set(kinds).size !== 6 || kinds.some(k => !REQUIRED_KINDS.includes(k))) {
-        statusEl.innerHTML = '<span style="color: #dc2626;">The six files must be one of each report type. Got: ' + kinds.join(', ') + '</span>';
-        return;
-    }
-
-    const body = new FormData();
-    for (const f of files) body.append('files', f, f.name);
-
+    // Disable synchronously, before the async validation — the "disabled
+    // while in flight" invariant is what the e2e helper waits on.
     const btn = document.getElementById('uploadBtn');
     btn.disabled = true;
     statusEl.innerHTML = '<span style="color: #6b7280;">Uploading&hellip;</span>';
     try {
+        const files = Array.from(input.files || []);
+        const verdict = await validateSelection(files);
+        if (verdict.error) {
+            statusEl.innerHTML = '<span style="color: #dc2626;">' + verdict.error + '</span>';
+            return;
+        }
+
+        const body = new FormData();
+        for (const f of files) body.append('files', f, f.name);
+
         const response = await fetch('/api/v1/ippt/snapshots', {
             method: 'POST',
             credentials: 'same-origin',

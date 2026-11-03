@@ -1,8 +1,9 @@
 """IPPT monitoring API endpoints (FEATURE_IPPT-gated; the Railway
 production environment force-disables the flag, see config.Settings).
 
-- ``POST /api/v1/ippt/snapshots`` (super-admin): ingest the six-file
-  report snapshot for one report date — atomic per date, replace-on-
+- ``POST /api/v1/ippt/snapshots`` (super-admin): ingest the report
+  snapshot for one report date — the six canonical files or the single
+  All Tabs workbook — atomic per date, replace-on-
   re-ingest, row-level rejects quarantined (docs/IPPT_MONITORING.md §4);
   the response reports window-consistency warnings and excluded
   servicemen who reappeared (decided 2026-10-08).
@@ -42,16 +43,21 @@ class ExclusionRequest(BaseModel):
 async def upload_snapshots(
     files: list[UploadFile] = File(
         ...,
-        description="The six monitoring reports (.csv or .xlsx) for one report date",
+        description=(
+            "The six monitoring reports (.csv or .xlsx, canonical names) "
+            "for one report date, or the single All_Tabs_Export_YYYYMMDD.xlsx "
+            "workbook"
+        ),
     ),
     user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Ingest the six-file snapshot (super-admin-only).
+    """Ingest the report snapshot (super-admin-only).
 
-    All six files must be present with canonical
-    ``{REPORT}_{STATE}_{YYYYMMDD}.csv``/``.xlsx`` names carrying the same
-    date (the set may mix the two extensions); anything else rejects the
+    Either the six canonical ``{REPORT}_{STATE}_{YYYYMMDD}.csv``/``
+    .xlsx`` files carrying the same date (the set may mix the two
+    extensions) or the single ``All_Tabs_Export_YYYYMMDD.xlsx`` workbook
+    (all six tabs); anything else rejects the
     whole submission with 422 and nothing is written. Re-uploading a
     report date replaces its previous ingest.
     Row-level validation failures do not reject the file — they land in

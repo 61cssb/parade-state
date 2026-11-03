@@ -179,6 +179,30 @@ Six files make up one snapshot **[confirmed]**:
   window (mandatory FIT); NSFIT rows that discharge reappear in
   `NSFIT_COMPLETED` and then leave the suite.
 
+**Single-file alternative: the "All Tabs" workbook (observed 2026-11-03).**
+OneNS can also export the whole snapshot as one Excel workbook,
+`All_Tabs_Export_YYYYMMDD.xlsx` — the date suffix is the report generation
+date, same semantics as the canonical filenames. It holds exactly one tab per
+report, each tab carrying its family's schema from §2.2 verbatim:
+
+| Tab | → file kind | Family |
+|---|---|---|
+| `(IPPT) Not Started` | `ippt_not_attempted` | C |
+| `(IPPT) Failed or FIT` | `ippt_failed` | B |
+| `(IPPT) Passed or Completed` | `ippt_completed` | A |
+| `(NSFIT) Not Started` | `nsfit_not_started` | C |
+| `(NSFIT) In Progress` | `nsfit_in_progress` | B |
+| `(NSFIT) Completed` | `nsfit_completed` | A |
+
+A workbook is the full snapshot for its date — it replaces the six-file
+set and cannot be mixed with canonical files. Tabs with an empty
+population still carry their header row (a zero-row report is a valid
+state). The **`.csv` export of the same name is NOT accepted**: it
+flattens the tabs into a single Not-Started-shaped table, losing the
+per-tab membership that the unified state (§6.2) is derived from. The
+upload page checks the workbook's tabs in the browser (and the backend
+re-checks) before accepting it.
+
 ### 2.2 Schema families
 
 There are **three distinct column layouts**. Two files share the same fields
@@ -216,11 +240,11 @@ Rank, Name, Unit, Sub-unit, Window close, Booked Status, FFI, Reminder sent, Las
 | `Sub-unit` | string | `BN HQ`, `FORWARD MAINT COY (LIGHT)`, `INF SUPPLY COY`, `MEDICAL COY`, `NON-ESTAB`, `S4 BR/HQ COY`, `SECURITY COY` | Same vocabulary as the nominal roll's sub-units; `NON-ESTAB` = non-establishment posting |
 | `Window close` | int | 4–361 in samples | **Days remaining** until the window closes, relative to the report date (absolute close = report date + N). Sorted ascending within the file. Absent from Family A |
 | `IPPT status` | string | `Pass`, `Pass with Incentive`, `Silver`, `Gold`, `Fail`, `Complete FIT`, `-` | `-` = none/no attempt this window; in `*_COMPLETED` it means waived (§2.4) |
-| `FIT sessions completed` | int | 1–9 observed or `-` | **Never use this count to decide completion** — completion is designated by `IPPT status` / file membership (§2.4) **[confirmed]** |
+| `FIT sessions completed` | int | 0–9 observed or `-` | **Never use this count to decide completion** — completion is designated by `IPPT status` / file membership (§2.4) **[confirmed]**. The one exception is the documented domain call below: `-` with **0** sessions on the failed/FIT tab means not-attempted |
 | `Booked Status` | string | `Yes`, `No` | **Route-specific [confirmed]**: booked an IPPT slot (`IPPT_NOT_ATTEMPTED`) vs booked NS FIT session(s) (`NSFIT_NOT_STARTED`) |
 | `FFI` | string | `NA`, `Fit`, `Pending` | Health-screening status **[confirmed]**: IPPT-eligible NSmen **aged 35+** must complete a health screening **before they can book IPPT**. `NA` = screening not required, `Fit` = screened fit, `Pending` = screening outstanding (cannot book IPPT yet). `Pending` only seen in `IPPT_NOT_ATTEMPTED`. Acronym expansion unconfirmed (§5) |
-| `Reminder sent` | string | `-` only | Reminder tracking; unused in all samples (§5) |
-| `Last sent` | string | `-` only | Reminder tracking; unused in all samples (§5) |
+| `Reminder sent` | string | `0`, `1` or `-` | Reminder tracking. `-` only in the 2026-09 samples; the 2026-11-03 All Tabs export carries counts (`0` = never reminded, `1` = reminded once). Stored verbatim as text |
+| `Last sent` | string | `DD Mon YYYY` (e.g. `02 Nov 2026`) or `-` | Reminder tracking. `-` only in the 2026-09 samples; the 2026-11-03 All Tabs export carries dates. Stored verbatim as text |
 
 **`-` is the null/NA sentinel in every column** — treat it as `NULL`, not as a
 literal string or 0.
@@ -254,6 +278,16 @@ not in default-risk tracking (§1.3) **[confirmed]**:
   suite). If the window closes without a pass → mandatory NS FIT next window.
 - 18 rows status `-` with FIT 1–9 — **voluntary NS FIT in progress**, no
   current-window attempt **[confirmed]**.
+
+**Domain call (decided 2026-11-03):** a status `-` row with **0** FIT
+sessions on the failed/FIT tab is treated as **`ippt_not_attempted`**,
+not quarantined. The tab catches him for prior-window history (an
+earlier failed attempt), but this window he has made no attempt and no
+FIT progress, so current-window monitoring tracks him as plain
+not-attempted. Defensive rule — not yet observed in a real export (the
+2026-11-03 workbook's `-` rows all carry 1–8 sessions); it replaces the
+previous "unrecognized combination → quarantine" behaviour for exactly
+this combination.
 
 **`IPPT_NOT_ATTEMPTED` (132 rows)** — no attempt, not on voluntary FIT:
 - Booked Status: Yes 80 / No 52 (IPPT slot bookings).
@@ -351,10 +385,14 @@ it is out of scope (§1.3).
   `Sub-unit` ∈ known set; `Unit` = expected unit; flag anything else for
   manual review rather than rejecting the file.
 - **Complete-set rule (agreed):** a report date's snapshot is the **full
-  set of six files**. The upload UI rejects incomplete six-file
-  submissions, and the backend rejects job submissions that lack the full
-  set for a report date — ingestion is **atomic per report date** (all six
-  files land, or none do).
+  set of six reports** — the six canonical files, or the single All Tabs
+  workbook (§2.1), which must carry all six tabs with their header rows.
+  The upload UI validates the selection in the browser (file set by
+  filename; workbook tabs read straight out of the xlsx) before
+  submitting, and the backend re-validates. Mixing the workbook with
+  canonical files is rejected, as is the flattened All Tabs `.csv`
+  export. Ingestion is **atomic per report date** (all six
+  reports land, or none do).
 - Row-level validation failures (guards above) land in a
   **rejects/quarantine list** for review rather than being silently
   dropped — a bad row must not take the file (or the report date) down
@@ -367,9 +405,11 @@ it is out of scope (§1.3).
 1. **Does the 35+ health screening gate NS FIT bookings too?** Only the IPPT
    booking gate is confirmed; `FFI` appears in `NSFIT_NOT_STARTED` with
    `Fit` values, implying it is recorded (and may matter) there as well.
-2. **`Reminder sent` / `Last sent`** — present in two families but always
-   `-`; confirm the populated format (date? count?) before building reminder
-   features on them.
+2. **`Reminder sent` / `Last sent`** — *partially answered 2026-11-03*: the
+   All Tabs export populates them (`Reminder sent` = reminder count,
+   `Last sent` = `DD Mon YYYY` date of the last reminder); the six-file
+   exports still show `-`. Semantics (who sends reminders, against what
+   schedule) remain unconfirmed before building reminder features on them.
 3. **What does a 10-session `NSFIT_COMPLETED` row look like?** No such row in
    the sample (`IPPT status` value and session count unobserved); file
    membership is authoritative either way.

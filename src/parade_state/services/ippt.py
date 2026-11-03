@@ -1,8 +1,10 @@
 """IPPT monitoring ingest + read models (docs/IPPT_MONITORING.md).
 
-Ingest implements §4: one submission = the full six-file snapshot for
-one report date, atomic per report date (all six files land, or none
-do). Re-uploading a report date replaces the previous ingest of that
+Ingest implements §4: one submission = the full six-report set for one
+report date — the six canonical files, or the single OneNS "All Tabs"
+workbook whose six tabs carry the same six reports — atomic per report
+date (all six land, or none do). Re-uploading a report date replaces
+the previous ingest of that
 date, so corrections and repeated test runs are idempotent. Row-level
 validation failures land in the quarantine list instead of rejecting
 the file; a serviceman may appear in at most one file per snapshot —
@@ -59,8 +61,10 @@ from parade_state.utils.ippt_reports import (
     FULFILLED_STATES,
     IpptReportRow,
     ParsedReportFile,
+    is_all_tabs_filename,
     months_between,
     normalize_name,
+    parse_all_tabs_workbook,
     parse_report_file,
     tier_band,
     tier_highlighted,
@@ -106,21 +110,36 @@ async def ingest_snapshot(
     db: AsyncSession,
     files: list[tuple[str, bytes]],
 ) -> IngestResult:
-    """Ingest the six-file snapshot for one report date, atomically.
+    """Ingest the snapshot for one report date, atomically.
 
-    ``files`` is a list of ``(filename, content_bytes)``. File names
-    must be canonical (kind + date come from the name); per-row
-    problems quarantine instead of rejecting.
+    ``files`` is a list of ``(filename, content_bytes)``: either the six
+    canonical report files (kind + date come from each name) or the
+    single All Tabs workbook, whose six tabs expand to the same set.
+    Per-row problems quarantine instead of rejecting; file-level
+    problems (including a workbook with missing tabs) reject the whole
+    submission.
 
     Raises:
         IngestError: the submission is rejected whole — wrong file set,
-            mixed report dates, or a file-level parse error. Nothing is
-            written (the caller's session rolls back / never commits).
+            mixed report dates, mixed formats, or an unusable
+            file/workbook. Nothing is written (the caller's session
+            rolls back / never commits).
     """
     parsed_files: list[ParsedReportFile] = []
     for filename, content in files:
         try:
-            parsed_files.append(parse_report_file(filename, content))
+            if is_all_tabs_filename(filename):
+                if len(files) > 1:
+                    raise IngestError(
+                        "The All Tabs workbook replaces the six-file set — "
+                        "upload it on its own; got "
+                        f"{len(files)} files: {', '.join(name for name, _ in files)}"
+                    )
+                parsed_files.extend(parse_all_tabs_workbook(filename, content))
+            else:
+                parsed_files.append(parse_report_file(filename, content))
+        except IngestError:
+            raise
         except ValueError as exc:
             raise IngestError(str(exc)) from exc
 
