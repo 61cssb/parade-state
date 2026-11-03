@@ -313,6 +313,171 @@ async def test_upload_rejects_corrupt_xlsx_file(client_as, db_session):
 
 
 # ============================================================================
+# The OneNS "All Tabs" workbook as a single-file snapshot
+# ============================================================================
+
+_ALL_TABS_TAB_BY_KIND: dict[str, tuple[str, str]] = {
+    # file_kind: (tab name, family header)
+    "ippt_not_attempted": ("(IPPT) Not Started", FAMILY_C_HEADER),
+    "ippt_failed": ("(IPPT) Failed or FIT", FAMILY_B_FAILED_HEADER),
+    "ippt_completed": ("(IPPT) Passed or Completed", FAMILY_A_HEADER),
+    "nsfit_not_started": ("(NSFIT) Not Started", FAMILY_C_HEADER),
+    "nsfit_in_progress": ("(NSFIT) In Progress", FAMILY_B_NSFIT_HEADER),
+    "nsfit_completed": ("(NSFIT) Completed", FAMILY_A_HEADER),
+}
+
+
+def _all_tabs_workbook(
+    rows: dict[str, list[str]], *, drop_tab: str | None = None
+) -> bytes:
+    """The OneNS All Tabs workbook as bytes: one tab per report, data
+    rows keyed by file_kind; kinds omitted get a header-only tab."""
+    buffer = io.BytesIO()
+    workbook = Workbook()
+    first = True
+    for kind, (tab, header) in _ALL_TABS_TAB_BY_KIND.items():
+        if tab == drop_tab:
+            continue
+        sheet = workbook.active if first else workbook.create_sheet()
+        first = False
+        assert sheet is not None
+        sheet.title = tab
+        sheet.append(next(csv.reader([header])))
+        for line in rows.get(kind, []):
+            sheet.append(
+                [
+                    int(value)
+                    if index in _NUMERIC_COLUMNS[header] and value != "-"
+                    else value
+                    for index, value in enumerate(next(csv.reader([line])))
+                ]
+            )
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+def _workbook_multipart(
+    content: bytes, name: str = "All_Tabs_Export_20261103.xlsx"
+) -> list[tuple[str, tuple[str, bytes, str]]]:
+    return [("files", (name, content, "application/octet-stream"))]
+
+
+async def test_upload_ingests_all_tabs_workbook(client_as, db_session):
+    await _seed_active_roll(db_session, ["WORKBOOK PERSON"])
+    client = await client_as("super_admin")
+    rows = {
+        "ippt_not_attempted": [
+            "PTE   ,WORKBOOK PERSON,DK314,BN HQ,30,No,NA,1,02 Nov 2026"
+        ],
+        "ippt_failed": ["CPL   ,WORKBOOK NOATTEMPT,DK314,BN HQ,10,-,0,0,-"],
+        "ippt_completed": ["SSG   ,WORKBOOK PASSER,DK314,SECURITY COY,Pass,0"],
+    }
+    response = client.post(
+        "/api/v1/ippt/snapshots", files=_workbook_multipart(_all_tabs_workbook(rows))
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["report_date"] == "2026-11-03"
+    assert payload["total_rows"] == 3
+    assert payload["quarantined"] == 0
+    assert set(payload["per_kind"]) == set(_ALL_TABS_TAB_BY_KIND)
+    assert payload["per_kind"]["ippt_not_attempted"] == {"rows": 1, "quarantined": 0}
+    assert payload["per_kind"]["nsfit_not_started"]["rows"] == 0  # empty tab
+
+    # The '-' + 0-session row derived to not-attempted (2026-11-03 domain
+    # call), and the populated reminder field survived verbatim.
+    states = set(
+        (
+            await db_session.execute(
+                select(
+                    IpptStateObservation.state,
+                    IpptStateObservation.window_close_days,
+                    IpptStateObservation.reminder_sent,
+                )
+            )
+        ).all()
+    )
+    assert ("ippt_not_attempted", 10, "0") in states
+    snapshots = {
+        s.file_kind: s.filename
+        for s in (await db_session.execute(select(IpptSnapshot))).scalars()
+    }
+    assert len(snapshots) == 6
+    assert set(snapshots.values()) == {"All_Tabs_Export_20261103.xlsx"}
+
+
+async def test_upload_rejects_workbook_mixed_with_canonical_files(
+    client_as, db_session
+):
+    client = await client_as("super_admin")
+    files = _workbook_multipart(_all_tabs_workbook({}))
+    files.append(
+        (
+            "files",
+            ("IPPT_COMPLETED_20261103.csv", FAMILY_A_HEADER.encode(), "text/csv"),
+        )
+    )
+    response = client.post("/api/v1/ippt/snapshots", files=files)
+    assert response.status_code == 422
+    assert "on its own" in response.json()["detail"]
+    assert (await db_session.execute(select(IpptSnapshot))).scalars().all() == []
+
+
+async def test_upload_rejects_flattened_all_tabs_csv(client_as, db_session):
+    """The .csv export of the same name flattens the tabs — rejected with
+    an explanation, not the generic filename error."""
+    client = await client_as("super_admin")
+    response = client.post(
+        "/api/v1/ippt/snapshots",
+        files=_workbook_multipart(
+            FAMILY_C_HEADER.encode(), "All_Tabs_Export_20261103.csv"
+        ),
+    )
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "All_Tabs_Export" in detail and ".xlsx" in detail
+
+
+async def test_upload_rejects_workbook_missing_tab(client_as, db_session):
+    client = await client_as("super_admin")
+    content = _all_tabs_workbook({}, drop_tab="(NSFIT) Completed")
+    response = client.post("/api/v1/ippt/snapshots", files=_workbook_multipart(content))
+    assert response.status_code == 422
+    assert "missing required tab" in response.json()["detail"]
+    assert "(NSFIT) Completed" in response.json()["detail"]
+    assert (await db_session.execute(select(IpptSnapshot))).scalars().all() == []
+
+
+async def test_all_tabs_reingest_replaces_same_date(client_as, db_session):
+    client = await client_as("super_admin")
+    first = _all_tabs_workbook(
+        {"ippt_not_attempted": ["PTE   ,REPLACE PERSON,DK314,BN HQ,30,No,NA,0,-"]}
+    )
+    assert (
+        client.post(
+            "/api/v1/ippt/snapshots", files=_workbook_multipart(first)
+        ).status_code
+        == 200
+    )
+    second = _all_tabs_workbook(
+        {
+            "ippt_not_attempted": [
+                "PTE   ,REPLACE PERSON,DK314,BN HQ,25,Yes,NA,0,-",
+                "LCP   ,REPLACE PERSON 2,DK314,BN HQ,60,No,NA,0,-",
+            ]
+        }
+    )
+    response = client.post("/api/v1/ippt/snapshots", files=_workbook_multipart(second))
+    assert response.status_code == 200
+    assert response.json()["replaced"] is True
+    assert response.json()["total_rows"] == 2
+    observations = (
+        (await db_session.execute(select(IpptStateObservation))).scalars().all()
+    )
+    assert len(observations) == 2  # first ingest's row replaced, not stacked
+
+
+# ============================================================================
 # Ingest semantics on a synthetic snapshot
 # ============================================================================
 

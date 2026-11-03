@@ -56,6 +56,67 @@ def test_client_side_rejects_incomplete_selection(page, e2e_server):
     assert "exactly the six report files" in status
 
 
+ALL_TABS_FIXTURE = FIXTURES / "All_Tabs_Export_20261103.xlsx"
+
+
+def test_upload_all_tabs_workbook(page, e2e_server):
+    """The single OneNS All Tabs workbook: detected client-side (the
+    change listener confirms the tabs), then ingested server-side like a
+    six-file snapshot (skipped when the gitignored fixture is absent)."""
+    if not ALL_TABS_FIXTURE.exists():
+        pytest.skip("All Tabs fixture not present — /fixtures is gitignored")
+
+    page.goto(f"{e2e_server}/ippt/upload")
+    page.set_input_files("#ipptFiles", str(ALL_TABS_FIXTURE))
+    # The selection check inflates the workbook's zip in the browser —
+    # wait for its verdict rather than racing it.
+    page.wait_for_function(
+        "document.querySelector('#uploadStatus').textContent.includes("
+        "'All Tabs workbook detected')"
+    )
+
+    page.click("#uploadBtn")
+    page.wait_for_function("document.querySelector('#uploadBtn').disabled === false")
+    status = page.inner_text("#uploadStatus")
+    assert "2026-11-03 ingested" in status
+    result = page.inner_text("#uploadResult")
+    assert "213 rows" in result
+    assert "0 quarantined" in result
+
+
+def test_client_side_rejects_workbook_missing_a_tab(page, e2e_server, tmp_path):
+    """A workbook without all six tabs is stopped in the browser — the
+    error names the missing tab, which only the client-side check knows."""
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    workbook.active.title = "(IPPT) Not Started"
+    workbook.active.append(["Rank", "Name"])
+    workbook.save(tmp_path / "All_Tabs_Export_20261103.xlsx")
+
+    page.goto(f"{e2e_server}/ippt/upload")
+    page.set_input_files("#ipptFiles", str(tmp_path / "All_Tabs_Export_20261103.xlsx"))
+    page.wait_for_function(
+        "document.querySelector('#uploadStatus').textContent.includes('missing tab(s)')"
+    )
+    status = page.inner_text("#uploadStatus")
+    assert "(NSFIT) Completed" in status
+
+
+def test_client_side_rejects_workbook_mixed_with_files(page, e2e_server):
+    snapshots = _fixture_snapshots()
+    if not snapshots:
+        pytest.skip("canonical IPPT fixtures not present — /fixtures is gitignored")
+    if not ALL_TABS_FIXTURE.exists():
+        pytest.skip("All Tabs fixture not present — /fixtures is gitignored")
+
+    page.goto(f"{e2e_server}/ippt/upload")
+    page.set_input_files("#ipptFiles", [str(ALL_TABS_FIXTURE), *snapshots[0][:2]])
+    page.wait_for_function(
+        "document.querySelector('#uploadStatus').textContent.includes('on its own')"
+    )
+
+
 def test_upload_fixtures_and_read_dashboard(page, e2e_server):
     snapshots = _fixture_snapshots()
     if not snapshots:

@@ -5,6 +5,11 @@ Implements the ingestion contract of docs/IPPT_MONITORING.md §2–§4 and
 
 - filenames ``{REPORT}_{STATE}_{YYYYMMDD}.csv`` (or ``.xlsx``) →
   (file_kind, report_date)
+- alternatively the OneNS "All Tabs" workbook ``All_Tabs_Export_
+  YYYYMMDD.xlsx`` — the whole six-report snapshot in one file, one tab
+  per report (:func:`parse_all_tabs_workbook`); its ``.csv`` export of
+  the same name flattens the tabs into one Not-Started-shaped table and
+  is NOT accepted (the per-tab state signal would be lost)
 - header-name-based column mapping — column order is not stable across
   files (``IPPT_FAILED`` and ``NSFIT_IN_PROGRESS`` share a schema in
   different orders, §2.2), so parsers must never map by position
@@ -57,6 +62,36 @@ _FILENAME_RE = re.compile(
     r"(\d{4})(\d{2})(\d{2})\.(csv|xlsx)$",
     re.IGNORECASE,
 )
+
+#: OneNS's "All Tabs" workbook export: the whole six-report snapshot in
+#: one .xlsx, one tab per report. The date suffix is the report
+#: generation date, like the canonical filenames. Only the ``.xlsx``
+#: form is accepted — the ``.csv`` export of the same name flattens the
+#: tabs, losing the per-tab state signal.
+_ALL_TABS_RE = re.compile(
+    r"^All_Tabs_Export_(\d{4})(\d{2})(\d{2})\.xlsx$",
+    re.IGNORECASE,
+)
+
+#: The flattened ``.csv`` form of the All Tabs export — recognized only
+#: so the ingest can reject it with an explanation instead of the
+#: generic filename error.
+_ALL_TABS_CSV_RE = re.compile(
+    r"^All_Tabs_Export_\d{8}\.csv$",
+    re.IGNORECASE,
+)
+
+#: Sheet name → file_kind in the All Tabs workbook (§2.1). Matched
+#: case/whitespace-insensitively — the names are stable but exports
+#: have shown padded/case drift in other columns.
+ALL_TABS_SHEET_KINDS: dict[str, str] = {
+    "(IPPT) Not Started": "ippt_not_attempted",
+    "(IPPT) Failed or FIT": "ippt_failed",
+    "(IPPT) Passed or Completed": "ippt_completed",
+    "(NSFIT) Not Started": "nsfit_not_started",
+    "(NSFIT) In Progress": "nsfit_in_progress",
+    "(NSFIT) Completed": "nsfit_completed",
+}
 
 _STATE_BY_TOKEN = {
     "IPPT_COMPLETED": "ippt_completed",
@@ -134,8 +169,9 @@ _FAMILY_HEADERS: dict[str, tuple[str, ...]] = {
 
 
 class FilenameError(ValueError):
-    """A report filename does not match
-    ``{REPORT}_{STATE}_{YYYYMMDD}.csv`` (or ``.xlsx``)."""
+    """A report filename does not match ``{REPORT}_{STATE}_{YYYYMMDD}.
+    csv`` (or ``.xlsx``) nor the ``All_Tabs_Export_YYYYMMDD.xlsx``
+    workbook name."""
 
 
 class ReportFileError(ValueError):
@@ -157,11 +193,36 @@ def parse_filename(filename: str) -> tuple[str, date]:
     if not match:
         raise FilenameError(
             f"Report filename {filename!r} does not match the expected "
-            f"{'{REPORT}_{STATE}_{YYYYMMDD}.csv|.xlsx'} pattern"
+            f"{'{REPORT}_{STATE}_{YYYYMMDD}.csv|.xlsx'} pattern (or the "
+            f"single-file {'All_Tabs_Export_YYYYMMDD.xlsx'} workbook)"
         )
     token = f"{match.group(1)}_{match.group(2)}".upper()
     report_date = date(int(match.group(3)), int(match.group(4)), int(match.group(5)))
     return _STATE_BY_TOKEN[token], report_date
+
+
+def is_all_tabs_filename(filename: str) -> bool:
+    """Whether the name is the All Tabs workbook (either extension —
+    used to give the flattened ``.csv`` a tailored rejection)."""
+    name = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    return bool(_ALL_TABS_RE.match(name) or _ALL_TABS_CSV_RE.match(name))
+
+
+def parse_all_tabs_filename(filename: str) -> date:
+    """Extract the report date from an All Tabs workbook filename.
+
+    Raises:
+        FilenameError: when the name is not ``All_Tabs_Export_
+            YYYYMMDD.xlsx``.
+    """
+    name = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    match = _ALL_TABS_RE.match(name)
+    if not match:
+        raise FilenameError(
+            f"Workbook filename {filename!r} does not match the expected "
+            f"{'All_Tabs_Export_YYYYMMDD.xlsx'} pattern"
+        )
+    return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
 
 
 def normalize_name(name: str) -> str:
@@ -251,7 +312,10 @@ def derive_state(
 
     Completion comes only from designations: ``*_COMPLETED`` membership
     is authoritative, and FIT session counts never decide completion —
-    ``Complete FIT`` rows legitimately show 9 sessions.
+    ``Complete FIT`` rows legitimately show 9 sessions. The one session
+    count that does decide a state is the documented domain call: a
+    ``-`` status with 0 sessions on ``ippt_failed`` is not-attempted
+    (2026-11-03).
     """
     if file_kind == "nsfit_completed":
         # Discharged by 10 sessions or a mid-programme pass; no
@@ -269,8 +333,16 @@ def derive_state(
     if file_kind == "ippt_failed":
         if ippt_status == "Fail":
             return "failed_can_reattempt"
-        if ippt_status is None and fit_sessions is not None and 1 <= fit_sessions <= 9:
-            return "voluntary_fit_in_progress"
+        if ippt_status is None and fit_sessions is not None:
+            if fit_sessions == 0:
+                # Domain call (decided 2026-11-03): '-' with zero
+                # sessions on the failed/FIT tab = no attempt and no FIT
+                # progress this window (the tab catches him for
+                # prior-window history) — tracked as plain
+                # not-attempted, not quarantined.
+                return "ippt_not_attempted"
+            if fit_sessions <= 9:
+                return "voluntary_fit_in_progress"
         return None
     if file_kind == "nsfit_in_progress":
         if ippt_status == "Fail":
@@ -305,6 +377,74 @@ def parse_report_file(filename: str, content: bytes | str) -> ParsedReportFile:
         rows = _xlsx_rows(filename, content)
     else:
         rows = _csv_rows(filename, content)
+    return _parse_report_matrix(file_kind, filename, report_date, rows)
+
+
+def parse_all_tabs_workbook(filename: str, content: bytes) -> list[ParsedReportFile]:
+    """Parse the OneNS All Tabs workbook into one :class:
+    ``ParsedReportFile`` per required tab — six entries with the same
+    ``report_date`` (from the filename), ready for the ordinary
+    six-kind ingest contract.
+
+    Every required tab must be present with its family's header row
+    (empty-but-present tabs are fine — a population of zero is a valid
+    state); unknown extra tabs are ignored. Missing tabs and header-less
+    tabs reject the whole workbook (§4: file-level problems reject,
+    per-row problems quarantine).
+
+    Raises:
+        FilenameError: unparsable filename.
+        ReportFileError: unreadable workbook, a missing required tab, or
+            a required tab without a header row.
+    """
+    report_date = parse_all_tabs_filename(filename)
+    try:
+        workbook = load_workbook(
+            io.BytesIO(content),  # type: ignore[arg-type]
+            read_only=True,
+            data_only=True,
+        )
+    except Exception as exc:  # noqa: BLE001 — any zip/XML defect is "unusable"
+        raise ReportFileError(f"{filename}: unreadable .xlsx workbook: {exc}") from exc
+    try:
+        by_norm = {
+            " ".join(str(name).split()).casefold(): name for name in workbook.sheetnames
+        }
+        parsed: list[ParsedReportFile] = []
+        missing: list[str] = []
+        for sheet_name, file_kind in ALL_TABS_SHEET_KINDS.items():
+            actual = by_norm.get(" ".join(sheet_name.split()).casefold())
+            if actual is None:
+                missing.append(sheet_name)
+                continue
+            rows = [
+                [_cell_text(cell) for cell in row]
+                for row in workbook[actual].iter_rows(values_only=True)
+            ]
+            if not rows or not any((value or "").strip() for value in rows[0]):
+                raise ReportFileError(
+                    f"{filename}: tab {sheet_name!r} has no header row — "
+                    "re-export the workbook with all six tabs"
+                )
+            parsed.append(_parse_report_matrix(file_kind, filename, report_date, rows))
+        if missing:
+            raise ReportFileError(
+                f"{filename}: missing required tab(s): {', '.join(missing)}"
+            )
+        return parsed
+    finally:
+        workbook.close()
+
+
+def _parse_report_matrix(
+    file_kind: str,
+    filename: str,
+    report_date: date,
+    rows: list[list[str]],
+) -> ParsedReportFile:
+    """Header-name column mapping + per-row parsing of a raw row matrix
+    (row 1 = header) — shared by the canonical files and each All Tabs
+    tab."""
     if not rows:
         raise ReportFileError(f"{filename}: file is empty")
 

@@ -19,8 +19,11 @@ from parade_state.utils.ippt_reports import (
     FilenameError,
     ReportFileError,
     derive_state,
+    is_all_tabs_filename,
     months_between,
     normalize_name,
+    parse_all_tabs_filename,
+    parse_all_tabs_workbook,
     parse_filename,
     parse_report_file,
     tier_band,
@@ -295,6 +298,9 @@ def test_parse_xlsx_unreadable_bytes_reject_file():
         ("ippt_failed", "Fail", None, "failed_can_reattempt"),
         ("ippt_failed", None, 1, "voluntary_fit_in_progress"),
         ("ippt_failed", None, 9, "voluntary_fit_in_progress"),
+        # Domain call (2026-11-03): no attempt, no FIT progress this
+        # window — the tab caught him for prior-window history.
+        ("ippt_failed", None, 0, "ippt_not_attempted"),
         # NSFIT_IN_PROGRESS
         ("nsfit_in_progress", None, 5, "mandatory_fit_in_progress"),
         ("nsfit_in_progress", "Fail", None, "mandatory_fit_failed_attempt"),
@@ -314,6 +320,7 @@ def test_derive_state_known_combinations(kind, status, fit, expected):
         ("nsfit_in_progress", None, None),  # unobserved
         ("nsfit_in_progress", "Pass", 3),  # award would be COMPLETED
         ("ippt_failed", None, None),  # neither attempt nor FIT observed
+        ("ippt_failed", None, 10),  # above the FIT range — still unexplained
         ("ippt_failed", "Pass", None),  # a pass would be COMPLETED
     ],
 )
@@ -425,6 +432,318 @@ def test_no_band_never_highlights():
 def test_normalize_name_uppercases_and_collapses_whitespace():
     assert normalize_name("  TAN   Kai Keong,  DERRICK ") == "TAN KAI KEONG, DERRICK"
     assert normalize_name("VINOD S/O RAJANDRAN MUTHU") == "VINOD S/O RAJANDRAN MUTHU"
+
+
+# ============================================================================
+# The OneNS "All Tabs" workbook (docs/IPPT_MONITORING.md §2.1, 2026-11-03)
+# ============================================================================
+
+ALL_TABS_DATE = date(2026, 11, 3)
+
+
+def _workbook_bytes(sheets: dict[str, list[list]]) -> bytes:
+    """An in-memory workbook with one sheet per given name, in order."""
+    buffer = io.BytesIO()
+    workbook = Workbook()
+    first = True
+    for name, rows in sheets.items():
+        sheet = workbook.active if first else workbook.create_sheet()
+        first = False
+        assert sheet is not None
+        sheet.title = name
+        for row in rows:
+            sheet.append(row)
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+def _all_tabs_sheets(rows: dict[str, list[list]]) -> dict[str, list[list]]:
+    """The six real tab names, header rows included; per-tab data rows
+    given as cell lists, empty list = empty-but-present population."""
+    families = {
+        "(IPPT) Not Started": (
+            "Rank",
+            "Name",
+            "Unit",
+            "Sub-unit",
+            "Window close",
+            "Booked Status",
+            "FFI",
+            "Reminder sent",
+            "Last sent",
+        ),
+        "(IPPT) Failed or FIT": (
+            "Rank",
+            "Name",
+            "Unit",
+            "Sub-unit",
+            "Window close",
+            "IPPT status",
+            "FIT sessions completed",
+            "Reminder sent",
+            "Last sent",
+        ),
+        "(IPPT) Passed or Completed": (
+            "Rank",
+            "Name",
+            "Unit",
+            "Sub-unit",
+            "IPPT status",
+            "FIT sessions completed",
+        ),
+        "(NSFIT) Not Started": (
+            "Rank",
+            "Name",
+            "Unit",
+            "Sub-unit",
+            "Window close",
+            "Booked Status",
+            "FFI",
+            "Reminder sent",
+            "Last sent",
+        ),
+        "(NSFIT) In Progress": (
+            "Rank",
+            "Name",
+            "Unit",
+            "Sub-unit",
+            "Window close",
+            "FIT sessions completed",
+            "IPPT status",
+            "Reminder sent",
+            "Last sent",
+        ),
+        "(NSFIT) Completed": (
+            "Rank",
+            "Name",
+            "Unit",
+            "Sub-unit",
+            "IPPT status",
+            "FIT sessions completed",
+        ),
+    }
+    return {
+        name: [list(header), *rows.get(name, [])] for name, header in families.items()
+    }
+
+
+def test_parse_all_tabs_filename():
+    assert parse_all_tabs_filename("All_Tabs_Export_20261103.xlsx") == ALL_TABS_DATE
+    assert parse_all_tabs_filename("all_tabs_export_20261103.XLSX") == ALL_TABS_DATE
+    with pytest.raises(FilenameError):
+        parse_all_tabs_filename("All_Tabs_Export_20261103.csv")  # flattened form
+    with pytest.raises(FilenameError):
+        parse_all_tabs_filename("All_Tabs_Export.xlsx")
+
+
+def test_is_all_tabs_filename_recognizes_both_extensions():
+    assert is_all_tabs_filename("All_Tabs_Export_20261103.xlsx")
+    assert is_all_tabs_filename("All_Tabs_Export_20261103.csv")  # to reject it
+    assert not is_all_tabs_filename("IPPT_COMPLETED_20261103.csv")
+    assert not is_all_tabs_filename("random.xlsx")
+
+
+def test_all_tabs_workbook_parses_to_six_kinds():
+    content = _workbook_bytes(
+        _all_tabs_sheets(
+            {
+                "(IPPT) Not Started": [
+                    [
+                        "ME1   ",
+                        "KO ENG LIANG",
+                        "DK314",
+                        "FORWARD MAINT COY (LIGHT)",
+                        20,
+                        "Yes",
+                        "NA",
+                        0,
+                        "-",
+                    ],
+                    [
+                        "MAJ   ",
+                        "WANG YI LIANG",
+                        "DK314",
+                        "NON-ESTAB",
+                        24,
+                        "No",
+                        "Fit",
+                        0,
+                        "-",
+                    ],
+                ],
+                "(IPPT) Failed or FIT": [
+                    [
+                        "CPL   ",
+                        "NO ATTEMPT PERSON",
+                        "DK314",
+                        "BN HQ",
+                        4,
+                        "-",
+                        0,
+                        0,
+                        "-",
+                    ],
+                    [
+                        "LCP   ",
+                        "FIT PERSON",
+                        "DK314",
+                        "MEDICAL COY",
+                        18,
+                        "-",
+                        3,
+                        0,
+                        "-",
+                    ],
+                ],
+                "(IPPT) Passed or Completed": [
+                    ["SSG   ", "PASS PERSON", "DK314", "SECURITY COY", "Pass", 0],
+                    ["CPL   ", "WAIVED PERSON", "DK314", "BN HQ", "-", "-"],
+                ],
+            }
+        )
+    )
+    parsed = parse_all_tabs_workbook("All_Tabs_Export_20261103.xlsx", content)
+    assert [p.file_kind for p in parsed] == [
+        "ippt_not_attempted",
+        "ippt_failed",
+        "ippt_completed",
+        "nsfit_not_started",
+        "nsfit_in_progress",
+        "nsfit_completed",
+    ]
+    assert all(p.report_date == ALL_TABS_DATE for p in parsed)
+    assert all(p.filename == "All_Tabs_Export_20261103.xlsx" for p in parsed)
+    assert all(p.quarantined == [] for p in parsed)
+    by_kind = {p.file_kind: p for p in parsed}
+    assert [r.state for r in by_kind["ippt_not_attempted"].rows] == [
+        "ippt_not_attempted",
+        "ippt_not_attempted",
+    ]
+    first = by_kind["ippt_not_attempted"].rows[0]
+    assert first.rank == "ME1"  # padding stripped
+    assert first.booked is True
+    assert first.ffi == "na"
+    assert first.last_sent is None
+    assert first.reminder_sent == "0"
+    # The '-' + 0-session domain call on the failed/FIT tab.
+    assert [r.state for r in by_kind["ippt_failed"].rows] == [
+        "ippt_not_attempted",
+        "voluntary_fit_in_progress",
+    ]
+    assert [r.state for r in by_kind["ippt_completed"].rows] == [
+        "met_award",
+        "waived",
+    ]
+    # Empty populations are valid: header-only tabs, zero rows.
+    assert by_kind["nsfit_not_started"].rows == []
+    assert by_kind["nsfit_in_progress"].rows == []
+    assert by_kind["nsfit_completed"].rows == []
+
+
+def test_all_tabs_workbook_ignores_extra_sheets_and_name_drift():
+    sheets = _all_tabs_sheets({})
+    sheets["Notes"] = [["scratch", "rows"]]
+    # Case/whitespace drift on one tab name still matches.
+    sheets["(ippt)  Not   Started"] = sheets.pop("(IPPT) Not Started")
+    parsed = parse_all_tabs_workbook(
+        "All_Tabs_Export_20261103.xlsx", _workbook_bytes(sheets)
+    )
+    assert len(parsed) == 6
+    assert {p.file_kind for p in parsed} == {
+        "ippt_completed",
+        "ippt_failed",
+        "ippt_not_attempted",
+        "nsfit_completed",
+        "nsfit_in_progress",
+        "nsfit_not_started",
+    }
+
+
+def test_all_tabs_workbook_rejects_missing_tab():
+    sheets = _all_tabs_sheets({})
+    del sheets["(NSFIT) Completed"]
+    with pytest.raises(ReportFileError, match="missing required tab"):
+        parse_all_tabs_workbook(
+            "All_Tabs_Export_20261103.xlsx", _workbook_bytes(sheets)
+        )
+
+
+def test_all_tabs_workbook_rejects_headerless_tab():
+    sheets = _all_tabs_sheets({})
+    sheets["(NSFIT) Completed"] = []  # empty sheet, not even a header
+    with pytest.raises(ReportFileError, match="no header row"):
+        parse_all_tabs_workbook(
+            "All_Tabs_Export_20261103.xlsx", _workbook_bytes(sheets)
+        )
+
+
+def test_all_tabs_workbook_quarantines_bad_row_without_rejecting():
+    sheets = _all_tabs_sheets(
+        {
+            "(IPPT) Not Started": [
+                ["PTE   ", "GOOD ROW", "DK314", "BN HQ", 30, "No", "NA", 0, "-"],
+                ["PTE   ", "BAD ROW", "DK314", "BN HQ", "soon", "No", "NA", 0, "-"],
+            ]
+        }
+    )
+    parsed = parse_all_tabs_workbook(
+        "All_Tabs_Export_20261103.xlsx", _workbook_bytes(sheets)
+    )
+    by_kind = {p.file_kind: p for p in parsed}
+    assert len(by_kind["ippt_not_attempted"].rows) == 1
+    assert len(by_kind["ippt_not_attempted"].quarantined) == 1
+    assert "not an integer" in by_kind["ippt_not_attempted"].quarantined[0].reason
+
+
+def test_all_tabs_workbook_rejects_unreadable_bytes():
+    with pytest.raises(ReportFileError, match="unreadable"):
+        parse_all_tabs_workbook(
+            "All_Tabs_Export_20261103.xlsx", b"definitely not a zip"
+        )
+
+
+ALL_TABS_FIXTURE = IPPT_FIXTURES / "All_Tabs_Export_20261103.xlsx"
+
+
+def test_all_tabs_fixture_parses_to_observed_counts():
+    """The real 2026-11-03 export (skipped when the gitignored fixture
+    is absent): 213 rows, zero quarantined, every derived state as
+    scanned from the workbook."""
+    if not ALL_TABS_FIXTURE.exists():
+        pytest.skip("All Tabs fixture not present — /fixtures is gitignored")
+    parsed = parse_all_tabs_workbook(
+        ALL_TABS_FIXTURE.name, ALL_TABS_FIXTURE.read_bytes()
+    )
+    by_kind = {p.file_kind: p for p in parsed}
+    expected_rows = {
+        "ippt_not_attempted": 76,
+        "ippt_failed": 39,
+        "ippt_completed": 98,
+        "nsfit_not_started": 0,
+        "nsfit_in_progress": 0,
+        "nsfit_completed": 0,
+    }
+    expected_states = {
+        "ippt_not_attempted": {"ippt_not_attempted": 76},
+        "ippt_failed": {
+            "failed_can_reattempt": 30,
+            "voluntary_fit_in_progress": 9,
+        },
+        "ippt_completed": {
+            "met_award": 87,
+            "met_voluntary_fit": 8,
+            "waived": 3,
+        },
+    }
+    for kind, count in expected_rows.items():
+        assert by_kind[kind].report_date == ALL_TABS_DATE
+        assert len(by_kind[kind].rows) == count, kind
+        assert by_kind[kind].quarantined == [], kind
+        if count:
+            states: dict[str, int] = {}
+            for row in by_kind[kind].rows:
+                states[row.state] = states.get(row.state, 0) + 1
+            assert states == expected_states[kind], kind
 
 
 # ============================================================================

@@ -232,8 +232,12 @@ season's test users will be admins, so this waits.
 ### 9. IPPT monitoring — built; dev-enabled, production blocked
 
 The full feature (docs/IPPT_MONITORING.md §6) is implemented behind
-`FEATURE_IPPT`: six-file snapshot ingest (atomic per report date,
-replace-on-re-ingest, quarantined-row reject list), the identity spine
+`FEATURE_IPPT`: snapshot ingest (atomic per report date,
+replace-on-re-ingest, quarantined-row reject list) accepting either the
+six canonical files or the single OneNS "All Tabs" workbook
+(`All_Tabs_Export_YYYYMMDD.xlsx`, one tab per report — detected and
+tab-checked client-side, re-validated server-side; the flattened
+All Tabs `.csv` is rejected), the identity spine
 with name-matching against the attendance-active roll (manual-review
 editor deferred), birthday-anchored windows, the escalation
 dashboard (`/ippt/dashboard` — tiers labelled by months before window
