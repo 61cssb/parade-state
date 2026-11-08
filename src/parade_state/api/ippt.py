@@ -17,9 +17,10 @@ production environment force-disables the flag, see config.Settings).
   (super-admin): remove-from-tracking with a reason, and re-include —
   both audit-logged (decided 2026-10-08).
 - ``POST /api/v1/ippt/defaulters`` (super-admin): ingest the quarterly
-  defaulter release (CSV or first-tab XLSX) for a user-chosen calendar
-  quarter; replace-on-re-ingest of the current quarter, archiving the
-  previously current one, audit-logged (docs/IPPT_MONITORING.md §7).
+  defaulter release (CSV or first-tab XLSX) for a user-chosen workyear
+  quarter (Q1 = Apr–Jun … Q4 = Jan–Mar); replace-on-re-ingest of the
+  current quarter, archiving the previously current one, audit-logged
+  (docs/IPPT_MONITORING.md §7).
 - ``GET /api/v1/ippt/defaulters`` (admin+): the current quarter's
   report header + Pending rows (what the dashboard table shows).
 - ``PATCH /api/v1/ippt/defaulters/rows/{row_id}`` (admin+): set/clear
@@ -285,8 +286,16 @@ async def upload_defaulters(
             "first tab carries the data"
         ),
     ),
-    year: int = Form(..., description="Calendar year of the quarter, e.g. 2026"),
-    quarter: int = Form(..., description="Calendar quarter 1–4 (Q1 = Jan–Mar)"),
+    year: int = Form(
+        ...,
+        description=(
+            "Workyear label: the calendar year the workyear started, "
+            "e.g. 2026 for Apr 2026 – Mar 2027"
+        ),
+    ),
+    quarter: int = Form(
+        ..., description="Workyear quarter 1–4 (Q1 = Apr–Jun … Q4 = Jan–Mar)"
+    ),
     user: User = Depends(require_super_admin_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:

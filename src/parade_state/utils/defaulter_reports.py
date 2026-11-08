@@ -58,13 +58,14 @@ _MAX_YEAR = 2100
 
 
 class QuarterError(ValueError):
-    """The upload's quarter label is not a calendar quarter."""
+    """The upload's quarter label is not a workyear quarter."""
 
 
 def validate_quarter(year: int, quarter: int) -> tuple[int, int]:
-    """Validate the user-chosen quarter: calendar quarter 1–4 (Q1 =
-    Jan 1 – Mar 31, the workyear's Apr–Mar span notwithstanding) and a
-    sane year. Returns ``(year, quarter)`` unchanged.
+    """Validate the user-chosen quarter: workyear quarter 1–4 (the
+    workyear runs 1 Apr – 31 Mar, so Q1 = Apr–Jun … Q4 = Jan–Mar of the
+    following year) and a sane label year — the calendar year the
+    workyear started. Returns ``(year, quarter)`` unchanged.
 
     Raises:
         QuarterError: quarter not in 1–4, or year outside the accepted

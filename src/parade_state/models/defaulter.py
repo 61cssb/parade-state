@@ -2,7 +2,7 @@
 
 The unit's quarterly defaulter release (CSV or the first tab of an
 XLSX) ingests as one batch per quarter: ``defaulter_reports`` is the
-batch (year + calendar quarter, current vs archived status) and
+batch (workyear label + current vs archived status) and
 ``defaulter_rows`` are its rows. Rows the file itself marks
 ``TYPE=Archived`` ingest but never display — they are this quarter's
 own concluded cases, kept so a later session can validate them against
@@ -65,9 +65,10 @@ class DefaulterReport(Base):
     replaces it in place; an already-archived quarter stays put (the
     service rejects the re-upload — history is not rewritten).
 
-    Calendar quarters (Q1 = Jan 1 – Mar 31) even though the workyear
-    runs Apr 1 – Mar 31: the quarter tag is only a label the user picks
-    at upload, never derived from the data.
+    Workyear quarters (Q1 = Apr 1 – Jun 30 … Q4 = Jan 1 – Mar 31 of the
+    following year; the workyear runs Apr 1 – Mar 31): ``year`` is the
+    calendar year the workyear started. The quarter tag is only a label
+    the user picks at upload, never derived from the data.
     """
 
     __tablename__ = "defaulter_reports"

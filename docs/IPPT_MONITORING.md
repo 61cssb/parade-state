@@ -701,11 +701,16 @@ observation spine without changing it.
 
 The unit releases defaulter data **quarterly** as one file: a `.csv`, or
 an `.xlsx` whose **first tab** carries the data. The quarter is **not in
-the file** — the uploading super-admin picks it (calendar quarters, Q1 =
-Jan 1 – Mar 31, even though the workyear runs Apr 1 – Mar 31), and it is
-stored verbatim as the batch's label (`Q{n} {year}`). Nothing validates
-the label against the offence windows. No special effort is made to
-track whether every quarter arrives.
+the file** — the uploading super-admin picks it in **workyear quarters**
+(the workyear runs 1 Apr – 31 Mar: Q1 = Apr 1 – Jun 30, Q2 = Jul 1 –
+Sep 30, Q3 = Oct 1 – Dec 31, Q4 = Jan 1 – Mar 31 of the following
+year), and it is stored verbatim as the batch's label (`Q{n} {year}`,
+where `year` is the calendar year the workyear started — a Jan–Mar
+release belongs to the previous year's workyear). Nothing validates the
+label against the offence windows. No special effort is made to track
+whether every quarter arrives. (Corrected 2026-11-08: first shipped
+labelled as calendar quarters — wrong; the folder of the real Q3
+release covering Oct–Nov confirmed the workyear reading.)
 
 ### 7.1 File shape and columns
 

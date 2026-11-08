@@ -50,9 +50,12 @@
     <p style="color: #6b7280; font-size: 0.85rem; margin-top: 0.5rem;">
         The quarterly defaulter release — a <code>.csv</code>, or an
         <code>.xlsx</code> whose <strong>first tab</strong> carries the data.
-        The quarter is <strong>not</strong> in the file: pick which calendar
-        quarter the release represents (Q1 = Jan–Mar, even though the
-        workyear runs Apr–Mar). Sections are matched by header name; rows
+        The quarter is <strong>not</strong> in the file: pick which workyear
+        quarter the release represents. The workyear runs 1 Apr – 31 Mar, so
+        Q1 = Apr–Jun, Q2 = Jul–Sep, Q3 = Oct–Dec, Q4 = Jan–Mar <em>of the
+        following year</em> — the Year field is the workyear's starting year
+        (a Jan–Mar release belongs to the previous year's workyear).
+        Sections are matched by header name; rows
         that fail validation are quarantined, not dropped. Re-uploading the
         <em>current</em> quarter replaces it (reason/remarks annotations are
         dropped with its rows); uploading any other quarter archives the
@@ -64,10 +67,10 @@
     <div style="margin-top: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
         <label for="defaulterQuarter" style="font-size: 0.85rem; color: #374151;">Quarter
             <select id="defaulterQuarter" style="margin-left: 0.35rem; padding: 0.45rem 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.85rem;">
-                <option value="1">Q1 (Jan–Mar)</option>
-                <option value="2">Q2 (Apr–Jun)</option>
-                <option value="3">Q3 (Jul–Sep)</option>
-                <option value="4">Q4 (Oct–Dec)</option>
+                <option value="1">Q1 (Apr–Jun)</option>
+                <option value="2">Q2 (Jul–Sep)</option>
+                <option value="3">Q3 (Oct–Dec)</option>
+                <option value="4">Q4 (Jan–Mar)</option>
             </select>
         </label>
         <label for="defaulterYear" style="font-size: 0.85rem; color: #374151;">Year
@@ -267,12 +270,15 @@
 
 {% block scripts %}
 <script>
-// Default the defaulter quarter to the current calendar quarter/year —
+// Default the defaulter quarter to the current workyear quarter/year —
 // releases are usually uploaded within the quarter they represent.
+// Workyear = 1 Apr – 31 Mar: months Apr–Jun are Q1 … Jan–Mar are Q4 of
+// the workyear that started the previous calendar year.
 (function () {
     const now = new Date();
-    document.getElementById('defaulterYear').value = now.getFullYear();
-    document.getElementById('defaulterQuarter').value = String(Math.floor(now.getMonth() / 3) + 1);
+    const month = now.getMonth(); // 0 = January
+    document.getElementById('defaulterQuarter').value = String(Math.floor(((month + 9) % 12) / 3) + 1);
+    document.getElementById('defaulterYear').value = month <= 2 ? now.getFullYear() - 1 : now.getFullYear();
 })();
 
 async function uploadDefaulters() {

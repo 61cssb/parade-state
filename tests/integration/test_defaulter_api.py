@@ -681,6 +681,11 @@ async def test_upload_page_shows_defaulter_cards(client_as, active_roll):
     text = response.text
     assert "Upload the defaulter report" in text
     assert 'id="defaulterQuarter"' in text
+    # Workyear quarters (the workyear runs 1 Apr – 31 Mar) — the option
+    # labels pin the mapping; corrected 2026-11-08 after shipping the
+    # calendar-quarter reading by mistake.
+    assert '<option value="1">Q1 (Apr–Jun)</option>' in text
+    assert '<option value="4">Q4 (Jan–Mar)</option>' in text
     assert "Defaulter quarters" in text
     assert "Q4 2026" in text
     assert "current" in text
