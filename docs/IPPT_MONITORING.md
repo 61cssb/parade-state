@@ -137,9 +137,9 @@ Partial FIT counts (1–9) never meet the obligation, so defaulting is only
 decidable at/after window close.
 
 > **Monitoring scope [confirmed]:** the monitoring dashboard does **not**
-> track defaulters. Defaulted servicemen are reported separately, outside
-> these six files; defaulter handling may be added by a future feature.
-> §1.3 is background policy only.
+> track defaulters as part of the six-file snapshot. Defaulted servicemen
+> are reported separately, in the quarterly defaulter release — ingested
+> by its own feature (§7). §1.3 is background policy only.
 
 ---
 
@@ -686,7 +686,86 @@ rules above.
   not per-attempt results or dates.
 - **`nsfit_sessions`** — only running counts (1–9), no session dates.
 - **Booking details** — `Booked Status` is a Yes/No flag, not slot data.
-- **Defaulter tracking** — out of monitoring scope (§1.3).
+- **Defaulter tracking** — out of the six-file monitoring scope (§1.3);
+  the quarterly defaulter release is its own ingest (§7).
 
 If a future source exposes any of these, they slot in alongside the
 observation spine without changing it.
+
+
+---
+
+## 7. Quarterly defaulter release (implemented 2026-11-08 — see
+`src/parade_state/models/defaulter.py` + `services/defaulter.py` +
+`utils/defaulter_reports.py`)
+
+The unit releases defaulter data **quarterly** as one file: a `.csv`, or
+an `.xlsx` whose **first tab** carries the data. The quarter is **not in
+the file** — the uploading super-admin picks it (calendar quarters, Q1 =
+Jan 1 – Mar 31, even though the workyear runs Apr 1 – Mar 31), and it is
+stored verbatim as the batch's label (`Q{n} {year}`). Nothing validates
+the label against the offence windows. No special effort is made to
+track whether every quarter arrives.
+
+### 7.1 File shape and columns
+
+One file, several stacked sections, each introduced by its own header
+row (recognised by its `NAME`/`OFFENCE TYPE` marker columns; usually the
+first cell is `TYPE`); blank rows separate sections. The live export
+leads with stray preamble headers from other report formats (no data
+rows beneath) — ignored. Columns are matched by header name:
+
+- Required: `UNIT`, `RANK`, `NAME`, `OFFENCE TYPE`, `OFFENCE WINDOW`,
+  `DEFAULT COUNT`, and the number of times defaulted — `SAF264 ISSUED`
+  in Pending sections, `DEFAULTER COUNT` in Archived ones (same slot,
+  section-dependent header).
+- Optional: `TYPE` (`Pending …` → pending; `Archived` → archived; column
+  absent → all pending) and `PERS` (personnel matched by name alone when
+  absent).
+- Ignored: `SCHEDULED SUMMARY TRIAL`, `MAIL MERGE DATE`, `DUE IN (DAYS)`,
+  `AMENDMENT STATUS`, `DISCIPLINARY ACTION`, `VERDICT`, `RANK GROUP`, …
+
+Section-level problems reject the whole submission (a data-carrying
+section missing required columns; a file that doesn't lead with a
+header; no data at all). Row-level problems quarantine the single row
+and keep the rest (bad `TYPE` value, empty required cell, non-integer
+count) — same contract as §4.
+
+Field intelligence (2026-11-08): the direct XLSX export arrives
+IRM-encrypted (CDFV2, not a zip) and cannot be parsed — re-save it
+unencrypted from Excel, or use the CSV. The upload page says so.
+
+### 7.2 Quarter lifecycle
+
+- `defaulter_reports` holds one row per ingested quarter (`unique (year,
+  quarter)`); exactly one is `current`, the rest `archived`.
+- Re-uploading the **current** quarter replaces it (rows + quarantines +
+  the reason/remarks annotations on them are dropped and re-ingested).
+- Uploading **any other** quarter archives the previously current one —
+  its rows are retained, read-only, for a future validation of the new
+  file's `TYPE=Archived` rows against last quarter's Pending rows
+  (**deferred**, decided 2026-11-08). Re-uploading an archived quarter
+  is rejected — history is not rewritten.
+- Annotations do **not** carry across quarters: a new quarter's rows
+  start with empty reason/remarks.
+
+### 7.3 Display and annotations
+
+The current quarter's **Pending** rows render as the first card of the
+IPPT dashboard: Subunit, Rank, Name, Offence Type, Offence Window,
+Defaulter Count (= the number-of-times-defaulted column), plus two
+per-row, editable columns — **Reason for defaulting** (HSP |
+Attitude Issue | Uncontactable | Others) and **Remarks** (free text) —
+saved per row via `PATCH /api/v1/ippt/defaulters/rows/{row_id}`
+(admin+), audit-logged. Archived rows and superseded quarters never
+display.
+
+Subunit is the **effective sub-unit 1** (tagging overlay applied) of
+the matched personnel at ingest time, denormalized onto the row — the
+file's own `UNIT` is the whole unit. Identity resolution: `PERS`
+first (unique pers_no on the attendance-active roll; no hit falls
+through), then normalized full name (§3.2 semantics); no roll →
+unmatched. Match status renders on the dashboard like the IPPT roster's.
+
+Ingest is super-admin-only (`POST /api/v1/ippt/defaulters`, audit-
+logged); purge (testing-only) clears all three `defaulter_*` tables.

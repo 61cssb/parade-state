@@ -1,6 +1,6 @@
 # Roadmap & Open Work
 
-**Last Updated:** 2026-10-19
+**Last Updated:** 2026-11-08
 **Status:** In production on Railway (admin-only access), with a separate
 hosted development environment (Issue 15) where test users try changes
 first. Test users (admins) coming on the weekend of 2026-08-22; annual
@@ -16,6 +16,14 @@ deployment/ops in [DEPLOYMENT.md](DEPLOYMENT.md) /
 
 ## Current Snapshot
 
+- **Quarterly defaulter release (2026-11-08):** the unit's quarterly
+  defaulter export (CSV, or XLSX first tab) ingests per user-chosen
+  calendar quarter; the current quarter's Pending rows lead the IPPT
+  dashboard as an editable table (Reason for defaulting: HSP /
+  Attitude Issue / Uncontactable / Others + Remarks), a new quarter
+  archives the previous one (rows retained for a deferred
+  pending↔archived validation). Rides `FEATURE_IPPT`;
+  [IPPT_MONITORING.md](IPPT_MONITORING.md) §7.
 - **Tests:** 681 passed / 4 skipped on the SQLite suite (2026-10-07 run;
   flags-on posture; flags-off gating has dedicated tests). The suite runs
   against Postgres by setting `TEST_DATABASE_URL` (per-test databases).

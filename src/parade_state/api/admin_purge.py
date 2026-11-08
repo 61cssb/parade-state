@@ -21,6 +21,9 @@ from parade_state.models import (
     AuditLog,
     ColumnMetadata,
     CsvUpload,
+    DefaulterQuarantinedRow,
+    DefaulterReport,
+    DefaulterRow,
     Deferment,
     Grouping,
     GroupingGroup,
@@ -52,6 +55,9 @@ CONFIRMATION_WORD = "PURGE"
 # but a purge means the rows go too), so servicemen must be deleted before
 # Personnel regardless.
 PURGE_TABLES: tuple[type, ...] = (
+    DefaulterQuarantinedRow,
+    DefaulterRow,
+    DefaulterReport,
     IpptStateObservation,
     IpptHealthScreening,
     IpptQuarantinedRow,
