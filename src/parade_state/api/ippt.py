@@ -16,18 +16,34 @@ production environment force-disables the flag, see config.Settings).
 - ``POST``/``DELETE /api/v1/ippt/servicemen/{serviceman_id}/exclusion``
   (super-admin): remove-from-tracking with a reason, and re-include —
   both audit-logged (decided 2026-10-08).
+- ``POST /api/v1/ippt/defaulters`` (super-admin): ingest the quarterly
+  defaulter release (CSV or first-tab XLSX) for a user-chosen calendar
+  quarter; replace-on-re-ingest of the current quarter, archiving the
+  previously current one, audit-logged (docs/IPPT_MONITORING.md §7).
+- ``GET /api/v1/ippt/defaulters`` (admin+): the current quarter's
+  report header + Pending rows (what the dashboard table shows).
+- ``PATCH /api/v1/ippt/defaulters/rows/{row_id}`` (admin+): set/clear
+  one row's reason and remarks; current-quarter rows only, audit-logged.
 """
 
 import json
+from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from parade_state.auth.dependencies import require_admin_user, require_super_admin_user
 from parade_state.db import get_db_session
 from parade_state.models import AuditLog, User
+from parade_state.services import defaulter as defaulter_service
 from parade_state.services import ippt as ippt_service
+from parade_state.services.defaulter import (
+    DefaulterIngestError,
+    DefaulterRowArchived,
+    DefaulterRowError,
+    DefaulterRowNotFound,
+)
 from parade_state.services.ippt import IngestError
 
 router = APIRouter()
@@ -37,6 +53,16 @@ class ExclusionRequest(BaseModel):
     """Why a serviceman is being removed from tracking (required)."""
 
     reason: str
+
+
+class DefaulterRowUpdate(BaseModel):
+    """Reason/remarks edit: omit a field (or ``null``) to leave it
+    unchanged, send an empty string to clear it."""
+
+    reason: Literal["hsp", "attitude_issue", "uncontactable", "others", ""] | None = (
+        None
+    )
+    remarks: str | None = None
 
 
 @router.post("/snapshots")
@@ -243,3 +269,146 @@ async def window_detail(
             detail="No IPPT data is linked to this personnel id",
         )
     return detail
+
+
+# ============================================================================
+# Defaulters (§7): quarterly release ingest + row annotations
+# ============================================================================
+
+
+@router.post("/defaulters")
+async def upload_defaulters(
+    file: UploadFile = File(
+        ...,
+        description=(
+            "The quarterly defaulter release: .csv, or an .xlsx whose "
+            "first tab carries the data"
+        ),
+    ),
+    year: int = Form(..., description="Calendar year of the quarter, e.g. 2026"),
+    quarter: int = Form(..., description="Calendar quarter 1–4 (Q1 = Jan–Mar)"),
+    user: User = Depends(require_super_admin_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Ingest one quarterly defaulter release (super-admin-only).
+
+    The quarter is user-supplied — the file does not carry it. Re-uploading
+    the current quarter replaces it (reason/remarks annotations on its rows
+    are dropped with them); any other quarter archives the previously
+    current one; re-uploading an archived quarter is rejected. Row-level
+    validation failures quarantine (reported here, reviewable on the
+    upload page) instead of rejecting the file.
+    """
+    content = await file.read()
+    try:
+        result = await defaulter_service.ingest_defaulter_report(
+            db, file.filename or "", content, year, quarter
+        )
+    except DefaulterIngestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    db.add(
+        AuditLog(
+            user_id=str(user.id),
+            entity_type="defaulter_report",
+            entity_id=str(result.report_id),
+            action="create",
+            changes=None,
+            description=json.dumps(
+                {
+                    "action": "ingest_defaulter_report",
+                    "quarter": result.label,
+                    "file": file.filename,
+                    "replaced": result.replaced,
+                    "archived": result.archived_labels,
+                    "rows": result.total_rows,
+                    "quarantined": result.quarantined_total,
+                    "match": result.match_counts,
+                }
+            ),
+        )
+    )
+    await db.commit()
+
+    return {
+        "report": {
+            "id": result.report_id,
+            "label": result.label,
+            "year": result.year,
+            "quarter": result.quarter,
+        },
+        "replaced": result.replaced,
+        "archived": result.archived_labels,
+        "pending_rows": result.pending_rows,
+        "archived_rows": result.archived_rows,
+        "quarantined": result.quarantined_total,
+        "match": result.match_counts,
+        "unmatched_names": result.unmatched_names,
+        "ambiguous_names": result.ambiguous_names,
+    }
+
+
+@router.get("/defaulters")
+async def get_defaulters(
+    user: User = Depends(require_admin_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """The current quarter's report header and Pending rows (empty when
+    nothing has been ingested yet)."""
+    payload = await defaulter_service.current_defaulters(db)
+    return payload or {"report": None, "rows": []}
+
+
+@router.patch("/defaulters/rows/{row_id}")
+async def update_defaulter_row(
+    row_id: int,
+    body: DefaulterRowUpdate,
+    user: User = Depends(require_admin_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Set or clear one defaulter row's reason and remarks (admin+).
+
+    Only current-quarter rows are editable. Audit-logged with the
+    previous values so the change is reconstructible."""
+    try:
+        row = await defaulter_service.update_defaulter_row(
+            db, row_id, body.reason, body.remarks
+        )
+    except DefaulterRowNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except DefaulterRowArchived as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+    except DefaulterRowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    db.add(
+        AuditLog(
+            user_id=str(user.id),
+            entity_type="defaulter_row",
+            entity_id=str(row.id),
+            action="update",
+            changes=None,
+            description=json.dumps(
+                {
+                    "action": "update_defaulter_row",
+                    "full_name": row.full_name,
+                    "reason": row.reason,
+                    "remarks": row.remarks,
+                }
+            ),
+        )
+    )
+    await db.commit()
+    return {
+        "id": row.id,
+        "reason": row.reason,
+        "remarks": row.remarks,
+    }

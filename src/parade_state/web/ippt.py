@@ -7,13 +7,17 @@ production environment force-disables the flag, see config.Settings).
   snapshot history, and match-quality counts. A GET filter/sort bar
   narrows and orders every roster section by sub-unit, state, booked and
   FFI (all plain query params, so each view is a shareable URL). Admin+.
+  The current quarter's defaulter release (docs/IPPT_MONITORING.md §7)
+  sits at the very top of the page as an editable table (reason for
+  defaulting + remarks per row) whenever one has been ingested.
 - ``/ippt/dashboard/export.xlsx`` — the dashboard as a five-tab Excel
   workbook (3/6/9 months, on track, fulfilled), always the full dataset
   regardless of the on-screen filters (decided 2026-10-19). Admin+.
 - ``/ippt/window/{personnel_id}`` — one person's window, trajectory and
   screening history (linked from the dashboard's roster rows). Admin+.
 - ``/ippt/upload`` — the snapshot upload (six canonical files or the
-  single All Tabs workbook), super-admin-only
+  single All Tabs workbook) plus the quarterly defaulter release upload
+  (quarter picker), super-admin-only
   (plain admins get the in-page no-access message, like Taggings).
 """
 
@@ -27,6 +31,8 @@ from jinja2 import Environment, FileSystemLoader
 from parade_state.admin_routes import no_permission_response
 from parade_state.auth.admin_dependencies import get_current_admin_user_optional
 from parade_state.db import get_session_maker
+from parade_state.models import REASON_LABELS
+from parade_state.services import defaulter as defaulter_service
 from parade_state.services import ippt as ippt_service
 from parade_state.utils import ippt_export, utc_dt
 
@@ -82,6 +88,7 @@ async def ippt_dashboard(
     async with session_maker() as db:
         dashboard = await ippt_service.dashboard_data(db)
         history = await ippt_service.snapshot_history(db)
+        defaulters = await defaulter_service.current_defaulters(db)
 
     servicemen = dashboard["servicemen"]
     subunit_options = sorted({e["sub_unit"] for e in servicemen if e["sub_unit"]})
@@ -142,6 +149,8 @@ async def ippt_dashboard(
             user=_user_dict(current_user),
             active_page="ippt",
             dashboard=dashboard,
+            defaulters=defaulters,
+            reason_labels=REASON_LABELS,
             tier_order=TIER_SECTION_ORDER,
             tier_titles=TIER_TITLES,
             tier_subtitles=TIER_SUBTITLES,
@@ -242,6 +251,8 @@ async def ippt_upload(request: Request):
         history = await ippt_service.snapshot_history(db)
         quarantine = await ippt_service.quarantined_rows(db)
         excluded = await ippt_service.excluded_servicemen(db)
+        defaulter_history = await defaulter_service.defaulter_history(db)
+        defaulter_quarantine = await defaulter_service.defaulter_quarantined(db)
 
     env = _get_templates(request)
     template = env.get_template("ippt_upload.html")
@@ -253,6 +264,8 @@ async def ippt_upload(request: Request):
             history=history,
             quarantine=quarantine,
             excluded=excluded,
+            defaulter_history=defaulter_history,
+            defaulter_quarantine=defaulter_quarantine,
         )
     )
 

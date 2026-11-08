@@ -44,6 +44,72 @@
     }
 </style>
 
+{# Defaulter release: the quarterly export sits at the very top of the
+   page — it is the watch-list the rest of the page triages. Only
+   Pending rows of the current quarter show; the quarter's own
+   TYPE=Archived rows ingest but stay hidden. Reason + Remarks are
+   edited in place, saved per row. #}
+{% if defaulters %}
+<div class="card" id="defaulterCard" style="border-top: 3px solid #b91c1c; margin-bottom: 1.25rem;">
+    <h3>Defaulters — {{ defaulters.report.label }}
+        <span style="display: inline-block; background: #fef2f2; color: #b91c1c; border-radius: 999px; padding: 0.1rem 0.6rem; font-size: 0.8rem; vertical-align: middle;">{{ defaulters.report.pending_rows }}</span>
+        <span class="ippt-sub">ingested {{ defaulters.report.ingested_at }}</span>
+    </h3>
+    <p style="color: #6b7280; font-size: 0.85rem; margin: 0.25rem 0 0;">
+        Open (Pending) defaulters of the current quarterly release.
+        Reason for defaulting and Remarks are editable per row.
+        {% if defaulters.report.archived_rows %}{{ defaulters.report.archived_rows }} concluded (Archived) case{{ '' if defaulters.report.archived_rows == 1 else 's' }} from this quarter {{ 'is' if defaulters.report.archived_rows == 1 else 'are' }} kept but not shown.{% endif %}
+    </p>
+    <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 0.75rem;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 0.4rem 0.5rem;">Subunit</th>
+                    <th style="padding: 0.4rem 0.5rem;">Rank</th>
+                    <th style="padding: 0.4rem 0.5rem;">Name</th>
+                    <th style="padding: 0.4rem 0.5rem;">Offence Type</th>
+                    <th style="padding: 0.4rem 0.5rem;">Offence Window</th>
+                    <th style="padding: 0.4rem 0.5rem;">Defaulter Count</th>
+                    <th style="padding: 0.4rem 0.5rem;">Reason for defaulting</th>
+                    <th style="padding: 0.4rem 0.5rem;">Remarks</th>
+                    <th style="padding: 0.4rem 0.5rem;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in defaulters.rows %}
+                <tr data-id="{{ r.id }}" style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 0.4rem 0.5rem;">{{ r.sub_unit or '—' }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ r.rank }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ r.full_name }}
+                        {% if r.match_status == 'ambiguous' %}
+                        <span class="ippt-match" title="Homonyms on the nominal roll — subunit unresolved" style="color: #d97706;">⚠ ambiguous</span>
+                        {% elif r.match_status == 'unmatched' %}
+                        <span class="ippt-match" title="No matching name on the attendance-active nominal roll" style="color: #9ca3af;">not in nominal roll</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ r.offence_type }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ r.offence_window }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">{{ r.defaulted_count }}</td>
+                    <td style="padding: 0.4rem 0.5rem;">
+                        <select class="defaulter-reason" style="min-width: 9rem; padding: 0.35rem 0.4rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; font-size: 0.85rem;">
+                            <option value=""></option>
+                            {% for value, label in reason_labels.items() %}
+                            <option value="{{ value }}"{% if r.reason == value %} selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    <td style="padding: 0.4rem 0.5rem;">
+                        <input type="text" class="defaulter-remarks" value="{{ (r.remarks or '')|e }}" style="width: 100%; min-width: 10rem; padding: 0.35rem 0.4rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.85rem; box-sizing: border-box;">
+                    </td>
+                    <td style="padding: 0.4rem 0.5rem;"><button class="ippt-action defaulter-save" onclick="saveDefaulterRow(this)" title="Save this row's reason and remarks">Save</button></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
 <p style="color: #6b7280; margin-bottom: 0.5rem;">
     Latest observation per serviceman from the monthly IPPT/NS FIT reports.
     {% if user.role == 'super_admin' %}
@@ -347,6 +413,41 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+// Defaulter reason/remarks edits: admin+ (the card only renders when a
+// quarterly release is ingested). Sending both fields always is safe —
+// the select and input carry the row's full annotation state, and an
+// empty select/input value clears the stored value.
+async function saveDefaulterRow(btn) {
+    const tr = btn.closest('tr');
+    const id = tr.dataset.id;
+    const reason = tr.querySelector('.defaulter-reason').value;
+    const remarks = tr.querySelector('.defaulter-remarks').value;
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+        const response = await fetch('/api/v1/ippt/defaulters/rows/' + id, {
+            method: 'PATCH',
+            credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({reason: reason, remarks: remarks}),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            alert(data.detail || ('Save failed (' + response.status + ').'));
+            btn.textContent = 'Save';
+            btn.disabled = false;
+            return;
+        }
+        btn.textContent = 'Saved ✓';
+        setTimeout(() => { btn.textContent = 'Save'; }, 1500);
+    } catch (err) {
+        alert('Save failed: ' + err);
+        btn.textContent = 'Save';
+        btn.disabled = false;
+    }
+}
+</script>
 {% if user.role == 'super_admin' %}
 <script>
 let excludeId = null;

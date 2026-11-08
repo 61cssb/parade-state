@@ -22,6 +22,13 @@ from .csv_ingestion import (
     CsvUpload,
     NominalRoll,
 )
+from .defaulter import (
+    DEFAULTER_REASONS,
+    REASON_LABELS,
+    DefaulterQuarantinedRow,
+    DefaulterReport,
+    DefaulterRow,
+)
 from .deferments import Deferment
 from .discussions import DiscussionComment, DiscussionPost
 from .grouping import (
@@ -92,4 +99,9 @@ __all__ = [
     "IpptSnapshot",
     "IpptStateObservation",
     "IpptWindow",
+    "DEFAULTER_REASONS",
+    "REASON_LABELS",
+    "DefaulterQuarantinedRow",
+    "DefaulterReport",
+    "DefaulterRow",
 ]

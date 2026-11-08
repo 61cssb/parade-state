@@ -49,6 +49,8 @@ class AuditLog(Base):
             "feature_access",
             "ippt_snapshot",
             "ippt_serviceman",
+            "defaulter_report",
+            "defaulter_row",
             name="audit_entity_type",
         ),
         index=True,
