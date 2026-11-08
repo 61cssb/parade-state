@@ -310,6 +310,20 @@ Defer until CSV Step 3 (diff confirmation) forces it.
 
 ## Recent History (one line each; git log is authoritative)
 
+- **2026-11-08:** Quarterly defaulter release (PR #100, first in-season
+  PR to base on the season branch per the 2026-11-03 SOP): CSV /
+  XLSX-first-tab ingest per user-chosen calendar quarter (Q1 = Jan–Mar;
+  the quarter is not in the file); current quarter's Pending defaulters
+  lead the IPPT dashboard with editable Reason for defaulting (HSP /
+  Attitude Issue / Uncontactable / Others) + Remarks (audit-logged);
+  a new quarter archives the previous one — in-file `TYPE=Archived`
+  validation against last quarter's Pending rows deferred (§7).
+  Merged to `20261103` (4952a84), deploy + Postgres migration verified;
+  season branch `20261108` cut at that commit and the Railway
+  development trigger repointed — deploy SUCCESS + /health 200.
+  Season → main is pending JS's call (feature docs on the season
+  branch converge then).
+
 - **2026-11-03:** IPPT All Tabs workbook upload (PR #99): OneNS's
   `All_Tabs_Export_YYYYMMDD.xlsx` accepted as a single-file snapshot —
   six tabs ↔ six file kinds, tab-checked client-side (zip read via
