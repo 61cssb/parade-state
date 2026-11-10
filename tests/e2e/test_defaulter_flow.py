@@ -129,15 +129,38 @@ def test_defaulter_upload_and_annotate_flow(page, e2e_server, tmp_path):
         "#defaulterResult"
     )  # matched names are not listed back
 
-    # The dashboard's defaulter card is the very first card on the page.
+    # The dashboard's defaulter card now sits BELOW the filter bar:
+    # after the filter/sort form, before the first roster section.
     page.goto(f"{e2e_server}/ippt/dashboard")
     card = page.locator("#defaulterCard")
     card.wait_for()
     assert card.inner_text().startswith("Defaulters — Q3 2026")
-    assert page.locator(".card").first.get_attribute("id") == "defaulterCard"
+    position = page.evaluate(
+        """() => {
+            const card = document.getElementById('defaulterCard');
+            const filters = document.querySelector('form.ippt-filters');
+            const firstSection = document.querySelector('.ippt-section');
+            const PRECEDING = Node.DOCUMENT_POSITION_PRECEDING;
+            const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
+            return {
+                afterFilters: !!(filters.compareDocumentPosition(card) & FOLLOWING),
+                beforeSections: !!(firstSection.compareDocumentPosition(card) & PRECEDING),
+            };
+        }"""
+    )
+    assert position["afterFilters"], "defaulter card must come after the filter bar"
+    assert position["beforeSections"], "defaulter card must precede the roster sections"
     assert "E2E FALLBACK PERSON" in card.inner_text()
     assert "1" in card.inner_text()  # one pending row; archived stays hidden
     assert "E2E SECOND PERSON" not in card.inner_text()
+
+    # It is a <details>, open by default; the summary header collapses
+    # and re-opens the table without any page reload.
+    assert card.locator("table").is_visible()
+    card.locator("summary").click()
+    assert not card.locator("table").is_visible()
+    card.locator("summary").click()
+    assert card.locator("table").is_visible()
 
     # Annotate the row and save; the button's "Saved ✓" flip is the
     # completion signal.
