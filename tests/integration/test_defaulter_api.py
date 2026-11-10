@@ -618,7 +618,7 @@ async def test_patch_requires_admin(client_as, active_roll):
 # ============================================================================
 
 
-async def test_dashboard_shows_defaulter_table_first(client_as, active_roll):
+async def test_dashboard_shows_defaulter_table_below_filters(client_as, active_roll):
     client = await client_as("super_admin")
     assert (
         _upload(
@@ -639,10 +639,11 @@ async def test_dashboard_shows_defaulter_table_first(client_as, active_roll):
     assert response.status_code == 200
     text = response.text
     assert "Defaulters — Q4 2026" in text
-    # Very top of the view: the card precedes the monitoring intro line.
-    assert text.index("Defaulters — Q4 2026") < text.index(
-        "Latest observation per serviceman"
-    )
+    # Below the filter bar (PR #103): after the filter/sort form, before
+    # the first roster section. The card is a <details>, open by default.
+    assert 'id="defaulterCard" open' in text
+    assert text.index("Defaulters — Q4 2026") > text.index('class="ippt-filters"')
+    assert text.index("Defaulters — Q4 2026") < text.index('class="card ippt-section"')
     # Display columns + the editable controls.
     for needle in (
         ">Subunit<",
