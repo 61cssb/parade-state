@@ -148,10 +148,22 @@ def test_defaulter_upload_and_annotate_flow(page, e2e_server, tmp_path):
     row.locator("button.defaulter-save").click()
     card.locator("button.defaulter-save", has_text="Saved ✓").wait_for()
 
+    # A second edit+save on the same row must also go through: the
+    # button may not stay disabled after a successful save (Playwright's
+    # click auto-waits for enabled state, so a stuck-disabled button
+    # times out here).
+    row.locator("select.defaulter-reason").select_option("uncontactable")
+    row.locator("input.defaulter-remarks").fill("counselled 08 Nov, no reply")
+    row.locator("button.defaulter-save").click()
+    card.locator("button.defaulter-save", has_text="Saved ✓").wait_for()
+
     # Reload: the annotation persisted.
     page.reload()
     card = page.locator("#defaulterCard")
     card.wait_for()
     row = card.locator("tbody tr").first
-    assert row.locator("select.defaulter-reason").input_value() == "hsp"
-    assert row.locator("input.defaulter-remarks").input_value() == "counselled 08 Nov"
+    assert row.locator("select.defaulter-reason").input_value() == "uncontactable"
+    assert (
+        row.locator("input.defaulter-remarks").input_value()
+        == "counselled 08 Nov, no reply"
+    )

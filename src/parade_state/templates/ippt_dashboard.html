@@ -439,6 +439,7 @@ async function saveDefaulterRow(btn) {
             btn.disabled = false;
             return;
         }
+        btn.disabled = false;
         btn.textContent = 'Saved ✓';
         setTimeout(() => { btn.textContent = 'Save'; }, 1500);
     } catch (err) {
